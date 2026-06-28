@@ -1,0 +1,569 @@
+# ============================================================================
+# Amazon Niche Choice — Scoring Profile: 铺货 / 找货型 (arbitrage)
+#
+# 【画像】
+#   面向：铺货卖家 / 找货团队 / 跟卖型玩家
+#   特点：看销量绝对值，找"现成能卖的"商品；怕品牌墙、怕价格战
+#   倾向：白牌起步、不做差异化、要求每单赚钱
+#
+# 【与 default 的核心差异】
+#   总体方向：聚焦"现成市场风险"——品牌墙、价格战、利润空间这三处更敏感
+#   - brand_monopoly 极高线 80 → 70（怕品牌墙阻挡铺货）
+#   - price_sensitivity 极高线 60 → 50（怕价格战压缩利润）
+#   - profit_margin -3 触发线 lt 0 → lt 5（每单必须赚钱）
+#   - 模块三 max_total 20 → 15（快速预览，不做深度研究）
+#
+#   说明：本 profile 只做"现成市场"判断，不调评论依赖、广告压力、新品周期——
+#   铺货 / 找货卖家通常跟卖现成 listing，这些维度不是他们的痛点。
+#
+#   ⚠️ 本 profile 的所有阈值均为设计阶段初稿——必须经过 §6 回测校准后才能视为成熟。
+#
+# 【北极星原则】
+#   你能调的：阈值、权重、上限、系数
+#   你不能改的：算法、数据源、评分维度数量
+#
+# 【规则语法】参见 default.yaml 顶部说明（gte/gt/lt/default 用法不变）
+#
+# 【版本】
+#   schema 版本：v1
+#   profile：arbitrage
+# ============================================================================
+
+version: v1
+profile: arbitrage
+name: "铺货 / 找货型"
+description: "看销量绝对值、不怕白牌、要求每单赚钱——适合跟卖 / 找货团队"
+
+# === 模块一：市场洞察门槛分析 ===
+# 目的：判断一个类目的进入难度，给出"能不能做"的结论。
+# 6 项门槛各自贴标签（极高/高/中/低），然后综合判断推荐等级。
+#
+# 整体调整思路：
+# - 想让结果"更乐观" → 把各项的 gte 阈值调高（如 80→90）
+# - 想让结果"更严苛" → 把各项的 gte 阈值调低
+# - entry_recommendation 的条件控制最终结论
+module1:
+  threshold_analysis:
+    link_monopoly:
+      label: "链接垄断度"
+      # 【衡量什么】
+      # Top20 链接的销量占整个类目总销量的比例。
+      # 越高说明头部链接越强势，新品难以分到流量。
+      #
+      # 【输入】
+      # source: 云端 competition.top20_listing_share（已算好的百分比）
+      #
+      # 【分数梯度含义】
+      #   >= 80% → 极高：头部20个链接吃掉80%销量，几乎没空间
+      #   >= 60% → 高：头部集中明显
+      #   >= 40% → 中：有一定集中但还有空间
+      #   >= 0%  → 低：分散市场，新品友好
+      #
+      # 【常见调整】
+      # - 自己有供应链优势 → 把 80 调到 90，容忍更高集中度
+      # - 纯新人 → 把 60 调到 50，更早触发"高"警告
+      source: "competition.top20_listing_share"
+      rules:
+        - {gte: 80, level: "极高"}
+        - {gte: 60, level: "高"}
+        - {gte: 40, level: "中"}
+        - {gte: 0,  level: "低"}
+      context_template: "Top20链接销量占比{value}%"
+
+    brand_monopoly:
+      label: "品牌垄断度"
+      # ⚠️ 本 profile 调整：极高线 80 → 70
+      # 理由：铺货 / 找货卖家无品牌备案，跟大品牌竞争胜算极低——
+      # Top10 品牌占 70% 就是铺货黑洞，敏感度必须提升。
+      #
+      # 【衡量什么】
+      # Top10 品牌的销量占整个类目总销量的比例。
+      #
+      # 【输入】
+      # source: 云端 competition.top10_brand_share
+      source: "competition.top10_brand_share"
+      rules:
+        - {gte: 70, level: "极高"}   # default: 80 → arbitrage: 70
+        - {gte: 60, level: "高"}
+        - {gte: 40, level: "中"}
+        - {gte: 0,  level: "低"}
+      context_template: "Top10品牌销量占比{value}%"
+
+    review_dependency:
+      label: "评论依赖性"
+      # 【衡量什么】
+      # 评论数排名前10%的商品，其销量占总销量的比例。
+      # 越高说明消费者越依赖评论数做购买决策，新品0评论很难卖。
+      #
+      # 【输入】
+      # source: 云端预算的 threshold_inputs.top10pct_ratings_units_share
+      #
+      # 【分数梯度含义】
+      #   >= 70% → 极高：没评论基本卖不动
+      #   >= 50% → 高：评论很重要
+      #   >= 30% → 中：有影响但不致命
+      #   >= 0%  → 低：评论不是决定因素
+      #
+      # 【常见调整】
+      # - 有 vine 计划或测评资源 → 放宽到 80
+      # - 纯自然积累评论 → 收紧到 60
+      source: "threshold_inputs.top10pct_ratings_units_share"
+      rules:
+        - {gte: 70, level: "极高"}
+        - {gte: 50, level: "高"}
+        - {gte: 30, level: "中"}
+        - {gte: 0,  level: "低"}
+      context_template: "评论数Top10%商品销量占比{value}%"
+
+    rating_dependency:
+      label: "评分依赖性"
+      # 【衡量什么】
+      # 评分 >= 4.5 的商品，其销量占总销量的比例。
+      # 越高说明消费者对评分要求越苛刻，低评分商品没机会。
+      #
+      # 【输入】
+      # source: 云端预算的 threshold_inputs.rating_gte_45_units_share
+      #
+      # 【分数梯度含义】
+      #   >= 80% → 极高：必须4.5+才能卖
+      #   >= 60% → 高：评分很重要
+      #   >= 40% → 中：有影响
+      #   >= 0%  → 低：评分不是关键
+      #
+      # 【常见调整】
+      # - 产品品控有信心 → 放宽
+      # - 新品类容易翻车 → 收紧
+      source: "threshold_inputs.rating_gte_45_units_share"
+      rules:
+        - {gte: 80, level: "极高"}
+        - {gte: 60, level: "高"}
+        - {gte: 40, level: "中"}
+        - {gte: 0,  level: "低"}
+      context_template: "评分>=4.5商品销量占比{value}%"
+
+    price_sensitivity:
+      label: "价格敏感度"
+      # ⚠️ 本 profile 调整：极高线 60 → 50
+      # 理由：铺货 / 找货卖家走价格竞争——价格敏感市场对他们是地狱，
+      # 50%+ 就该直接告警，不用等 60%。
+      #
+      # 【衡量什么】
+      # 价格最低30%的商品，其销量占总销量的比例。
+      #
+      # 【输入】
+      # source: 云端预算的 threshold_inputs.low30pct_price_units_share
+      source: "threshold_inputs.low30pct_price_units_share"
+      rules:
+        - {gte: 50, level: "极高"}   # default: 60 → arbitrage: 50
+        - {gte: 45, level: "高"}
+        - {gte: 30, level: "中"}
+        - {gte: 0,  level: "低"}
+      context_template: "低价30%商品销量占比{value}%"
+
+    new_product_difficulty:
+      label: "新品打造周期"
+      # 【衡量什么】
+      # 12个月内上架的新品中，销量达到类目中位数的比例。
+      # 越高说明新品越容易起量，市场对新品友好。
+      #
+      # 【输入】
+      # source: 云端预算的 threshold_inputs.new_lt12mo_above_median_ratio
+      #
+      # 【分数梯度含义】
+      #   >= 50% → 容易：一半新品能起来
+      #   >= 30% → 中等：有机会但需要运营
+      #   >= 15% → 困难：大部分新品起不来
+      #   >= 0%  → 极难：新品几乎没机会
+      #
+      # 【常见调整】
+      # - 有推广预算 → 把 30 调到 20，容忍更低成功率
+      # - 测品阶段想快速验证 → 收紧到 40
+      source: "threshold_inputs.new_lt12mo_above_median_ratio"
+      template_keys:
+        new_total: "threshold_inputs.new_lt12mo_count"
+      rules:
+        - {gte: 50, level: "容易"}
+        - {gte: 30, level: "中等"}
+        - {gte: 15, level: "困难"}
+        - {gte: 0,  level: "极难"}
+      context_template: "12月内新品进入Top50%比例{value}%（新品{new_total}个）"
+
+  entry_recommendation:
+    # 【规则说明】
+    # 按顺序匹配，命中即返回。min_high/min_medium 是门槛分析中
+    # 被归为"高风险"/"中风险"的项数下限。
+    # 高风险 = level 在 risk_categories.high 里的
+    # 中风险 = level 在 risk_categories.medium 里的
+    #
+    # 【本 profile 思路 — 比 default 稍严，介于 default 和 solo_seller 之间】
+    # 铺货型不做差异化，靠白牌空间 + 价差吃饭——
+    # 品牌墙厚 = 铺不进去；价格战激烈 = 利润被压。
+    # 不需要每一项都"打爆"（产品多样性可以分散风险），
+    # 但 2 项极高 + 1 项中风险这种"有毒"组合就该警觉。
+    #
+    # 【相对 default 的差异】
+    # - "2 极高 + 中风险" 触发提前一档：default 是 2+2，本 profile 是 2+1
+    # - 其他规则与 default 一致（铺货型容忍度本就在 default 附近）
+    #
+    # 【常见调整】
+    # - 想更严格 → 拉到 solo_seller 风格（min_high 3→2）
+    # - 想更宽松 → 拉回 default 风格（2+1 → 2+2）
+    risk_categories:
+      high:   ["极高", "极难"]
+      medium: ["高",  "困难"]
+    rules:
+      - {min_high: 3, recommendation: "not_recommend", difficulty_level: "high"}
+      - {min_high: 2, min_medium: 1, recommendation: "not_recommend", difficulty_level: "high"}
+      - {min_high: 1, recommendation: "cautious_enter", difficulty_level: "medium"}
+      - {min_medium: 2, recommendation: "cautious_enter", difficulty_level: "medium"}
+      - {default: true, recommendation: "enter", difficulty_level: "low"}
+
+# === 模块二：细分市场机会评分 ===
+# 目的：在父类目下的 N 个细分市场里，挑出"最容易切入"的几个。
+# 9 项评分加总后排序，分越高代表越好做（不代表市场越大）。
+#
+# 整体调整思路：
+# - 想让结果"更乐观" → 把负分档的阈值放宽（如 -3 → -2）
+# - 想让结果"更严苛" → 把正分档的阈值收紧
+# - 不同评分项的"权重"不是直接配置——靠"分数极差"体现
+#   （如 review_dependency 最大分±5，比 keyword_monopoly 的±3 更"重要"）
+module2:
+  scoring:
+    growth_trend:
+      label: "增长趋势"
+      # 【衡量什么】
+      # PRD §15.5.1:90 天搜索量增长率(feiyu trend.search_volume_growth_t90)精确分级。
+      # 季节性识别在 computed.growth.market_type(数据侧判断,LLM 仅辅助确认)。
+      #
+      # 【输入】
+      # source: computed.growth.value(90 天搜索量增长率 %)
+      #
+      # 【分数梯度含义】
+      #   > 5%   → +1  增量市场
+      #   -5%~5% → 0   平稳市场
+      #   < -5%  → -1  下滑市场
+      source: "computed.growth.value"
+      rules:
+        - {gt: 5,  score: 1}
+        - {gt: -5, score: 0}
+        - {default: true, score: -1}
+      template_keys:
+        market_type:    "computed.growth.market_type"
+        growth_t360:    "computed.growth.growth_t360"
+      context_template: "{market_type}(90 天搜索量增长{value}%,360 天{growth_t360}%)"
+    ad_pressure:
+      label: "广告投入压力"
+      # 【衡量什么】
+      # PRD §15.5.2 精确公式:预估 ACOS = 平均广告建议竞价 / (平均售价 × 90 天点击转化率)。
+      # ACOS 越高,广告 ROI 越差,新人越难烧出量。
+      #
+      # 【输入】
+      # source: computed.ad_pressure.value(预估 ACOS,%)
+      #   - avg_bid: 该 niche Top 关键词的 SellerSprite bid 加权平均
+      #   - avg_price: trend.avg_price_t90
+      #   - click_conv: trend.click_conversion_rate_t90
+      source: "computed.ad_pressure.value"
+      rules:
+        - {lt: 30, score: 5}
+        - {lt: 40, score: 3}
+        - {lt: 50, score: 1}
+        - {lt: 60, score: 0}
+        - {default: true, score: -3}
+      template_keys:
+        avg_bid:   "computed.ad_pressure.avg_bid"
+        avg_price: "computed.ad_pressure.avg_price"
+        click_conv: "computed.ad_pressure.click_conversion_rate_t90"
+      context_template: "ACOS≈{value}%(均价${avg_price},均 bid${avg_bid},点击转化{click_conv}%)"
+    new_product:
+      label: "新品机会"
+      # 【衡量什么】
+      # 新品成功率 = 新品均销 / 整体均销 × 100。
+      # 越高说明新品越容易卖过平均水平。
+      #
+      # 【输入】
+      # source: 云端预算的 computed.new_product.success_rate
+      # min_sample_field: 新品数量，< 10 时强制 0 分
+      #
+      # 【分数梯度含义】
+      #   > 80% → +3  新品表现远超平均
+      #   > 70% → +2  新品表现好
+      #   > 60% → +1  新品表现尚可
+      #   > 50% → 0   新品表现一般
+      #   > 40% → -1  新品偏弱
+      #   > 20% → -2  新品很弱
+      #   <=20% → -3  新品几乎卖不动
+      #
+      # 【常见调整】
+      # - min_sample 调小（如 5）→ 小市场也能评分
+      # - 整体偏严 → 把 80 调到 90
+      source: "computed.new_product.success_rate"
+      min_sample_field: "computed.new_product.new_count"
+      min_sample: 10
+      rules:
+        - {gt: 80, score: 3}
+        - {gt: 70, score: 2}
+        - {gt: 60, score: 1}
+        - {gt: 50, score: 0}
+        - {gt: 40, score: -1}
+        - {gt: 20, score: -2}
+        - {default: true, score: -3}
+      template_keys:
+        new_count:     "computed.new_product.new_count"
+        new_avg_units: "computed.new_product.new_avg_units"
+        avg_units:     "computed.new_product.avg_units"
+      context_template: "新品{new_count}个，成功率{value}%（新品均销{new_avg_units} vs 整体均销{avg_units}）"
+
+    product_concentration:
+      label: "商品集中度"
+      # 【衡量什么】
+      # PRD §15.5.4 字面:按商品销量降序前 10% 商品的销量份额。
+      # 头部商品越垄断,新品越难分到流量。
+      #
+      # 【⚠️ 口径声明】
+      # feiyu 不给单 asin 销量份额,当前用 top5_products_click_share_t90(点击份额)代理。
+      # 头部商品通常转化率 >= niche 均值 → 点击份额"低估"销量份额 5~15pp。
+      # 阈值仍按 PRD 字面执行,这意味着对 click_share 高的 niche 我们会给分偏高一档。
+      # 业务影响:Top5 推荐里可能混入 1-2 个实际比看起来更集中的 niche,用户需警惕。
+      #
+      # 【输入】
+      # source: 云端预算的 computed.product_concentration.top_ratio
+      #
+      # 【分数梯度含义】
+      #   > 80% → -3  极度集中，几乎没空间
+      #   > 60% → -2  高度集中
+      #   > 50% → -1  偏集中
+      #   > 40% → 0   正常
+      #   > 30% → +1  偏分散
+      #   > 20% → +2  分散
+      #   <=20% → +3  极度分散，新品友好
+      #
+      # 【常见调整】
+      # - 自己有差异化产品 → 放宽（容忍更高集中度）
+      # - 走跟卖模式 → 收紧
+      source: "computed.product_concentration.top_ratio"
+      rules:
+        - {gt: 80, score: -3}
+        - {gt: 60, score: -2}
+        - {gt: 50, score: -1}
+        - {gt: 40, score: 0}
+        - {gt: 30, score: 1}
+        - {gt: 20, score: 2}
+        - {default: true, score: 3}
+      template_keys:
+        hl_products: "computed.product_concentration.hl_products"
+        products:    "computed.product_concentration.products"
+      context_template: "头部 {hl_products} 商品点击份额 {value}%(PRD 字面要销量份额,此处用点击代理 → 真实集中度可能略高 5-15pp)"
+
+    brand_concentration:
+      label: "品牌集中度"
+      # 【衡量什么】
+      # PRD §15.5.5 字面:按品牌销量降序前 10% 品牌的销量份额。
+      # 越高说明大品牌垄断越严重。
+      #
+      # 【⚠️ 口径声明】
+      # 同 product_concentration:feiyu 用 top5_brands_click_share_t90(点击份额)代理。
+      # 真实销量份额可能比点击份额高 5-15pp(头部品牌转化率通常高于均值)。
+      #
+      # 【输入】
+      # source: 云端预算的 computed.brand_concentration.top_ratio
+      #
+      # 【分数梯度含义】
+      #   同商品集中度（±3 范围）
+      #
+      # 【常见调整】
+      # - 有品牌备案 → 放宽
+      # - 白牌铺货 → 收紧
+      source: "computed.brand_concentration.top_ratio"
+      rules:
+        - {gt: 80, score: -3}
+        - {gt: 60, score: -2}
+        - {gt: 50, score: -1}
+        - {gt: 40, score: 0}
+        - {gt: 30, score: 1}
+        - {gt: 20, score: 2}
+        - {default: true, score: 3}
+      context_template: "头部品牌点击份额 {value}%(用点击代理销量份额,真实集中度可能略高)"
+
+    return_ratio:
+      label: "退货率"
+      # 【衡量什么】
+      # 该细分市场的平均退货率。
+      # 越高说明品类退货风险越大，影响利润和账号健康。
+      #
+      # 【输入】
+      # source: 云端透传的 raw.return_ratio
+      #
+      # 【分数梯度含义】
+      #   > 20% → -2  退货率极高，慎入
+      #   > 10% → -1  退货率偏高
+      #   > 5%  → 0   正常
+      #   <= 5% → +1  退货率低，利好
+      #
+      # 【常见调整】
+      # - 做服装/鞋类（天然高退货）→ 把 20 调到 30
+      # - 做电子产品 → 保持默认
+      source: "raw.return_ratio"
+      rules:
+        - {gt: 20, score: -2}
+        - {gt: 10, score: -1}
+        - {gt: 5,  score: 0}
+        - {default: true, score: 1}
+      context_template: "退货率{value}%"
+
+    profit_margin:
+      label: "回款空间"
+      # ⚠️ 本 profile 调整：-3 触发线 lt 0 → lt 5
+      # 理由：铺货 / 找货卖家**每单必须赚钱**，回款空间低于 5% 就视为不可入场——
+      # 不像品牌团队那样能接受小幅亏损换市场份额。
+      #
+      # 【衡量什么】
+      # 毛利率减去预估广告成本后的净回款空间。
+      #
+      # 【输入】
+      # source: 云端预算的 computed.profit_margin.value
+      source: "computed.profit_margin.value"
+      rules:
+        - {lt: -10, score: -5}
+        - {lt: 5,   score: -3}    # default: lt 0 → arbitrage: lt 5
+        - {lt: 10,  score: -1}
+        - {lt: 20,  score: 0}
+        - {lt: 30,  score: 1}
+        - {lt: 40,  score: 3}
+        - {default: true, score: 5}
+      template_keys:
+        top5_avg_price:     "computed.profit_margin.top5_avg_price"
+        fba_rate:           "computed.profit_margin.fba_rate"
+        commission_rate:    "computed.profit_margin.commission_rate"
+        commission_source:  "computed.profit_margin.commission_source"
+        estimated_acos:     "computed.profit_margin.estimated_acos"
+      context_template: "TOP5 均价${top5_avg_price},扣 FBA{fba_rate}%+佣金{commission_rate}%({commission_source})-ACOS{estimated_acos}%={value}%"
+
+    review_dependency:
+      label: "评论依赖度"
+      # 【衡量什么】
+      # 评论数Top10%商品的销量占比（细分市场级别）。
+      # 越高说明评论壁垒越高。
+      #
+      # 【输入】
+      # source: 云端预算的 computed.review_dependency.top_ratio
+      #
+      # 【分数梯度含义】
+      #   > 80% → -5  评论壁垒极高
+      #   > 60% → -3  评论壁垒高
+      #   > 50% → -1  偏高
+      #   > 40% → 0   正常
+      #   > 30% → +1  偏低
+      #   > 20% → +3  低
+      #   <=20% → +5  极低，新品友好
+      #
+      # 【常见调整】
+      # - 有测评资源 → 放宽
+      # - 纯自然积累 → 收紧
+      source: "computed.review_dependency.top_ratio"
+      rules:
+        - {gt: 80, score: -5}
+        - {gt: 60, score: -3}
+        - {gt: 50, score: -1}
+        - {gt: 40, score: 0}
+        - {gt: 30, score: 1}
+        - {gt: 20, score: 3}
+        - {default: true, score: 5}
+      context_template: "评论数Top10%商品销量占比{value}%"
+
+    keyword_monopoly:
+      label: "关键词垄断度"
+      # 【衡量什么】
+      # TOP3关键词的搜索量占比和销量占比的平均值。
+      # 越高说明流量集中在少数关键词，竞争激烈且风险集中。
+      #
+      # 【输入】
+      # source: 云端预算的 computed.keyword_monopoly.avg
+      # min_keywords: 关键词数 < 3 时强制 0 分
+      #
+      # 【分数梯度含义】
+      #   > 80% → -3  关键词极度集中
+      #   > 60% → -2  集中
+      #   > 50% → -1  偏集中
+      #   > 40% → 0   正常
+      #   > 30% → +1  偏分散
+      #   > 20% → +2  分散
+      #   <=20% → +3  极度分散，多词可打
+      #
+      # 【常见调整】
+      # - 擅长 SEO 多词布局 → 放宽
+      # - 只会打大词 → 收紧
+      source: "computed.keyword_monopoly.avg"
+      min_keywords_field: "raw.keyword_volumes.length"
+      min_keywords: 3
+      rules:
+        - {gt: 80, score: -3}
+        - {gt: 60, score: -2}
+        - {gt: 50, score: -1}
+        - {gt: 40, score: 0}
+        - {gt: 30, score: 1}
+        - {gt: 20, score: 2}
+        - {default: true, score: 3}
+      template_keys:
+        search_ratio:   "computed.keyword_monopoly.search_ratio"
+        sale_ratio:     "computed.keyword_monopoly.sale_ratio"
+      context_template: "TOP3 关键词搜索量占比 {search_ratio}%、销量占比 {sale_ratio}%(均值 {value}%)"
+
+  output:
+    # ⚠️ 高频可调点：最终展示几个细分市场
+    # 默认 5：给用户看 Top5 选择
+    # 想看更多 → 调大（如 10）
+    # 想聚焦 → 调小（如 3）
+    top_n: 5
+    recommend_reason_top_k: 3
+    risk_notes_top_k: 3
+
+# === 模块三：商品机会匹配评分 ===
+# 目的：从商品池中筛出与目标关键词最相关的候选商品，供深度分析。
+# 全部本地完成：切词 → 标题匹配打分 → 分级 → 去重 → 截断。
+#
+# 整体调整思路：
+# - 想要"更精准的匹配" → 调高 core_word_score 或 high_match_min
+# - 想要"更多候选" → 调大 max_total 或调小 high_match_min
+# - 想要"品牌多样性" → 调小 brand_cap
+module3:
+  matching:
+    # ⚠️ 高频可调点：核心词命中加分
+    # 默认 3：核心词（用户输入的关键词拆分）每命中一个 +3
+    # 调大 → 核心词权重更高，辅助词影响变小
+    # 调小 → 核心词和辅助词权重接近
+    core_word_score: 3
+
+    # ⚠️ 高频可调点：辅助词命中加分
+    # 默认 1：辅助词（从 Top 关键词中提取）每命中一个 +1
+    aux_word_score: 1
+
+    # 辅助词切词时的最小长度（过滤掉 a/an/of 等短词）
+    aux_word_min_length: 3
+
+    # 辅助词总数上限（防止噪音太多）
+    aux_word_max_count: 20
+
+    classify:
+      # 【分级阈值】
+      # score >= high_match_min → 高匹配
+      # medium_match_min <= score < high_match_min → 中匹配
+      # score <= low_match_max → 低匹配
+      #
+      # 默认：核心词2个都命中(6分)或1个核心+1个辅助(4分) → 高匹配
+      # 调高 high_match_min → 更严格，只有多词命中才算高匹配
+      # 调低 → 更宽松
+      high_match_min: 4
+      medium_match_min: 1
+      low_match_max: 0
+
+  detail_candidates:
+    # ⚠️ 高频可调点：每个品牌最多保留几个商品（用于商品池去重）
+    # 默认 5：保证商品池不被单一大品牌刷屏
+    # 想要"多看几个品牌的样本" → 调小（如 3）
+    # 想要"重点研究头部大品牌" → 调大（如 10）
+    brand_cap: 5
+
+    # ⚠️ 本 profile 调整：max_total 20 → 15
+    # 理由：铺货 / 找货卖家要的是"快速判断要不要做"，
+    # 不需要深度研究 20 个商品，15 个足够看清市场。
+    max_total: 15                         # default: 20 → arbitrage: 15

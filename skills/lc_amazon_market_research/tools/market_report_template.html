@@ -1,0 +1,1293 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Amazon 市场调研报告看板</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f6f8;
+      --paper: #ffffff;
+      --ink: #17202c;
+      --text: #2e3a49;
+      --muted: #687588;
+      --subtle: #eef2f6;
+      --line: #d7dde6;
+      --blue: #2468d1;
+      --blue-soft: #eaf1ff;
+      --green: #187454;
+      --green-soft: #e8f5ef;
+      --amber: #9a5b00;
+      --amber-soft: #fff3dd;
+      --red: #b42318;
+      --red-soft: #fff0ef;
+      --violet: #6b4db7;
+      --violet-soft: #f0edff;
+      --shadow: 0 1px 2px rgba(16, 24, 40, 0.05);
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Arial, sans-serif;
+      line-height: 1.45;
+    }
+    header {
+      background: #111827;
+      color: #ffffff;
+      padding: 22px 28px 20px;
+      border-bottom: 1px solid #0b1220;
+    }
+    .header-inner { max-width: 1480px; margin: 0 auto; }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 24px;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+    .meta {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      color: #d5ddea;
+      font-size: 13px;
+    }
+    .meta span {
+      border: 1px solid rgba(255,255,255,0.16);
+      border-radius: 6px;
+      padding: 4px 8px;
+      background: rgba(255,255,255,0.06);
+    }
+    main {
+      max-width: 1600px;
+      margin: 0 auto;
+      padding: 22px;
+      display: grid;
+      grid-template-columns: 216px minmax(0, 1fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .content { min-width: 0; }
+    .sidebar {
+      position: sticky;
+      top: 18px;
+      align-self: start;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+    }
+    .side-title {
+      margin: 0 0 10px;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 760;
+    }
+    .sidebar a {
+      display: block;
+      color: #334155;
+      text-decoration: none;
+      font-size: 13px;
+      line-height: 1.35;
+      padding: 9px 10px;
+      border-radius: 6px;
+    }
+    .sidebar a:hover {
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+    section { margin-bottom: 18px; }
+    h2 {
+      margin: 0 0 12px;
+      color: var(--ink);
+      font-size: 17px;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+    h3 {
+      margin: 0;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 760;
+      letter-spacing: 0;
+    }
+    .grid { display: grid; gap: 12px; }
+    .two { grid-template-columns: 1fr; }
+    .three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .panel {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+    }
+    .panel-tight { padding: 12px; }
+
+    .summary-layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+      align-items: stretch;
+    }
+    .verdict {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      min-height: 214px;
+    }
+    .verdict-label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .verdict-title {
+      color: var(--ink);
+      font-size: 26px;
+      line-height: 1.18;
+      font-weight: 800;
+    }
+    .verdict-copy { color: var(--muted); font-size: 14px; }
+    .signal-list { display: grid; gap: 8px; margin-top: auto; }
+    .signal {
+      display: grid;
+      grid-template-columns: 122px 1fr;
+      gap: 10px;
+      align-items: baseline;
+      font-size: 13px;
+      border-top: 1px solid var(--subtle);
+      padding-top: 8px;
+    }
+    .signal strong { color: var(--ink); }
+
+    .metric-matrix {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .metric-group {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+      min-height: 214px;
+    }
+    .metric-group h3 { margin-bottom: 10px; }
+    .metric-row {
+      display: grid;
+      grid-template-columns: minmax(92px, 1fr) auto;
+      gap: 8px;
+      align-items: baseline;
+      padding: 7px 0;
+      border-top: 1px solid var(--subtle);
+      min-height: 34px;
+    }
+    .metric-row:first-of-type { border-top: 0; }
+    .metric-row .name { color: var(--muted); font-size: 12px; }
+    .metric-row .value {
+      color: var(--ink);
+      font-weight: 760;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+    .metric-note {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .quality-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .quality-item {
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: var(--paper);
+      padding: 12px;
+      display: grid;
+      gap: 5px;
+    }
+    .quality-item.warn { border-color: #e7b66b; background: var(--amber-soft); }
+    .quality-item.good { border-color: #a8d7bd; background: var(--green-soft); }
+    .quality-item.bad { border-color: #eeaaa4; background: var(--red-soft); }
+    .quality-item .label { color: var(--muted); font-size: 12px; }
+    .quality-item .value { color: var(--ink); font-weight: 760; }
+
+    .section-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .section-note { color: var(--muted); font-size: 12px; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--muted);
+      background: #f8fafc;
+      font-size: 12px;
+      font-weight: 760;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .scroll { overflow: auto; max-height: 430px; border-radius: 8px; }
+    .muted { color: var(--muted); }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 52px;
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 12px;
+      font-weight: 760;
+      white-space: nowrap;
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+    .badge.high { background: var(--red-soft); color: var(--red); }
+    .badge.mid { background: var(--amber-soft); color: var(--amber); }
+    .badge.low { background: var(--green-soft); color: var(--green); }
+    .badge.neutral { background: var(--subtle); color: var(--muted); }
+
+    .chart { width: 100%; height: 235px; display: block; }
+    .chart.tall { height: 286px; }
+    .visual-overview { grid-template-columns: 1fr; }
+    .donut-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .donut-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 10px;
+      display: grid;
+      gap: 7px;
+      min-width: 0;
+    }
+    .pie-visual {
+      width: min(168px, 100%);
+      aspect-ratio: 1 / 1;
+      border-radius: 50%;
+      margin: 2px auto 6px;
+      background: conic-gradient(var(--pie-color) 0 var(--pie-angle), #e7edf4 var(--pie-angle) 360deg);
+      border: 1px solid #dfe6ef;
+      position: relative;
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,0.65);
+    }
+    .pie-visual span {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      min-width: 70px;
+      text-align: center;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.92);
+      color: var(--ink);
+      font-size: 18px;
+      font-weight: 820;
+      padding: 5px 8px;
+      box-shadow: 0 1px 4px rgba(16, 24, 40, 0.12);
+    }
+    .pie-legend {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .pie-legend span { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
+    .donut-title { color: var(--ink); font-size: 13px; font-weight: 760; }
+    .donut-sub { color: var(--muted); font-size: 12px; }
+    .chart-note {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 16px;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .dot { width: 9px; height: 9px; border-radius: 99px; display: inline-block; }
+    .insight-list { margin-top: 8px; display: grid; gap: 6px; }
+    .insight-list div {
+      border-left: 3px solid var(--line);
+      padding-left: 9px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .tabs {
+      display: inline-flex;
+      gap: 4px;
+      padding: 3px;
+      background: var(--subtle);
+      border-radius: 8px;
+    }
+    .tab {
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--muted);
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .tab.active {
+      background: var(--paper);
+      color: var(--blue);
+      box-shadow: 0 1px 2px rgba(16,24,40,0.08);
+    }
+
+    .pivot-layout {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 14px;
+      align-items: start;
+    }
+    .bar-stack { display: grid; gap: 8px; }
+    .bar-row {
+      display: grid;
+      grid-template-columns: minmax(128px, 178px) 1fr 70px 70px 76px;
+      gap: 8px;
+      align-items: center;
+      font-size: 12px;
+    }
+    .bar-label { color: var(--ink); overflow-wrap: anywhere; }
+    .bar-label-sub,
+    .pivot-secondary {
+      display: block;
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.25;
+    }
+    .dual-track {
+      height: 18px;
+      background: #eef2f7;
+      border-radius: 4px;
+      position: relative;
+      overflow: hidden;
+    }
+    .bar-supply, .bar-demand {
+      position: absolute;
+      left: 0;
+      height: 8px;
+      border-radius: 4px;
+    }
+    .bar-supply { top: 2px; background: rgba(36, 104, 209, 0.78); }
+    .bar-demand { bottom: 2px; background: rgba(24, 116, 84, 0.78); }
+    .ratio-chip {
+      display: inline-flex;
+      min-width: 56px;
+      justify-content: flex-end;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    .ratio-chip.over { color: var(--green); font-weight: 760; }
+    .ratio-chip.under { color: var(--amber); font-weight: 760; }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .small-note {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 8px;
+    }
+    .research-summary {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .research-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+      background: #fbfcfe;
+      min-height: 96px;
+    }
+    .research-card .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .research-card .value {
+      color: var(--ink);
+      font-weight: 760;
+      line-height: 1.35;
+    }
+    .research-notice {
+      color: var(--muted);
+      font-size: 12px;
+      margin-top: 10px;
+    }
+    .chart-divider {
+      height: 1px;
+      background: var(--subtle);
+      margin: 10px 0;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    @media (max-width: 980px) {
+      main {
+        display: block;
+        max-width: 1480px;
+      }
+      .sidebar {
+        position: static;
+        margin-bottom: 14px;
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        padding: 10px;
+      }
+      .side-title { display: none; }
+      .sidebar a { white-space: nowrap; }
+      .summary-layout,
+      .two,
+      .visual-overview,
+      .pivot-layout,
+      .detail-grid,
+      .research-summary { grid-template-columns: 1fr; }
+      .metric-matrix,
+      .quality-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .donut-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+    @media (max-width: 720px) {
+      main { padding: 14px; }
+      header { padding: 18px 16px; }
+      .metric-matrix,
+      .quality-strip,
+      .three,
+      .four { grid-template-columns: 1fr; }
+      .donut-grid { grid-template-columns: 1fr; }
+      .bar-row { grid-template-columns: 1fr; gap: 4px; }
+      .tabs { display: grid; grid-template-columns: repeat(2, 1fr); width: 100%; }
+      .tab { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <h1>Amazon 市场调研报告看板</h1>
+    <div class="meta" id="headerMeta"></div>
+  </div>
+</header>
+
+<main>
+  <nav class="sidebar" aria-label="报告导航">
+    <div class="side-title">报告导航</div>
+    <a href="#overview">总览</a>
+    <a href="#charts">核心图表</a>
+    <a href="#qualityStrip">数据提示</a>
+    <a href="#rules">规则结论</a>
+    <a href="#trends">趋势</a>
+    <a href="#pivots">维度透视</a>
+    <a href="#entities">头部主体</a>
+    <a href="#externalResearchSection" id="externalResearchNav">外部调研</a>
+    <a href="#dataQuality">数据质量</a>
+  </nav>
+  <div class="content">
+  <section class="summary-layout" id="overview">
+    <div class="panel verdict">
+      <div>
+        <div class="verdict-label">Market Readout</div>
+        <div class="verdict-title" id="verdictTitle"></div>
+        <div class="verdict-copy" id="verdictCopy"></div>
+      </div>
+      <div class="signal-list" id="signalList"></div>
+    </div>
+    <div class="metric-matrix" id="metricMatrix"></div>
+  </section>
+
+  <section class="grid visual-overview" id="charts">
+    <div class="panel">
+      <div class="section-head">
+        <h2>饼状图：头部销量占比</h2>
+        <div class="section-note">前10% vs 剩余市场</div>
+      </div>
+      <div class="donut-grid" id="concentrationDonuts"></div>
+      <div class="chart-note">饼状图展示头部控制力；深色部分越大，市场越被少数链接、品牌或卖家拿走。</div>
+    </div>
+    <div class="panel">
+      <div class="section-head">
+        <h2>关键词流量柱状图</h2>
+        <div class="section-note">Top 12 关键词，按流量占比排序</div>
+      </div>
+      <svg class="chart tall" id="keywordShareChart"></svg>
+      <div class="chart-note">用于看流量是否集中在少数词；完整 Top90 明细在下方表格。</div>
+    </div>
+  </section>
+
+  <section id="qualityStrip"></section>
+
+  <section class="panel" id="rules">
+    <div class="section-head">
+      <h2>8 项规则结论</h2>
+      <div class="section-note">等级来自固定规则；文字只解释规则结果</div>
+    </div>
+    <div class="scroll"><table id="conclusionTable"></table></div>
+  </section>
+
+  <section class="grid two" id="trends">
+    <div class="panel">
+      <div class="section-head">
+        <h2>集中度与价格趋势</h2>
+        <div class="section-note">每个月用当月在榜集合重算</div>
+      </div>
+      <div class="legend">
+        <span><i class="dot" style="background:#2468d1"></i>链接前10%销量占比</span>
+        <span><i class="dot" style="background:#187454"></i>品牌前10%销量占比</span>
+        <span><i class="dot" style="background:#9a5b00"></i>卖家前10%销量占比</span>
+      </div>
+      <svg class="chart" id="concentrationChart"></svg>
+      <div class="insight-list" id="concentrationInsights"></div>
+    </div>
+    <div class="panel">
+      <div class="section-head">
+        <h2>新品推新成功率</h2>
+        <div class="section-note">新品 ≤360 天，成功 = 销量进入前20%</div>
+      </div>
+      <div class="legend"><span><i class="dot" style="background:#6b4db7"></i>推新成功率</span></div>
+      <svg class="chart" id="newProductChart"></svg>
+      <div class="insight-list" id="newProductInsight"></div>
+    </div>
+  </section>
+
+  <section class="panel" id="pivots">
+    <div class="section-head">
+      <h2>基础维度透视</h2>
+      <div class="tabs" id="pivotTabs"></div>
+    </div>
+    <div class="pivot-layout">
+      <div>
+        <div class="legend">
+          <span><i class="dot" style="background:#2468d1"></i>Listing 数量占比</span>
+          <span><i class="dot" style="background:#187454"></i>销量占比</span>
+        </div>
+        <div class="bar-stack" id="pivotBars"></div>
+      </div>
+      <div class="scroll"><table id="pivotTable"></table></div>
+    </div>
+    <div class="small-note" id="pivotNote"></div>
+  </section>
+
+  <section class="grid two" id="entities">
+    <div class="panel">
+      <div class="section-head">
+        <h2>头部主体</h2>
+        <div class="tabs" id="entityTabs"></div>
+      </div>
+      <div class="section-note" id="entityNote"></div>
+      <svg class="chart tall" id="entityShareChart"></svg>
+      <div class="chart-divider"></div>
+      <div class="scroll"><table id="entityTable"></table></div>
+    </div>
+    <div class="panel">
+      <div class="section-head">
+        <h2>关键词与转化覆盖</h2>
+        <div class="section-note" id="top90Note"></div>
+      </div>
+      <div class="scroll"><table id="topKeywords"></table></div>
+    </div>
+  </section>
+
+  <section class="panel" id="externalResearchSection" style="display:none;">
+    <div class="section-head">
+      <h2>头部品牌卖家外部调研</h2>
+      <div class="section-note">公开信息推断，不是尽调结论</div>
+    </div>
+    <div class="research-summary" id="externalResearchSummary"></div>
+    <div class="grid two">
+      <div>
+        <h3>头部品牌外部竞争力</h3>
+        <div class="scroll"><table id="externalBrandTable"></table></div>
+      </div>
+      <div>
+        <h3>头部卖家外部竞争力</h3>
+        <div class="scroll"><table id="externalSellerTable"></table></div>
+      </div>
+    </div>
+    <div class="research-notice" id="externalResearchNotice"></div>
+  </section>
+
+  <section class="panel" id="dataQuality">
+    <div class="section-head">
+      <h2>数据质量</h2>
+      <div class="section-note">辅助明细见同目录 auxiliary_market_research.xlsx</div>
+    </div>
+    <div class="scroll"><table id="qualityTable"></table></div>
+  </section>
+  </div>
+</main>
+
+<script id="report-data" type="application/json">__REPORT_JSON__</script>
+<script>
+const data = JSON.parse(document.getElementById('report-data').textContent);
+
+const fmtNum = (n, digits = 0) => n == null ? '无法判断' : Number(n).toLocaleString(undefined, {maximumFractionDigits: digits});
+const fmtMoney = (n) => n == null ? '无法判断' : '$' + Number(n).toLocaleString(undefined, {maximumFractionDigits: 2});
+const fmtPct = (n) => n == null ? '无法判断' : (Number(n) * 100).toFixed(1) + '%';
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+const pivotLabels = {
+  review_count: { title: '评论数', note: '判断新品是否需要先堆评价；销量占比明显高于供给占比的低评论区间更值得关注。' },
+  launch_days: { title: '上架天数', note: '判断新品打造周期；越早出现销量超配区间，说明起量周期越短。' },
+  rating: { title: '评分', note: '判断最低评分要求；销量占比开始超过供给占比的最低区间，是评分门槛信号。' },
+  price: { title: '售价', note: '判断价格带机会；销量占比高于 Listing 占比的区间，说明需求相对强于供给。' }
+};
+const entityLabels = {
+  link: '链接',
+  brand: '品牌',
+  seller: '卖家'
+};
+let activePivot = 'review_count';
+let activeEntity = 'brand';
+
+function init() {
+  setHeader();
+  renderExecutiveSummary();
+  renderQualityStrip();
+  renderConclusionTable();
+  renderCharts();
+  setupPivotTabs();
+  renderPivot();
+  setupEntityTabs();
+  renderEntityTable();
+  renderKeywords();
+  renderExternalResearch();
+  renderQualityTables();
+}
+
+function setHeader() {
+  const m = data.manifest;
+  document.getElementById('headerMeta').innerHTML = [
+    `站点：${esc(m.marketplace)}`,
+    `核心关键词：${esc(m.keyword)}`,
+    `生成时间：${esc(m.generated_at)}`,
+    `月表数量：${m.monthly_files.length}`
+  ].map(x => `<span>${x}</span>`).join('');
+}
+
+function renderExecutiveSummary() {
+  const o = data.metrics.overview;
+  const c = data.metrics.current_concentration;
+  const conclusions = data.conclusions;
+  const verdict = buildVerdict();
+  document.getElementById('verdictTitle').textContent = verdict.title;
+  document.getElementById('verdictCopy').textContent = verdict.copy;
+  document.getElementById('signalList').innerHTML = [
+    ['竞争结构', `链接前10%拿走 ${fmtPct(c.link.top_sales_share)}，品牌前10%拿走 ${fmtPct(c.brand.top_sales_share)}`],
+    ['获客成本', `ACOS ${fmtPct(o.ad_pressure_acos)}，加权 PPC ${fmtMoney(o.weighted_ppc_90d)}`],
+    ['新品信号', `近30天新品成功率 ${fmtPct(c.new_product_success.success_rate)}，新品数 ${fmtNum(c.new_product_success.new_count)}`],
+    ['数据覆盖', `Top90 转化率覆盖 ${fmtPct(o.top90_conversion_coverage)}`]
+  ].map(([k, v]) => `<div class="signal"><strong>${k}</strong><span>${v}</span></div>`).join('');
+
+  const groups = [
+    {
+      title: '市场规模',
+      note: '看容量，不判断利润',
+      rows: [
+        ['年总销售额', fmtMoney(o.annual_revenue)],
+        ['年总销量', fmtNum(o.annual_sales)],
+        ['近30天销售额', fmtMoney(o.total_revenue_30d)],
+        ['近30天销量', fmtNum(o.total_sales_30d)]
+      ]
+    },
+    {
+      title: '价格与获客',
+      note: 'ACOS 越高，广告获客压力越大',
+      rows: [
+        ['平均售价', fmtMoney(o.avg_price_30d)],
+        ['90天转化率', fmtPct(o.avg_conversion_rate_90d)],
+        ['加权 PPC', fmtMoney(o.weighted_ppc_90d)],
+        ['广告压力 ACOS', fmtPct(o.ad_pressure_acos)]
+      ]
+    },
+    {
+      title: '竞争集中',
+      note: '前10%份额衡量头部控制力',
+      rows: [
+        ['链接垄断', `${fmtPct(c.link.top_sales_share)} · ${data.conclusions.product_monopoly.level}`],
+        ['品牌垄断', `${fmtPct(c.brand.top_sales_share)} · ${data.conclusions.brand_monopoly.level}`],
+        ['卖家垄断', fmtPct(c.seller.top_sales_share)],
+        ['头部链接均价', fmtMoney(c.link.top_avg_price)]
+      ]
+    },
+    {
+      title: '进入窗口',
+      note: '结合新品周期、价格带和评价门槛看',
+      rows: [
+        ['新品周期', conclusions.new_product_cycle.value || '无法判断'],
+        ['评分门槛', conclusions.rating_requirement.value || '无法判断'],
+        ['价格敏感度', conclusions.price_sensitivity.level],
+        ['推荐价格带', listValues(conclusions.best_price_bands.value, 2)]
+      ]
+    }
+  ];
+  document.getElementById('metricMatrix').innerHTML = groups.map(group => `
+    <div class="metric-group">
+      <h3>${esc(group.title)}</h3>
+      ${group.rows.map(([name, value]) => `
+        <div class="metric-row"><span class="name">${esc(name)}</span><span class="value">${esc(value)}</span></div>
+      `).join('')}
+      <div class="metric-note">${esc(group.note)}</div>
+    </div>
+  `).join('');
+}
+
+function buildVerdict() {
+  const c = data.metrics.current_concentration;
+  const acos = data.metrics.overview.ad_pressure_acos;
+  const product = c.link.top_sales_share || 0;
+  const brand = c.brand.top_sales_share || 0;
+  const success = c.new_product_success.success_rate;
+  if ((product >= 0.6 || brand >= 0.6) && acos != null && acos >= 0.4) {
+    return {
+      title: '市场容量够，但进入压力偏高',
+      copy: '头部份额和广告成本都不低，新品需要明确差异点和预算承受能力。'
+    };
+  }
+  if (product < 0.4 && brand < 0.4 && acos != null && acos < 0.4) {
+    return {
+      title: '结构相对分散，按规则继续阅读',
+      copy: '集中度和广告压力都不高，继续结合基础透视和 8 项规则结论阅读。'
+    };
+  }
+  if (success != null && success >= 0.2) {
+    return {
+      title: '存在新品窗口，但要看细分方向',
+      copy: '新品成功率不低，需要结合价格带、评价门槛和上架时间透视一起判断。'
+    };
+  }
+  return {
+    title: '需要谨慎筛选切入点',
+    copy: '当前数据没有给出单一强结论，应把重点放在价格带和基础维度超配区间。'
+  };
+}
+
+function listValues(value, limit = 2) {
+  if (Array.isArray(value)) {
+    const items = value.filter(Boolean).slice(0, limit);
+    return items.length ? items.join('、') : '无法判断';
+  }
+  return value || '无法判断';
+}
+
+function renderQualityStrip() {
+  const cl = data.cleaning_log;
+  const items = [
+    {
+      label: '样本规模',
+      value: `${fmtNum(cl.last30.kept_rows)} / ${fmtNum(cl.last30.input_rows)} 条保留`,
+      state: cl.last30.low_confidence ? 'bad' : 'good'
+    },
+    {
+      label: 'Top90 转化覆盖',
+      value: `${fmtNum(cl.top90_conversion_coverage.covered_count)} / ${fmtNum(cl.top90_conversion_coverage.top90_keyword_count)} · ${fmtPct(cl.top90_conversion_coverage.coverage)}`,
+      state: cl.top90_conversion_coverage.coverage < 0.65 ? 'warn' : 'good'
+    },
+    {
+      label: '导出上限',
+      value: cl.keyword_file_possible_export_limit ? '关键词表可能截断' : '未触发明显上限',
+      state: cl.keyword_file_possible_export_limit ? 'warn' : 'good'
+    },
+    {
+      label: '月度快照',
+      value: `${data.manifest.monthly_files.length} 个月`,
+      state: data.manifest.monthly_files.length === 12 ? 'good' : 'warn'
+    }
+  ];
+  document.getElementById('qualityStrip').innerHTML = `
+    <div class="quality-strip">
+      ${items.map(item => `
+        <div class="quality-item ${item.state}">
+          <div class="label">${esc(item.label)}</div>
+          <div class="value">${esc(item.value)}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderConclusionTable() {
+  const rows = [
+    ['review_dependency', '评论依赖性', fmtPct(data.conclusions.review_dependency.value), data.conclusions.review_dependency.level, data.conclusions.review_dependency.summary],
+    ['rating_requirement', '评分值依赖性', data.conclusions.rating_requirement.value || '无法判断', data.conclusions.rating_requirement.level, data.conclusions.rating_requirement.summary],
+    ['price_sensitivity', '价格敏感度', fmtPct(data.conclusions.price_sensitivity.value), data.conclusions.price_sensitivity.level, data.conclusions.price_sensitivity.summary],
+    ['best_price_bands', '最值得进入的价格带', Array.isArray(data.conclusions.best_price_bands.value) ? data.conclusions.best_price_bands.value.join('、') : '无法判断', data.conclusions.best_price_bands.level, data.conclusions.best_price_bands.summary],
+    ['new_product_cycle', '新品打造周期', data.conclusions.new_product_cycle.value || '无法判断', data.conclusions.new_product_cycle.level, data.conclusions.new_product_cycle.summary],
+    ['product_monopoly', '商品垄断度', fmtPct(data.conclusions.product_monopoly.value), data.conclusions.product_monopoly.level, data.conclusions.product_monopoly.summary],
+    ['brand_monopoly', '品牌垄断度', fmtPct(data.conclusions.brand_monopoly.value), data.conclusions.brand_monopoly.level, data.conclusions.brand_monopoly.summary],
+    ['ad_pressure', '市场广告压力指数', fmtPct(data.conclusions.ad_pressure.value), data.conclusions.ad_pressure.level, data.conclusions.ad_pressure.summary]
+  ];
+  document.getElementById('conclusionTable').innerHTML = `
+    <thead><tr><th>指标</th><th class="num">规则值</th><th>等级</th><th>读数</th><th>口径</th></tr></thead>
+    <tbody>${rows.map(([key, label, value, level, summary]) => `
+      <tr>
+        <td><strong>${esc(label)}</strong></td>
+        <td class="num">${esc(value)}</td>
+        <td><span class="badge ${badgeClass(level)}">${esc(level)}</span></td>
+        <td>${esc(summary)}</td>
+        <td class="muted">${esc(data.conclusions[key].basis)}</td>
+      </tr>
+    `).join('')}</tbody>
+  `;
+}
+
+function badgeClass(level) {
+  if (['极高','很高','较高'].includes(level)) return 'high';
+  if (['中等','较低','已识别','有最低评分要求'].includes(level)) return 'mid';
+  if (['很低','极低'].includes(level)) return 'low';
+  return 'neutral';
+}
+
+function renderCharts() {
+  const trend = data.metrics.monthly_trend;
+  const labels = trend.map(x => x.month);
+  renderConcentrationDonuts();
+  drawKeywordShareChart();
+  drawEntityShareChart();
+  drawLineChart('concentrationChart', [
+    {label:'链接', color:'#2468d1', values: trend.map(x => x.link.top_sales_share)},
+    {label:'品牌', color:'#187454', values: trend.map(x => x.brand.top_sales_share)},
+    {label:'卖家', color:'#9a5b00', values: trend.map(x => x.seller.top_sales_share)}
+  ], labels, true);
+  drawLineChart('newProductChart', [
+    {label:'新品成功率', color:'#6b4db7', values: trend.map(x => x.new_product_success.success_rate || 0)}
+  ], labels, true);
+  const insights = data.metrics.trend_insights || {};
+  document.getElementById('concentrationInsights').innerHTML = ['link','brand','seller']
+    .map(k => insights[k] ? `<div>${esc(insights[k].summary)}</div>` : '')
+    .join('');
+  document.getElementById('newProductInsight').innerHTML = insights.new_product_success
+    ? `<div>${esc(insights.new_product_success.summary)}</div>`
+    : '';
+}
+
+function renderConcentrationDonuts() {
+  const c = data.metrics.current_concentration;
+  const items = [
+    {label:'链接前10%', value:c.link.top_sales_share, sub:`头部均价 ${fmtMoney(c.link.top_avg_price)}`, color:'#2468d1'},
+    {label:'品牌前10%', value:c.brand.top_sales_share, sub:`头部品牌数 ${fmtNum(c.brand.top_n)}`, color:'#187454'},
+    {label:'卖家前10%', value:c.seller.top_sales_share, sub:`头部卖家数 ${fmtNum(c.seller.top_n)}`, color:'#9a5b00'}
+  ];
+  document.getElementById('concentrationDonuts').innerHTML = items.map(renderDonutCard).join('');
+}
+
+function renderDonutCard(item) {
+  const value = clampShare(item.value);
+  const angle = value * 360;
+  return `
+    <div class="donut-card">
+      <div class="pie-visual" role="img" aria-label="${esc(item.label)} ${fmtPct(value)}" style="--pie-color:${item.color};--pie-angle:${angle}deg;">
+        <span>${fmtPct(value)}</span>
+      </div>
+      <div>
+        <div class="donut-title">${esc(item.label)}</div>
+        <div class="donut-sub">${esc(item.sub)} · 其余 ${fmtPct(1 - value)}</div>
+      </div>
+      <div class="pie-legend">
+        <span><i class="dot" style="background:${item.color}"></i>头部</span>
+        <span><i class="dot" style="background:#e7edf4"></i>其余</span>
+      </div>
+    </div>
+  `;
+}
+
+function drawLineChart(svgId, series, labels, asPct) {
+  const svg = document.getElementById(svgId);
+  const width = svg.clientWidth || 640;
+  const height = 235;
+  const padL = 48, padR = 16, padT = 16, padB = 34;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  const all = series.flatMap(s => s.values).filter(v => v != null);
+  const maxRaw = Math.max(...all, 0.01);
+  const max = asPct ? nicePctAxisMax(maxRaw) : Math.max(maxRaw * 1.15, 0.1);
+  const x = (i, n) => padL + (n <= 1 ? 0 : i * (width - padL - padR) / (n - 1));
+  const y = (v) => padT + (1 - ((v || 0) / max)) * (height - padT - padB);
+  const gridTicks = buildAxisTicks(max, asPct);
+  const axis = `
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${height-padB}" stroke="#b8c2cf" stroke-width="1"/>
+    <line x1="${padL}" y1="${height-padB}" x2="${width-padR}" y2="${height-padB}" stroke="#b8c2cf" stroke-width="1"/>
+  `;
+  const grid = gridTicks.map(t => {
+    const gy = y(t);
+    return `<line x1="${padL}" y1="${gy}" x2="${width-padR}" y2="${gy}" stroke="#e4e9f0"/><text x="${padL-8}" y="${gy+4}" text-anchor="end" font-size="11" fill="#687588">${asPct ? fmtPct(t) : fmtNum(t)}</text>`;
+  }).join('');
+  const lines = series.map(s => {
+    const pts = s.values.map((v, i) => `${x(i, s.values.length)},${y(v)}`).join(' ');
+    const dots = s.values.map((v, i) => `<circle cx="${x(i, s.values.length)}" cy="${y(v)}" r="2.6" fill="${s.color}"/>`).join('');
+    return `<polyline fill="none" stroke="${s.color}" stroke-width="2.4" points="${pts}"/>${dots}`;
+  }).join('');
+  const xLabels = labels.map((label, i, arr) => {
+    if (arr.length > 8 && i !== 0 && i !== arr.length - 1 && i % 2 !== 0) return '';
+    return `<text x="${x(i, arr.length)}" y="${height-9}" font-size="11" text-anchor="middle" fill="#687588">${esc(String(label).slice(5))}</text>`;
+  }).join('');
+  svg.innerHTML = grid + axis + lines + xLabels;
+}
+
+function nicePctAxisMax(maxRaw) {
+  const padded = Math.max((maxRaw || 0) * 1.15, 0.05);
+  const step = niceTickStep(padded / 5);
+  return Math.min(1, Math.max(step, Math.ceil(padded / step) * step));
+}
+
+function niceTickStep(rawStep) {
+  const steps = [0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.25, 0.5, 1];
+  return steps.find(step => step >= rawStep) || 1;
+}
+
+function buildAxisTicks(max, asPct) {
+  if (!asPct) return [0, max / 2, max];
+  const step = niceTickStep(max / 5);
+  const ticks = [];
+  for (let value = 0; value <= max + step / 2; value += step) {
+    ticks.push(Math.min(max, Number(value.toFixed(4))));
+  }
+  if (ticks[ticks.length - 1] < max) ticks.push(max);
+  return [...new Set(ticks)];
+}
+
+function drawKeywordShareChart() {
+  const rows = (data.top90.top90_keywords || []).slice(0, 12).map(row => ({
+    label: row.keyword,
+    value: row.traffic_share || 0,
+    sub: `累计 ${fmtPct(row.cumulative_traffic_share)}`
+  }));
+  drawHorizontalShareChart('keywordShareChart', rows, {
+    color: '#9a5b00',
+    valueLabel: '流量占比'
+  });
+}
+
+function drawEntityShareChart() {
+  const groups = (data.metrics.current_concentration[activeEntity].top_groups || []).slice(0, 8);
+  const label = entityLabels[activeEntity];
+  const color = activeEntity === 'link' ? '#2468d1' : activeEntity === 'brand' ? '#187454' : '#9a5b00';
+  const rows = groups.map(row => ({
+    label: row.name,
+    value: row.sales_share || 0,
+    sub: entitySubLabel(row)
+  }));
+  drawHorizontalShareChart('entityShareChart', rows, {
+    color,
+    valueLabel: `${label}销量占比`
+  });
+}
+
+function entitySubLabel(row) {
+  if (activeEntity === 'link') {
+    return `${fmtNum(row.sales)} 近30天销量 · 单条 listing`;
+  }
+  if (activeEntity === 'brand') {
+    return `${fmtNum(row.sales)} 品牌合计销量 · ${fmtNum(row.listing_count)} 条 listing`;
+  }
+  return `${fmtNum(row.sales)} 卖家合计销量 · ${fmtNum(row.listing_count)} 条 listing`;
+}
+
+function drawHorizontalShareChart(svgId, rows, options) {
+  const svg = document.getElementById(svgId);
+  if (!svg) return;
+  const width = svg.clientWidth || 640;
+  const rowH = 29;
+  const padT = 30;
+  const padB = 18;
+  const labelW = width < 560 ? 118 : 178;
+  const valueW = width < 560 ? 56 : 72;
+  const padR = 10;
+  const barX = labelW + 8;
+  const plotW = Math.max(80, width - barX - valueW - padR);
+  const height = Math.max(220, padT + padB + rows.length * rowH);
+  svg.style.height = `${height}px`;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  if (!rows.length) {
+    svg.innerHTML = `<text x="12" y="36" font-size="13" fill="#687588">暂无可绘制数据</text>`;
+    return;
+  }
+  const maxRaw = Math.max(...rows.map(r => r.value || 0), 0.01);
+  const max = Math.min(1, Math.max(maxRaw * 1.18, 0.05));
+  const ticks = [0, max / 2, max];
+  const grid = ticks.map(t => {
+    const gx = barX + (t / max) * plotW;
+    return `
+      <line x1="${gx}" y1="${padT - 12}" x2="${gx}" y2="${height - padB + 2}" stroke="#e4e9f0"/>
+      <text x="${gx}" y="${padT - 17}" font-size="10" text-anchor="${t === 0 ? 'start' : 'middle'}" fill="#687588">${fmtPct(t)}</text>
+    `;
+  }).join('');
+  const bars = rows.map((row, i) => {
+    const y = padT + i * rowH;
+    const barW = Math.max(2, ((row.value || 0) / max) * plotW);
+    const label = truncate(row.label, width < 560 ? 16 : 25);
+    return `
+      <text x="0" y="${y + 15}" font-size="12" fill="#17202c">${esc(label)}</text>
+      <rect x="${barX}" y="${y + 3}" width="${plotW}" height="16" rx="4" fill="#eef2f7"/>
+      <rect x="${barX}" y="${y + 3}" width="${barW}" height="16" rx="4" fill="${options.color}"/>
+      <text x="${barX + plotW + 8}" y="${y + 15}" font-size="12" font-weight="700" fill="#17202c">${fmtPct(row.value)}</text>
+      <text x="${barX}" y="${y + 28}" font-size="10" fill="#687588">${esc(row.sub || options.valueLabel || '')}</text>
+    `;
+  }).join('');
+  svg.innerHTML = grid + bars;
+}
+
+function clampShare(value) {
+  if (value == null || Number.isNaN(Number(value))) return 0;
+  return Math.max(0, Math.min(1, Number(value)));
+}
+
+function truncate(value, maxLen) {
+  const text = String(value ?? '');
+  return text.length > maxLen ? text.slice(0, Math.max(1, maxLen - 1)) + '…' : text;
+}
+
+function setupPivotTabs() {
+  const keys = Object.keys(pivotLabels);
+  document.getElementById('pivotTabs').innerHTML = keys.map(key => `
+    <button class="tab ${key === activePivot ? 'active' : ''}" data-pivot="${key}">${esc(pivotLabels[key].title)}</button>
+  `).join('');
+  document.querySelectorAll('[data-pivot]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activePivot = btn.getAttribute('data-pivot');
+      setupPivotTabs();
+      renderPivot();
+    });
+  });
+}
+
+function renderPivot() {
+  const rows = data.pivots[activePivot] || [];
+  const label = pivotLabels[activePivot];
+  document.getElementById('pivotBars').innerHTML = rows.map(row => {
+    const supply = row.listing_count_share || 0;
+    const demand = row.sales_share || 0;
+    const ratio = supply ? demand / supply : null;
+    const display = pivotDisplay(row);
+    return `
+      <div class="bar-row">
+        <div class="bar-label">
+          <strong>${esc(display.primary)}</strong>
+          ${display.secondary ? `<span class="bar-label-sub">${esc(display.secondary)}</span>` : ''}
+        </div>
+        <div class="dual-track">
+          <div class="bar-supply" style="width:${Math.min(100, supply * 100)}%"></div>
+          <div class="bar-demand" style="width:${Math.min(100, demand * 100)}%"></div>
+        </div>
+        <div class="num">${fmtPct(supply)}</div>
+        <div class="num">${fmtPct(demand)}</div>
+        <div class="ratio-chip ${ratio == null ? '' : (ratio >= 1 ? 'over' : 'under')}">${ratio == null ? 'NA' : ratio.toFixed(2) + 'x'}</div>
+      </div>
+    `;
+  }).join('');
+  document.getElementById('pivotTable').innerHTML = `
+    <thead><tr><th>${esc(label.title)}区间</th><th class="num">Listing占比</th><th class="num">销量占比</th><th class="num">Listing数</th><th class="num">平均销量</th><th class="num">供需比</th></tr></thead>
+    <tbody>${rows.map(row => {
+      const ratio = row.listing_count_share ? row.sales_share / row.listing_count_share : null;
+      const display = pivotDisplay(row);
+      return `<tr>
+        <td>
+          <strong>${esc(display.primary)}</strong>
+          ${display.secondary ? `<span class="pivot-secondary">${esc(display.secondary)}</span>` : ''}
+        </td>
+        <td class="num">${fmtPct(row.listing_count_share)}</td>
+        <td class="num">${fmtPct(row.sales_share)}</td>
+        <td class="num">${fmtNum(row.listing_count)}</td>
+        <td class="num">${fmtNum(row.avg_sales)}</td>
+        <td class="num">${ratio == null ? 'NA' : ratio.toFixed(2) + 'x'}</td>
+      </tr>`;
+    }).join('')}</tbody>
+  `;
+  document.getElementById('pivotNote').textContent = label.note;
+}
+
+function pivotDisplay(row) {
+  if (activePivot === 'price' && row.actual_price_range) {
+    return {
+      primary: row.actual_price_range,
+      secondary: ''
+    };
+  }
+  return { primary: row.label, secondary: '' };
+}
+
+function setupEntityTabs() {
+  document.getElementById('entityTabs').innerHTML = Object.entries(entityLabels).map(([key, label]) => `
+    <button class="tab ${key === activeEntity ? 'active' : ''}" data-entity="${key}">${esc(label)}</button>
+  `).join('');
+  document.querySelectorAll('[data-entity]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeEntity = btn.getAttribute('data-entity');
+      setupEntityTabs();
+      renderEntityTable();
+    });
+  });
+}
+
+function renderEntityTable() {
+  const groups = data.metrics.current_concentration[activeEntity].top_groups || [];
+  const label = entityLabels[activeEntity];
+  renderEntityNote();
+  drawEntityShareChart();
+  renderTable('entityTable', groups, [
+    {key:'name', label},
+    {key:'sales', label:'销量', type:'num'},
+    {key:'sales_share', label:'销量占比', type:'pct'},
+    {key:'revenue', label:'销售额', type:'money'},
+    {key:'revenue_share', label:'销售额占比', type:'pct'},
+    {key:'listing_count', label:'链接数', type:'num'},
+    {key:'avg_price', label:'均价', type:'money'}
+  ]);
+}
+
+function renderEntityNote() {
+  const c = data.metrics.current_concentration[activeEntity];
+  const label = entityLabels[activeEntity];
+  const scopeText = activeEntity === 'link'
+    ? '按单条 listing / ASIN 排名，不做品牌或卖家合并。'
+    : activeEntity === 'brand'
+      ? '按品牌聚合；同一品牌下多条 listing 的销量会合并。'
+      : '按卖家聚合；同一卖家下多条 listing 的销量会合并。';
+  document.getElementById('entityNote').textContent =
+    `当前口径：${scopeText} 共 ${fmtNum(c.group_count)} 个${label}，前10%${label}合计销量占比 ${fmtPct(c.top_sales_share)}。`;
+}
+
+function renderKeywords() {
+  const top90 = data.top90;
+  const cl = data.cleaning_log.top90_conversion_coverage;
+  drawKeywordShareChart();
+  document.getElementById('top90Note').textContent =
+    `${fmtNum(top90.top90_count)} 个词覆盖 ${fmtPct(top90.top90_cumulative_share)} 流量；转化率表覆盖 ${fmtPct(cl.coverage)}`;
+  renderTable('topKeywords', (top90.top90_keywords || []).slice(0, 100), [
+    {key:'keyword', label:'关键词'},
+    {key:'traffic_share', label:'流量占比', type:'pct'},
+    {key:'cumulative_traffic_share', label:'累计占比', type:'pct'},
+    {key:'monthly_searches', label:'月搜索量', type:'num'},
+    {key:'clicks', label:'点击量', type:'num'},
+    {key:'monthly_purchases', label:'月购买量', type:'num'},
+    {key:'conversion_rate_90d', label:'90天转化率', type:'coverage_pct'}
+  ]);
+}
+
+function renderExternalResearch() {
+  const er = data.external_research;
+  const section = document.getElementById('externalResearchSection');
+  const nav = document.getElementById('externalResearchNav');
+  if (!er) {
+    section.style.display = 'none';
+    if (nav) nav.style.display = 'none';
+    return;
+  }
+  section.style.display = '';
+  if (nav) nav.style.display = '';
+  const summary = er.market_summary || {};
+  const cards = [
+    ['全域流量布局', summary.traffic_layout_summary || '未形成总结'],
+    ['品牌背后公司实力', summary.company_strength_summary || '未形成总结'],
+    ['市场级外部竞争强度', summary.summary || summary.external_competition_level || '未形成总结']
+  ];
+  document.getElementById('externalResearchSummary').innerHTML = cards.map(([label, value]) => `
+    <div class="research-card">
+      <div class="label">${esc(label)}</div>
+      <div class="value">${esc(value)}</div>
+    </div>
+  `).join('');
+  renderTable('externalBrandTable', er.brand_results || [], externalResearchColumns());
+  renderTable('externalSellerTable', er.seller_results || [], externalResearchColumns());
+  document.getElementById('externalResearchNotice').textContent =
+    er.notice || '该结果属于公开信息推断，不是尽调结论；不可推翻结构化市场数据，只能辅助解释竞争强度。';
+}
+
+function externalResearchColumns() {
+  return [
+    {key:'rank', label:'排名', type:'num'},
+    {key:'name', label:'主体'},
+    {key:'research_status', label:'状态'},
+    {key:'external_presence_level', label:'外部声量'},
+    {key:'confidence', label:'置信度'},
+    {key:'traffic_layout', label:'全域流量布局'},
+    {key:'company_strength', label:'公司实力'},
+    {key:'evidence_summary', label:'证据摘要'}
+  ];
+}
+
+function renderQualityTables() {
+  const cl = data.cleaning_log;
+  const qualityRows = [
+    {name:'近30天原始行数', value: fmtNum(cl.last30.input_rows), note:'卖家精灵导出表读取行数'},
+    {name:'近30天清洗后行数', value: fmtNum(cl.last30.kept_rows), note:'剔除缺价、零价、缺销量或零销量'},
+    {name:'近30天剔除行数', value: fmtNum(cl.last30.removed_rows), note: reasonSummary(cl.last30.reason_counts)},
+    {name:'低置信度', value: cl.last30.low_confidence ? '是' : '否', note: cl.last30.low_confidence_reason || '样本数达到最低门槛'},
+    {name:'Top90转化覆盖', value: `${fmtNum(cl.top90_conversion_coverage.covered_count)} / ${fmtNum(cl.top90_conversion_coverage.top90_keyword_count)}`, note: fmtPct(cl.top90_conversion_coverage.coverage)},
+    {name:'关键词表导出上限', value: cl.keyword_file_possible_export_limit ? '可能达到' : '未触发', note:'行数为2000/3000时按可能截断处理'},
+    {name:'转化率表导出上限', value: cl.conversion_file_possible_export_limit ? '可能达到' : '未触发', note:'行数为2000/3000时按可能截断处理'},
+    {name:'月表数量', value: fmtNum(data.manifest.monthly_files.length), note: (data.manifest.warnings || []).join('；') || '符合12个月口径'}
+  ];
+  renderTable('qualityTable', qualityRows, [
+    {key:'name', label:'检查项'},
+    {key:'value', label:'结果'},
+    {key:'note', label:'说明'}
+  ]);
+}
+
+function reasonSummary(reasons) {
+  if (!reasons || Object.keys(reasons).length === 0) return '无';
+  return Object.entries(reasons).map(([k, v]) => `${k}: ${v}`).join('；');
+}
+
+function renderTable(id, rows, columns) {
+  const head = `<thead><tr>${columns.map(c => `<th class="${c.type ? 'num' : ''}">${esc(c.label)}</th>`).join('')}</tr></thead>`;
+  const body = `<tbody>${(rows || []).map(row => `<tr>${columns.map(c => `<td class="${c.type ? 'num' : ''}">${formatCell(row[c.key], c.type)}</td>`).join('')}</tr>`).join('')}</tbody>`;
+  document.getElementById(id).innerHTML = head + body;
+}
+
+function formatCell(value, type) {
+  if (type === 'money') return fmtMoney(value);
+  if (type === 'pct') return fmtPct(value);
+  if (type === 'coverage_pct') return value == null ? '未覆盖' : fmtPct(value);
+  if (type === 'num') return fmtNum(value);
+  return esc(value);
+}
+
+init();
+window.addEventListener('resize', renderCharts);
+</script>
+</body>
+</html>

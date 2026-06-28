@@ -1,0 +1,210 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Niche 细分市场评分报告</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #0f0f17;
+  color: #e0e0e0;
+  line-height: 1.6;
+  padding: 24px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+h1 { font-size: 1.5rem; color: #89b4fa; margin-bottom: 4px; }
+.subtitle { color: #6c7086; font-size: 0.85rem; margin-bottom: 24px; }
+.card {
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-radius: 10px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #cba6f7;
+  margin-bottom: 12px;
+}
+.stats-row { display: flex; gap: 24px; flex-wrap: wrap; margin: 12px 0; }
+.stat { text-align: center; }
+.stat .num { font-size: 1.4rem; font-weight: 700; color: #89b4fa; }
+.stat .label { font-size: 0.75rem; color: #6c7086; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin-top: 12px; }
+th { background: #313244; color: #cdd6f4; padding: 8px 12px; text-align: left; position: sticky; top: 0; }
+td { padding: 8px 12px; border-bottom: 1px solid #313244; }
+tr:hover { background: #181825; }
+.score-pos { color: #a6e3a1; font-weight: 600; }
+.score-neg { color: #f38ba8; font-weight: 600; }
+.score-zero { color: #6c7086; }
+.rank-badge { background: #cba6f7; color: #1e1e2e; padding: 2px 8px; border-radius: 4px; font-weight: 700; font-size: 0.8rem; }
+.niche-detail { background: #181825; border: 1px solid #313244; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+.niche-detail h3 { color: #f9e2af; font-size: 0.95rem; margin-bottom: 8px; }
+.reason { color: #a6e3a1; font-size: 0.85rem; margin-bottom: 4px; }
+.risk { color: #f38ba8; font-size: 0.85rem; margin-bottom: 4px; }
+.score-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; margin-top: 12px; }
+.score-item { background: #1e1e2e; padding: 8px 12px; border-radius: 6px; display: flex; justify-content: space-between; align-items: center; }
+.score-item .key { color: #6c7086; font-size: 0.8rem; }
+.score-item .val { font-size: 0.8rem; }
+.score-item .exp { font-size: 0.75rem; color: #9399b2; margin-top: 2px; }
+.not-found { background: #3a1e1e; padding: 8px 12px; border-radius: 6px; color: #f38ba8; font-size: 0.85rem; margin-top: 8px; }
+.profile-badge { background: #313244; color: #89b4fa; padding: 4px 12px; border-radius: 4px; font-size: 0.8rem; display: inline-block; margin-left: 8px; }
+.method-note {
+  background: #181825;
+  border: 1px solid #45475a;
+  border-left: 4px solid #89b4fa;
+  border-radius: 8px;
+  padding: 12px 14px;
+  color: #bac2de;
+  font-size: 0.82rem;
+  margin-top: 14px;
+}
+.method-note strong { color: #cdd6f4; }
+</style>
+</head>
+<body>
+
+<h1>🎯 Niche 细分市场评分报告</h1>
+<div class="subtitle">Amazon Niche Choice v2 — 自动生成，双击打开即可查看</div>
+
+<!--
+  模板使用说明：
+  Agent 将 CLI 输出的 JSON 替换到下方占位符中。
+  替换前需要将 JSON 内容中的 </ 替换为 <\/，防止破坏 script 标签。
+-->
+<script id="data-score-result" type="application/json">__DATA_SCORE_RESULT__</script>
+
+<div id="app"></div>
+
+<script>
+function loadData(id) {
+  try {
+    const text = document.getElementById(id).textContent.trim();
+    if (!text || text.startsWith('__DATA_')) return null;
+    return JSON.parse(text);
+  } catch(e) { return null; }
+}
+
+function scoreClass(score) {
+  if (score > 0) return 'score-pos';
+  if (score < 0) return 'score-neg';
+  return 'score-zero';
+}
+
+function formatScore(score) {
+  return score > 0 ? `+${score}` : String(score);
+}
+
+function formatNum(n) {
+  if (n === null || n === undefined) return 'N/A';
+  if (n >= 1000000) return (n/1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n/1000).toFixed(1) + 'K';
+  return String(Math.round(n));
+}
+
+const SCORE_LABELS = {
+  growth_trend: '增长趋势',
+  ad_pressure: '广告压力',
+  new_product: '新品机会',
+  product_concentration: '商品集中度',
+  brand_concentration: '品牌集中度',
+  return_ratio: '退货率',
+  profit_margin: '回款空间',
+  review_dependency: '评论依赖度',
+  keyword_monopoly: '关键词垄断度'
+};
+
+function render() {
+  const result = loadData('data-score-result');
+  if (!result || !result.data) {
+    document.getElementById('app').innerHTML = '<div class="card"><p>暂无数据。请先运行评分命令。</p></div>';
+    return;
+  }
+
+  const d = result.data;
+  const meta = result.meta || {};
+  const warnings = result.warnings || [];
+  let html = '';
+
+  // 概览卡片
+  html += `<div class="card">
+    <div class="card-title">📊 评分概览 <span class="profile-badge">Profile: ${meta.profile || 'default'}</span></div>
+    <div class="stats-row">
+      <div class="stat"><div class="num">${d.total_scored || 0}</div><div class="label">已评分</div></div>
+      <div class="stat"><div class="num">${d.not_found_count || 0}</div><div class="label">未匹配</div></div>
+      <div class="stat"><div class="num">${d.total_input || 0}</div><div class="label">总输入</div></div>
+    </div>`;
+
+  html += `<div class="method-note">
+    <strong>广告压力说明：</strong>报告中的 ACOS 为估算广告压力指标，由 SellerSprite 关键词建议竞价、市场均价和估算点击转化率推算，用于同一批 niche 之间横向比较广告竞争强弱；它不是 Amazon 广告后台真实 ACOS，也不代表真实投放结果。
+  </div>`;
+
+  if (d.not_found && d.not_found.length > 0) {
+    html += `<div class="not-found">⚠️ 未匹配: ${d.not_found.join(', ')}</div>`;
+  }
+  html += '</div>';
+
+  // 排名表
+  const ranking = d.ranking || [];
+  if (ranking.length > 0) {
+    html += `<div class="card">
+      <div class="card-title">🏆 完整排名</div>
+      <table>
+        <thead><tr>
+          <th>排名</th><th>Niche</th><th>总分</th><th>360天销量</th>
+          <th>增长</th><th>广告</th><th>新品</th><th>商品集中</th><th>品牌集中</th><th>退货</th><th>回款</th><th>评论</th><th>关键词</th>
+        </tr></thead><tbody>`;
+
+    ranking.forEach((item, i) => {
+      const scores = {};
+      (item.score_items || []).forEach(si => { scores[si.score_key] = si.score; });
+      const vol = (item.volume_360d || {}).value;
+      html += `<tr>
+        <td><span class="rank-badge">${i+1}</span></td>
+        <td>${item.submarket_name}</td>
+        <td class="${scoreClass(item.total_score)}">${formatScore(item.total_score)}</td>
+        <td>${formatNum(vol)}</td>`;
+      ['growth_trend','ad_pressure','new_product','product_concentration','brand_concentration','return_ratio','profit_margin','review_dependency','keyword_monopoly'].forEach(key => {
+        const s = scores[key] !== undefined ? scores[key] : 0;
+        html += `<td class="${scoreClass(s)}">${formatScore(s)}</td>`;
+      });
+      html += '</tr>';
+    });
+    html += '</tbody></table></div>';
+  }
+
+  // Top5 详细
+  const top5 = d.top5 || [];
+  if (top5.length > 0) {
+    html += `<div class="card"><div class="card-title">🔍 Top${top5.length} 详细解读</div>`;
+    top5.forEach(item => {
+      html += `<div class="niche-detail">
+        <h3><span class="rank-badge">#${item.rank}</span> ${item.submarket_name} (总分 ${formatScore(item.total_score)})</h3>
+        <div class="reason">✅ 推荐理由: ${item.recommend_reason || '无'}</div>`;
+      (item.risk_notes || []).forEach(r => {
+        html += `<div class="risk">⚠️ ${r}</div>`;
+      });
+      html += '<div class="score-grid">';
+      (item.score_items || []).forEach(si => {
+        const label = SCORE_LABELS[si.score_key] || si.score_key;
+        html += `<div class="score-item">
+          <div><div class="key">${label}</div><div class="exp">${si.explanation || ''}</div></div>
+          <div class="${scoreClass(si.score)}" style="font-size:1.1rem;font-weight:700">${formatScore(si.score)}</div>
+        </div>`;
+      });
+      html += '</div></div>';
+    });
+    html += '</div>';
+  }
+
+  document.getElementById('app').innerHTML = html;
+}
+
+render();
+</script>
+</body>
+</html>
