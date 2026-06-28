@@ -3,6 +3,6 @@
 .env.*
 !.env.example
 config.local.json
-listing_*/
-outputs/
+**/listing_*/
+**/outputs/
 *.log

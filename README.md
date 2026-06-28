@@ -1,55 +1,27 @@
-# lc-amazon-listing-asin
+# Laochen Amazon Project
 
-Codex skill for generating Amazon listings from a competitor ASIN set and a
-seller's own product images or description.
+Public repository for Laochen Amazon workflow skills.
 
-The skill guides an agent through:
+## Skills
 
-- product profile extraction
-- SellerSprite keyword expansion through an authorized backend
-- keyword filtering and SEO tagging
-- Rufus buyer-question collection through an authorized backend
-- Amazon-compliant listing generation
-- image plan and A+ content planning
-- a self-contained HTML reasoning report
+- `skills/lc-amazon-listing-asin/` - Generate Amazon listings from competitor
+  ASIN sets, product images, and product descriptions.
 
-## Safe Public Package
+## Install Path
 
-This public package intentionally does not include:
+Use this repository with the skill subpath:
 
-- backend tokens
-- local credential files
-
-`config.json` is committed with the backend URL and an empty token. Configure the
-token only in your local environment, and do not commit it back to GitHub.
-
-## Files
-
-- `SKILL.md` - Codex skill entrypoint
-- `INSTRUCTIONS.md` - full platform-neutral workflow
-- `AGENTS.md` - generic agent entrypoint
-- `knowledge/distilled/` - listing writing rules
-- `knowledge/examples/` - good/bad examples
-- `tools/listing_report_template.html` - local HTML report template
-- `tools/bin/` - authorized CLI binaries
-
-## Local Setup
-
-1. Set the token locally without committing it:
-
-```bash
-export LAOCHEN_BACKEND_TOKEN="your-token"
+```text
+https://github.com/chenqinglin2019-tech/Laochen-Amazon-project
+skills/lc-amazon-listing-asin
 ```
 
-2. On macOS, run:
+Direct folder URL:
 
-```bash
-./tools/bin/install.sh
+```text
+https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-amazon-listing-asin
 ```
 
-3. Read `INSTRUCTIONS.md` before running a listing task.
+## Security
 
-## Security Notes
-
-Never commit real tokens, cookies, API keys, or local credential files. If a
-token is accidentally exposed, revoke it immediately before continuing work.
+Do not commit backend tokens, cookies, API keys, or local credential files.
