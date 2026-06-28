@@ -1,0 +1,61 @@
+# 标题写作规则
+# 来源：Amazon 平台规范 + SEO 最佳实践 + COSMO 场景模型
+# 待后续论文蒸馏后补充精确出处
+
+version: 0.2
+domain: title
+applies_to:
+  category: ["*"]
+rules:
+  - id: title_capitalization
+    type: soft
+    prompt_fragment: |
+      单词首字母大写，介词(for/in/on/with)、连词(and/or)、冠词(a/an/the)小写。
+      除非它们是标题第一个词。
+    source: "Amazon Style Guide"
+
+  - id: title_structure
+    type: soft
+    prompt_fragment: |
+      标题结构：核心品类词 + 1-2 个最关键属性词 + 必要规格/适用范围。
+      2026-07-27 起标题空间只有 75 字符，材料、更多场景、详细规格转移到
+      Item Highlight，不要在标题里堆完整长尾词。
+      示例：Adjustable Phone Stand for Desk, Foldable Aluminum Holder
+    source: "Amazon SEO best practice"
+
+  - id: title_cosmo_scene
+    type: soft
+    prompt_fragment: |
+      标题中最多融入 1 个最重要的 COSMO 场景词，让买家能想象使用画面。
+      场景词来自产品画像的 scenes 字段。
+      如：for Desk, for Kitchen, for Travel。次要场景写入 Item Highlight。
+    source: "COSMO model (待论文补充)"
+
+  - id: title_short_mobile_priority
+    type: soft
+    prompt_fragment: |
+      标题整体必须在 75 字符内。前 60 字符必须包含最核心的关键词和卖点，
+      移动端搜索结果依赖短标题完整展示。
+    source: "Amazon mobile search UX"
+
+  - id: title_no_promotional
+    type: soft
+    prompt_fragment: |
+      禁止促销词(Sale/Discount/Free Shipping)、
+      装饰字符(★/♥/【】)、
+      主观极限词(Best/Perfect/#1/Amazing)、
+      未授权品牌词。
+    source: "Amazon listing policy"
+
+  - id: title_numbers
+    type: soft
+    prompt_fragment: |
+      数字用阿拉伯数字而非英文拼写。"5 Pack" 而非 "Five Pack"。
+      数字更醒目，节省字符。
+    source: "Amazon SEO best practice"
+
+  - id: title_max_chars
+    type: hard
+    enforced_by: "POST /validate (backend)"
+    note: "自 2026-07-27 起，除媒介类商品外，标题硬上限为 75 字符（含空格）"
+    source: "Amazon Seller Central announcement, 2026-06"

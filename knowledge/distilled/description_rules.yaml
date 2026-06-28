@@ -1,0 +1,56 @@
+# 长描写作规则
+# 来源：Amazon 规范 + GEO 优化 + Storytelling 方法论
+
+version: 0.1
+domain: description
+applies_to:
+  category: ["*"]
+rules:
+  - id: desc_storytelling
+    type: soft
+    prompt_fragment: |
+      长描用 Storytelling 风格：简洁、坦诚、友好。
+      开头用一个场景引入（如"Tired of your phone sliding off the desk?"），
+      然后自然过渡到产品如何解决问题。
+    source: "Copywriting best practice"
+
+  - id: desc_long_tail_keywords
+    type: soft
+    prompt_fragment: |
+      在长描中自然融入 kw_tagged.json 中标记为 "high" 的长尾关键词。
+      这些词在标题里放不下，长描是它们的归宿。
+      不要生硬堆砌，要融入场景描述中。
+    source: "Amazon SEO"
+
+  - id: desc_scenes
+    type: soft
+    prompt_fragment: |
+      描述 2-3 个具体使用场景，让买家产生代入感。
+      场景来自产品画像的 scenes 字段。
+      如：Whether you're on a video call at your desk, following a recipe in the kitchen,
+      or watching videos in bed...
+    source: "COSMO model"
+
+  - id: desc_rufus_answers
+    type: soft
+    prompt_fragment: |
+      将 qa.json 中的高价值问题的答案自然织入长描。
+      不要用 Q&A 格式，而是把答案融入叙述中。
+      如果买家常问材质，就在描述中自然提到材质和耐用性。
+    source: "GEO/Rufus optimization"
+
+  - id: desc_no_exaggeration
+    type: soft
+    prompt_fragment: |
+      不夸张，不用极限词（best/perfect/unbeatable）。
+      不提竞品（不说"unlike other stands"）。
+      用具体数据代替模糊承诺（"supports phones up to 13 inch" 而非 "fits all phones"）。
+    source: "Amazon listing policy"
+
+  - id: desc_html_allowed
+    type: soft
+    prompt_fragment: |
+      默认交付的 07_listing.md 使用 Markdown/纯文本长描，不主动混入 HTML。
+      只有用户明确要求 Amazon HTML 描述时，才使用基础 HTML：<br>换行、
+      <b>加粗、<ul><li>列表。不要过度使用，避免影响可读性。
+    source: "Amazon Seller Central"

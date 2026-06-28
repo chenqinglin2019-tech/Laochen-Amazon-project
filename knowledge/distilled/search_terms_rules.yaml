@@ -1,0 +1,56 @@
+# 后台搜索词规则
+# 来源：Amazon 官方指南 + SEO 最佳实践
+
+version: 0.1
+domain: search_terms
+applies_to:
+  category: ["*"]
+rules:
+  - id: st_max_bytes
+    type: hard
+    enforced_by: "POST /validate (backend)"
+    note: "总长度 ≤ 250 字节（注意是字节不是字符，含空格）"
+    source: "Amazon Seller Central"
+
+  - id: st_format
+    type: soft
+    prompt_fragment: |
+      格式要求：
+      - 全小写
+      - 空格分隔（不用逗号、分号）
+      - 无标点符号
+      - 不重复标题中已出现的词（Amazon 会自动索引标题）
+    source: "Amazon Search Terms guidelines"
+
+  - id: st_no_brand
+    type: soft
+    prompt_fragment: |
+      不含任何品牌词（自己的和别人的都不放）。
+      品牌词 Amazon 会从品牌字段自动索引。
+    source: "Amazon listing policy"
+
+  - id: st_no_stop_words
+    type: soft
+    prompt_fragment: |
+      不含虚词/停用词：a, an, the, for, with, of, in, on, to, and, or, is, it。
+      这些词浪费字节，Amazon 搜索会自动忽略。
+    source: "Amazon SEO best practice"
+
+  - id: st_dedup_with_title
+    type: soft
+    prompt_fragment: |
+      去重逻辑：标题和 bullets 中已出现的词不要再放 search terms。
+      Amazon 会合并索引所有字段，重复无意义。
+      把 search terms 的空间留给标题放不下的长尾词和同义词。
+    source: "Amazon A10 indexing"
+
+  - id: st_synonyms_and_spelling
+    type: soft
+    prompt_fragment: |
+      Search terms 适合放：
+      - 同义词（phone holder / cellphone stand / mobile cradle）
+      - 常见拼写变体（organiser vs organizer）
+      - 缩写（adj = adjustable）
+      默认站点为 US 时优先使用英文词。不要放已在步骤 3 被剔除的非目标语言词；
+      只有用户明确要求多语言站点/双语投放，且确认合规时，才考虑对应语言词。
+    source: "Amazon SEO"

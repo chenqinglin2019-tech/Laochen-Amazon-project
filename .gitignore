@@ -1,0 +1,11 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+config.local.json
+listing_*/
+outputs/
+*.log
+
+# Authorized CLI binaries are distributed separately.
+tools/bin/laochen-cli-*

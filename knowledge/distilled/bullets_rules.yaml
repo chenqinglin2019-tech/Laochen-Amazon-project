@@ -1,0 +1,58 @@
+# 五点描述写作规则
+# 来源：Amazon 平台规范 + COSMO 场景模型 + GEO 优化
+
+version: 0.1
+domain: bullets
+applies_to:
+  category: ["*"]
+rules:
+  - id: bullets_count
+    type: hard
+    enforced_by: "POST /validate (backend)"
+    note: "固定 5 条 bullet points"
+    source: "Amazon Seller Central"
+
+  - id: bullets_structure
+    type: soft
+    prompt_fragment: |
+      每条 bullet 结构：【大写核心卖点关键词】+ 解释说明。
+      大写部分 2-4 个词，概括本条核心。
+      示例：
+      - 【STABLE & SECURE BASE】Weighted non-slip silicone pad keeps your phone steady...
+      - 【ADJUSTABLE VIEWING ANGLE】Rotate 270° to find your perfect angle...
+    source: "Amazon top seller pattern"
+
+  - id: bullets_benefit_focused
+    type: soft
+    prompt_fragment: |
+      重点体现功能带来的益处(benefit)，而非单纯罗列功能(feature)。
+      差：Made of aluminum alloy material
+      好：【PREMIUM ALUMINUM BUILD】Lightweight yet sturdy, won't tip over even with heavy phones
+    source: "Copywriting best practice"
+
+  - id: bullets_cosmo_chain
+    type: soft
+    prompt_fragment: |
+      每条 bullet 尽量体现 COSMO 链路：场景意图 → 产品能力 → 用户收益。
+      示例：When working at your desk (场景) → adjustable angle (能力) → reduces neck strain (收益)
+    source: "COSMO model (待论文补充)"
+
+  - id: bullets_rufus_qa
+    type: soft
+    prompt_fragment: |
+      参考 qa.json 中买家高频问题，在 bullets 中主动回答。
+      如果买家常问"Is it compatible with cases?"，就写一条关于兼容性的 bullet。
+    source: "GEO/Rufus optimization"
+
+  - id: bullets_no_keyword_stuffing
+    type: soft
+    prompt_fragment: |
+      不要堆砌关键词。每条 bullet 自然融入 1-2 个相关关键词即可。
+      读起来要像人话，不像 SEO 垃圾。
+    source: "Amazon A10 algorithm"
+
+  - id: bullets_total_length
+    type: hard
+    enforced_by: "POST /validate (backend)"
+    note: "每条 bullet ≤ 500 字符，总长度 ≤ 1000 字符（建议）"
+    source: "Amazon Seller Central"
