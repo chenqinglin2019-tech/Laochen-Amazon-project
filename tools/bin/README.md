@@ -1,9 +1,9 @@
 # CLI Binaries
 
-This public repository intentionally does not include `laochen-cli-*` binaries.
+This directory contains the authorized CLI binaries used by the skill.
 
-To use backend-powered commands such as `expand`, `qa`, or `validate`, place an
-authorized CLI build in this directory and configure `config.json` or the
-corresponding environment variables locally.
+To use backend-powered commands such as `expand`, `qa`, or `validate`, configure
+the token locally through `config.json` or the corresponding environment
+variables.
 
-Do not commit private backend URLs, tokens, cookies, or local credential files.
+Do not commit tokens, cookies, or local credential files.

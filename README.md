@@ -18,12 +18,10 @@ The skill guides an agent through:
 This public package intentionally does not include:
 
 - backend tokens
-- private backend URLs
 - local credential files
-- compiled `laochen-cli-*` binaries
 
-`config.json` is committed with empty backend fields. Configure credentials only
-in your local environment, and do not commit them back to GitHub.
+`config.json` is committed with the backend URL and an empty token. Configure the
+token only in your local environment, and do not commit it back to GitHub.
 
 ## Files
 
@@ -33,27 +31,25 @@ in your local environment, and do not commit them back to GitHub.
 - `knowledge/distilled/` - listing writing rules
 - `knowledge/examples/` - good/bad examples
 - `tools/listing_report_template.html` - local HTML report template
-- `tools/bin/` - place authorized CLI binaries here locally
+- `tools/bin/` - authorized CLI binaries
 
 ## Local Setup
 
-1. Copy an authorized `laochen-cli-*` binary into `tools/bin/`.
-2. Set local credentials without committing them:
+1. Set the token locally without committing it:
 
 ```bash
-export LAOCHEN_BACKEND_URL="https://your-backend.example.com"
 export LAOCHEN_BACKEND_TOKEN="your-token"
 ```
 
-3. On macOS, run:
+2. On macOS, run:
 
 ```bash
 ./tools/bin/install.sh
 ```
 
-4. Read `INSTRUCTIONS.md` before running a listing task.
+3. Read `INSTRUCTIONS.md` before running a listing task.
 
 ## Security Notes
 
-Never commit real tokens, cookies, API keys, or private backend URLs. If a token
-is accidentally exposed, revoke it immediately before continuing work.
+Never commit real tokens, cookies, API keys, or local credential files. If a
+token is accidentally exposed, revoke it immediately before continuing work.
