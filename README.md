@@ -6,8 +6,6 @@ Public repository for Laochen Amazon workflow skills.
 
 - `skills/amazon-listing-image-studio/` - Build non-copycat Amazon listing image
   systems from product photos, selling points, and competitor references.
-- `skills/lc-amazon-listing-asin/` - Generate Amazon listings from competitor
-  ASIN sets, product images, and product descriptions.
 - `skills/lc_amazon_competitor_promotion/` - Analyze competitor promotion,
   pricing, ads, reviews, seasonality, Woot signals, and optional offsite traces.
 - `skills/lc_amazon_market_opportunity/` - Continue from market research into
@@ -30,7 +28,6 @@ Direct folder URLs:
 
 ```text
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/amazon-listing-image-studio
-https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-amazon-listing-asin
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_competitor_promotion
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_market_opportunity
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_market_research
