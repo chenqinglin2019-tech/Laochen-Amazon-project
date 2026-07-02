@@ -1,0 +1,66 @@
+# SEO 通用规则（跨字段）
+# 来源：Amazon A9/A10 算法逻辑 + GEO 优化
+
+version: 0.1
+domain: general
+applies_to:
+  category: ["*"]
+rules:
+  - id: seo_keyword_placement_priority
+    type: soft
+    prompt_fragment: |
+      关键词权重分配（从高到低）：
+      1. Title — 权重最高，核心词必须在这里
+      2. Bullet Points — 次高，属性词和长尾词
+      3. Search Terms — 补充标题/bullets 没覆盖的词
+      4. Description — 权重最低，但有助于 A10 语义理解
+      
+      不要在低权重位置重复高权重位置已有的词。
+    source: "Amazon A10 algorithm"
+
+  - id: seo_no_stuffing
+    type: soft
+    prompt_fragment: |
+      关键词密度控制：
+      - 同一个词在同一字段中最多出现 2 次
+      - 读起来必须通顺自然
+      - 如果为了塞词导致句子不通顺，宁可不塞
+      Amazon 会惩罚明显的关键词堆砌。
+    source: "Amazon A10 anti-spam"
+
+  - id: seo_phrase_match
+    type: soft
+    prompt_fragment: |
+      尽量保持关键词短语的完整性（phrase match）。
+      "phone stand for desk" 比 "phone desk stand" 更好，
+      因为买家搜索时是按完整短语搜的。
+      但不要为了保持短语而牺牲可读性。
+    source: "Amazon search matching"
+
+  - id: geo_rufus_optimization
+    type: soft
+    prompt_fragment: |
+      GEO/Rufus 优化（仅 US/JP 站）：
+      - Amazon Rufus AI 会从 listing 中提取信息回答买家问题
+      - 确保 listing 中包含 qa.json 里问题的答案信息
+      - 用陈述句而非疑问句（Rufus 需要提取答案，不是问题）
+      - 具体数据比模糊描述更容易被 Rufus 引用
+      示例：
+        差：Our stand is very stable.
+        好：Weighted silicone base prevents tipping on surfaces up to 15° incline.
+    source: "GEO paper (待补充)"
+
+  - id: cosmo_intent_chain
+    type: soft
+    prompt_fragment: |
+      COSMO 场景意图链路：
+      每个卖点都应该体现完整链路：
+        场景意图(为什么需要) → 产品能力(怎么满足) → 用户收益(得到什么)
+      
+      示例：
+        场景：Video calls at desk (场景意图)
+        能力：Adjustable 270° rotation (产品能力)
+        收益：Always find the perfect angle, no more awkward camera positions (用户收益)
+      
+      不要只写能力（"270° rotation"），要连上场景和收益。
+    source: "COSMO paper (待补充)"
