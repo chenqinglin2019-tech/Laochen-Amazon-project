@@ -1,5 +1,5 @@
 ---
-name: zhihuiya-feishu-patent-check
+name: Lc Patent Detection
 description: Run a Wisdom Bud / PatSnap image-search patent workflow and write results back to the user's own Feishu/Lark Bitable. Use when Codex needs to process product rows or product images by using the user's configured Wisdom Bud account, capture candidate patent/design evidence, optionally attempt official-source verification, skip official checks that cannot be found, generate a concise report, upload it to Feishu, and update configured Feishu fields. Requires the recipient user to provide their own Wisdom Bud access and Feishu credentials/table mapping.
 ---
 
