@@ -1,0 +1,8 @@
+[
+  {
+    "evidence_json": "examples/evidence-placeholder.json",
+    "record_ids": ["recxxxxxxxxxxxxxx"],
+    "risk_field": "专利",
+    "pdf_field": "专利pdf"
+  }
+]
