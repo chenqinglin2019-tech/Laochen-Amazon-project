@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lc amazon Data Crawl"
+  short_description: "Amazon search, rank, and storefront crawling"
+  default_prompt: "Use $lc-amazon-data-crawl to crawl Amazon search results, category ranking nodes, or storefront product lists. Start with the cloud auth gate; if it fails, stop immediately."
