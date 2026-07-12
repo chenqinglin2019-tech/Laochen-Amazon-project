@@ -1,9 +1,9 @@
 ---
 name: lc_amazon_niche
-description: 输入细分市场（niche）名称列表（最多 100 个），自动从数据库拉取 9 项指标并评分排序，帮助卖家找到最容易切入的细分市场。支持 4 种卖家 profile 个性化评分。
+description: 输入细分市场（niche）名称列表（最多 100 个，可聊天输入或从 txt/csv/xlsx 读取名称），自动从数据库拉取 9 项指标并评分排序，帮助卖家找到最容易切入的细分市场。支持 4 种卖家 profile 个性化评分。
 ---
 
-# Amazon Niche Choice v2
+# Amazon Niche Choice v3
 
 细分市场评分工具。输入 niche 名称 → 后端拉指标 → CLI 本地评分 → Agent 解读。
 
@@ -11,7 +11,7 @@ description: 输入细分市场（niche）名称列表（最多 100 个），自
 
 1. 读 `INSTRUCTIONS.md` — 完整流程
 2. 看 `scoring/*.yaml` — 评分配置（可调阈值）
-3. 用 `tools/bin/amazon-niche-choice-v2-*` — CLI 工具
+3. 用 `tools/bin/amazon-niche-choice-v3-*` — CLI 工具
 
 ## 环境变量
 

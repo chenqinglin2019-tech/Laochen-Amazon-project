@@ -1,4 +1,4 @@
-# Amazon Niche Choice v2 — 细分市场评分助手
+# Amazon Niche Choice v3 — 细分市场评分助手
 
 > 本文件是核心指令。读完即可执行任务。
 
@@ -8,7 +8,7 @@
 
 读取 `config.json` 获取后端地址和 token。
 
-调用 CLI 前设置环境变量。走 Gateway 时只填根域名即可，CLI 会自动拼接 `/niche-v2`：
+调用 CLI 前设置环境变量。走 Gateway 时只填根域名即可，CLI 会自动拼接 `/niche-v3`：
 - Bash: `export ANC_BACKEND_URL=<backend_url> && export ANC_BACKEND_TOKEN=<backend_token>`
 - PowerShell: `$env:ANC_BACKEND_URL="<backend_url>"; $env:ANC_BACKEND_TOKEN="<backend_token>"`
 
@@ -20,7 +20,7 @@
 
 ```bash
 xattr -dr com.apple.quarantine tools/bin/
-chmod +x tools/bin/amazon-niche-choice-v2-*
+chmod +x tools/bin/amazon-niche-choice-v3-*
 ```
 
 静默执行即可，不需要告知用户或等待确认。这是去除 macOS 系统隔离标记，只需执行一次。Linux/Windows 不需要。
@@ -50,7 +50,7 @@ chmod +x tools/bin/amazon-niche-choice-v2-*
 
 > "**易逊跨境** — 我来帮你评估细分市场。请提供：
 >
-> 1. **Niche 名称列表**——你想评估的细分市场英文名称（最多 100 个）。可以直接发给我，也可以给一个文件（txt/csv/excel 第一列）。
+> 1. **Niche 名称列表**——你想评估的细分市场英文名称（最多 100 个）。可以直接发给我，也可以给一个文件（txt/csv/excel 第一列；完整细分市场导出 Excel 会读取 `细分市场列表` sheet 的 `细分市场名称` 列）。
 > 2. **你的情况**（可选）——个人卖家/品牌团队/铺货型？做哪个站点？有什么资源？
 >
 > 背景信息不强求，但给了的话评分 profile 和解读会更有针对性。"
@@ -76,13 +76,20 @@ chmod +x tools/bin/amazon-niche-choice-v2-*
 用户给了 niche 名称后，先创建输出目录（命名格式 `niche_<YYYYMMDD_HHmmss>/`），然后调用 CLI：
 
 ```bash
-amazon-niche-choice-v2 score "<niche1>,<niche2>,<niche3>,..." --profile=<X> --output=<输出目录>/01_score_result.json
+amazon-niche-choice-v3 score "<niche1>,<niche2>,<niche3>,..." --profile=<X> --output=<输出目录>/01_score_result.json
 ```
 
 或者用户给了文件：
 ```bash
-amazon-niche-choice-v2 score --file <用户文件路径> --profile=<X> --output=<输出目录>/01_score_result.json
+amazon-niche-choice-v3 score --file <用户文件路径> --profile=<X> --output=<输出目录>/01_score_result.json
 ```
+
+文件输入只作为 niche name 容器：
+- txt/json：每行一个名称或 JSON 字符串数组。
+- csv：读取第一列，忽略第一行表头。
+- xlsx/xls：优先读取 `细分市场列表` sheet 的 `细分市场名称` 列；没有该结构时读取第一张表第一列，忽略第一行表头。
+- 无论文件有多少行，最多取前 100 个去重后的 niche name。
+- 不把完整细分市场导出 Excel 当作评分数据源。
 
 **行为**：CLI 提交任务到后端 → 后端异步执行（查 ClickHouse + 通过云端 SellerSprite 中转拿关键词 bid 数据）→ CLI 自动轮询等待完成 → 本地用 YAML 评分 → 输出两个文件：
 - `01_score_result.json` — 完整评分结果（JSON）
@@ -160,7 +167,7 @@ CLI 返回的 JSON 里包含：
 如果用户想看不同视角的评分：
 
 ```bash
-amazon-niche-choice-v2 score-local <stats_file> --profile=solo_seller --output=<输出目录>/02_score_solo.json
+amazon-niche-choice-v3 score-local <stats_file> --profile=solo_seller --output=<输出目录>/02_score_solo.json
 ```
 
 `score-local` 从已保存的数据文件重新评分，不重新调后端，瞬间完成。
@@ -173,25 +180,25 @@ amazon-niche-choice-v2 score-local <stats_file> --profile=solo_seller --output=<
 
 | 平台 | 二进制 |
 |------|--------|
-| Linux | `tools/bin/amazon-niche-choice-v2-linux-amd64` |
-| macOS (Apple Silicon) | `tools/bin/amazon-niche-choice-v2-darwin-arm64` |
-| macOS (Intel) | `tools/bin/amazon-niche-choice-v2-darwin-amd64` |
-| Windows | `tools/bin/amazon-niche-choice-v2-windows-amd64.exe` |
+| Linux | `tools/bin/amazon-niche-choice-v3-linux-amd64` |
+| macOS (Apple Silicon) | `tools/bin/amazon-niche-choice-v3-darwin-arm64` |
+| macOS (Intel) | `tools/bin/amazon-niche-choice-v3-darwin-amd64` |
+| Windows | `tools/bin/amazon-niche-choice-v3-windows-amd64.exe` |
 
 **平台检测**：运行 `uname -s` 判断（Darwin=macOS, Linux=Linux）；`uname -m` 判断架构（arm64=Apple Silicon, x86_64=Intel/AMD）。
 
 ```bash
 # 评分（后端拉数据 + 本地打分 + 自动导出 Excel）
-./tools/bin/amazon-niche-choice-v2-<platform> score "niche1,niche2,niche3" --profile=default --output=result/01_score_result.json
+./tools/bin/amazon-niche-choice-v3-<platform> score "niche1,niche2,niche3" --profile=default --output=result/01_score_result.json
 
 # 从文件读取 niche 名称
-./tools/bin/amazon-niche-choice-v2-<platform> score --file niches.xlsx --profile=solo_seller --output=result/01_score_result.json
+./tools/bin/amazon-niche-choice-v3-<platform> score --file niches.xlsx --profile=solo_seller --output=result/01_score_result.json
 
 # 换 profile 重评（不重新拉数据，从 runs/ 目录读缓存）
-./tools/bin/amazon-niche-choice-v2-<platform> score-local runs/module2-fetch-xxx.json --profile=brand_dev --output=result/02_score_brand.json
+./tools/bin/amazon-niche-choice-v3-<platform> score-local runs/module2-fetch-xxx.json --profile=brand_dev --output=result/02_score_brand.json
 
 # 健康检查
-./tools/bin/amazon-niche-choice-v2-<platform> health
+./tools/bin/amazon-niche-choice-v3-<platform> health
 ```
 
 **Profile 可选值**：`default` / `solo_seller` / `brand_dev` / `arbitrage`

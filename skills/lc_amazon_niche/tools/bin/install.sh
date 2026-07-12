@@ -5,5 +5,5 @@
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 xattr -dr com.apple.quarantine "$DIR"
-chmod +x "$DIR"/amazon-niche-choice-v2-*
+chmod +x "$DIR"/amazon-niche-choice-v3-*
 echo "✅ 安装完成，CLI 可正常使用"

@@ -1,6 +1,6 @@
 # 站外推广公开证据追加契约
 
-该契约只在用户明确要求“继续站外推广溯源 / 联网查站外推广 / 追加站外证据”时使用。主报告生成阶段不要自动联网写入站外结论。
+该契约只负责当前 Agent 的免费公开网页检索。只有用户明确要求“继续站外推广溯源 / 联网查站外推广 / 追加站外证据”时使用；主报告生成阶段不要自动联网写入站外结论。免费证据追加成功后，如需收费增强，必须再次征得用户明确同意并改读 `paid_offsite_merge_contract.md`。
 
 ## 搜索范围
 
@@ -46,6 +46,12 @@
 - `relative_snippet_date`
 - `search_snippet_relative_or_hidden`
 - `unknown`
+
+日期规则：
+
+- 只有 `event_date` 是稳定的 `YYYY-MM-DD` 时，CLI 才会计算该站外日期前 7 天和后 7 天自然流量变化，并尝试匹配同 ASIN 前后 7 天内的站内动作。
+- `约 2026-03`、`时间待核验`、搜索摘要相对时间、隐藏时间等非精确日期，只能作为站外辅助线索；不要写成“有效站外动作”。
+- 前后 3 天内匹配到站内动作，只能说明站外与站内节奏存在同步线索，不能直接证明站外投放带来销量。
 
 ## JSON 文件
 
@@ -99,6 +105,7 @@ offsite_research_filled.json
 - `source_url` 必填。
 - `evidence_summary` 必填，必须写可见证据，不要写推测。
 - `action_type` / `action_summary` 可选；如果填写，必须是对这条证据的动作解释，例如“折扣站促销”“社群促销放单”“站外价格线索”。不要在这里写尽调结论。CLI 会重新标准化或补齐这两个字段，HTML 以标准化后的动作总结为准。
+- 不要手填 `offsite_before_7d_organic`、`offsite_after_7d_organic`、`offsite_organic_growth`、`effect_window_note`；这些字段由 CLI 在 `attach-offsite` 时按日趋势样本计算。
 - 不确定时间就写低置信，不要编造精确日期。
 - 站外证据不要写入动作有效性结论，只作为独立追加章节。
 - 如果某个 ASIN 没找到公开证据，在 `summary.coverage` 中说明。
@@ -130,5 +137,22 @@ Windows：
 
 成功后会更新同一个 HTML，并新增：
 
+- `offsite_search_trace.json`
+- `03_source_inventory.json`
+- `04_offsite_trace_events.json`
 - `04_offsite_promotion_research.json`
+- `05_channel_summary.csv`
 - `offsite_promotion_sources.csv`
+- `amazon_offsite_trace_report.md`
+
+其中：
+
+- `offsite_search_trace.json` 在本步骤只记录当前 Agent 自带联网能力整理并追加免费公开证据的事实。后续如完成收费增强合并，该文件会由 CLI 更新为“免费 + 收费增强”的联合来源说明。
+- `04_offsite_promotion_research.json` 是 HTML 使用的兼容追加数据。
+- `04_offsite_trace_events.json` 是 V2 标准站外证据事件留痕，包含标准化事件和 `offsite_combos`。
+- `05_channel_summary.csv` 是按平台聚合的证据强度、精确日期和 3 天内承接情况。
+- `amazon_offsite_trace_report.md` 是站外证据的结论、渠道、限制和运营含义摘要。
+
+只有 `event_date` 为稳定 `YYYY-MM-DD`，且同 ASIN 前后 3 天内匹配到站内价格、促销、广告、评价或 Woot 动作的站外线索，才会进入“站内外 3 天组合动作”。没有精确日期的站外线索只能留在证据明细里。
+
+完成本契约后必须向用户报告免费覆盖情况，并单独询问是否启用收费增强。用户未明确同意时，不得运行 `paid-offsite-workspace`。
