@@ -289,6 +289,12 @@ body{
 .listing-doc p{margin:8px 0;font-size:.92rem;color:var(--ink-soft);line-height:1.7}
 .listing-doc strong.k1{color:var(--leaf);font-weight:700}
 .listing-doc strong.k2{color:var(--teal);font-weight:700}
+.search-terms-list{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 14px}
+.search-term{
+  display:inline-flex;align-items:center;padding:5px 9px;border:1px solid var(--line-soft);
+  border-radius:6px;background:var(--surface);color:var(--ink-soft);
+  font-family:var(--mono);font-size:.78rem;line-height:1.25;
+}
 
 /* ---------- 空态 ---------- */
 .empty-note{color:var(--ink-faint);font-style:italic;font-size:.85rem;padding:8px 0}
@@ -346,7 +352,7 @@ body{
   <header class="masthead">
     <div class="kicker">Amazon Listing · 推导卷宗</div>
     <h1>Listing <span class="accent">生成报告</span></h1>
-    <p class="lede">从卖家精灵关键词反查到最终 Listing 的完整推导链路——每一步的取舍、过滤决策与 SEO 标注均可追溯。</p>
+    <p class="lede">从站点关键词到最终 Listing 的完整推导链路——每一步的取舍、过滤决策与 SEO 标注均可追溯。</p>
     <div class="rule"></div>
     <div class="meta-bar">
       <span><b>生成时间</b> <span id="reportTime">—</span></span>
@@ -418,9 +424,9 @@ body{
 
   <!-- ============ 06 买家问题 ============ -->
   <section class="chapter">
-    <div class="chapter-rail"><div class="idx">0<span>6</span></div><div class="tick">Rufus QA</div></div>
+    <div class="chapter-rail"><div class="idx">0<span>6</span></div><div class="tick" id="qaTick">Rufus QA</div></div>
     <div>
-      <div class="chapter-head"><h2>买家问题</h2><div class="sub">Rufus 问答采集 —— 真实购买疑虑</div></div>
+      <div class="chapter-head"><h2 id="qaTitle">买家问题</h2><div class="sub" id="qaSubtitle">Rufus 问答采集 —— 真实购买疑虑</div></div>
       <div class="card"><div id="qaSection"></div></div>
     </div>
   </section>
@@ -499,13 +505,18 @@ function formatInline(text){
   return text;
 }
 function renderMarkdown(md){
-  const lines=md.split('\n');let html='';let inList=false;
+  const lines=md.split('\n');let html='';let inList=false;let section='';
   const closeList=()=>{if(inList){html+='</ul>';inList=false;}};
   for(let line of lines){
-    if(line.startsWith('## ')){closeList();html+=`<div class="listing-title">${formatInline(line.slice(3))}</div>`;}
+    if(line.startsWith('## ')){closeList();section=line.slice(3).trim().toLowerCase();html+=`<div class="listing-title">${formatInline(line.slice(3))}</div>`;}
     else if(line.startsWith('### ')){closeList();html+=`<div class="listing-h3">${formatInline(line.slice(4))}</div>`;}
     else if(line.startsWith('- ')||line.startsWith('* ')){if(!inList){html+='<ul>';inList=true;}html+=`<li>${formatInline(line.slice(2))}</li>`;}
     else if(line.trim()===''){closeList();}
+    else if(section==='search terms'){
+      closeList();
+      const terms=line.trim().split(/\s+/).filter(Boolean);
+      html+=`<div class="search-terms-list">${terms.map(term=>`<span class="search-term">${esc(term)}</span>`).join('')}</div>`;
+    }
     else{closeList();html+=`<p>${formatInline(line)}</p>`;}
   }
   closeList();return html;
@@ -520,6 +531,9 @@ function render(){
   const kwTagged=loadData('data-kw-tagged');
   const titleKw=loadData('data-title-keywords');
   const qa=loadData('data-qa');
+  const site=String((profile&&profile.site)||(kwRaw&&kwRaw.site)||(qa&&qa.site)||'未识别').toUpperCase();
+  const siteLabel=site==='未识别'?'站点未识别':`${site} 站`;
+  const language=(profile&&profile.listing_language)||({US:'English',JP:'Japanese',UK:'English',DE:'German',FR:'French',IT:'Italian',ES:'Spanish',CA:'English',IN:'English'}[site]||'—');
 
   /* 时间 */
   const now=new Date();
@@ -564,11 +578,13 @@ function render(){
      </div>`).join('');
 
   document.getElementById('metaSummary').innerHTML=
-    `<b>${rawCount}</b> 原始词 · 保留 <b>${filteredCount}</b> · 标题核心 <b>${titleCount}</b>`;
+    `<b>${siteLabel}</b> · <b>${esc(language)}</b> · <b>${rawCount}</b> 原始词 · 保留 <b>${filteredCount}</b> · 标题核心 <b>${titleCount}</b>`;
 
   /* 01 画像 */
   if(profile){
     const items=[
+      {label:'目标站点',value:site},
+      {label:'文案语言',value:language},
       {label:'品类',value:profile.category},
       {label:'人群',value:(profile.audience&&profile.audience.identity||[]).join('、')},
       {label:'材质',value:(profile.materials||[]).join('、')},
@@ -652,7 +668,16 @@ function render(){
   }
 
   /* 06 QA */
-  if(qa){
+  if(qa&&qa.status==='skipped'){
+    document.getElementById('qaTick').textContent='Skipped';
+    document.getElementById('qaTitle').textContent='买家问题（未启用）';
+    document.getElementById('qaSubtitle').textContent=`${site} 站不调用仅面向 US 的 Rufus 问答服务`;
+    document.getElementById('qaSection').innerHTML=`<div class="empty-note">已按站点规则跳过 Rufus，不影响 ${site} 站 Listing 生成。</div>`;
+  }else if(qa&&qa.status==='unavailable'){
+    document.getElementById('qaTick').textContent='Unavailable';
+    document.getElementById('qaSubtitle').textContent='Rufus 问答服务本次不可用，报告保留其余完整产物';
+    document.getElementById('qaSection').innerHTML='<div class="empty-note">本次未取得买家问题。</div>';
+  }else if(qa){
     const pairs=qa.qa_pairs||(Array.isArray(qa)?qa:[]);
     document.getElementById('qaSection').innerHTML=pairs.length?pairs.map(p=>{
       const questions=Array.isArray(p.questions)?p.questions:((p.question||'').split(';').map(q=>q.trim()).filter(Boolean));
