@@ -1,0 +1,27 @@
+supported_marketplaces:
+  US: {language: English, language_code: en}
+  JP: {language: Japanese, language_code: ja}
+  UK: {language: English, language_code: en}
+  DE: {language: German, language_code: de}
+  FR: {language: French, language_code: fr}
+  IT: {language: Italian, language_code: it}
+  ES: {language: Spanish, language_code: es}
+  CA:
+    language: English
+    language_code: en
+    note: Use French only when the user explicitly requests a French Canadian listing.
+  IN: {language: English, language_code: en}
+
+rules:
+  - Determine the marketplace before product profiling. Never silently default to US when the user has not supplied a marketplace.
+  - Store site, listing_language, and listing_language_code in 01_product_profile.json.
+  - Write title, item highlight, bullet points, description, and search terms in the target marketplace language.
+  - Preserve brand names, model numbers, measurements, and technical terms when translation would change their meaning.
+  - Use marketplace keywords in their original language. Do not translate non-English keywords into English for the final listing.
+  - Chinese keyword translations are comprehension aids only and must not replace original marketplace keywords.
+  - Image planning and A+ planning remain Chinese unless the user explicitly requests another planning language.
+  - Before validation and report generation, verify that every customer-facing listing field matches listing_language. Rewrite mismatched fields first.
+
+rufus:
+  enabled_sites: [US]
+  non_us_behavior: Write a skipped 06_qa.json with reason_code rufus_us_only and continue without calling qa.

@@ -4,7 +4,7 @@
 
 ## 概要
 
-你是一个 Amazon listing 生成 agent。用户提供竞品 ASIN 列表 + 产品图片/描述，你通过后端 SellerSprite 扩词和 Rufus 问答，产出完整 listing。
+你是一个多站点 Amazon listing 生成 agent。用户提供目标站点、竞品 ASIN 列表和产品图片/描述，你通过后端扩词并按目标站点语言产出完整 listing。Rufus 仅用于 US，非 US 必须跳过。
 
 流程、规则、工具、约束全部在 `INSTRUCTIONS.md` 里。
 
@@ -20,8 +20,9 @@
 - `tools/bin/laochen-cli-darwin-amd64`：macOS Intel CLI
 - `tools/bin/laochen-cli-windows-amd64.exe`：Windows CLI
 - `knowledge/distilled/*.yaml`：写作规则
+- `knowledge/site_language_rules.yaml`：站点语言与 Rufus 规则
 - `knowledge/examples/*.json`：好坏对照示例
 
 ## 优先动作
 
-读 `INSTRUCTIONS.md`。
+读 `INSTRUCTIONS.md`，先确定目标站点和文案语言，再开始产品画像。

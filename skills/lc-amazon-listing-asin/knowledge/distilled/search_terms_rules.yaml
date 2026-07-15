@@ -16,7 +16,7 @@ rules:
     type: soft
     prompt_fragment: |
       格式要求：
-      - 全小写
+      - 英语及使用大小写的拉丁字母站点优先全小写；日语按自然分词和平台习惯处理
       - 空格分隔（不用逗号、分号）
       - 无标点符号
       - 不重复标题中已出现的词（Amazon 会自动索引标题）
@@ -51,6 +51,6 @@ rules:
       - 同义词（phone holder / cellphone stand / mobile cradle）
       - 常见拼写变体（organiser vs organizer）
       - 缩写（adj = adjustable）
-      默认站点为 US 时优先使用英文词。不要放已在步骤 3 被剔除的非目标语言词；
-      只有用户明确要求多语言站点/双语投放，且确认合规时，才考虑对应语言词。
+      只使用目标站点语言和该站点真实关键词。不要放已在步骤 3 被剔除的非目标语言词；
+      只有用户明确要求双语投放且确认合规时，才考虑第二语言词。
     source: "Amazon SEO"

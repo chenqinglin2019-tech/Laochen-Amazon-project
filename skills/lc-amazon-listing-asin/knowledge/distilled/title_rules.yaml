@@ -10,8 +10,9 @@ rules:
   - id: title_capitalization
     type: soft
     prompt_fragment: |
-      单词首字母大写，介词(for/in/on/with)、连词(and/or)、冠词(a/an/the)小写。
-      除非它们是标题第一个词。
+      遵循目标站点语言的自然大小写和标点习惯。英语站点使用 Title Case：
+      介词(for/in/on/with)、连词(and/or)、冠词(a/an/the)通常小写，标题首词除外。
+      日语、德语、法语、意大利语、西班牙语不得强套英语 Title Case。
     source: "Amazon Style Guide"
 
   - id: title_structure
@@ -50,7 +51,7 @@ rules:
   - id: title_numbers
     type: soft
     prompt_fragment: |
-      数字用阿拉伯数字而非英文拼写。"5 Pack" 而非 "Five Pack"。
+      数字用阿拉伯数字而非目标语言的文字拼写。英语示例："5 Pack" 而非 "Five Pack"。
       数字更醒目，节省字符。
     source: "Amazon SEO best practice"
 

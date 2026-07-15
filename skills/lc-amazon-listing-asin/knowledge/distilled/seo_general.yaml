@@ -40,11 +40,12 @@ rules:
   - id: geo_rufus_optimization
     type: soft
     prompt_fragment: |
-      GEO/Rufus 优化（仅 US/JP 站）：
+      GEO/Rufus 优化（仅 US 站且 qa.json 已完成）：
       - Amazon Rufus AI 会从 listing 中提取信息回答买家问题
       - 确保 listing 中包含 qa.json 里问题的答案信息
       - 用陈述句而非疑问句（Rufus 需要提取答案，不是问题）
       - 具体数据比模糊描述更容易被 Rufus 引用
+      - 非 US 的 qa.json 为 skipped，不得编造问题或套用 US 问答
       示例：
         差：Our stand is very stable.
         好：Weighted silicone base prevents tipping on surfaces up to 15° incline.

@@ -7,7 +7,7 @@
 
 ## 后端配置
 
-读取 `config.json` 获取后端地址、token 和默认站点。
+读取 `config.json` 获取后端地址和 token。目标站点不从配置文件读取，必须使用用户本次任务明确选择的站点。
 
 交付给用户的 skill 包里，`backend_token` 可能被留空。调用 `expand` / `qa` / `validate` 前必须先检查：
 - 如果 `backend_token` 有值：按下方方式设置环境变量后继续。
@@ -40,7 +40,7 @@ chmod +x tools/bin/laochen-cli-*
 - **asins**：1–20 个 Amazon ASIN（竞品或同类产品的 ASIN），作为**一组**整体处理，用于拉取流量关键词
 - **images**：用户自己要上架的产品的实拍图 / 渲染图（最多 10 张），用于分析产品特征生成画像
 - **product_description**：用户对自己产品的文字描述（可选但推荐），用于补充图片无法识别的材质、规格、场景和卖点
-- **site**：Amazon 站点代码（默认 `US`）
+- **site**：Amazon 站点代码，支持 `US`、`JP`、`UK`、`DE`、`FR`、`IT`、`ES`、`CA`、`IN`；用户未提供时必须先询问，不得静默默认 US
 - 可选：品牌名、目标卖点、禁用词、是否需要导出 TXT
 
 你按 8 步流程产出最终 listing：标题 / 商品亮点 / 五点描述 / 长描 / 后台搜索词 / 附图策划 / A+策划。
@@ -55,6 +55,9 @@ chmod +x tools/bin/laochen-cli-*
 4. **LLM 性质的工作**（产品画像、剔除无关词、标注、写 listing）你自己做。
 5. **不要泄露 token** 或后端 URL 到对话里。
 6. **写文件必须用 UTF-8 编码**。Windows PowerShell 的 `>` 重定向会产生 UTF-16 乱码，必须避免。正确做法：使用工具自带的文件写入功能（如 `fs_write`、`writeFile`），或在 shell 中显式指定编码。
+7. **Amazon 上架文案必须使用目标站点语言**。默认语言：US/UK/CA/IN 英语、JP 日语、DE 德语、FR 法语、IT 意大利语、ES 西班牙语；CA 仅在用户明确要求时使用加拿大法语。
+8. 本文中的英语文案仅用于说明字段结构，不是可复用内容。非英语站点必须根据真实产品和关键词重新生成目标语言文案，不得复制英语示例后直接交付。
+9. **Rufus 仅支持 US**。非 US 不调用 `qa`，必须生成跳过状态的 `06_qa.json` 后继续完整流程。
 
 ---
 
@@ -87,6 +90,7 @@ chmod +x tools/bin/laochen-cli-*
 #### 输入
 - `images`：用户提供的产品图片 URL（最多 10 张）
 - `product_description`：用户提供的产品文字描述（可选）
+- `site`：目标站点（必填）以及由 `knowledge/site_language_rules.yaml` 确定的文案语言
 
 #### 必须输出的维度
 
@@ -104,6 +108,9 @@ chmod +x tools/bin/laochen-cli-*
 
 ```json
 {
+  "site": "DE",
+  "listing_language": "German",
+  "listing_language_code": "de",
   "category": "Phone Stand / Desk Organizer",
   "audience": {
     "age_range": "25–45",
@@ -136,7 +143,7 @@ chmod +x tools/bin/laochen-cli-*
 ```bash
 laochen-cli expand \
   --asins B001,B002,B003 \
-  --site US \
+  --site <目标站点> \
   --output 02_kw_raw.json
 ```
 
@@ -154,7 +161,7 @@ laochen-cli expand \
 
 ### 步骤 3 — 剔除无关词 + 合规过滤（你自己做）
 
-对照步骤 1 的产品画像，从 300 个词中剔除不能用的词。分两类：
+对照步骤 1 的产品画像，从步骤 2 实际返回的全部关键词中剔除不能用的词。分两类：
 
 #### A. 剔除与产品无关的词
 
@@ -268,7 +275,11 @@ laochen-cli expand \
 
 ---
 
-### 步骤 6 — 买家问题采集（外部）
+### 步骤 6 — 买家问题采集（US 调后端，非 US 跳过）
+
+先读取 `01_product_profile.json` 的 `site`。
+
+#### US 站
 
 用步骤 5 选出的标题核心词，调用后端查询 Amazon Rufus 买家常问问题。
 
@@ -283,6 +294,9 @@ laochen-cli qa \
 
 ```json
 {
+  "status": "completed",
+  "site": "US",
+  "reason_code": null,
   "qa_pairs": [
     {
       "keyword": "phone stand",
@@ -319,6 +333,21 @@ laochen-cli qa \
 
 不要跳过这一步直接进入文案生成。
 
+#### 非 US 站
+
+**不要执行 `qa` 命令，也不要用 US Rufus 数据替代。** 直接以 UTF-8 写入：
+
+```json
+{
+  "status": "skipped",
+  "site": "DE",
+  "reason_code": "rufus_us_only",
+  "qa_pairs": []
+}
+```
+
+其中 `site` 必须写真实目标站点。告知用户该站点未调用 Rufus，然后继续步骤 7；这不是失败，也不得中断流程。
+
 ---
 
 ### 步骤 7 — 生成 Listing（你自己做）
@@ -341,6 +370,7 @@ laochen-cli qa \
 | `knowledge/distilled/description_rules.yaml` | 长描写作规则 |
 | `knowledge/distilled/search_terms_rules.yaml` | 后台搜索词规则 |
 | `knowledge/distilled/seo_general.yaml` | SEO 通用规则 |
+| `knowledge/site_language_rules.yaml` | 站点、文案语言与 Rufus 适用范围 |
 | `knowledge/examples/title_examples.json` | 标题好坏对照示例 |
 | `knowledge/examples/bullets_examples.json` | 五点好坏对照示例 |
 
@@ -350,9 +380,9 @@ laochen-cli qa \
 
 1. **SEO**：核心词合理埋点，避免堆砌
 2. **COSMO**：体现"场景意图 → 产品能力 → 用户收益"链路
-3. **GEO/Rufus**：将 `qa.json` 中的高价值问题信息自然织入文案（仅 US/JP 站）
+3. **GEO/Rufus**：仅当 `06_qa.json.status` 为 `completed` 或旧格式中存在有效 `qa_pairs` 时，将问题自然织入文案；非 US 跳过
 
-**写完后必须输出"买家问题覆盖清单"（让用户看到你确实用了）**：逐条列出 `06_qa.json` 里的问题，标明每条在文案的哪个位置被回应（标题/商品亮点/某条五点/长描），未覆盖的也要说明原因。例如：
+**仅在 QA 已完成且存在问题时**输出"买家问题覆盖清单"：逐条列出问题，标明每条在文案的哪个位置被回应。QA 为 `skipped` 时不生成虚假的覆盖清单。
 
 > 买家问题覆盖：
 > - "How stable...?" → 五点①【STABLE & SECURE】
@@ -366,7 +396,7 @@ laochen-cli qa \
 
 ##### Title（标题）
 
-1. 单词首字母大写（介词/连词/冠词除外）
+1. 遵循目标站点语言的自然标题大小写和标点习惯；英语站点使用 Title Case，其他语言不得强套英语规则
 2. 数字用阿拉伯数字
 3. 禁促销词、禁装饰字符、禁主观极限词、禁品牌词（未授权）
 4. 结构：核心关键词 + 属性词 + 规格/适用范围
@@ -376,7 +406,7 @@ laochen-cli qa \
 ##### Item Highlight（商品亮点）
 
 1. **长度 ≤ 125 字符（含空格）**
-2. 英文，一句话或短语，显示在商品名称下方
+2. 使用目标站点语言，一句话或短语，显示在商品名称下方
 3. 内容可搜索，用于补充标题放不下的材质、建议使用场景、关键规格或比较点
 4. 不重复标题原句，不堆词，不含促销词、极限词、未授权品牌词
 
@@ -384,7 +414,7 @@ laochen-cli qa \
 
 1. 固定 5 条
 2. 总长度 ≤ 1000 字符
-3. 结构：【大写核心卖点】+ 解释
+3. 结构：【核心卖点】+ 解释；大小写遵循目标站点语言习惯
 4. 重点体现功能与益处，不堆词
 
 ##### Description（长描）
@@ -396,7 +426,7 @@ laochen-cli qa \
 ##### Search Terms（后台搜索词）
 
 1. 总长度 ≤ 250 字节（含空格）
-2. 全小写，空格分隔，无标点
+2. 英语及使用大小写的拉丁字母站点优先小写、空格分隔、无标点；日语等语言按自然分词和平台习惯处理
 3. 去重，不含标题已出现的词
 4. 不含品牌词，不含虚词（a/an/the/with 等）
 
@@ -406,11 +436,11 @@ laochen-cli qa \
 
 按以下顺序输出：
 
-1. **Title**（标题）— 英文
-2. **Item Highlight**（商品亮点）— 英文，≤ 125 字符
-3. **Bullet Points**（五点描述）— 英文
-4. **Description**（长描）— 英文
-5. **Search Terms**（后台搜索词）— 英文
+1. **Title**（标题）— 目标站点语言
+2. **Item Highlight**（商品亮点）— 目标站点语言，≤ 125 字符
+3. **Bullet Points**（五点描述）— 目标站点语言
+4. **Description**（长描）— 目标站点语言
+5. **Search Terms**（后台搜索词）— 目标站点语言
 6. **附图策划**（按上传图片顺序，每张图的拍摄/设计方向和卖点建议）— **中文**
 7. **A+ 整体策划**（A+ 页面的模块规划和内容方向）— **中文**
 
@@ -421,7 +451,9 @@ laochen-cli qa \
 
 **落盘**：
 - `07_listing.md`：Markdown 可读版（给用户看的最终产物）。**必须是真正的多行文本文件**（每个 `##` 标题、每条 bullet 各占一行），不要把 `\n` 写成字面转义字符。
-- `07_listing.json`：结构化 JSON（给程序用），格式：`{"title": "...", "item_highlight": "...", "bullets": [...], "description": "...", "search_terms": "..."}`
+- `07_listing.json`：结构化 JSON（给程序用），必须保留站点语言信息：`{"site": "DE", "listing_language": "German", "title": "...", "item_highlight": "...", "bullets": [...], "description": "...", "search_terms": "..."}`
+
+写入文件前做最后一次语言核验：上述五个 Amazon 上架字段必须与 `listing_language` 一致；发现整段英语残留时先重写，品牌名、型号和技术术语除外。
 
 ```markdown
 ## Title
@@ -505,19 +537,20 @@ phone stand desk holder foldable adjustable...
 
 ```bash
 # 扩词（步骤 2）— 异步任务，结果直接写文件
-./tools/bin/laochen-cli-<platform> expand --asins X,Y,Z --site US --output 02_kw_raw.json
+./tools/bin/laochen-cli-<platform> expand --asins X,Y,Z --site <目标站点> --output 02_kw_raw.json
 
 # 买家问题（步骤 6）
 ./tools/bin/laochen-cli-<platform> qa --keywords-file 05_title_keywords.json --site US --output 06_qa.json
 
 # 校验 listing（备用）
-./tools/bin/laochen-cli-<platform> validate --listing-file 07_listing.json --site US
+./tools/bin/laochen-cli-<platform> validate --listing-file 07_listing.json --site <目标站点>
 ```
 
 **注意**：
 - expand 命令是异步的，提交后 CLI 会自动轮询直到完成，进度信息输出到 stderr
 - 20 个 ASIN 的扩词通常需要 2-3 分钟，这是正常的
 - 如果 CLI 报"任务超时"，说明系统当前非常繁忙，等 1 分钟后重试即可
+- qa 命令仅用于 US；非 US 按步骤 6 生成 skipped 文件，不发后端请求
 
 环境变量（使用前设置）：
 

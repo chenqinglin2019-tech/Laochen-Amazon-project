@@ -34,7 +34,7 @@ rules:
   - id: desc_rufus_answers
     type: soft
     prompt_fragment: |
-      将 qa.json 中的高价值问题的答案自然织入长描。
+      仅当 qa.json 状态为 completed 或存在有效问题时，将高价值问题的答案自然织入长描。
       不要用 Q&A 格式，而是把答案融入叙述中。
       如果买家常问材质，就在描述中自然提到材质和耐用性。
     source: "GEO/Rufus optimization"

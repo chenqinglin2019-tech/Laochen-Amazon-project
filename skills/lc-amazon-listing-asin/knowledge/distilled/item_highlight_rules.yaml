@@ -26,14 +26,14 @@ rules:
       - 材质或结构（如 aluminum, silicone, waterproof fabric）
       - 推荐使用场景（如 desk, kitchen, travel, camping）
       - 关键兼容性或规格（如 fits 4-10 inch phones）
-      - Rufus QA 中高频问题的直接答案
+      - 已完成的 Rufus QA 中高频问题的直接答案（仅 US）
       不要写促销词、极限词、无授权品牌词。
     source: "Amazon title update best practice"
 
   - id: ih_style
     type: soft
     prompt_fragment: |
-      写成一句自然英文短句或短语，信息密度高但可读。
-      示例：Aluminum foldable design for desk, kitchen, travel and video calls
+      使用目标站点语言，写成一句自然短句或短语，信息密度高但可读。
+      英语示例：Aluminum foldable design for desk, kitchen, travel and video calls
       避免逗号堆词和 keyword stuffing。
     source: "Amazon SEO best practice"

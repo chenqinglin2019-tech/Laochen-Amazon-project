@@ -15,8 +15,8 @@ rules:
   - id: bullets_structure
     type: soft
     prompt_fragment: |
-      每条 bullet 结构：【大写核心卖点关键词】+ 解释说明。
-      大写部分 2-4 个词，概括本条核心。
+      每条 bullet 结构：【核心卖点关键词】+ 解释说明。
+      核心卖点部分简短概括本条内容，大小写遵循目标站点语言习惯。
       示例：
       - 【STABLE & SECURE BASE】Weighted non-slip silicone pad keeps your phone steady...
       - 【ADJUSTABLE VIEWING ANGLE】Rotate 270° to find your perfect angle...
@@ -40,7 +40,7 @@ rules:
   - id: bullets_rufus_qa
     type: soft
     prompt_fragment: |
-      参考 qa.json 中买家高频问题，在 bullets 中主动回答。
+      仅当 qa.json 状态为 completed 或存在有效问题时，参考买家高频问题并在 bullets 中主动回答。
       如果买家常问"Is it compatible with cases?"，就写一条关于兼容性的 bullet。
     source: "GEO/Rufus optimization"
 
