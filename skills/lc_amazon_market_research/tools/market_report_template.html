@@ -274,6 +274,43 @@
 
     .chart { width: 100%; height: 235px; display: block; }
     .chart.tall { height: 286px; }
+    .chart.sales-trend { height: 370px; }
+    .sales-trend-panel { position: relative; }
+    .sales-trend-panel .section-note { color: #d48a1f; font-weight: 760; }
+    .trend-hover-zone { cursor: crosshair; }
+    .chart-tooltip {
+      position: absolute;
+      z-index: 8;
+      min-width: 190px;
+      max-width: 260px;
+      padding: 10px 12px;
+      border: 1px solid rgba(15, 23, 42, 0.2);
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.86);
+      box-shadow: 0 10px 26px rgba(15, 23, 42, 0.16);
+      color: #fff;
+      font-size: 12px;
+      line-height: 1.45;
+      pointer-events: none;
+      opacity: 0;
+      transform: translate(10px, -50%);
+      transition: opacity 0.12s ease;
+    }
+    .chart-tooltip.show { opacity: 1; }
+    .chart-tooltip-title {
+      font-size: 13px;
+      font-weight: 820;
+      margin-bottom: 6px;
+    }
+    .chart-tooltip-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .chart-tooltip-row span:first-child { color: rgba(255, 255, 255, 0.72); }
+    .chart-tooltip-row strong { color: #fff; }
     .visual-overview { grid-template-columns: 1fr; }
     .donut-grid {
       display: grid;
@@ -540,6 +577,19 @@
   </section>
 
   <section class="grid visual-overview" id="charts">
+    <div class="panel sales-trend-panel">
+      <div class="section-head">
+        <h2>月总销量与销售额趋势</h2>
+        <div class="section-note" id="salesTrendNote">月度竞品表清洗样本</div>
+      </div>
+      <div class="legend">
+        <span><i class="dot" style="background:#ffad2f"></i>月总销量</span>
+        <span><i class="dot" style="background:#61b96f"></i>月总销售额</span>
+      </div>
+      <svg class="chart sales-trend" id="salesTrendChart"></svg>
+      <div class="chart-tooltip" id="salesTrendTooltip"></div>
+      <div class="chart-note">柱状图对应左轴销量；折线图对应右轴销售额。仅展示清洗后月度样本，不判断利润。</div>
+    </div>
     <div class="panel">
       <div class="section-head">
         <h2>饼状图：头部销量占比</h2>
@@ -884,6 +934,7 @@ function badgeClass(level) {
 function renderCharts() {
   const trend = data.metrics.monthly_trend;
   const labels = trend.map(x => x.month);
+  drawSalesTrendChart();
   renderConcentrationDonuts();
   drawKeywordShareChart();
   drawEntityShareChart();
@@ -902,6 +953,204 @@ function renderCharts() {
   document.getElementById('newProductInsight').innerHTML = insights.new_product_success
     ? `<div>${esc(insights.new_product_success.summary)}</div>`
     : '';
+}
+
+function drawSalesTrendChart() {
+  const trend = data.metrics.monthly_trend || [];
+  const svg = document.getElementById('salesTrendChart');
+  if (!svg) return;
+  const note = document.getElementById('salesTrendNote');
+  const latest = trend[trend.length - 1] || {};
+  if (note) note.textContent = `最新样本商品数：${fmtNum(latest.listing_count || 0)}`;
+  const width = svg.clientWidth || 900;
+  const height = 370;
+  const padL = 84, padR = 100, padT = 30, padB = 108;
+  const plotW = Math.max(120, width - padL - padR);
+  const plotH = height - padT - padB;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  if (!trend.length) {
+    svg.innerHTML = `<text x="16" y="42" font-size="13" fill="#687588">暂无月度趋势数据</text>`;
+    return;
+  }
+
+  const salesValues = trend.map(row => Number(row.total_sales || 0));
+  const revenueValues = trend.map(row => Number(row.total_revenue || 0));
+  const salesMax = niceValueAxisMax(Math.max(...salesValues, 1));
+  const revenueMax = niceValueAxisMax(Math.max(...revenueValues, 1));
+  const x = (i) => padL + (trend.length <= 1 ? plotW / 2 : i * plotW / (trend.length - 1));
+  const ySales = (v) => padT + (1 - (v || 0) / salesMax) * plotH;
+  const yRevenue = (v) => padT + (1 - (v || 0) / revenueMax) * plotH;
+  const barStep = trend.length <= 1 ? plotW : plotW / Math.max(1, trend.length - 1);
+  const barW = Math.max(10, Math.min(32, barStep * 0.5));
+  const salesTicks = buildValueTicks(salesMax);
+  const revenueTicks = buildValueTicks(revenueMax);
+
+  const grid = salesTicks.map(t => {
+    const gy = ySales(t);
+    return `
+      <line x1="${padL}" y1="${gy}" x2="${width - padR}" y2="${gy}" stroke="#dce3ec" stroke-dasharray="6 6"/>
+      <text x="${padL - 10}" y="${gy + 4}" font-size="11" text-anchor="end" fill="#687588">${fmtCompactNum(t)}</text>
+    `;
+  }).join('');
+  const rightTicks = revenueTicks.map(t => {
+    const gy = yRevenue(t);
+    return `<text x="${width - padR + 10}" y="${gy + 4}" font-size="11" fill="#687588">${fmtCompactMoney(t)}</text>`;
+  }).join('');
+  const monthDividers = trend.map((row, i) => {
+    const cx = x(i);
+    return `<line x1="${cx}" y1="${padT}" x2="${cx}" y2="${height-padB}" stroke="#edf1f6" stroke-width="1"/>`;
+  }).join('');
+  const hoverGuides = `
+    <rect id="salesTrendHoverBand" x="${padL}" y="${padT}" width="1" height="${plotH}" fill="#d8dee9" opacity="0" pointer-events="none"/>
+    <line id="salesTrendHoverV" x1="${padL}" y1="${padT}" x2="${padL}" y2="${height-padB}" stroke="#8d99aa" stroke-width="1" stroke-dasharray="4 4" opacity="0" pointer-events="none"/>
+    <line id="salesTrendHoverSales" x1="${padL}" y1="${padT}" x2="${width-padR}" y2="${padT}" stroke="#ffad2f" stroke-width="1" stroke-dasharray="5 5" opacity="0" pointer-events="none"/>
+    <line id="salesTrendHoverRevenue" x1="${padL}" y1="${padT}" x2="${width-padR}" y2="${padT}" stroke="#61b96f" stroke-width="1" stroke-dasharray="5 5" opacity="0" pointer-events="none"/>
+  `;
+  const axes = `
+    <text x="${padL}" y="18" font-size="12" fill="#687588">销量</text>
+    <text x="${width - padR}" y="18" font-size="12" text-anchor="end" fill="#687588">销售额 $</text>
+    <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${height-padB}" stroke="#b8c2cf"/>
+    <line x1="${width-padR}" y1="${padT}" x2="${width-padR}" y2="${height-padB}" stroke="#b8c2cf"/>
+    <line x1="${padL}" y1="${height-padB}" x2="${width-padR}" y2="${height-padB}" stroke="#b8c2cf"/>
+  `;
+  const bars = trend.map((row, i) => {
+    const cx = x(i);
+    const v = Number(row.total_sales || 0);
+    const top = ySales(v);
+    const h = Math.max(1, height - padB - top);
+    return `
+      <rect x="${cx - barW / 2}" y="${top}" width="${barW}" height="${h}" rx="3" fill="#ffad2f" opacity="0.88">
+        <title>${esc(row.month)}\n月总销量：${fmtNum(row.total_sales)}\n月总销售额：${fmtMoney(row.total_revenue)}</title>
+      </rect>
+    `;
+  }).join('');
+  const points = revenueValues.map((v, i) => `${x(i)},${yRevenue(v)}`).join(' ');
+  const line = `
+    <polyline fill="none" stroke="#61b96f" stroke-width="2.6" points="${points}"/>
+    ${revenueValues.map((v, i) => `
+      <circle cx="${x(i)}" cy="${yRevenue(v)}" r="3.4" fill="#ffffff" stroke="#61b96f" stroke-width="2">
+        <title>${esc(trend[i].month)}\n月总销售额：${fmtMoney(v)}\n月总销量：${fmtNum(salesValues[i])}</title>
+      </circle>
+    `).join('')}
+  `;
+  const labels = trend.map((row, i) => {
+    const label = String(row.month || '');
+    const ly = height - 64;
+    return `<text x="${x(i)}" y="${ly}" transform="rotate(-55 ${x(i)} ${ly})" font-size="12" text-anchor="end" fill="#687588">${esc(label)}</text>`;
+  }).join('');
+  const hoverZones = trend.map((row, i) => {
+    const left = i === 0 ? padL : (x(i - 1) + x(i)) / 2;
+    const right = i === trend.length - 1 ? width - padR : (x(i) + x(i + 1)) / 2;
+    return `<rect class="trend-hover-zone" data-index="${i}" x="${left}" y="${padT}" width="${Math.max(1, right - left)}" height="${plotH}" fill="transparent" pointer-events="all"></rect>`;
+  }).join('');
+  svg.innerHTML = grid + monthDividers + rightTicks + hoverGuides + axes + bars + line + labels + hoverZones;
+  bindSalesTrendTooltip(svg, trend, {x, ySales, yRevenue, barStep, padL, padR, padT, padB, plotH, width, height});
+}
+
+function bindSalesTrendTooltip(svg, trend, scale) {
+  const tooltip = document.getElementById('salesTrendTooltip');
+  const panel = svg.closest('.sales-trend-panel');
+  if (!tooltip || !panel) return;
+  const show = (event) => {
+    const index = Number(event.currentTarget.dataset.index || 0);
+    const row = trend[index] || {};
+    updateSalesTrendGuides(svg, row, index, scale);
+    const panelRect = panel.getBoundingClientRect();
+    const tooltipW = tooltip.offsetWidth || 220;
+    const leftRaw = event.clientX - panelRect.left + 14;
+    const topRaw = event.clientY - panelRect.top;
+    const left = Math.min(Math.max(10, leftRaw), Math.max(10, panelRect.width - tooltipW - 10));
+    const top = Math.min(Math.max(72, topRaw), Math.max(72, panelRect.height - 28));
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
+    tooltip.innerHTML = `
+      <div class="chart-tooltip-title">${esc(row.month || '月份')}</div>
+      <div class="chart-tooltip-row"><span>月总销量</span><strong>${fmtNum(row.total_sales || 0)}</strong></div>
+      <div class="chart-tooltip-row"><span>月总销售额</span><strong>${fmtMoney(row.total_revenue || 0)}</strong></div>
+      <div class="chart-tooltip-row"><span>清洗样本</span><strong>${fmtNum(row.listing_count || 0)} 条</strong></div>
+    `;
+    tooltip.classList.add('show');
+  };
+  const hide = () => {
+    tooltip.classList.remove('show');
+    updateSalesTrendGuides(svg, null, null, scale);
+  };
+  svg.querySelectorAll('.trend-hover-zone').forEach(zone => {
+    zone.addEventListener('mouseenter', show);
+    zone.addEventListener('mousemove', show);
+    zone.addEventListener('mouseleave', hide);
+  });
+}
+
+function updateSalesTrendGuides(svg, row, index, scale) {
+  const ids = ['salesTrendHoverBand', 'salesTrendHoverV', 'salesTrendHoverSales', 'salesTrendHoverRevenue'];
+  const elements = Object.fromEntries(ids.map(id => [id, svg.querySelector(`#${id}`)]));
+  if (!row || index == null || !scale) {
+    Object.values(elements).forEach(el => { if (el) el.setAttribute('opacity', '0'); });
+    return;
+  }
+  const cx = scale.x(index);
+  const bandW = Math.max(18, scale.barStep * 0.86);
+  if (elements.salesTrendHoverBand) {
+    elements.salesTrendHoverBand.setAttribute('x', String(Math.max(scale.padL, cx - bandW / 2)));
+    elements.salesTrendHoverBand.setAttribute('width', String(Math.min(bandW, scale.width - scale.padR - scale.padL)));
+    elements.salesTrendHoverBand.setAttribute('opacity', '0.32');
+  }
+  if (elements.salesTrendHoverV) {
+    elements.salesTrendHoverV.setAttribute('x1', String(cx));
+    elements.salesTrendHoverV.setAttribute('x2', String(cx));
+    elements.salesTrendHoverV.setAttribute('opacity', '0.8');
+  }
+  if (elements.salesTrendHoverSales) {
+    const y = scale.ySales(Number(row.total_sales || 0));
+    elements.salesTrendHoverSales.setAttribute('y1', String(y));
+    elements.salesTrendHoverSales.setAttribute('y2', String(y));
+    elements.salesTrendHoverSales.setAttribute('opacity', '0.85');
+  }
+  if (elements.salesTrendHoverRevenue) {
+    const y = scale.yRevenue(Number(row.total_revenue || 0));
+    elements.salesTrendHoverRevenue.setAttribute('y1', String(y));
+    elements.salesTrendHoverRevenue.setAttribute('y2', String(y));
+    elements.salesTrendHoverRevenue.setAttribute('opacity', '0.85');
+  }
+}
+
+function niceValueAxisMax(maxRaw) {
+  const padded = Math.max(maxRaw * 1.12, 1);
+  const step = niceNumberStep(padded / 5);
+  return Math.max(step, Math.ceil(padded / step) * step);
+}
+
+function niceNumberStep(rawStep) {
+  if (!Number.isFinite(rawStep) || rawStep <= 0) return 1;
+  const power = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const normalized = rawStep / power;
+  const base = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+  return base * power;
+}
+
+function buildValueTicks(max) {
+  const step = niceNumberStep(max / 5);
+  const ticks = [];
+  for (let value = 0; value <= max + step / 2; value += step) {
+    ticks.push(Math.min(max, Number(value.toFixed(6))));
+  }
+  if (ticks[ticks.length - 1] < max) ticks.push(max);
+  return [...new Set(ticks)];
+}
+
+function fmtCompactNum(value) {
+  const n = Number(value || 0);
+  if (Math.abs(n) >= 1000000) return (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (Math.abs(n) >= 1000) return (n / 1000).toFixed(0) + 'K';
+  return fmtNum(n);
+}
+
+function fmtCompactMoney(value) {
+  const n = Number(value || 0);
+  if (Math.abs(n) >= 1000000) return '$' + (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (Math.abs(n) >= 1000) return '$' + (n / 1000).toFixed(0) + 'K';
+  return fmtMoney(n);
 }
 
 function renderConcentrationDonuts() {
@@ -1016,13 +1265,14 @@ function drawEntityShareChart() {
 }
 
 function entitySubLabel(row) {
+  const growth = row.growth_pct == null ? '' : ` · 成长 ${fmtPct(row.growth_pct)}`;
   if (activeEntity === 'link') {
     return `${fmtNum(row.sales)} 近30天销量 · 单条 listing`;
   }
   if (activeEntity === 'brand') {
-    return `${fmtNum(row.sales)} 品牌合计销量 · ${fmtNum(row.listing_count)} 条 listing`;
+    return `${fmtNum(row.sales)} 品牌合计销量 · ${fmtNum(row.listing_count)} 条 listing${growth}`;
   }
-  return `${fmtNum(row.sales)} 卖家合计销量 · ${fmtNum(row.listing_count)} 条 listing`;
+  return `${fmtNum(row.sales)} 卖家合计销量 · ${fmtNum(row.listing_count)} 条 listing${growth}`;
 }
 
 function drawHorizontalShareChart(svgId, rows, options) {
@@ -1164,9 +1414,7 @@ function setupEntityTabs() {
 function renderEntityTable() {
   const groups = data.metrics.current_concentration[activeEntity].top_groups || [];
   const label = entityLabels[activeEntity];
-  renderEntityNote();
-  drawEntityShareChart();
-  renderTable('entityTable', groups, [
+  const columns = [
     {key:'name', label},
     {key:'sales', label:'销量', type:'num'},
     {key:'sales_share', label:'销量占比', type:'pct'},
@@ -1174,7 +1422,13 @@ function renderEntityTable() {
     {key:'revenue_share', label:'销售额占比', type:'pct'},
     {key:'listing_count', label:'链接数', type:'num'},
     {key:'avg_price', label:'均价', type:'money'}
-  ]);
+  ];
+  if (activeEntity === 'brand' || activeEntity === 'seller') {
+    columns.push({key:'growth_pct', label:'成长百分比', type:'pct'});
+  }
+  renderEntityNote();
+  drawEntityShareChart();
+  renderTable('entityTable', groups, columns);
 }
 
 function renderEntityNote() {
