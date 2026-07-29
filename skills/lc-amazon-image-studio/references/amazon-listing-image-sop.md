@@ -1,202 +1,127 @@
-# Amazon Listing Image Generation SOP
+# Amazon Listing Image Strategy SOP
 
-Use this SOP when you need the full execution logic behind `lc-amazon-image-studio`.
+Use this reference for buyer logic, image-slot strategy, and product-understanding output. Use `runtime-pipeline.md` for execution, state, detail crops, retries, postprocessing, and QA.
 
-## 1. Inputs
+## 1. Inputs and branch
 
 Collect:
-- real product photos, supplier photos, packaging photos, or component photos
-- product facts, selling points, included parts, constraints, target buyer, or other product context
-- strategy source: either the user's image generation plan/design ideas or a competitor Amazon URL/ASIN
+
+- real product, component, detail, and packaging photos
+- confirmed facts, selling points, included parts, constraints, and target buyer
 - target marketplace
-- brand name if available
-- whether the user wants strategy only or final image generation
+- either the user's image plan or one competitor URL/ASIN
 
-Treat missing inputs as explicit risk. Do not silently invent facts that should have come from the user, selected strategy source, or real images.
+Select one branch:
 
-Choose one strategy branch before research:
-- `User-planned branch`: use when the user provides image generation planning, per-image concepts, storyboard, composition suggestions, image-by-image selling jobs, or clear creative direction. This branch takes priority over competitor input. If a competitor ASIN is also present, do not decompose it unless the user explicitly asks for a comparison.
-- `Competitor-learning branch`: use only when no usable user image plan is provided and the competitor Amazon URL/ASIN is the strategy source.
+- `user_planned`: use when the user specifies the purpose, content, composition, or sequence of at least one image; preserve that partial or complete plan and fill only its gaps
+- `competitor_learning`: study only selling jobs, objections, and sequence; do not copy layout, wording, badges, branding, packaging, or composition
 
-## 2. Product Research
+## 2. Product understanding
 
-Start with the real product images and user product facts. Inspect an Amazon listing only when the competitor-learning branch is selected or when the user says the listing is the user's own listing.
+Inspect real product images at original resolution. Record:
 
-In the competitor-learning branch, inspect the Amazon listing and extract:
-- title and product type
-- dimensions, colors, variants, included parts
-- compatibility and exclusions
-- visible review pain points
-- the practical job the product performs
-- trust signals buyers need before purchase
-- main-image, gallery, and A+ selling-job logic for strategy only
+- product type, buyer, primary job, and use environment
+- confirmed dimensions and supported ratios
+- supported front/rear/side/top/bottom/45-degree views
+- silhouette, thickness, relative part sizes, attachment geometry, and included parts
+- materials, finish, color, texture, transparency, and light behavior
+- ports, buttons, indicators, screws, holes, clips, seams, labels, and other micro-details
+- known and unknown facts
+- claims that require proof
 
-In the user-planned branch, normalize the user's plan into:
-- image slots
-- visual leads
-- selling jobs
-- composition notes
-- render modes
-- must-avoid constraints
-
-Preserve the user's intended image direction unless it conflicts with product truth, Amazon policy, or clear conversion logic. Fill missing slots from product truth, buyer logic, and category playbooks, not from competitor teardown.
-
-Then inspect the real images. Identify:
-- overall shape and silhouette
-- exact proportions and relative part sizes
-- material clues
-- attachment points or moving parts
-- cutouts, seams, ports, buttons, fasteners, textures, finish, and other visible identifying details
-- scale
-- packaging or storage method
-- whether the product works alone or as part of a kit
-
-Create a locked product-truth list from the real images before planning prompts. This list should capture the physical traits that must not change across any generated image.
-Build a `Geometry Lock` from the same evidence:
-- confirmed dimensions from the user or listing
-- normalized `L:W:H` ratio when supported
-- visible-axis ratio for the current view when full `L:W:H` is unsupported
-- which reference images support each axis or detail
-- which axes remain uncertain
-
-Never invent hidden depth or thickness from a single angle. If the reference set cannot support a full `L:W:H` lock, keep the unsupported axis marked uncertain and ask for another view when needed.
-
-Use the selected strategy source and images together. Do not trust either one in isolation when they conflict. In the user-planned branch, user-provided image planning outranks competitor references as the composition source.
+Build Geometry, Material, Scene Scale, and Critical Detail locks. Never infer hidden product truth.
 
 ## 3. Product Understanding Checkpoint
 
-Before planning images, write a structured checkpoint:
+Output:
 
-- What is the product exactly?
-- Who buys it?
-- What practical problem does it solve?
-- What confirmed dimensions do we have?
-- What normalized `L:W:H` ratio can we support, if any?
-- Which axes remain uncertain?
-- What physical details must render correctly?
-- Which proportions and silhouette traits are locked?
-- Which visible details must not be added, removed, or redesigned?
-- What should be shown to build buyer trust?
-- Which claims are safe, and which need proof?
-- Which strategy branch was selected, and why?
-- Which user image plan should be preserved, if using the user-planned branch?
-- Which competitor patterns should be avoided, if using the competitor-learning branch?
-- What is still uncertain?
+```markdown
+## Product Understanding Checkpoint
+- Product:
+- Buyer:
+- Primary use:
+- Confirmed dimensions and ratios:
+- Supported views:
+- Unsupported axes / surfaces:
+- Geometry Lock:
+- Material Lock:
+- Scene Scale Lock:
+- P0/P1 Critical Detail Lock:
+- Source quality and safe enlargement:
+- Master asset mode:
+- Included parts:
+- Trust-building facts:
+- Claims to avoid:
+- Selected strategy branch:
+- User plan to preserve:
+- Competitor logic worth learning from:
+- Must-not-generate list:
+- Blocking uncertainties:
+```
 
-Default behavior: stop here and ask the user to confirm or correct.
+Under `risk_gated_auto`, stop only when a blocking uncertainty could change product truth, a restored master needs confirmation, or a required P0/P1 detail is unverifiable.
 
-## 4. Image-System Design
-
-Build a system, not eight unrelated pictures.
-
-Each image needs:
-- one visual lead
-- one selling job
-- one reason it exists in the sequence
+## 4. Image system
 
 Default sequence:
 
-1. `01_main`
-   White background, product only. Zero scene logic.
-2. `02_size_or_components`
-   Show measurements, variants, or included parts.
-3. `03_primary_use_case`
-   Show the product performing its most purchase-driving task.
-4. `04_compatibility_or_installation`
-   Explain fit, attachment, mounting, or tool relationship.
-5. `05_material_or_detail`
-   Explain physical quality through close-up evidence.
-6. `06_storage_or_package`
-   Show organization, carrying, packaging, or kit completeness.
-7. `07_problem_solution`
-   Resolve a pain point through before/after, workflow, or efficiency logic.
-8. `08_a_plus`
-   Premium summary visual for A+ content.
+1. `01_main`: exact product on white; no text or props
+2. `02_size_or_components`: confirmed dimensions or confirmed set contents
+3. `03_primary_use_case`: highest-value believable task
+4. `04_compatibility_or_installation`: confirmed fit, connection, mounting, or workflow
+5. `05_material_or_detail`: real construction evidence from a verified crop/master
+6. `06_storage_or_package`: confirmed organization, carrying, package, or set completeness
+7. `07_problem_solution`: resolve one buyer objection
+8. `08_a_plus`: wide premium summary grounded in confirmed facts
 
-If the category does not need one slot, replace it rather than forcing a weak image.
+Replace a weak slot when the category does not need it. Every image must have one visual lead and one selling job.
 
-In the user-planned branch, map the user's plan onto this sequence instead of replacing it with competitor logic. If the user's plan defines a different sequence, keep the user's sequence when it is Amazon-safe and conversion-logical.
+For every slot, record:
 
-In the competitor-learning branch, use competitor research only to sharpen selling jobs, objection handling, and sequencing. The final compositions must remain original.
+- selling job
+- supported view
+- render mode
+- source references
+- required and hidden critical details
+- product output bounding box
+- scene scale and support/contact logic
+- facts and claims allowed in deterministic overlays
 
-Assign a render mode to each slot:
-- `composite/edit` when the product body itself must remain exact and the surroundings can change
-- `reference-constrained generation` when the scene matters more, but the product still must follow the `Geometry Lock`
+## 5. Composition and anti-copy rules
 
-Default guidance:
-- `01_main`, `02_size_or_components`, `05_material_or_detail`, and `06_storage_or_package`: prefer `composite/edit`
-- `03_primary_use_case`, `04_compatibility_or_installation`, `07_problem_solution`, and `08_a_plus`: use `reference-constrained generation` only if needed
+- Show a believable task, not decorative staging.
+- Keep props subordinate to the product and physically plausible in size.
+- Keep connection, installation, support, contact shadow, and occlusion physically coherent.
+- Use padding, background extension, or recomposition instead of product distortion.
+- Borrow only the objection being answered from competitors.
+- Never copy a competitor's layout, headline, badge stack, scene, packaging cue, brand term, or distinctive execution.
 
-## 5. Composition Rules
+## 6. Prompt strategy
 
-- Main image: white background, product only, no human, no prop, no text.
-- Scene image: the product must be actively doing a believable job.
-- Detail image: zoom in only on features that matter to conversion.
-- Infographic image: keep copy short and readable.
-- A+ image: more editorial, but still product-truthful.
-- Never stretch, compress, slim, widen, elongate, shorten, or otherwise warp the product to fit the canvas.
-- Never add, remove, simplify, relocate, or redesign visible product details unless the user explicitly confirmed the change.
+Create one prompt per image from the manifest-generated lock blocks.
 
-When in doubt, simplify. Clutter is usually a sign that the selling job is unclear.
+- Attach only references relevant to the current view.
+- Attach a separate crop for every required P0/P1 detail.
+- Mark details hidden from the view so the model does not relocate them.
+- Ask for text-free bases.
+- Prefer `pixel_composite`, then `reference_edit`, then `reference_generate`.
+- Use targeted single-change edits for repairs; never rewrite the whole prompt and regenerate the full set.
 
-## 6. Anti-Copy Rules
+## 7. Delivery checklist
 
-Apply these rules whenever competitor material is used. Borrow only the competitor's information logic, never their exact execution.
-
-Allowed inspiration:
-- which buyer objection they tried to answer
-- which feature needed explanation
-- which usage moment was important
-
-Not allowed:
-- same layout
-- same headline structure
-- same badge stack
-- same scene composition
-- same brand terms or packaging cues
-
-## 7. Prompt Writing
-
-Prompts should encode:
-- product truth
-- buyer context
-- the single selling job of the current image
-- scene or composition constraints
-- what must not appear
-- size and framing requirements
-
-Every prompt must explicitly say:
-- include the `Geometry Lock` block with confirmed dimensions, normalized ratio when supported, reference-view anchors, and uncertain axes
-- preserve the exact proportions, silhouette, and relative part sizes from the user images
-- preserve all visible product details from the user images
-- do not stretch, compress, slim, widen, or otherwise distort the product
-- do not add, remove, or redesign components or visible details
-
-If the tool supports image references, attach the real product images on every generation pass. Do not rely on text-only geometry reminders when the images themselves can be passed in.
-
-Do not write one giant prompt for the full set unless the tool requires it. Prefer one prompt per image.
-
-## 8. Postprocess
-
-After generation:
-- if the slot was `composite/edit`, confirm the real product body was preserved and only surroundings/layout changed
-- resize listing images to exactly `1600x1600` with aspect ratio preserved; use padding or extra background instead of stretching the product
-- resize or crop A+ to `970x600` unless told otherwise, while preserving product geometry and using recomposition or background extension instead of distortion
-- check text readability
-- check shape consistency across images
-- reject any image where an unsupported axis was silently guessed or where the geometry lock was dropped from the prompt
-- reject any image where the product proportions changed or any visible detail was added, removed, or redesigned
-- remove or regenerate any hallucinated accessory, mount, button, or texture
-
-## 9. Delivery
-
-Deliver:
-- final output folder
-- image index with role of each image
-- prompt pack
-- review notes
-
-Always state:
-- which assets are production-ready
-- which need human verification
-- that text, dimensions, compliance statements, and IP risk still need final human review
+- Required inputs and strategy branch recorded
+- Source-quality gate completed
+- Critical Detail Census explicitly completed after original-resolution inspection
+- Every P0/P1 visibility rule covers every job
+- Restored master confirmed when used
+- Four locks present in every prompt
+- Every required P0/P1 detail explicitly passed
+- No hidden detail was moved into view
+- No unsupported accessory, port, texture, label, or claim added
+- Main image is product-only on pure white
+- Listing images are `1600x1600`
+- A+ matches requested size
+- Text comes from deterministic postprocessing
+- Manifest, QA report, contact sheet, and micro-detail sheet delivered
+- Runtime `delivery-check` passed against current prompt and output hashes
+- Human review risks stated for dimensions, compliance claims, and IP
