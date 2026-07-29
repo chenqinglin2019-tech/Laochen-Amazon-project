@@ -39,6 +39,8 @@ from selenium.webdriver.remote.webdriver import WebDriver
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
+from browser_runtime import CdpWebDriver
+
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
@@ -120,6 +122,18 @@ REQUESTED_DATA_FIELDS = [
     "seller_name",
     "brand_name",
     "seller_country",
+    "sales_30_days_child",
+    "sales_30_days_parent",
+    "fba_fee",
+    "gross_margin",
+    "fulfillment_method",
+    "delivery_duration",
+    "launch_date",
+    "organic_keywords_count",
+    "ad_keywords_count",
+]
+
+SELLERSPRITE_EVIDENCE_FIELDS = [
     "sales_30_days_child",
     "sales_30_days_parent",
     "fba_fee",
@@ -365,6 +379,7 @@ class RuntimeConfig:
     start_url: str
     job_id: str
     outputs_root: Path
+    browser_backend: str
     browser_mode: str
     chrome_binary: str
     chrome_user_data_dir: Path
@@ -398,6 +413,10 @@ class RuntimeConfig:
     page_scroll_step_ratio: float
     page_scroll_wait_seconds: float
     page_scroll_stable_rounds: int
+    sellersprite_required: bool
+    sellersprite_min_enriched_records: int
+    sellersprite_min_fields_per_record: int
+    sellersprite_stable_checks: int
     save_debug_snapshots: bool
     field_selectors: Dict[str, List[str]] = field(default_factory=dict)
 
@@ -410,6 +429,9 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
 
     job_id = config_text(config, "job_id") or f"category-rank-{now_ts()}"
     outputs_root = resolve_path(config_text(config, "outputs_root", "outputs"))
+    browser_backend = config_text(config, "browser_backend", "cdp").lower()
+    if browser_backend not in {"cdp", "selenium"}:
+        raise UserFacingError("配置项 `browser_backend` 只支持 cdp 或 selenium。")
     browser_mode = config_text(config, "browser_mode", "launch").lower()
     if browser_mode not in {"launch", "attach", "reuse", "applescript"}:
         raise UserFacingError("配置项 `browser_mode` 只支持 launch、attach、reuse 或 applescript。")
@@ -467,6 +489,7 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         start_url=start_url,
         job_id=slugify(job_id),
         outputs_root=outputs_root,
+        browser_backend=browser_backend,
         browser_mode=browser_mode,
         chrome_binary=chrome_binary,
         chrome_user_data_dir=chrome_user_data_dir,
@@ -500,6 +523,19 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         page_scroll_step_ratio=page_scroll_step_ratio,
         page_scroll_wait_seconds=page_scroll_wait_seconds,
         page_scroll_stable_rounds=page_scroll_stable_rounds,
+        sellersprite_required=config_bool(config, "sellersprite_required", True),
+        sellersprite_min_enriched_records=max(
+            config_int(config, "sellersprite_min_enriched_records", 1) or 1,
+            1,
+        ),
+        sellersprite_min_fields_per_record=max(
+            config_int(config, "sellersprite_min_fields_per_record", 2) or 2,
+            1,
+        ),
+        sellersprite_stable_checks=max(
+            config_int(config, "sellersprite_stable_checks", 3) or 3,
+            1,
+        ),
         save_debug_snapshots=config_bool(config, "save_debug_snapshots", True),
         field_selectors=field_selectors,
     )
@@ -607,6 +643,10 @@ class StateStore:
         self.data["failures_count"] = int(self.data.get("failures_count") or 0) + 1
         self.flush()
 
+    def mark_sellersprite_readiness(self, report: Dict[str, Any]) -> None:
+        self.data["sellersprite_readiness"] = safe_sellersprite_readiness(report)
+        self.flush()
+
     def mark_manual_pause(self, reason: str, page_url: str) -> None:
         self.data["manual_pause"] = {
             "paused_at": now_iso(),
@@ -624,6 +664,27 @@ class StateStore:
 def start_driver(runtime: RuntimeConfig) -> WebDriver:
     if runtime.browser_mode == "applescript":
         return AppleScriptChromeDriver(runtime.page_timeout)  # type: ignore[return-value]
+    if runtime.browser_backend == "cdp":
+        owned_process = None
+        if runtime.browser_mode == "launch":
+            owned_process = launch_debug_chrome(runtime)
+        elif not wait_for_debugger(runtime.debugger_address, timeout=2):
+            raise UserFacingError(
+                "没有找到可连接的 Chrome CDP 调试窗口。"
+                f"当前配置的调试地址是：{runtime.debugger_address}"
+            )
+        try:
+            return CdpWebDriver(  # type: ignore[return-value]
+                debugger_address=runtime.debugger_address,
+                page_timeout=runtime.page_timeout,
+                expected_user_data_dir=runtime.chrome_user_data_dir,
+                profile_directory=runtime.chrome_profile_directory,
+                owns_browser=owned_process is not None,
+                owned_process=owned_process,
+            )
+        except WebDriverException as exc:
+            raise UserFacingError(str(exc)) from exc
+
     options = Options()
     if runtime.browser_mode == "launch":
         launch_debug_chrome(runtime)
@@ -641,9 +702,9 @@ def start_driver(runtime: RuntimeConfig) -> WebDriver:
     raise UserFacingError(f"不支持的浏览器模式：{runtime.browser_mode}")
 
 
-def launch_debug_chrome(runtime: RuntimeConfig) -> None:
+def launch_debug_chrome(runtime: RuntimeConfig) -> Optional[subprocess.Popen]:
     if wait_for_debugger(runtime.debugger_address, timeout=2):
-        return
+        return None
     chrome_binary = Path(runtime.chrome_binary)
     if runtime.chrome_binary and not chrome_binary.exists():
         raise UserFacingError(f"没有找到 Chrome：{runtime.chrome_binary}")
@@ -660,12 +721,13 @@ def launch_debug_chrome(runtime: RuntimeConfig) -> None:
     ]
     if runtime.extension_path and runtime.extension_path.exists():
         command.insert(-2, f"--load-extension={runtime.extension_path}")
-    subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not wait_for_debugger(runtime.debugger_address, timeout=90):
         raise UserFacingError(
             "Chrome 调试端口没有启动成功。请关闭刚打开的专用 Chrome 后重试，"
             "或把 browser_mode 改成 attach 并手动打开调试端口。"
         )
+    return process
 
 
 def parse_debugger_port(address: str) -> int:
@@ -957,12 +1019,24 @@ def wait_for_amazon_products(driver: WebDriver, runtime: RuntimeConfig) -> None:
 def try_activate_plugin(driver: WebDriver) -> bool:
     script = r"""
 const words = ['Product Research', 'SellerSprite', '卖家精灵', '产品调研', 'BSR'];
+const pluginRootSelector = [
+  '[id*="sellersprite" i]',
+  '[class*="sellersprite" i]',
+  '[id*="seller-sprite" i]',
+  '[class*="seller-sprite" i]',
+  '[id*="__ss" i]',
+  '[class*="ss-" i]'
+].join(',');
 const isVisible = (el) => {
   const rect = el.getBoundingClientRect();
   const style = window.getComputedStyle(el);
   return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
 };
-const candidates = [...document.querySelectorAll('button,a,div,span')].filter(el => {
+const roots = [...document.querySelectorAll(pluginRootSelector)];
+const candidates = roots.flatMap(root => [
+  ...(root.matches('button,[role="button"]') ? [root] : []),
+  ...root.querySelectorAll('button,[role="button"]')
+]).filter(el => {
   const text = (el.innerText || el.textContent || '').trim();
   if (!text || text.length > 80 || !isVisible(el)) return false;
   return words.some(word => text.includes(word));
@@ -1001,6 +1075,150 @@ return document.querySelectorAll(selector).length;
         return 0
 
 
+def sellersprite_login_required(driver: WebDriver) -> bool:
+    script = r"""
+const pluginSelector = [
+  '[id*="sellersprite" i]',
+  '[class*="sellersprite" i]',
+  '[id*="seller-sprite" i]',
+  '[class*="seller-sprite" i]',
+  '[id*="__ss" i]',
+  '[class*="vxe-" i]',
+  '[class*="ss-" i]',
+  '[class*="sprite" i]'
+].join(',');
+const phrases = [
+  '请登录', '立即登录', '登录卖家精灵', '重新登录', '授权已过期',
+  'login required', 'sign in to sellersprite', 'session expired',
+  'please login', 'please sign in'
+];
+const text = [...document.querySelectorAll(pluginSelector)]
+  .map(el => el.innerText || el.textContent || '')
+  .join(' ')
+  .replace(/\s+/g, ' ')
+  .toLowerCase();
+return phrases.some(phrase => text.includes(phrase.toLowerCase()));
+"""
+    try:
+        return bool(driver.execute_script(script))
+    except (JavascriptException, WebDriverException):
+        return False
+
+
+def classify_sellersprite_snapshot(
+    snapshot: Dict[str, Any],
+    min_enriched_records: int,
+    min_fields_per_record: int,
+) -> str:
+    if snapshot.get("blocked"):
+        return "blocked"
+    if int(snapshot.get("plugin_nodes") or 0) <= 0:
+        return "plugin_absent"
+    if bool(snapshot.get("login_required")):
+        return "login_required"
+    if int(snapshot.get("product_count") or 0) <= 0:
+        return "data_loading"
+    if (
+        int(snapshot.get("enriched_records") or 0) >= max(min_enriched_records, 1)
+        and int(snapshot.get("max_fields_per_record") or 0) >= max(min_fields_per_record, 1)
+    ):
+        return "ready_candidate"
+    return "data_loading"
+
+
+def set_sellersprite_readiness(driver: WebDriver, report: Dict[str, Any]) -> None:
+    try:
+        setattr(driver, "_sellersprite_readiness", dict(report))
+    except Exception:
+        pass
+
+
+def get_sellersprite_readiness(driver: WebDriver) -> Dict[str, Any]:
+    try:
+        value = getattr(driver, "_sellersprite_readiness", {})
+    except Exception:
+        value = {}
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def safe_sellersprite_readiness(report: Dict[str, Any]) -> Dict[str, Any]:
+    allowed = {
+        "status",
+        "checked_at",
+        "page_url",
+        "plugin_nodes",
+        "login_required",
+        "product_count",
+        "enriched_records",
+        "max_fields_per_record",
+        "stable_checks",
+        "blocked",
+        "blocked_reason",
+    }
+    return {key: report.get(key) for key in allowed if key in report}
+
+
+def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) -> Dict[str, Any]:
+    blocked_reason = detect_block(driver)
+    cards = extract_product_cards(driver)
+    rows = extract_table_rows(driver)
+    product_asins = {
+        normalize_space(str(item.get("asin") or "")).upper()
+        for item in [*cards, *rows]
+        if normalize_space(str(item.get("asin") or ""))
+    }
+    field_counts_by_asin: Dict[str, int] = {}
+    for row in rows:
+        asin = normalize_space(str(row.get("asin") or "")).upper()
+        if not asin:
+            continue
+        parsed = parse_table_row_fields(row)
+        count = sum(1 for field_name in SELLERSPRITE_EVIDENCE_FIELDS if parsed.get(field_name))
+        field_counts_by_asin[asin] = max(field_counts_by_asin.get(asin, 0), count)
+    for card in cards:
+        asin = normalize_space(str(card.get("asin") or "")).upper()
+        if not asin:
+            continue
+        text = str(card.get("text") or "")
+        count = sum(
+            1
+            for field_name in SELLERSPRITE_EVIDENCE_FIELDS
+            if parse_sellersprite_inline_field(field_name, text)
+        )
+        field_counts_by_asin[asin] = max(field_counts_by_asin.get(asin, 0), count)
+
+    min_fields = max(int(getattr(runtime, "sellersprite_min_fields_per_record", 2) or 2), 1)
+    enriched_records = sum(1 for count in field_counts_by_asin.values() if count >= min_fields)
+    signature = "|".join(
+        [
+            str(plugin_node_count(driver)),
+            str(len(product_asins)),
+            str(len(rows)),
+            ",".join(f"{asin}:{count}" for asin, count in sorted(field_counts_by_asin.items())),
+        ]
+    )
+    report: Dict[str, Any] = {
+        "status": "data_loading",
+        "checked_at": now_iso(),
+        "page_url": str(getattr(driver, "current_url", "") or ""),
+        "plugin_nodes": plugin_node_count(driver),
+        "login_required": sellersprite_login_required(driver),
+        "product_count": len(product_asins),
+        "enriched_records": enriched_records,
+        "max_fields_per_record": max(field_counts_by_asin.values(), default=0),
+        "stable_checks": 0,
+        "signature": signature,
+        "blocked": bool(blocked_reason),
+        "blocked_reason": blocked_reason or "",
+    }
+    report["status"] = classify_sellersprite_snapshot(
+        report,
+        int(getattr(runtime, "sellersprite_min_enriched_records", 1) or 1),
+        min_fields,
+    )
+    return report
+
+
 def wait_for_user_plugin_action(driver: WebDriver, reason: str) -> None:
     print(f"卖家精灵插件需要人工处理：{reason}")
     print("请在当前 Chrome 窗口安装/启用卖家精灵插件，并完成登录。")
@@ -1021,7 +1239,23 @@ def wait_for_sellersprite_data_or_prompt(
     on_manual_pause: Optional[Any] = None,
     on_manual_resume: Optional[Any] = None,
     restart_driver: Optional[Any] = None,
+    on_readiness: Optional[Any] = None,
 ) -> str:
+    if not bool(getattr(runtime, "sellersprite_required", True)):
+        report = {
+            "status": "not_required",
+            "checked_at": now_iso(),
+            "page_url": str(getattr(driver, "current_url", "") or ""),
+        }
+        set_sellersprite_readiness(driver, report)
+        if on_readiness:
+            on_readiness(report)
+        return "not_required"
+
+    def publish(current_driver: WebDriver) -> None:
+        if on_readiness:
+            on_readiness(get_sellersprite_readiness(current_driver))
+
     def handle_block(current_driver: WebDriver) -> Optional[str]:
         if on_manual_pause:
             on_manual_pause("sellersprite_or_amazon_verification", current_driver.current_url)
@@ -1046,6 +1280,7 @@ def wait_for_sellersprite_data_or_prompt(
             except TimeoutException:
                 pass
             last_status = wait_for_sellersprite_data(current_driver, runtime, wait_seconds)
+            publish(current_driver)
             if last_status == "ok":
                 return last_status, current_driver
             if last_status == "blocked":
@@ -1056,6 +1291,7 @@ def wait_for_sellersprite_data_or_prompt(
 
     while True:
         status = wait_for_sellersprite_data(driver, runtime)
+        publish(driver)
         if status == "ok":
             return status
         if status == "blocked":
@@ -1096,11 +1332,14 @@ def wait_for_sellersprite_data_or_prompt(
             if status == "blocked":
                 return status
 
-        node_count = plugin_node_count(driver)
-        if node_count <= 0:
+        report = get_sellersprite_readiness(driver)
+        status = str(report.get("status") or status)
+        if status == "plugin_absent":
             wait_for_user_plugin_action(driver, "当前页面未检测到卖家精灵插件注入，可能未安装、未启用或当前 Chrome 不是安装插件的用户资料。")
+        elif status == "login_required":
+            wait_for_user_plugin_action(driver, "卖家精灵插件需要登录、重新授权或确认登录状态。")
         else:
-            wait_for_user_plugin_action(driver, "已检测到卖家精灵插件，但插件数据没有加载成功，通常是未登录、登录过期或插件弹窗需要确认。")
+            wait_for_user_plugin_action(driver, "已检测到卖家精灵插件，但真实字段尚未稳定显示。")
         try:
             wait_for_amazon_products(driver, runtime)
         except TimeoutException:
@@ -1612,6 +1851,14 @@ return {
 
 
 def wait_for_sellersprite_data(driver: WebDriver, runtime: RuntimeConfig, timeout_seconds: Optional[float] = None) -> str:
+    if not bool(getattr(runtime, "sellersprite_required", True)):
+        report = {
+            "status": "not_required",
+            "checked_at": now_iso(),
+            "page_url": str(getattr(driver, "current_url", "") or ""),
+        }
+        set_sellersprite_readiness(driver, report)
+        return "not_required"
     if runtime.activate_plugin:
         try_activate_plugin(driver)
     preload_page_data_with_scroll(driver, runtime)
@@ -1619,34 +1866,30 @@ def wait_for_sellersprite_data(driver: WebDriver, runtime: RuntimeConfig, timeou
     deadline = time.time() + timeout
     stable_seen = 0
     last_signature = ""
+    last_status = "data_loading"
     while time.time() < deadline:
-        if detect_block(driver):
+        report = inspect_sellersprite_readiness(driver, runtime)
+        status = str(report.get("status") or "data_loading")
+        if status == "blocked":
+            set_sellersprite_readiness(driver, report)
             return "blocked"
-        node_count = plugin_node_count(driver)
-        cards = extract_product_cards(driver)
-        rows = extract_table_rows(driver)
-        non_empty_plugin_rows = 0
-        for row in rows:
-            parsed = parse_table_row_fields(row)
-            if sum(1 for value in parsed.values() if value) >= 2:
-                non_empty_plugin_rows += 1
-        non_empty_card_rows = 0
-        for card in cards:
-            text = str(card.get("text") or "")
-            parsed_count = sum(1 for field_name in REQUESTED_DATA_FIELDS if parse_sellersprite_inline_field(field_name, text))
-            if parsed_count >= 3:
-                non_empty_card_rows += 1
-        signature = f"{node_count}:{len(cards)}:{len(rows)}:{non_empty_plugin_rows}:{non_empty_card_rows}"
-        if node_count > 0 and cards and (non_empty_plugin_rows > 0 or rows or non_empty_card_rows > 0):
-            if signature == last_signature:
-                stable_seen += 1
-            else:
-                stable_seen = 0
-            if stable_seen >= 2:
+        signature = str(report.get("signature") or "")
+        if status == "ready_candidate":
+            stable_seen = stable_seen + 1 if signature == last_signature else 1
+            report["stable_checks"] = stable_seen
+            required_checks = max(int(getattr(runtime, "sellersprite_stable_checks", 3) or 3), 1)
+            if stable_seen >= required_checks:
+                report["status"] = "ready"
+                set_sellersprite_readiness(driver, report)
                 return "ok"
+            report["status"] = "data_loading"
+        else:
+            stable_seen = 0
+        last_status = str(report.get("status") or status)
+        set_sellersprite_readiness(driver, report)
         last_signature = signature
         time.sleep(2)
-    return "plugin_timeout"
+    return last_status
 
 
 def random_plugin_retry_wait(runtime: RuntimeConfig) -> float:
@@ -1904,7 +2147,8 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
 
     print(f"任务目录：{job_dir}")
     print(f"起始类目：{runtime.start_url}")
-    print(f"浏览器模式：{runtime.browser_mode}")
+    print(f"浏览器后端：{runtime.browser_backend}/{runtime.browser_mode}")
+    print(f"卖家精灵门禁：{'required' if runtime.sellersprite_required else 'not_required'}")
     print(f"输出表格：{output_xlsx}")
     if dry_run:
         print("dry-run：配置检查完成，未打开浏览器。")
@@ -1983,6 +2227,7 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
                     on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
                     on_manual_resume=state.clear_manual_pause,
                     restart_driver=restart_plugin_driver,
+                    on_readiness=state.mark_sellersprite_readiness,
                 )
                 if plugin_status == "blocked":
                     log_failure(failures_path, state, runtime, node, page_number, page_url, "verification_timeout", "人工处理超时")

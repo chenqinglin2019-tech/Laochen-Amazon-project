@@ -71,6 +71,7 @@ from amazon_category_rank_crawler import (
     resolve_path,
     run_crawl as run_category_crawl,
     save_debug_snapshot,
+    safe_sellersprite_readiness,
     sleep_between_pages,
     slugify,
     start_driver,
@@ -178,6 +179,7 @@ class FrontRuntimeConfig:
     store_page_limit: Optional[int]
     store_sort_orders: List[str]
     resume: bool
+    browser_backend: str
     browser_mode: str
     chrome_binary: str
     chrome_user_data_dir: Path
@@ -206,6 +208,10 @@ class FrontRuntimeConfig:
     page_scroll_step_ratio: float
     page_scroll_wait_seconds: float
     page_scroll_stable_rounds: int
+    sellersprite_required: bool
+    sellersprite_min_enriched_records: int
+    sellersprite_min_fields_per_record: int
+    sellersprite_stable_checks: int
     save_debug_snapshots: bool
     field_selectors: Dict[str, List[str]] = field(default_factory=dict)
 
@@ -278,6 +284,10 @@ class FrontStateStore:
 
     def log_failure(self) -> None:
         self.data["failures_count"] = int(self.data.get("failures_count") or 0) + 1
+        self.flush()
+
+    def mark_sellersprite_readiness(self, report: Dict[str, Any]) -> None:
+        self.data["sellersprite_readiness"] = safe_sellersprite_readiness(report)
         self.flush()
 
     def mark_manual_pause(self, reason: str, page_url: str) -> None:
@@ -392,6 +402,9 @@ def build_front_runtime_config(config: Dict[str, Any], no_resume: bool) -> Front
     if mode == "storefront" and not store_urls_file.exists():
         raise UserFacingError(f"没有找到店铺 URL 表格：{store_urls_file}")
 
+    browser_backend = config_text(config, "browser_backend", "cdp").lower()
+    if browser_backend not in {"cdp", "selenium"}:
+        raise UserFacingError("配置项 `browser_backend` 只支持 cdp 或 selenium。")
     browser_mode = config_text(config, "browser_mode", "launch").lower()
     if browser_mode not in {"launch", "attach", "reuse", "applescript"}:
         raise UserFacingError("配置项 `browser_mode` 只支持 launch、attach、reuse 或 applescript。")
@@ -472,6 +485,7 @@ def build_front_runtime_config(config: Dict[str, Any], no_resume: bool) -> Front
         store_page_limit=store_page_limit,
         store_sort_orders=store_sort_orders,
         resume=False if no_resume else config_bool(config, "resume", True),
+        browser_backend=browser_backend,
         browser_mode=browser_mode,
         chrome_binary=config_text(config, "chrome_binary"),
         chrome_user_data_dir=resolve_path(config_text(config, "chrome_user_data_dir", "chrome_profiles/category-rank-sellersprite")),
@@ -500,6 +514,19 @@ def build_front_runtime_config(config: Dict[str, Any], no_resume: bool) -> Front
         page_scroll_step_ratio=page_scroll_step_ratio,
         page_scroll_wait_seconds=page_scroll_wait_seconds,
         page_scroll_stable_rounds=page_scroll_stable_rounds,
+        sellersprite_required=config_bool(config, "sellersprite_required", True),
+        sellersprite_min_enriched_records=max(
+            config_int(config, "sellersprite_min_enriched_records", 1) or 1,
+            1,
+        ),
+        sellersprite_min_fields_per_record=max(
+            config_int(config, "sellersprite_min_fields_per_record", 2) or 2,
+            1,
+        ),
+        sellersprite_stable_checks=max(
+            config_int(config, "sellersprite_stable_checks", 3) or 3,
+            1,
+        ),
         save_debug_snapshots=config_bool(config, "save_debug_snapshots", True),
         field_selectors=field_selectors,
     )
@@ -1126,6 +1153,8 @@ def run_front_modes(raw_config: Dict[str, Any], runtime: FrontRuntimeConfig, dry
 
     print(f"任务目录：{job_dir}")
     print(f"任务模式：{runtime.mode}")
+    print(f"浏览器后端：{runtime.browser_backend}/{runtime.browser_mode}")
+    print(f"卖家精灵门禁：{'required' if runtime.sellersprite_required else 'not_required'}")
     print(f"输入数量：{len(initial_queue)}")
     print(f"输出表格：{output_xlsx}")
     if dry_run:
@@ -1185,6 +1214,7 @@ def run_front_modes(raw_config: Dict[str, Any], runtime: FrontRuntimeConfig, dry
                     on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
                     on_manual_resume=state.clear_manual_pause,
                     restart_driver=restart_plugin_driver,
+                    on_readiness=state.mark_sellersprite_readiness,
                 )
                 if plugin_status == "blocked":
                     log_front_failure(failures_path, state, current, "verification_timeout", "人工处理超时", driver.current_url)

@@ -68,6 +68,8 @@ Run these from the generated runner folder:
 ./lc-amazon-data-crawl.sh amazon-front-run --config config/amazon_front_storefront.json
 ./lc-amazon-data-crawl.sh category-rank-run --config config/category_rank_crawler.json
 ./lc-amazon-data-crawl.sh image-competitor-run --config config/amazon_image_competitors.json
+./lc-amazon-data-crawl.sh cdp-browser-start --config config/amazon_front_keyword_search.json
+./lc-amazon-data-crawl.sh sellersprite-check --config config/amazon_front_keyword_search.json
 ```
 
 Always run the matching `*-dry-run` command before a real run after editing config or input files.
@@ -79,10 +81,38 @@ Read `references/configuration.md` when creating or editing configs. The key ope
 - Replace example input files under `inputs/` with the user's real Excel/CSV files, or point config paths to the real files.
 - For keyword search sorting, set `keyword_sort_orders` to any of: `Featured`, `Price: Low to High`, `Price: High to Low`, `Avg. Customer Review`, `Newest Arrivals`, `Best Sellers`.
 - For storefront crawling, set `store_sort_orders` with the same labels and set `store_page_limit` from 1 to 20.
-- Prefer `browser_mode: "launch"` with a dedicated `chrome_user_data_dir` when creating a new runner.
-- If using SellerSprite enrichment, fill `extension_path` with the local SellerSprite Chrome extension folder, or leave it empty and use a Chrome profile where the extension is already installed.
+- Default to `browser_backend: "cdp"` and `browser_mode: "reuse"` with
+  `chrome_binary: "auto"` and a dedicated `chrome_user_data_dir`. Real run and
+  readiness commands automatically start a persistent Chrome for Testing when
+  the configured CDP endpoint is not already running.
+- `./lc-amazon-data-crawl.sh install` installs the Python dependencies and the
+  Playwright Chromium/Chrome for Testing runtime used by automatic extension
+  loading.
+- `browser_backend: "selenium"` remains available as an explicit fallback.
+- If using SellerSprite enrichment, set `extension_path: "auto"` to scan normal
+  Chrome Profiles for the newest installed SellerSprite version and load it
+  into the dedicated CDP Profile. This loads extension code only; it never
+  copies credentials, cookies, or other Profile data.
+- Automatic extension loading requires Chrome for Testing or Chromium. Official
+  branded Chrome 137+ ignores `--load-extension`; on those versions either use
+  Chrome for Testing or load the unpacked extension once from
+  `chrome://extensions`.
+- With `browser_mode: "reuse"`, the runner connects to a separate crawl tab and
+  does not close the user-owned browser. `cdp-browser-start` remains available
+  when the browser should be prepared before a check or crawl command.
+- A fixed local extension folder remains supported in `extension_path`; leave
+  it empty only when the dedicated Profile already has the extension.
+- Keep `activate_plugin: false` by default. SellerSprite content scripts inject
+  automatically; avoiding broad activation clicks prevents accidental Amazon
+  navigation.
 - Keep `page_scroll_before_extract: true` so each visible Amazon page is scrolled downward before extraction; this triggers lazy-loaded product cards and SellerSprite-injected fields before records are written.
-- Do not use legacy third-party browser-container workflows; this skill is only for normal Chrome/Selenium Amazon front-end crawling.
+- Run `sellersprite-check` when preparing a profile or diagnosing plugin data.
+  It opens the first real target page and writes no crawl records.
+- When `sellersprite_required` is true, do not write page records until at
+  least the configured number of ASINs contains real SellerSprite-only fields
+  and the data remains stable for the configured number of checks.
+- Do not use legacy third-party browser-container workflows; this skill is only
+  for normal visible Chrome crawling through CDP, with Selenium as a fallback.
 
 ## Long-Running Crawl Supervision
 
@@ -91,6 +121,9 @@ For real runs, monitor terminal output and the `outputs/<job_id>/state.json` fil
 - If no new records, state updates, or browser actions happen for more than 3 minutes, report the current reason to the user.
 - If Amazon or SellerSprite needs manual action, tell the user exactly which browser window/page is waiting.
 - Before writing records, the crawler scrolls the page until the Amazon/product DOM and SellerSprite/plugin DOM stop changing, then waits for SellerSprite data to stabilize.
+- CDP reachability, plugin injection, plugin login prompts and actual enriched
+  fields are separate readiness checks. A plugin node or empty table alone is
+  never treated as ready.
 - The scripts include retry/relaunch behavior for SellerSprite data stalls: five plugin retries with random 10-20 second waits, then browser relaunch waits of 5 minutes and 10 minutes for later retry rounds when configured.
 
 ## Output Expectations

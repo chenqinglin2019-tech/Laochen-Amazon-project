@@ -51,9 +51,11 @@ except ImportError:  # pragma: no cover
 from amazon_category_rank_crawler import (
     BatchPauseScheduler,
     REQUESTED_DATA_FIELDS,
+    SELLERSPRITE_EVIDENCE_FIELDS,
     UserFacingError,
     append_jsonl,
     clean_url,
+    classify_sellersprite_snapshot,
     config_bool,
     config_float,
     config_int,
@@ -76,10 +78,13 @@ from amazon_category_rank_crawler import (
     read_jsonl,
     resolve_path,
     save_debug_snapshot,
+    safe_sellersprite_readiness,
+    set_sellersprite_readiness,
     sleep_between_pages,
     slugify,
     start_driver,
     try_activate_plugin,
+    sellersprite_login_required,
     wait_for_manual_clear,
     wait_for_amazon_products,
     wait_for_sellersprite_data,
@@ -281,6 +286,7 @@ class ImageCompetitorRuntimeConfig:
     vision_batch_size: int
     vision_timeout: int
     resume: bool
+    browser_backend: str
     browser_mode: str
     chrome_binary: str
     chrome_user_data_dir: Path
@@ -309,6 +315,10 @@ class ImageCompetitorRuntimeConfig:
     page_scroll_step_ratio: float
     page_scroll_wait_seconds: float
     page_scroll_stable_rounds: int
+    sellersprite_required: bool
+    sellersprite_min_enriched_records: int
+    sellersprite_min_fields_per_record: int
+    sellersprite_stable_checks: int
     save_debug_snapshots: bool
     sellersprite_on_lens: bool
     enrich_accepted_results: bool
@@ -386,6 +396,10 @@ class ImageCompetitorStateStore:
         self.data["failures_count"] = int(self.data.get("failures_count") or 0) + 1
         self.flush()
 
+    def mark_sellersprite_readiness(self, report: Dict[str, Any]) -> None:
+        self.data["sellersprite_readiness"] = safe_sellersprite_readiness(report)
+        self.flush()
+
     def mark_manual_pause(self, reason: str, page_url: str) -> None:
         self.data["manual_pause"] = {
             "paused_at": now_iso(),
@@ -448,9 +462,12 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
 
     extension_path_text = config_text(config, "extension_path")
     extension_path = resolve_path(extension_path_text) if extension_path_text else Path("")
+    browser_backend = config_text(config, "browser_backend", "cdp").lower()
+    if browser_backend not in {"cdp", "selenium"}:
+        raise UserFacingError("配置项 `browser_backend` 只支持 cdp 或 selenium。")
     browser_mode = config_text(config, "browser_mode", "launch").lower()
     if browser_mode not in {"launch", "attach", "reuse"}:
-        raise UserFacingError("以图搜图上传图片需要 Selenium 控制文件上传，browser_mode 只支持 launch、attach 或 reuse。")
+        raise UserFacingError("以图搜图 browser_mode 只支持 launch、attach 或 reuse。")
     if browser_mode == "launch" and extension_path_text and not extension_path.exists():
         raise UserFacingError(f"没有找到卖家精灵扩展目录：{extension_path}")
 
@@ -498,9 +515,16 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
         raise UserFacingError("配置项 result_mode 只支持 detail 或 count_only。")
     sellersprite_on_lens = config_bool(config, "sellersprite_on_lens", False)
     enrich_accepted_results = config_bool(config, "enrich_accepted_results", True)
+    sellersprite_required = config_bool(config, "sellersprite_required", result_mode != "count_only")
     if result_mode == "count_only":
         sellersprite_on_lens = False
         enrich_accepted_results = False
+        sellersprite_required = False
+    if sellersprite_required and not (sellersprite_on_lens or enrich_accepted_results):
+        raise UserFacingError(
+            "sellersprite_required=true 时，必须启用 sellersprite_on_lens "
+            "或 enrich_accepted_results。"
+        )
 
     return ImageCompetitorRuntimeConfig(
         job_id=slugify(config_text(config, "job_id") or f"amazon-image-competitors-{now_ts()}"),
@@ -526,6 +550,7 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
         vision_batch_size=config_int(config, "vision_batch_size", 6) or 6,
         vision_timeout=config_int(config, "vision_timeout", 120) or 120,
         resume=False if no_resume else config_bool(config, "resume", True),
+        browser_backend=browser_backend,
         browser_mode=browser_mode,
         chrome_binary=config_text(config, "chrome_binary"),
         chrome_user_data_dir=resolve_path(config_text(config, "chrome_user_data_dir", "chrome_profiles/category-rank-sellersprite")),
@@ -554,6 +579,19 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
         page_scroll_step_ratio=page_scroll_step_ratio,
         page_scroll_wait_seconds=page_scroll_wait_seconds,
         page_scroll_stable_rounds=page_scroll_stable_rounds,
+        sellersprite_required=sellersprite_required,
+        sellersprite_min_enriched_records=max(
+            config_int(config, "sellersprite_min_enriched_records", 1) or 1,
+            1,
+        ),
+        sellersprite_min_fields_per_record=max(
+            config_int(config, "sellersprite_min_fields_per_record", 2) or 2,
+            1,
+        ),
+        sellersprite_stable_checks=max(
+            config_int(config, "sellersprite_stable_checks", 3) or 3,
+            1,
+        ),
         save_debug_snapshots=config_bool(config, "save_debug_snapshots", True),
         sellersprite_on_lens=sellersprite_on_lens,
         enrich_accepted_results=enrich_accepted_results,
@@ -955,6 +993,14 @@ def wait_for_lens_sellersprite_data(
     runtime: ImageCompetitorRuntimeConfig,
     timeout_seconds: Optional[float] = None,
 ) -> str:
+    if not runtime.sellersprite_required:
+        report = {
+            "status": "not_required",
+            "checked_at": now_iso(),
+            "page_url": str(getattr(driver, "current_url", "") or ""),
+        }
+        set_sellersprite_readiness(driver, report)
+        return "not_required"
     if runtime.activate_plugin:
         try_activate_plugin(driver)
     preload_page_data_with_scroll(driver, runtime)
@@ -962,34 +1008,79 @@ def wait_for_lens_sellersprite_data(
     deadline = time.time() + timeout
     stable_seen = 0
     last_signature = ""
+    last_status = "data_loading"
     while time.time() < deadline:
-        if detect_block(driver):
+        blocked_reason = detect_block(driver)
+        if blocked_reason:
+            report = {
+                "status": "blocked",
+                "checked_at": now_iso(),
+                "page_url": str(getattr(driver, "current_url", "") or ""),
+                "blocked": True,
+                "blocked_reason": blocked_reason,
+            }
+            set_sellersprite_readiness(driver, report)
             return "blocked"
         cards = extract_lens_candidate_cards(driver, include_text=True)
         table_rows = extract_table_rows(driver)
-        parsed_table_rows = 0
+        field_counts_by_asin: Dict[str, int] = {}
         for row in table_rows:
+            asin = normalize_space(str(row.get("asin") or "")).upper()
+            if not asin:
+                continue
             parsed = parse_table_row_fields(row)
-            if sum(1 for value in parsed.values() if value) >= 2:
-                parsed_table_rows += 1
-        parsed_cards = 0
+            count = sum(1 for field_name in SELLERSPRITE_EVIDENCE_FIELDS if parsed.get(field_name))
+            field_counts_by_asin[asin] = max(field_counts_by_asin.get(asin, 0), count)
         for card in cards:
+            asin = normalize_space(str(card.get("asin") or "")).upper()
+            if not asin:
+                continue
             text = str(card.get("text") or "")
-            parsed_count = sum(1 for field_name in REQUESTED_DATA_FIELDS if parse_field_from_text(field_name, text))
-            if parsed_count >= 2:
-                parsed_cards += 1
+            count = sum(
+                1
+                for field_name in SELLERSPRITE_EVIDENCE_FIELDS
+                if parse_field_from_text(field_name, text)
+            )
+            field_counts_by_asin[asin] = max(field_counts_by_asin.get(asin, 0), count)
         node_count = plugin_node_count(driver)
-        signature = f"{node_count}:{len(cards)}:{len(table_rows)}:{parsed_table_rows}:{parsed_cards}"
-        if cards and (parsed_table_rows > 0 or parsed_cards > 0 or (node_count > 0 and table_rows)):
-            if signature == last_signature:
-                stable_seen += 1
-            else:
-                stable_seen = 0
-            if stable_seen >= 1:
+        min_fields = max(runtime.sellersprite_min_fields_per_record, 1)
+        report = {
+            "status": "data_loading",
+            "checked_at": now_iso(),
+            "page_url": str(getattr(driver, "current_url", "") or ""),
+            "plugin_nodes": node_count,
+            "login_required": sellersprite_login_required(driver),
+            "product_count": len({str(card.get("asin") or "") for card in cards if card.get("asin")}),
+            "enriched_records": sum(1 for count in field_counts_by_asin.values() if count >= min_fields),
+            "max_fields_per_record": max(field_counts_by_asin.values(), default=0),
+            "stable_checks": 0,
+            "blocked": False,
+            "blocked_reason": "",
+        }
+        report["status"] = classify_sellersprite_snapshot(
+            report,
+            runtime.sellersprite_min_enriched_records,
+            min_fields,
+        )
+        signature = (
+            f"{node_count}:{len(cards)}:{len(table_rows)}:"
+            + ",".join(f"{asin}:{count}" for asin, count in sorted(field_counts_by_asin.items()))
+        )
+        if report["status"] == "ready_candidate":
+            stable_seen = stable_seen + 1 if signature == last_signature else 1
+            report["stable_checks"] = stable_seen
+            if stable_seen >= runtime.sellersprite_stable_checks:
+                report["status"] = "ready"
+                set_sellersprite_readiness(driver, report)
                 return "ok"
+            report["status"] = "data_loading"
+        else:
+            stable_seen = 0
+        last_status = str(report["status"])
+        set_sellersprite_readiness(driver, report)
         last_signature = signature
         time.sleep(1)
-    return "plugin_timeout"
+    return last_status
 
 
 def strip_html_text(value: str) -> str:
@@ -1708,6 +1799,10 @@ def enrich_accepted_records(
                 record["load_status"] = "blocked"
                 record["note"] = "补抓卖家精灵数据时遇到验证。"
                 break
+            if runtime.sellersprite_required and plugin_status != "ok":
+                raise UserFacingError(
+                    f"卖家精灵数据未达到写入门禁：{plugin_status}。"
+                )
             source_context = {
                 "source_id": record.get("source_id", ""),
                 "source_asin": record.get("source_asin", ""),
@@ -1948,6 +2043,8 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
 
     print(f"任务目录：{job_dir}")
     print(f"任务模式：image_competitor/{runtime.result_mode}")
+    print(f"浏览器后端：{runtime.browser_backend}/{runtime.browser_mode}")
+    print(f"卖家精灵门禁：{'required' if runtime.sellersprite_required else 'not_required'}")
     print(f"Amazon 站点：{runtime.marketplace_domain}")
     print(f"输入数量：{len(initial_queue)}")
     print(f"输出表格：{output_xlsx}")
@@ -2019,11 +2116,16 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                         raise
                 if runtime.sellersprite_on_lens:
                     plugin_status = wait_for_lens_sellersprite_data(driver, runtime)
+                    state.mark_sellersprite_readiness(getattr(driver, "_sellersprite_readiness", {}))
                     if plugin_status == "blocked":
                         log_failure(failures_path, state, current, "verification_timeout", "人工处理超时", driver.current_url)
                         if runtime.save_debug_snapshots:
                             save_debug_snapshot(driver, debug_dir, "verification_timeout")
                         break
+                    if runtime.sellersprite_required and plugin_status != "ok":
+                        raise UserFacingError(
+                            f"卖家精灵数据未达到写入门禁：{plugin_status}。"
+                        )
                 else:
                     plugin_status = "skipped_on_lens"
 
@@ -2044,6 +2146,7 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                 )
                 if needs_enrichment:
                     accepted_records = enrich_accepted_records(driver, runtime, accepted_records)
+                    state.mark_sellersprite_readiness(getattr(driver, "_sellersprite_readiness", {}))
                 candidate_audit_rows = build_candidate_audit_rows(candidate_records, accepted_records, decisions)
 
                 for row in candidate_audit_rows:
