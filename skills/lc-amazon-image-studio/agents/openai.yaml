@@ -1,4 +1,4 @@
 interface:
   display_name: "Lc Amazon Image Studio"
-  short_description: "Amazon listing image system"
-  default_prompt: "Use $lc-amazon-image-studio to plan Amazon listing images from my product photos and selling points. Start with the cloud auth gate; if it fails, stop immediately."
+  short_description: "Fast Amazon images with critical-detail locks"
+  default_prompt: "Use $lc-amazon-image-studio to build a fast, resumable Amazon image set from my real product photos with source-quality, geometry, material, scale, and critical-detail locks."
