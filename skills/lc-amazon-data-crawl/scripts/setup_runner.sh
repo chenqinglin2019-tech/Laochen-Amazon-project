@@ -52,7 +52,12 @@ mkdir -p "$TARGET_DIR/scripts" "$TARGET_DIR/config" "$TARGET_DIR/inputs" "$TARGE
 
 cp "$SKILL_DIR"/scripts/*.py "$TARGET_DIR/scripts/"
 cp "$SKILL_DIR/assets/requirements.txt" "$TARGET_DIR/requirements.txt"
-cp "$SKILL_DIR"/assets/config/*.json "$TARGET_DIR/config/"
+for config_file in "$SKILL_DIR"/assets/config/*.json; do
+  target_config="$TARGET_DIR/config/$(basename "$config_file")"
+  if [[ ! -f "$target_config" ]]; then
+    cp "$config_file" "$target_config"
+  fi
+done
 if [[ ! -f "$TARGET_DIR/config.json" ]]; then
   cp "$SKILL_DIR/config.json" "$TARGET_DIR/config.json"
 fi
@@ -90,6 +95,8 @@ Usage:
   ./lc-amazon-data-crawl.sh category-rank-run [--config config/category_rank_crawler.json]
   ./lc-amazon-data-crawl.sh image-competitor-dry-run [--config config/amazon_image_competitors.json]
   ./lc-amazon-data-crawl.sh image-competitor-run [--config config/amazon_image_competitors.json]
+  ./lc-amazon-data-crawl.sh cdp-browser-start --config <config-file>
+  ./lc-amazon-data-crawl.sh sellersprite-check --config <config-file>
 USAGE
 }
 
@@ -154,12 +161,16 @@ install_runner() {
   fi
   "$PYTHON_BIN" -m pip install --upgrade pip
   "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
+  "$PYTHON_BIN" -m playwright install chromium
 }
 
 doctor() {
   echo "runner: $ROOT_DIR"
   if [[ -x "$PYTHON_BIN" ]]; then
     echo "python: ok ($PYTHON_BIN)"
+    "$PYTHON_BIN" -c "import playwright; print('playwright: ok')"
+    "$PYTHON_BIN" -c "import selenium; print('selenium: ok')"
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/start_cdp_browser.py" --diagnose
   else
     echo "python: missing .venv"
   fi
@@ -178,6 +189,32 @@ doctor() {
       echo "$file: missing"
     fi
   done
+}
+
+auto_start_reuse_browser() {
+  local default_config="$1"
+  shift
+  local config_path="$default_config"
+  local previous=""
+  local argument
+  for argument in "$@"; do
+    if [[ "$previous" == "--config" ]]; then
+      config_path="$argument"
+      previous=""
+      continue
+    fi
+    case "$argument" in
+      --config)
+        previous="--config"
+        ;;
+      --config=*)
+        config_path="${argument#--config=}"
+        ;;
+    esac
+  done
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/start_cdp_browser.py" \
+    --if-needed \
+    --config "$config_path"
 }
 
 COMMAND="${1:-help}"
@@ -200,6 +237,7 @@ case "$COMMAND" in
   amazon-front-run)
     require_cloud_auth
     ensure_installed
+    auto_start_reuse_browser "config/amazon_front_crawler.json" "$@"
     exec "$PYTHON_BIN" "$ROOT_DIR/scripts/run_amazon_front_crawl.py" "$@"
     ;;
   category-rank-dry-run)
@@ -210,6 +248,7 @@ case "$COMMAND" in
   category-rank-run)
     require_cloud_auth
     ensure_installed
+    auto_start_reuse_browser "config/category_rank_crawler.json" "$@"
     exec "$PYTHON_BIN" "$ROOT_DIR/scripts/run_category_rank_crawl.py" "$@"
     ;;
   image-competitor-dry-run)
@@ -220,7 +259,19 @@ case "$COMMAND" in
   image-competitor-run)
     require_cloud_auth
     ensure_installed
+    auto_start_reuse_browser "config/amazon_image_competitors.json" "$@"
     exec "$PYTHON_BIN" "$ROOT_DIR/scripts/run_amazon_image_competitor_crawl.py" "$@"
+    ;;
+  cdp-browser-start)
+    require_cloud_auth
+    ensure_installed
+    exec "$PYTHON_BIN" "$ROOT_DIR/scripts/start_cdp_browser.py" "$@"
+    ;;
+  sellersprite-check)
+    require_cloud_auth
+    ensure_installed
+    auto_start_reuse_browser "config/amazon_front_keyword_search.json" "$@"
+    exec "$PYTHON_BIN" "$ROOT_DIR/scripts/run_sellersprite_check.py" "$@"
     ;;
   help|-h|--help)
     usage

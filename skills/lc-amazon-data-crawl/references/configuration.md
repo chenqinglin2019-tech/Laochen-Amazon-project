@@ -19,18 +19,88 @@ Configs are plain JSON. Relative paths are resolved from the runner root.
 
 ## Browser Modes
 
-- `launch`: start a dedicated Chrome with `chrome_user_data_dir`; best for repeatable crawling.
+- `browser_backend: "cdp"`: default; connect Playwright to visible Chrome
+  through `debugger_address` without invoking ChromeDriver.
+- `browser_backend: "selenium"`: explicit compatibility fallback.
+- `launch`: start a dedicated Chrome owned by the crawler; it closes when the crawler exits.
 - `attach`: connect to an already running Chrome debugging port.
-- `reuse`: require an already running debugging port; fail if not available.
+- `reuse`: keep a user-owned CDP browser open across commands. The runner shell
+  automatically starts it before real runs and `sellersprite-check` when the
+  endpoint is not already available.
 - `applescript`: only supported by front/category crawlers, for manual Chrome control fallback.
+
+`browser_backend` selects the automation implementation. `browser_mode`
+selects who starts and owns the Chrome process. In CDP `attach`/`reuse` mode the
+runner opens a separate crawl tab and disconnects without closing the user's
+browser.
 
 Common fields:
 
-- `chrome_binary`: usually `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` on macOS.
-- `chrome_user_data_dir`: dedicated profile folder, for example `chrome_profiles/lc-amazon-data-crawl`.
+- `chrome_binary: "auto"`: locate the newest installed Chrome for Testing,
+  including the Playwright browser cache installed by the runner.
+- `chrome_user_data_dir`: dedicated profile folder, by default
+  `chrome_profiles/lc-amazon-data-crawl-cft`.
 - `debugger_address`: default `127.0.0.1:9222`.
 - `extension_path`: local SellerSprite extension folder. Leave empty if using a Chrome profile where the extension is already installed and the script can work without loading an unpacked extension.
-- `activate_plugin`: true to try to click/activate SellerSprite injected data.
+- `extension_path: "auto"`: when starting the dedicated CDP browser with
+  `cdp-browser-start`, scan normal Chrome Profiles for the newest installed
+  SellerSprite version and load that extension into the dedicated Profile.
+  No credentials, cookies, or other Profile files are copied.
+- `extension_path: "auto"` must use Chrome for Testing or Chromium. Branded
+  Chrome 137+ ignores command-line extension loading.
+- `activate_plugin`: false by default. SellerSprite injects automatically;
+  enabling it only permits clicks inside detected plugin containers.
+
+`install` provisions the required Chrome for Testing runtime:
+
+```bash
+./lc-amazon-data-crawl.sh install
+./lc-amazon-data-crawl.sh doctor
+```
+
+Real run and readiness commands automatically start or reuse the configured
+browser. It can also be prepared explicitly:
+
+```bash
+./lc-amazon-data-crawl.sh cdp-browser-start --config config/amazon_front_storefront.json
+./lc-amazon-data-crawl.sh sellersprite-check --config config/amazon_front_storefront.json
+```
+
+`cdp-browser-start` verifies the configured Profile path and leaves Chrome
+running; later runner commands close only the tabs they created.
+
+Chrome Profile verification is mandatory for CDP. The Profile Path shown by
+`chrome://version` must equal `chrome_user_data_dir/chrome_profile_directory`.
+This prevents attaching to a different Chrome profile that does not contain the
+expected SellerSprite installation and login session.
+
+## SellerSprite Readiness
+
+Use these fields for SellerSprite-enriched modes:
+
+- `sellersprite_required`: fail closed when actual plugin data is unavailable.
+- `sellersprite_min_enriched_records`: minimum ASIN records with plugin fields;
+  default 1.
+- `sellersprite_min_fields_per_record`: minimum SellerSprite-only fields per
+  qualifying ASIN; default 2.
+- `sellersprite_stable_checks`: consecutive identical data checks required
+  before writing; default 3.
+
+The readiness states are `browser_unreachable`, `plugin_absent`,
+`login_required`, `data_loading`, `ready`, and `blocked`. Title, price, rating,
+empty plugin tables, and plugin DOM nodes without parsed SellerSprite fields do
+not satisfy the gate.
+
+Check the first real target without writing records:
+
+```bash
+./lc-amazon-data-crawl.sh sellersprite-check --config config/amazon_front_keyword_search.json
+```
+
+For `image-competitor` count-only mode, set `sellersprite_required: false`
+because that output does not request SellerSprite fields. Detail mode must use
+either `sellersprite_on_lens` or `enrich_accepted_results` when the gate is
+required.
 
 ## Page Preload Scroll
 
