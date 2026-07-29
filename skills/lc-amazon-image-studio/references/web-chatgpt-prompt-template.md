@@ -12,6 +12,9 @@ Use this when you want web ChatGPT / Image 2 to create a secondary reference set
 - If using the competitor-learning branch, tell web ChatGPT to learn from the competitor references without copying layouts or text.
 - Tell web ChatGPT explicitly that canvas fitting must happen through padding, background extension, or scene recomposition, never by stretching or warping the product.
 - Prefer using the real product as a reference anchor or composite source for high-fidelity images instead of repainting the product body from scratch.
+- Provide separate close-up crops for every P0/P1 critical detail that should be visible in the requested view.
+- Mark details that are hidden from a view. Never move a hidden port, button, seam, or connector to another surface just to show it.
+- If a critical detail is unreadable in the source, stop that image instead of reconstructing it from imagination.
 - If the product category is obvious, inject category-specific scene logic from `category-playbooks.md`.
 
 ## Master Prompt Template
@@ -39,6 +42,21 @@ Geometry Lock:
 - Normalized L:W:H ratio: [RATIO or N/A]
 - Reference image anchors: [front / side / top / 45deg / detail]
 - Unsupported or uncertain axes: [NONE or DETAILS]
+
+Material Lock:
+- Material and finish: [CONFIRMED MATERIAL / FINISH]
+- Texture and light behavior: [CONFIRMED TEXTURE / REFLECTION / TRANSLUCENCY]
+
+Scene Scale Lock:
+- Product physical dimensions: [DIMENSIONS or UNKNOWN]
+- Support surface / reference object: [CONFIRMED SCALE CONTEXT]
+- Contact and shadow logic: [HOW THE PRODUCT PHYSICALLY SITS OR ATTACHES]
+
+Critical Detail Lock:
+- [P0 DETAIL]: [EXACT COMPONENT, SUPPORTED VIEW, POSITION, SHAPE, ORIENTATION, COLOR]
+- [P1 DETAIL]: [EXACT COMPONENT, SUPPORTED VIEW, POSITION, SHAPE, ORIENTATION, COLOR]
+- Hidden from this view: [DETAILS THAT MUST NOT BE MOVED INTO VIEW]
+- Do not delete, fill, move, enlarge, shrink, rotate, simplify, or replace any required P0/P1 detail.
 
 Locked physical traits that must not change:
 - [PROPORTION / SILHOUETTE FACT]
@@ -98,6 +116,18 @@ Geometry Lock:
 - Reference image anchors: [front / side / top / 45deg / detail]
 - Unsupported or uncertain axes: [NONE or DETAILS]
 
+Material Lock:
+- [CONFIRMED MATERIAL / FINISH / TEXTURE]
+
+Scene Scale Lock:
+- [PHYSICAL SIZE / SUPPORT / REFERENCE OBJECT / CONTACT SHADOW]
+
+Critical Detail Lock:
+- Required and visible: [DETAIL + EXACT SUPPORTED LOCATION]
+- Hidden from this view: [DETAILS THAT MUST NOT BE RELOCATED]
+- Attach a separate reference crop for every required P0/P1 detail.
+- Do not delete, fill, move, resize, rotate, simplify, or replace a required detail.
+
 Locked physical traits that must remain unchanged:
 - [PROPORTION / SILHOUETTE FACT]
 - [VISIBLE DETAIL FACT]
@@ -113,5 +143,5 @@ Do not show:
 - any altered proportions, warped geometry, or modified product details
 
 Style:
-Clean, photorealistic, conversion-focused Amazon visual. Readable text only if necessary.
+Clean, photorealistic, conversion-focused Amazon base visual with no text. Add text later through deterministic layout.
 ```
