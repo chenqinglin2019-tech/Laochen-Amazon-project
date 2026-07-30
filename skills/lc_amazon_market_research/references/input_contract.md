@@ -11,7 +11,7 @@
 
 运行 `tools/bin/market-research inspect-inputs` 后，从本地 Excel 自动识别：
 
-- `marketplace`：站点，例如 `US`。优先从文件名 `Competitor-US-*`、`ExpandKeywords-US-*`、`KeywordConversionRate-US-*` 识别。
+- `marketplace`：目标站点，必须由用户确认。支持 `US`、`UK`、`DE`、`FR`、`JP`、`AU`、`CA`、`IT`、`ES`、`MX`；`GB` 输入归一为 `UK`。文件名中的站点只用于核对。
 - `keyword`：核心关键词 / 市场名。优先从 `KeywordConversionRate-US-car seat cushion(164)-Last 90 days.xlsx` 或 sheet 名识别；识别不到时从表内第一条关键词兜底。
 - `primary_category`：主类目路径。从近 30 天竞品表 `类目路径` 的众数识别。
 
@@ -42,8 +42,8 @@ B0XXXXXXX,明显不相关：不是当前核心关键词对应产品
 - `父ASIN`
 - `类目路径`
 - `月销量`
-- `月销售额($)`
-- `价格($)`
+- `月销售额(<Excel 货币>)`
+- `价格(<Excel 货币>)`
 - `评分数`
 - `评分`
 - `上架天数`
@@ -71,6 +71,6 @@ B0XXXXXXX,明显不相关：不是当前核心关键词对应产品
 - `关键词`
 - `近90天点击量`
 - `近90天购买量`
-- `PPC竞价-推荐($)`
+- `PPC竞价-推荐(<Excel 货币>)`
 
-`PPC竞价-推荐($)` 为空或无法解析的行会被剔除；平均转化率和加权 PPC 只基于保留词计算。
+金额字段兼容 `$`、`€`、`£`、`¥/￥` 等 Excel 表头；不做汇率换算。`PPC竞价-推荐` 为空或无法解析的行会被剔除；平均转化率和加权 PPC 只基于保留词计算。

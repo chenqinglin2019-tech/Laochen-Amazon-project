@@ -12,8 +12,9 @@ Public repository for Laochen Amazon workflow skills.
   pricing, ads, reviews, seasonality, Woot signals, and optional offsite traces.
 - `skills/lc_amazon_market_opportunity/` - Continue from market research into
   product feature tagging, opportunity combinations, and supply-demand indexes.
+  Last updated: 2026-07-30 23:42 (UTC+8).
 - `skills/lc_amazon_market_research/` - Generate Amazon market research reports
-  from SellerSprite Excel exports.
+  from SellerSprite Excel exports. Last updated: 2026-07-30 23:42 (UTC+8).
 - `skills/lc_amazon_niche/` - Score and rank Amazon niche candidates by seller
   profile.
 

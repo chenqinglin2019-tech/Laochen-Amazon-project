@@ -2,6 +2,13 @@
 
 本文件只约束 agent 判断和留痕，不替代 CLI 计算。
 
+## 站点与语言边界
+
+- 站点只继承上一段项目 manifest，不由本 skill 再次询问、默认或覆盖。
+- 维度聚类和打标必须理解 `inspect-report.listing_language` 对应的关键词、标题与参数。
+- 原始值及 evidence 保留源语言，标准语义值可保留行业原词，`display_value` 统一为中文。
+- 不得用只覆盖英语的固定关键词规则冒充多语言语义判断。无法可靠理解时填 `不可识别` 并留痕。
+
 ## 维度确认输出契约
 
 Agent 必须基于 `03_dimension_candidates.json` 做四件事：

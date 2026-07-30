@@ -4,7 +4,7 @@
 
 ## 概要
 
-先完成一次用户访问校验 → 用户给已经准备好的卖家精灵市场调研 Excel → 创建 `market_project_<YYYYMMDD_HHmmss>/` 项目目录 → CLI 在 `market_research/` 子目录本地清洗和计算 → 生成 HTML 看板、辅助 Excel、JSON 底稿 → 你按固定口径解读。主报告完成后，可按固定流程追加头部品牌/卖家外部调研。
+先完成一次不扣积分的用户访问校验 → 用户确认目标 Amazon 站点并提供已经准备好的卖家精灵市场调研 Excel → 创建 `market_project_<YYYYMMDD_HHmmss>/` 项目目录 → CLI 在 `market_research/` 子目录本地清洗和计算 → 生成 HTML 看板、辅助 Excel、JSON 底稿 → 你按固定口径解读。主报告完成后，可按固定流程追加头部品牌/卖家外部调研。
 
 本 skill 主报告只做文档中市场主报告前半段：市场规模、趋势、垄断度、广告压力、基础透视、8 项规则结论和过程留痕。头部品牌/卖家外部调研只作为公开信息推断追加，不改写结构化市场数据。
 
@@ -15,7 +15,7 @@
 - `tools/bin/market-research-darwin-amd64`：macOS Intel Go CLI。
 - `tools/bin/market-research-darwin-arm64`：macOS Apple Silicon Go CLI。
 - macOS 首次运行前默认执行预处理：`chmod +x ./tools/bin/market-research-darwin-*`，然后执行 `xattr -d com.apple.quarantine ./tools/bin/market-research-darwin-* 2>/dev/null || true`。不要等报错后才处理。
-- `<所选CLI> auth-check`：每次 skill 调用的第一条业务命令，只做一次用户访问校验，不扣积分；通过后其余报告计算均在本地完成。
+- `<所选CLI> auth-check`：每次 skill 调用的第一条业务命令，只做一次用户访问校验，不扣积分；通过后主报告计算均在本地完成。
 - `<所选CLI> relevance-workspace`：从硬规则清洗后的近 30 天有效 listing 生成全量相关性打标工作区；agent 必须每个 ASIN 输出一条 relevance tag。
 - `<所选CLI> relevance-exclusions`：校验 agent 全量相关性打标结果，并只把 `relevance=irrelevant` 的 ASIN 导出为剔除清单。
 - `<所选CLI> external-targets`：从已有报告中导出 Top 品牌/卖家外部调研对象和填报模板。
@@ -28,7 +28,11 @@
 
 读 `INSTRUCTIONS.md`。
 
-读取 `config.json` 并先执行 `<所选CLI> auth-check`。Token 缺失或校验未通过时立即停止，不读取输入、不创建项目目录、不运行其他命令，也不得复用其他 skill 的 Token。不要在回复中打印完整 Token。
+读取 `config.json` 并先执行 `<所选CLI> auth-check`。Token 缺失或校验未通过时立即停止，不读取输入、不创建项目目录、不运行其他命令，也不得复用其他 Skill 的 Token。不要在命令或回复中打印完整 Token。
+
+开始时必须取得用户明确确认的目标站点。CLI 从文件名识别出的站点只用于核对；如果与用户确认结果冲突，必须先让用户确认，不能静默覆盖，也不能默认使用 US。主报告金额及货币以用户 Excel 表头和数值为准，不做汇率换算。
+
+全量相关性打标必须理解目标站点语言。标题、类目和参数保留源语言，Agent 按语义判断是否属于当前核心关键词市场；不得把只覆盖英语的候选提示或固定词表当作最终结论。候选提示只决定复核优先级，不能替代全量判断。
 
 主报告完成后，只用一句话询问用户是否继续联网调研 Top10 品牌/卖家并追加到同一个 HTML 看板；不要写“尚未追加”这类提示。
 

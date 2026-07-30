@@ -5,12 +5,12 @@
 - `cleaned_30d_listings.json`：近 30 天有效 listing，已经完成硬规则清洗和 agent 明显不相关 ASIN 剔除。
 - `06_top90_keywords.json`：按流量占比累计到 90% 的关键词。
 - `03_market_metrics.json`：总指标和垄断/趋势指标。
-- `01_input_manifest.json`：站点、核心词、类目、源文件路径。
+- `01_input_manifest.json`：站点、Excel 原币种、核心词、类目、源文件路径。站点必须是 `US`、`UK`、`DE`、`FR`、`JP`、`AU`、`CA`、`IT`、`ES`、`MX` 之一；旧值 `GB` 只规范为 `UK`。
 - `report_data.json`：HTML 看板使用的公开数据。
 
 ## 本 skill 生成的文件
 
-- `02_keyword_roots.json`：后端关键词词根返回和请求计数。
+- `02_keyword_roots.json`：统一后端关键词词根返回、项目站点、主要语言和请求计数。
 - `03_dimension_candidates.json`：按词根类型聚合的维度候选。
 - `agent_dimensions.json`：agent 确认的最终维度。
 - `04_tagging_workspace.json`：给 agent 逐 listing 打标的工作区。
@@ -43,3 +43,5 @@
 - `evidence`：每个维度的判断依据
 
 `normalization_dictionary` 每条映射必须包含 `display_value`，用于追溯 `display_values`。
+
+非英语站点的原始值和 evidence 必须保留源语言；`display_values` 必须是中文展示标签。项目站点在本 skill 内不可更改。
