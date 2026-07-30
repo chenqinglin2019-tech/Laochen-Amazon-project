@@ -9,6 +9,8 @@
 PROJECT_ROOT=/path/to/market_project_<YYYYMMDD_HHmmss>
 ```
 
+支持继承的 Amazon 站点固定为：`US`、`UK`、`DE`、`FR`、`JP`、`AU`、`CA`、`IT`、`ES`、`MX`。站点以项目里的 `01_input_manifest.json` 为唯一依据。本 skill 不重新询问站点、不默认 US、不接受另一个站点覆盖项目；旧项目中的 `GB` 仅规范为 `UK`。
+
 只有满足以下条件才继续：
 
 - 当前上下文中已经出现真实 `market_project_<YYYYMMDD_HHmmss>/` 项目根目录，且不是 agent 临时猜测出来的。
@@ -32,7 +34,7 @@ market_project_<YYYYMMDD_HHmmss>/
   market_opportunity/
 ```
 
-CLI 会根据 `project_manifest.json` 自动定位 `market_research/`。为了兼容旧产物，也可以接受当前上下文中已经明确出现的 `market_research/` 输出目录；但不要在缺少上下文时要求用户补目录。
+CLI 会根据 `project_manifest.json` 自动定位 `market_research/`。本 skill 的正常入口是项目根目录，不要求用户补 `market_research/` 子目录。
 
 本 skill 不直接接收原始 Excel。`market_research/` 目录必须包含：
 
@@ -44,10 +46,15 @@ CLI 会根据 `project_manifest.json` 自动定位 `market_research/`。为了�
 
 如果缺少 `cleaned_30d_listings.json`，停止并说明需要先在同一上下文完成新版 `lc_amazon_market_research` 市场主报告。
 
-后端配置由 CLI 从环境变量或本机私有 `config.json` 读取；这是访问我们后端的凭据，不是上游词根服务账号、key 或 token。
+后端访问配置由 CLI 自行读取。agent 只调用 CLI，不读取、不打印、不在回复中复述任何后端凭据；也不要询问或记录外部供应商接口、账号或凭据。
 
-- `LAOCHEN_BACKEND_URL`：默认 `https://mcp.yixunkuajing.com`
-- `LAOCHEN_BACKEND_TOKEN`：访问我们后端的 token。开发测试目录可以放在本机私有 `config.json`；面向用户交付的包不要内置 token。agent 不要读取、打印或在回复中复述该 token。
+如果 `fetch-roots` 明确返回缺少后端 token，立即停止，不生成维度候选、不自行拆词根、不使用其他 Skill 的 token。固定回复：
+
+```text
+商品机会深挖访问配置缺失，本轮不继续执行。请补齐该 Skill 的用户访问 Token 后，在同一上下文继续。
+```
+
+这里需要的是统一后端的用户访问 Token；不要向用户询问任何外部供应商 token。
 
 ---
 
@@ -93,19 +100,26 @@ Windows：
 
 确认 `status=ready` 后继续。
 
+同时读取命令返回的：
+
+- `marketplace`：本轮唯一目标站点。
+- `listing_language`：关键词、标题和参数的主要语言。
+
+非英语站点的维度确认和逐 listing 打标必须理解目标语言。原始关键词、标题、参数和证据保留源语言；中文看板继续使用 `display_values`。不得把英文关键词规则硬套到其他语言，也不得因为不是英语就直接放弃；先做语义判断，确实存在歧义或证据不足时才填 `不可识别`。
+
 ### 2. 创建输出目录
 
-如果输入是 `market_project_<YYYYMMDD_HHmmss>/`，输出目录固定使用同一个项目下的：
+输出目录固定使用同一个项目下的：
 
 ```text
 market_project_<YYYYMMDD_HHmmss>/market_opportunity/
 ```
 
-如果输入是旧式 `market_research/` 目录，则在当前工作目录创建 `market_opportunity_<YYYYMMDD_HHmmss>/`。所有中间文件、agent 文件、最终看板都写入机会输出目录。
+所有中间文件、agent 文件、最终看板都写入该机会输出目录。
 
 ### 3. 获取关键词词根
 
-必须走后端，不得直连上游词根服务。agent 只调用 CLI；CLI 会从环境变量或本机私有配置读取我们后端的访问凭据。agent 不需要知道上游供应商凭据，也不要询问、记录或复述；上游凭据只存在服务端。
+必须走我们的统一后端，不得直连任何外部词根服务。agent 只调用 CLI，不需要知道后端如何获取词根，也不要询问、记录或复述任何外部供应商信息。
 
 ```bash
 ./tools/bin/market-opportunity-<platform> fetch-roots \
@@ -117,7 +131,7 @@ market_project_<YYYYMMDD_HHmmss>/market_opportunity/
 
 - `02_keyword_roots.json`
 
-计费口径：当前按后端实际成功请求词根服务的 batch 数计次。Top90 关键词通常一个 batch 即一次请求；如果后续确认上游按关键词收费，再调整后端和用户计费配置。上游凭据只在服务端，不进入 skill。
+计费由后端处理。agent 只需要在结果中引用 CLI 返回的 `request_count`，不要自行解释外部供应商计费。
 
 ### 4. 生成维度候选
 
@@ -348,3 +362,19 @@ HTML 看板要求：
 - 这部分结果依赖 agent 打标质量，必须说明是“结构化计算 + agent 语义打标”，不能包装成纯客观数据。
 - 正式机会方向不能只看供需指数最高，还要同时看样本量、销量占比、平均销量和组合是否有明确产品意义。
 - HTML Top 方向按机会分展示；机会分综合样本量、销量占比、平均销量和供需指数。
+
+---
+
+## 交付要求
+
+完成后必须向用户同时突出项目根目录和最终 HTML，不要只列中间 CSV：
+
+```text
+本次项目目录：
+<真实 market_project_<YYYYMMDD_HHmmss> 绝对路径>
+
+商品机会深挖看板：
+<同一项目下 market_opportunity/市场机会深挖看板.html>
+```
+
+项目路径必须来自当前上下文中上一段真实项目，并经 `inspect-report` 校验；不要重新扫描或猜测。说明本次实际处理的清洗后 listing 数、最终有效维度数和正式机会组合数，并明确结果性质为“结构化计算 + Agent 语义打标”。不要启动本地 HTTP 服务。

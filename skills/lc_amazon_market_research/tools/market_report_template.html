@@ -713,9 +713,10 @@
 <script id="report-data" type="application/json">__REPORT_JSON__</script>
 <script>
 const data = JSON.parse(document.getElementById('report-data').textContent);
+const currencySymbol = String(data.manifest.currency_symbol || '$');
 
 const fmtNum = (n, digits = 0) => n == null ? '无法判断' : Number(n).toLocaleString(undefined, {maximumFractionDigits: digits});
-const fmtMoney = (n) => n == null ? '无法判断' : '$' + Number(n).toLocaleString(undefined, {maximumFractionDigits: 2});
+const fmtMoney = (n) => n == null ? '无法判断' : currencySymbol + Number(n).toLocaleString(undefined, {maximumFractionDigits: 2});
 const fmtPct = (n) => n == null ? '无法判断' : (Number(n) * 100).toFixed(1) + '%';
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -1008,7 +1009,7 @@ function drawSalesTrendChart() {
   `;
   const axes = `
     <text x="${padL}" y="18" font-size="12" fill="#687588">销量</text>
-    <text x="${width - padR}" y="18" font-size="12" text-anchor="end" fill="#687588">销售额 $</text>
+    <text x="${width - padR}" y="18" font-size="12" text-anchor="end" fill="#687588">销售额 ${esc(currencySymbol)}</text>
     <line x1="${padL}" y1="${padT}" x2="${padL}" y2="${height-padB}" stroke="#b8c2cf"/>
     <line x1="${width-padR}" y1="${padT}" x2="${width-padR}" y2="${height-padB}" stroke="#b8c2cf"/>
     <line x1="${padL}" y1="${height-padB}" x2="${width-padR}" y2="${height-padB}" stroke="#b8c2cf"/>
@@ -1148,8 +1149,8 @@ function fmtCompactNum(value) {
 
 function fmtCompactMoney(value) {
   const n = Number(value || 0);
-  if (Math.abs(n) >= 1000000) return '$' + (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (Math.abs(n) >= 1000) return '$' + (n / 1000).toFixed(0) + 'K';
+  if (Math.abs(n) >= 1000000) return currencySymbol + (n / 1000000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (Math.abs(n) >= 1000) return currencySymbol + (n / 1000).toFixed(0) + 'K';
   return fmtMoney(n);
 }
 
