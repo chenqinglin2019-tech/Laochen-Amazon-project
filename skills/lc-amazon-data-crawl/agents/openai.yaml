@@ -1,4 +1,4 @@
 interface:
   display_name: "Lc amazon Data Crawl"
-  short_description: "Amazon search, rank, and storefront crawling"
-  default_prompt: "Use $lc-amazon-data-crawl to crawl Amazon search results, category ranking nodes, or storefront product lists. Start with the cloud auth gate; if it fails, stop immediately."
+  short_description: "Amazon crawling with delivery and image matching"
+  default_prompt: "Use $lc-amazon-data-crawl to crawl Amazon search results, category ranks, storefronts, or image competitors. Start with the cloud auth gate; if it fails, stop immediately. Confirm the configured marketplace delivery location before extraction. For image competitor counts, recommend doubao-embedding-vision-251215 and have the user bind their own Volcengine Ark API key only in config/doubao_embedding_vision.json, never in chat."

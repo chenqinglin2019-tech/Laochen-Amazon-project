@@ -1,0 +1,7 @@
+{
+  "api_key": "",
+  "model": "doubao-embedding-vision-251215",
+  "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+  "api_path": "embeddings/multimodal",
+  "encoding_format": "float"
+}

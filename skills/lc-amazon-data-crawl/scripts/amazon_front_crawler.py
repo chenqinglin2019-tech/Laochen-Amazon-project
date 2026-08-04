@@ -43,7 +43,9 @@ from amazon_category_rank_crawler import (
     BatchPauseScheduler,
     REQUESTED_DATA_FIELDS,
     UserFacingError,
+    VerificationUnconfirmedError,
     append_jsonl,
+    build_delivery_location_config,
     build_runtime_config as build_category_runtime_config,
     clean_url,
     config_bool,
@@ -55,6 +57,7 @@ from amazon_category_rank_crawler import (
     discover_child_categories,
     dump_json,
     ensure_dir,
+    ensure_resume_delivery_fingerprint,
     extract_by_selectors,
     extract_current_category_path,
     extract_node_id,
@@ -65,6 +68,7 @@ from amazon_category_rank_crawler import (
     normalize_space,
     now_iso,
     now_ts,
+    open_amazon_page,
     parse_field_from_text,
     parse_table_row_fields,
     read_jsonl,
@@ -197,6 +201,11 @@ class FrontRuntimeConfig:
     plugin_second_relaunch_retry_attempts: int
     plugin_second_relaunch_wait_seconds: float
     manual_pause_timeout: int
+    delivery_location_enabled: bool
+    delivery_locations_file: Path
+    delivery_location_timeout: int
+    delivery_locations: Dict[str, Dict[str, str]]
+    delivery_location_fingerprint: str
     delay_seconds_min: float
     delay_seconds_max: float
     batch_pause_pages_min: int
@@ -226,7 +235,19 @@ class FrontStateStore:
     def load_or_create(self) -> None:
         if self.runtime.resume and self.path.exists():
             self.data = load_json(self.path)
+            if ensure_resume_delivery_fingerprint(
+                self.data,
+                self.runtime,
+                self.path.with_name("records.jsonl"),
+            ):
+                self.flush()
             return
+        if self.runtime.resume:
+            ensure_resume_delivery_fingerprint(
+                {},
+                self.runtime,
+                self.path.with_name("records.jsonl"),
+            )
         self.data = {
             "job_id": self.runtime.job_id,
             "mode": self.runtime.mode,
@@ -237,6 +258,7 @@ class FrontStateStore:
             "completed_sources": [],
             "records_count": 0,
             "failures_count": 0,
+            "delivery_location_fingerprint": self.runtime.delivery_location_fingerprint,
         }
         self.flush()
 
@@ -446,6 +468,7 @@ def build_front_runtime_config(config: Dict[str, Any], no_resume: bool) -> Front
         raise UserFacingError("配置项 page_scroll_step_ratio 必须大于 0。")
     page_scroll_wait_seconds = max(config_float(config, "page_scroll_wait_seconds", 1.0) or 0, 0)
     page_scroll_stable_rounds = max(config_int(config, "page_scroll_stable_rounds", 2) or 1, 1)
+    delivery_config = build_delivery_location_config(config)
 
     raw_selectors = config.get("field_selectors") or {}
     field_selectors: Dict[str, List[str]] = {}
@@ -503,6 +526,7 @@ def build_front_runtime_config(config: Dict[str, Any], no_resume: bool) -> Front
         plugin_second_relaunch_retry_attempts=max(config_int(config, "plugin_second_relaunch_retry_attempts", 3) or 0, 0),
         plugin_second_relaunch_wait_seconds=max(config_float(config, "plugin_second_relaunch_wait_seconds", 600) or 0, 0),
         manual_pause_timeout=config_int(config, "manual_pause_timeout", 900) or 900,
+        **delivery_config,
         delay_seconds_min=min_delay,
         delay_seconds_max=max_delay,
         batch_pause_pages_min=batch_pages_min,
@@ -685,7 +709,9 @@ def wait_for_page_or_manual_front(
             log_front_failure(failures_path, state, current, block_reason, "人工处理超时", driver.current_url)
             if runtime.save_debug_snapshots:
                 save_debug_snapshot(driver, debug_dir, block_reason)
-            return False
+            raise VerificationUnconfirmedError(
+                f"{block_reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+            )
     if wait_for_product_cards(driver, runtime):
         return True
     return False
@@ -720,21 +746,27 @@ return '';
         return ""
 
 
-def prepare_storefront_page(driver: WebDriver, runtime: FrontRuntimeConfig, current: Dict[str, Any]) -> None:
+def prepare_storefront_page(
+    driver: WebDriver,
+    runtime: FrontRuntimeConfig,
+    current: Dict[str, Any],
+    on_manual_pause: Optional[Any] = None,
+    on_manual_resume: Optional[Any] = None,
+) -> None:
     if current.get("prepared_storefront"):
         return
     sort_order = str(current.get("store_sort_order") or "Featured")
     if wait_for_product_cards(driver, runtime, timeout=12):
         sorted_url = apply_sort_to_url(driver.current_url, sort_order)
         if clean_url(sorted_url) != clean_url(driver.current_url):
-            driver.get(sorted_url)
+            open_amazon_page(driver, sorted_url, runtime, on_manual_pause, on_manual_resume)
         current["prepared_storefront"] = True
         current["page_url"] = driver.current_url
         return
     products_url = find_store_products_url(driver)
     if products_url and clean_url(products_url) != clean_url(driver.current_url):
         sorted_url = apply_sort_to_url(products_url, sort_order)
-        driver.get(sorted_url)
+        open_amazon_page(driver, sorted_url, runtime, on_manual_pause, on_manual_resume)
         current["page_url"] = sorted_url
     current["prepared_storefront"] = True
 
@@ -1179,7 +1211,13 @@ def run_front_modes(raw_config: Dict[str, Any], runtime: FrontRuntimeConfig, dry
         if wait_seconds > 0:
             time.sleep(wait_seconds)
         driver = start_driver(runtime)  # type: ignore[arg-type]
-        driver.get(page_url)
+        open_amazon_page(
+            driver,
+            page_url,
+            runtime,
+            on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
+            on_manual_resume=state.clear_manual_pause,
+        )
         try:
             wait_for_amazon_products(driver, runtime)  # type: ignore[arg-type]
         except TimeoutException:
@@ -1198,9 +1236,21 @@ def run_front_modes(raw_config: Dict[str, Any], runtime: FrontRuntimeConfig, dry
             print(f"处理：{label} / 第 {page_number} 页")
 
             try:
-                driver.get(page_url)
+                open_amazon_page(
+                    driver,
+                    page_url,
+                    runtime,
+                    on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
+                    on_manual_resume=state.clear_manual_pause,
+                )
                 if current.get("source_type") == "storefront":
-                    prepare_storefront_page(driver, runtime, current)
+                    prepare_storefront_page(
+                        driver,
+                        runtime,
+                        current,
+                        on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
+                        on_manual_resume=state.clear_manual_pause,
+                    )
                     state.set_current(current)
                 if not wait_for_page_or_manual_front(driver, runtime, state, failures_path, debug_dir, current):
                     log_front_failure(failures_path, state, current, "no_product_cards", "页面未检测到商品卡片", driver.current_url)
@@ -1220,7 +1270,9 @@ def run_front_modes(raw_config: Dict[str, Any], runtime: FrontRuntimeConfig, dry
                     log_front_failure(failures_path, state, current, "verification_timeout", "人工处理超时", driver.current_url)
                     if runtime.save_debug_snapshots:
                         save_debug_snapshot(driver, debug_dir, "verification_timeout")
-                    break
+                    raise VerificationUnconfirmedError(
+                        "sellersprite_verification_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+                    )
 
                 key = front_page_key(current, driver.current_url)
                 records: List[Dict[str, Any]] = []

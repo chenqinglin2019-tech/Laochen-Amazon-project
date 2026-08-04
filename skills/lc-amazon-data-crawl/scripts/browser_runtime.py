@@ -56,7 +56,25 @@ class CdpElement:
             if str(self._locator.get_attribute("type") or "").lower() == "file":
                 self._locator.set_input_files(value)
             else:
-                self._locator.fill(value)
+                self._locator.fill(value, timeout=1000)
+        except Exception as exc:  # pragma: no cover - translated at backend boundary
+            raise WebDriverException(str(exc)) from exc
+
+    def clear(self) -> None:
+        try:
+            self._locator.fill("", timeout=1000)
+        except Exception as exc:  # pragma: no cover - translated at backend boundary
+            raise WebDriverException(str(exc)) from exc
+
+    def type_text(self, value: str) -> None:
+        try:
+            self._locator.press_sequentially(value, delay=50)
+        except Exception as exc:  # pragma: no cover - translated at backend boundary
+            raise WebDriverException(str(exc)) from exc
+
+    def click(self) -> None:
+        try:
+            self._locator.click(timeout=1000)
         except Exception as exc:  # pragma: no cover - translated at backend boundary
             raise WebDriverException(str(exc)) from exc
 
