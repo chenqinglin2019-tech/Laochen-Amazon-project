@@ -50,10 +50,13 @@ except ImportError:  # pragma: no cover
 
 from amazon_category_rank_crawler import (
     BatchPauseScheduler,
+    DeliveryLocationUnconfirmedError,
     REQUESTED_DATA_FIELDS,
     SELLERSPRITE_EVIDENCE_FIELDS,
     UserFacingError,
+    VerificationUnconfirmedError,
     append_jsonl,
+    build_delivery_location_config,
     clean_url,
     classify_sellersprite_snapshot,
     config_bool,
@@ -63,14 +66,17 @@ from amazon_category_rank_crawler import (
     country_from_flag_code_or_text,
     detect_block,
     dump_json,
+    ensure_amazon_delivery_location,
     ensure_dir,
     extract_by_selectors,
     extract_table_rows,
+    handle_amazon_verification,
     load_json,
     normalize_header,
     normalize_space,
     now_iso,
     now_ts,
+    open_amazon_page,
     parse_field_from_text,
     parse_table_row_fields,
     plugin_node_count,
@@ -260,6 +266,22 @@ CANDIDATE_HEADERS = [
 COUNT_COLUMN_HEADER = "相似竞品数量"
 
 EMBEDDING_CACHE: Dict[str, List[float]] = {}
+DOUBAO_EMBEDDING_MODEL = "doubao-embedding-vision-251215"
+DOUBAO_EMBEDDING_BASE_URL = "https://ark.cn-beijing.volces.com/api/v3"
+DOUBAO_EMBEDDING_API_PATH = "embeddings/multimodal"
+RETRYABLE_EMBEDDING_STATUS_CODES = {408, 429}
+
+
+class EmbeddingProviderError(UserFacingError):
+    """A recoverable source-level embedding failure.
+
+    The current source must remain in state so a later run can retry it instead
+    of persisting a misleading zero-competitor result.
+    """
+
+
+class FatalEmbeddingProviderError(EmbeddingProviderError):
+    """A provider credential, model, or endpoint error that must stop the task."""
 
 
 @dataclass
@@ -279,6 +301,15 @@ class ImageCompetitorRuntimeConfig:
     min_match_confidence: float
     include_source_as_competitor: bool
     match_mode: str
+    doubao_embedding_config_file: Optional[Path]
+    embedding_provider: str
+    embedding_api_key: str
+    embedding_model: str
+    embedding_base_url: str
+    embedding_api_path: str
+    embedding_encoding_format: str
+    embedding_retry_attempts: int
+    embedding_retry_backoff_seconds: float
     vision_model: str
     openai_api_key_env: str
     openai_base_url: str
@@ -304,6 +335,11 @@ class ImageCompetitorRuntimeConfig:
     plugin_second_relaunch_retry_attempts: int
     plugin_second_relaunch_wait_seconds: float
     manual_pause_timeout: int
+    delivery_location_enabled: bool
+    delivery_locations_file: Path
+    delivery_location_timeout: int
+    delivery_locations: Dict[str, Dict[str, str]]
+    delivery_location_fingerprint: str
     delay_seconds_min: float
     delay_seconds_max: float
     batch_pause_pages_min: int
@@ -342,10 +378,48 @@ class ImageCompetitorStateStore:
         self.initial_queue = list(initial_queue)
         self.data: Dict[str, Any] = {}
 
+    def has_existing_result_rows(self) -> bool:
+        return any(
+            path.exists() and path.stat().st_size > 0
+            for path in (
+                self.path.with_name("records.jsonl"),
+                self.path.with_name("candidates.jsonl"),
+                self.path.with_name("counts.jsonl"),
+            )
+        )
+
     def load_or_create(self) -> None:
         if self.runtime.resume and self.path.exists():
             self.data = load_json(self.path)
+            expected = vision_provider_fingerprint(self.runtime)
+            existing = self.data.get("vision_provider_fingerprint")
+            expected_delivery = self.runtime.delivery_location_fingerprint
+            existing_delivery = str(self.data.get("delivery_location_fingerprint") or "")
+            has_progress = bool(
+                self.data.get("records_count")
+                or self.data.get("completed_sources")
+                or self.has_existing_result_rows()
+            )
+            if existing_delivery != expected_delivery and has_progress:
+                raise UserFacingError(
+                    "配送地址配置与已有断点不一致；"
+                    "请保留旧输出并改用新的 job_id，避免混合结果。"
+                )
+            if existing != expected and has_progress:
+                raise UserFacingError(
+                    "视觉向量模型、端点、相似度阈值或配送地址配置与已有断点不一致；"
+                    "请改用新的 job_id，避免混合旧结果。"
+                )
+            if existing != expected or existing_delivery != expected_delivery:
+                self.data["vision_provider_fingerprint"] = expected
+                self.data["delivery_location_fingerprint"] = expected_delivery
+                self.flush()
             return
+        if self.runtime.resume and self.has_existing_result_rows():
+            raise UserFacingError(
+                "已有图片竞品结果但缺少可验证的地址/模型断点指纹；"
+                "请保留旧输出并改用新的 job_id，避免混合结果。"
+            )
         self.data = {
             "job_id": self.runtime.job_id,
             "mode": "image_competitor",
@@ -356,6 +430,8 @@ class ImageCompetitorStateStore:
             "completed_sources": [],
             "records_count": 0,
             "failures_count": 0,
+            "vision_provider_fingerprint": vision_provider_fingerprint(self.runtime),
+            "delivery_location_fingerprint": self.runtime.delivery_location_fingerprint,
         }
         self.flush()
 
@@ -448,6 +524,129 @@ def product_url_for_asin(domain: str, asin: str) -> str:
     return f"https://www.{domain}/dp/{asin}"
 
 
+def redact_sensitive_text(value: Any, secrets: Sequence[str] = ()) -> str:
+    text = str(value)
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "[REDACTED]")
+    text = re.sub(r"(?i)(authorization\s*[:=]\s*bearer\s+)[^\s,;]+", r"\1[REDACTED]", text)
+    text = re.sub(r'(?i)(["\']?api[_-]?key["\']?\s*[:=]\s*["\']?)[^"\'\s,;}]+', r"\1[REDACTED]", text)
+    return text
+
+
+def _provider_url(base_url: str, api_path: str) -> str:
+    parsed = urlparse(base_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise UserFacingError("视觉向量配置中的 base_url 必须是有效的 http/https 地址。")
+    if not api_path:
+        raise UserFacingError("视觉向量配置中的 api_path 不能为空。")
+    return f"{base_url.rstrip('/')}/{api_path.strip('/')}"
+
+
+def prepare_vision_provider(runtime: ImageCompetitorRuntimeConfig) -> None:
+    """Resolve credentials before dry-run returns or a browser is opened."""
+    if runtime.match_mode == "chat":
+        if not os.environ.get(runtime.openai_api_key_env):
+            raise UserFacingError(
+                f"缺少视觉模型 API Key，请先设置环境变量 {runtime.openai_api_key_env}。"
+            )
+        runtime.embedding_provider = "openai_chat"
+        _provider_url(runtime.openai_base_url, runtime.openai_api_path)
+        print(
+            "弃用提示：chat 模式继续使用旧 openai_* 配置；"
+            "新任务建议迁移到 doubao_embedding_config_file 专用配置。",
+            file=sys.stderr,
+        )
+        return
+
+    config_path = runtime.doubao_embedding_config_file
+    if config_path is not None:
+        if not config_path.exists() or not config_path.is_file():
+            raise UserFacingError(
+                f"没有找到豆包视觉向量配置文件：{config_path}。"
+                "请在该专用配置文件中填写您自己的 Doubao-embedding-vision API Key；"
+                "不要在聊天中发送 Key。"
+            )
+        try:
+            raw = json.loads(config_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise UserFacingError(
+                f"豆包视觉向量配置文件不是有效 JSON：{config_path}。"
+            ) from exc
+        if not isinstance(raw, dict):
+            raise UserFacingError(f"豆包视觉向量配置文件必须是 JSON 对象：{config_path}。")
+        api_key = normalize_space(str(raw.get("api_key") or ""))
+        if not api_key:
+            raise UserFacingError(
+                f"豆包视觉向量 API Key 为空。请把您自己的 Key 填入 {config_path} 的 api_key 字段；"
+                "不要在聊天中发送 Key。"
+            )
+        runtime.embedding_provider = "doubao"
+        runtime.embedding_api_key = api_key
+        runtime.embedding_model = normalize_space(str(raw.get("model") or DOUBAO_EMBEDDING_MODEL))
+        runtime.embedding_base_url = normalize_space(
+            str(raw.get("base_url") or DOUBAO_EMBEDDING_BASE_URL)
+        ).rstrip("/")
+        runtime.embedding_api_path = normalize_space(
+            str(raw.get("api_path") or DOUBAO_EMBEDDING_API_PATH)
+        ).strip("/")
+        runtime.embedding_encoding_format = normalize_space(
+            str(raw.get("encoding_format") or "float")
+        ).lower()
+        if runtime.embedding_encoding_format != "float":
+            raise UserFacingError("豆包视觉向量配置 encoding_format 当前只支持 float。")
+        if not runtime.embedding_model:
+            raise UserFacingError("豆包视觉向量配置中的 model 不能为空。")
+        _provider_url(runtime.embedding_base_url, runtime.embedding_api_path)
+        return
+
+    api_key = os.environ.get(runtime.openai_api_key_env, "").strip()
+    if not api_key:
+        raise UserFacingError(
+            f"缺少旧版视觉向量 API Key 环境变量：{runtime.openai_api_key_env}。"
+            "建议改用 doubao_embedding_config_file，并在专用 JSON 文件中绑定您自己的 Key。"
+        )
+    runtime.embedding_provider = "legacy_openai"
+    runtime.embedding_api_key = api_key
+    runtime.embedding_model = runtime.vision_model
+    runtime.embedding_base_url = runtime.openai_base_url
+    runtime.embedding_api_path = runtime.openai_api_path
+    runtime.embedding_encoding_format = "float"
+    _provider_url(runtime.embedding_base_url, runtime.embedding_api_path)
+    print(
+        "弃用提示：embedding 模式正在使用旧 openai_* 配置；"
+        "请迁移到 doubao_embedding_config_file 专用配置。",
+        file=sys.stderr,
+    )
+
+
+def vision_provider_fingerprint(runtime: ImageCompetitorRuntimeConfig) -> Dict[str, Any]:
+    if runtime.match_mode == "chat":
+        public_config: Dict[str, Any] = {
+            "match_mode": "chat",
+            "provider": "openai_chat",
+            "model": runtime.vision_model,
+            "endpoint": _provider_url(runtime.openai_base_url, runtime.openai_api_path),
+            "min_match_confidence": runtime.min_match_confidence,
+            "delivery_location_fingerprint": runtime.delivery_location_fingerprint,
+        }
+    else:
+        public_config = {
+            "match_mode": "embedding",
+            "provider": runtime.embedding_provider,
+            "model": runtime.embedding_model,
+            "endpoint": _provider_url(runtime.embedding_base_url, runtime.embedding_api_path),
+            "encoding_format": runtime.embedding_encoding_format,
+            "min_match_confidence": runtime.min_match_confidence,
+            "delivery_location_fingerprint": runtime.delivery_location_fingerprint,
+        }
+    serialized = json.dumps(public_config, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return {
+        **public_config,
+        "sha256": hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+    }
+
+
 def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> ImageCompetitorRuntimeConfig:
     marketplace = config_text(config, "marketplace")
     if not marketplace:
@@ -499,6 +698,7 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
         raise UserFacingError("配置项 page_scroll_step_ratio 必须大于 0。")
     page_scroll_wait_seconds = max(config_float(config, "page_scroll_wait_seconds", 1.0) or 0, 0)
     page_scroll_stable_rounds = max(config_int(config, "page_scroll_stable_rounds", 2) or 1, 1)
+    delivery_config = build_delivery_location_config(config)
 
     raw_selectors = config.get("field_selectors") or {}
     field_selectors: Dict[str, List[str]] = {}
@@ -507,12 +707,34 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
             if isinstance(value, list):
                 field_selectors[key] = [str(item).strip() for item in value if str(item).strip()]
 
-    min_confidence = config_float(config, "min_match_confidence", 0.85)
+    min_confidence = config_float(config, "min_match_confidence", 0.70)
     if min_confidence < 0 or min_confidence > 1:
         raise UserFacingError("配置项 min_match_confidence 必须在 0-1 之间。")
     result_mode = (config_text(config, "result_mode", "detail").lower() or "detail").replace("-", "_")
     if result_mode not in {"detail", "count_only"}:
         raise UserFacingError("配置项 result_mode 只支持 detail 或 count_only。")
+    default_match_mode = "embedding" if "doubao_embedding_config_file" in config else "chat"
+    match_mode = config_text(config, "match_mode", default_match_mode).lower() or default_match_mode
+    if match_mode not in {"embedding", "chat"}:
+        raise UserFacingError("配置项 match_mode 只支持 embedding 或 chat。")
+    doubao_config_text = config_text(config, "doubao_embedding_config_file")
+    if (
+        match_mode == "embedding"
+        and "doubao_embedding_config_file" in config
+        and not doubao_config_text
+    ):
+        raise UserFacingError(
+            "配置项 doubao_embedding_config_file 已声明但为空；"
+            "请填写专用 JSON 配置文件路径，并在文件中绑定您自己的 API Key。"
+        )
+    doubao_config_path = resolve_path(doubao_config_text) if doubao_config_text else None
+    vision_model = config_text(config, "vision_model", "gpt-5.4-mini")
+    openai_base_url = config_text(config, "openai_base_url", "https://api.openai.com/v1").rstrip("/")
+    openai_api_path = config_text(config, "openai_api_path", "responses").strip("/")
+    embedding_retry_attempts = max(config_int(config, "embedding_retry_attempts", 3) or 0, 1)
+    embedding_retry_backoff_seconds = config_float(config, "embedding_retry_backoff_seconds", 1.0)
+    if embedding_retry_backoff_seconds < 0:
+        raise UserFacingError("配置项 embedding_retry_backoff_seconds 不能小于 0。")
     sellersprite_on_lens = config_bool(config, "sellersprite_on_lens", False)
     enrich_accepted_results = config_bool(config, "enrich_accepted_results", True)
     sellersprite_required = config_bool(config, "sellersprite_required", result_mode != "count_only")
@@ -542,11 +764,20 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
         result_mode=result_mode,
         min_match_confidence=min_confidence,
         include_source_as_competitor=config_bool(config, "include_source_as_competitor", False),
-        match_mode=config_text(config, "match_mode", "chat").lower() or "chat",
-        vision_model=config_text(config, "vision_model", "gpt-5.4-mini"),
+        match_mode=match_mode,
+        doubao_embedding_config_file=doubao_config_path,
+        embedding_provider="doubao" if doubao_config_path else "legacy_openai",
+        embedding_api_key="",
+        embedding_model=DOUBAO_EMBEDDING_MODEL if doubao_config_path else vision_model,
+        embedding_base_url=DOUBAO_EMBEDDING_BASE_URL if doubao_config_path else openai_base_url,
+        embedding_api_path=DOUBAO_EMBEDDING_API_PATH if doubao_config_path else openai_api_path,
+        embedding_encoding_format="float",
+        embedding_retry_attempts=embedding_retry_attempts,
+        embedding_retry_backoff_seconds=embedding_retry_backoff_seconds,
+        vision_model=vision_model,
         openai_api_key_env=config_text(config, "openai_api_key_env", "OPENAI_API_KEY") or "OPENAI_API_KEY",
-        openai_base_url=config_text(config, "openai_base_url", "https://api.openai.com/v1").rstrip("/"),
-        openai_api_path=config_text(config, "openai_api_path", "responses").strip("/"),
+        openai_base_url=openai_base_url,
+        openai_api_path=openai_api_path,
         vision_batch_size=config_int(config, "vision_batch_size", 6) or 6,
         vision_timeout=config_int(config, "vision_timeout", 120) or 120,
         resume=False if no_resume else config_bool(config, "resume", True),
@@ -568,6 +799,7 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
         plugin_second_relaunch_retry_attempts=max(config_int(config, "plugin_second_relaunch_retry_attempts", 0) or 0, 0),
         plugin_second_relaunch_wait_seconds=max(config_float(config, "plugin_second_relaunch_wait_seconds", 600) or 0, 0),
         manual_pause_timeout=config_int(config, "manual_pause_timeout", 900) or 900,
+        **delivery_config,
         delay_seconds_min=min_delay,
         delay_seconds_max=max_delay,
         batch_pause_pages_min=batch_pages_min,
@@ -778,11 +1010,48 @@ return imgs.length ? absUrl(imgs[0].src) : '';
         return ""
 
 
+def open_image_amazon_page(
+    driver: WebDriver,
+    url: str,
+    runtime: ImageCompetitorRuntimeConfig,
+    state: Optional[ImageCompetitorStateStore] = None,
+) -> None:
+    open_amazon_page(
+        driver,
+        url,
+        runtime,
+        on_manual_pause=(
+            (lambda reason, page_url: state.mark_manual_pause(reason, page_url))
+            if state is not None
+            else None
+        ),
+        on_manual_resume=state.clear_manual_pause if state is not None else None,
+    )
+
+
+def handle_image_verification(
+    driver: WebDriver,
+    runtime: ImageCompetitorRuntimeConfig,
+    state: Optional[ImageCompetitorStateStore],
+    reason: str,
+) -> None:
+    if state is not None:
+        state.mark_manual_pause(reason, str(getattr(driver, "current_url", "") or ""))
+    if wait_for_manual_clear(driver, reason, runtime.manual_pause_timeout):
+        if state is not None:
+            state.clear_manual_pause()
+        return
+    raise VerificationUnconfirmedError(
+        f"{reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+    )
+
+
 def resolve_source_image(
     driver: WebDriver,
     runtime: ImageCompetitorRuntimeConfig,
     current: Dict[str, Any],
     image_dir: Path,
+    state: Optional[ImageCompetitorStateStore] = None,
 ) -> Path:
     raw_path = normalize_space(str(current.get("input_image_path") or ""))
     if raw_path:
@@ -800,10 +1069,7 @@ def resolve_source_image(
                 current["source_product_url"] = product_url
         if not product_url:
             raise UserFacingError("该行没有可用的图片、ASIN 或商品链接。")
-        driver.get(product_url)
-        block_reason = detect_block(driver)
-        if block_reason:
-            raise UserFacingError(f"打开来源商品页时遇到验证：{block_reason}")
+        open_image_amazon_page(driver, product_url, runtime, state)
         WebDriverWait(driver, runtime.page_timeout).until(lambda d: bool(extract_main_image_url(d)))
         image_url = extract_main_image_url(driver)
         if not image_url:
@@ -822,17 +1088,15 @@ def ensure_lens_supported(
     failures_path: Path,
     debug_dir: Path,
 ) -> None:
-    driver.get(runtime.lens_url)
+    open_image_amazon_page(driver, runtime.lens_url, runtime, state)
     block_reason = detect_block(driver)
     if block_reason:
-        state.mark_manual_pause(block_reason, driver.current_url)
-        cleared = wait_for_manual_clear(driver, block_reason, runtime.manual_pause_timeout)
-        if cleared:
-            state.clear_manual_pause()
-        if not cleared:
+        try:
+            handle_image_verification(driver, runtime, state, block_reason)
+        except VerificationUnconfirmedError:
             if runtime.save_debug_snapshots:
                 save_debug_snapshot(driver, debug_dir, f"lens_{block_reason}")
-            raise UserFacingError("Amazon Lens 页面验证处理超时。")
+            raise
 
     def has_file_input(d: WebDriver) -> bool:
         try:
@@ -861,8 +1125,13 @@ def ensure_lens_supported(
         ) from exc
 
 
-def upload_image_to_lens(driver: WebDriver, runtime: ImageCompetitorRuntimeConfig, image_path: Path) -> None:
-    driver.get(runtime.lens_url)
+def upload_image_to_lens(
+    driver: WebDriver,
+    runtime: ImageCompetitorRuntimeConfig,
+    image_path: Path,
+    state: Optional[ImageCompetitorStateStore] = None,
+) -> None:
+    open_image_amazon_page(driver, runtime.lens_url, runtime, state)
     WebDriverWait(driver, runtime.page_timeout).until(
         lambda d: bool(d.execute_script("return !!document.querySelector('input[type=file]');"))
     )
@@ -886,7 +1155,12 @@ return true;
     input_el.send_keys(str(image_path.resolve()))
 
 
-def trigger_sellersprite_find_similar(driver: WebDriver, runtime: ImageCompetitorRuntimeConfig, current: Dict[str, Any]) -> bool:
+def trigger_sellersprite_find_similar(
+    driver: WebDriver,
+    runtime: ImageCompetitorRuntimeConfig,
+    current: Dict[str, Any],
+    state: Optional[ImageCompetitorStateStore] = None,
+) -> bool:
     product_url = normalize_space(str(current.get("source_product_url") or ""))
     source_asin = normalize_space(str(current.get("source_asin") or ""))
     if not product_url and source_asin:
@@ -897,7 +1171,7 @@ def trigger_sellersprite_find_similar(driver: WebDriver, runtime: ImageCompetito
     try:
         current_url = normalize_space(str(getattr(driver, "current_url", "") or ""))
         if not (source_asin and source_asin.upper() in current_url.upper()):
-            driver.get(product_url)
+            open_image_amazon_page(driver, product_url, runtime, state)
         WebDriverWait(driver, min(runtime.page_timeout, 45)).until(lambda d: bool(extract_main_image_url(d)))
         script = r"""
 const norm = (text) => (text || '').replace(/\s+/g, ' ').trim();
@@ -943,6 +1217,26 @@ return true;
         WebDriverWait(driver, min(runtime.page_timeout, runtime.find_similar_timeout)).until(
             lambda d: switch_to_find_similar_result(d, before_handles)
         )
+        current_result_url = str(getattr(driver, "current_url", "") or "")
+        on_manual_pause = (
+            (lambda reason, page_url: state.mark_manual_pause(reason, page_url))
+            if state is not None
+            else None
+        )
+        on_manual_resume = state.clear_manual_pause if state is not None else None
+        handle_amazon_verification(
+            driver,
+            runtime,
+            on_manual_pause,
+            on_manual_resume,
+        )
+        ensure_amazon_delivery_location(
+            driver,
+            runtime,
+            original_url=current_result_url,
+            on_manual_pause=on_manual_pause,
+            on_manual_resume=on_manual_resume,
+        )
         return True
     except (JavascriptException, TimeoutException, WebDriverException):
         return False
@@ -969,11 +1263,12 @@ def run_image_search(
     runtime: ImageCompetitorRuntimeConfig,
     current: Dict[str, Any],
     source_image_path: Path,
+    state: Optional[ImageCompetitorStateStore] = None,
 ) -> str:
     if runtime.search_strategy in {"sellersprite_find_similar_first", "find_similar_first"}:
-        if trigger_sellersprite_find_similar(driver, runtime, current):
+        if trigger_sellersprite_find_similar(driver, runtime, current, state):
             return "sellersprite_find_similar"
-    upload_image_to_lens(driver, runtime, source_image_path)
+    upload_image_to_lens(driver, runtime, source_image_path, state)
     return "amazon_upload"
 
 
@@ -1429,40 +1724,168 @@ def image_ref_to_embedding_input(image_ref: str) -> Dict[str, Any]:
     return {"type": "image_url", "image_url": {"url": image_ref}}
 
 
-def call_multimodal_embedding(runtime: ImageCompetitorRuntimeConfig, image_ref: str) -> List[float]:
-    api_key = os.environ.get(runtime.openai_api_key_env)
-    if not api_key:
-        raise UserFacingError(f"缺少视觉模型 API Key，请先设置环境变量 {runtime.openai_api_key_env}。")
-    payload = {
-        "model": runtime.vision_model,
-        "input": [image_ref_to_embedding_input(image_ref)],
-        "encoding_format": "float",
-    }
-    response = requests.post(
-        f"{runtime.openai_base_url}/{runtime.openai_api_path}",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        timeout=runtime.vision_timeout,
-    )
-    if response.status_code >= 400:
-        raise UserFacingError(f"多模态向量模型调用失败：HTTP {response.status_code} {response.text[:500]}")
-    data = response.json()
-    items = data.get("data") or []
+def extract_embedding_vector(data: Dict[str, Any]) -> List[float]:
+    items = data.get("data")
     if isinstance(items, dict):
         item = items
     elif isinstance(items, list) and items and isinstance(items[0], dict):
         item = items[0]
     else:
-        raise UserFacingError(f"多模态向量模型返回格式异常：{str(data)[:500]}")
+        raise EmbeddingProviderError("多模态向量模型返回格式异常：缺少 data 对象。")
+
     embedding = item.get("embedding")
-    if not isinstance(embedding, list):
-        raise UserFacingError(f"多模态向量模型未返回 embedding：{str(data)[:500]}")
-    return [float(value) for value in embedding]
+    if (
+        isinstance(embedding, list)
+        and len(embedding) == 1
+        and isinstance(embedding[0], list)
+    ):
+        embedding = embedding[0]
+    if not isinstance(embedding, list) or not embedding:
+        raise EmbeddingProviderError("多模态向量模型未返回非空 embedding。")
+
+    vector: List[float] = []
+    for value in embedding:
+        if isinstance(value, bool) or isinstance(value, (dict, list, tuple)):
+            raise EmbeddingProviderError("多模态向量模型返回了无效 embedding 数值。")
+        try:
+            number = float(value)
+        except (TypeError, ValueError) as exc:
+            raise EmbeddingProviderError("多模态向量模型返回了无效 embedding 数值。") from exc
+        if not math.isfinite(number):
+            raise EmbeddingProviderError("多模态向量模型返回了非有限 embedding 数值。")
+        vector.append(number)
+    if not any(value != 0 for value in vector):
+        raise EmbeddingProviderError("多模态向量模型返回了全零 embedding。")
+    return vector
+
+
+def embedding_http_error_is_fatal(response: requests.Response) -> bool:
+    status = int(response.status_code)
+    if status in {401, 403, 404}:
+        return True
+
+    error_text = str(getattr(response, "text", "") or "")
+    try:
+        payload = response.json()
+    except (TypeError, ValueError):
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict):
+            error_text += " " + " ".join(
+                str(error.get(field) or "") for field in ("code", "type", "message")
+            )
+        error_text += " " + " ".join(
+            str(payload.get(field) or "") for field in ("code", "type", "message")
+        )
+    normalized = error_text.lower()
+    fatal_code_markers = (
+        "model_not_opened",
+        "model_not_found",
+        "modelnotfound",
+        "invalid_model",
+        "endpoint_not_found",
+        "endpointnotfound",
+        "invalid_endpoint_id",
+    )
+    model_configuration_error = "model" in normalized and any(
+        marker in normalized
+        for marker in (
+            "not activated",
+            "not enabled",
+            "not found",
+            "no permission",
+            "permission denied",
+            "access denied",
+            "invalid model",
+        )
+    )
+    if any(marker in normalized for marker in fatal_code_markers) or model_configuration_error:
+        return True
+    if status == 400:
+        return False
+    if status in {408, 413, 415, 422, 429} or 500 <= status < 600:
+        return False
+    return 400 <= status < 500
+
+
+def call_multimodal_embedding(runtime: ImageCompetitorRuntimeConfig, image_ref: str) -> List[float]:
+    api_key = runtime.embedding_api_key
+    if not api_key:
+        raise EmbeddingProviderError("视觉向量服务尚未完成凭据校验。")
+    payload = {
+        "model": runtime.embedding_model,
+        "input": [image_ref_to_embedding_input(image_ref)],
+        "encoding_format": runtime.embedding_encoding_format,
+    }
+    endpoint = _provider_url(runtime.embedding_base_url, runtime.embedding_api_path)
+    attempts = max(runtime.embedding_retry_attempts, 1)
+    response: Optional[requests.Response] = None
+    for attempt in range(attempts):
+        try:
+            response = requests.post(
+                endpoint,
+                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                json=payload,
+                timeout=runtime.vision_timeout,
+            )
+        except requests.RequestException as exc:
+            if attempt + 1 < attempts:
+                time.sleep(runtime.embedding_retry_backoff_seconds * (2**attempt))
+                continue
+            safe_message = redact_sensitive_text(exc, (api_key,))[:300]
+            raise EmbeddingProviderError(f"多模态向量模型请求失败：{safe_message}") from exc
+
+        status = int(response.status_code)
+        if status < 400:
+            break
+        retryable = status in RETRYABLE_EMBEDDING_STATUS_CODES or 500 <= status < 600
+        if retryable and attempt + 1 < attempts:
+            time.sleep(runtime.embedding_retry_backoff_seconds * (2**attempt))
+            continue
+        if status in {401, 403}:
+            raise FatalEmbeddingProviderError(
+                f"豆包视觉向量 API 鉴权失败（HTTP {status}）；请检查专用配置文件中的 API Key 和模型权限。"
+            )
+        if status == 404:
+            raise FatalEmbeddingProviderError(
+                "豆包视觉向量 API 端点不存在（HTTP 404）；请检查 base_url 和 api_path。"
+            )
+        if embedding_http_error_is_fatal(response):
+            raise FatalEmbeddingProviderError(
+                f"豆包视觉向量请求配置错误（HTTP {status}）；"
+                "请检查模型是否已开通以及端点配置。"
+            )
+        if status in {400, 413, 415, 422}:
+            raise EmbeddingProviderError(
+                f"豆包视觉向量未接受当前图片输入（HTTP {status}）；"
+                "可改用本地转码图片重试。"
+            )
+        if status == 408:
+            raise EmbeddingProviderError("豆包视觉向量请求重试后仍超时（HTTP 408）。")
+        if status == 429:
+            raise EmbeddingProviderError("豆包视觉向量请求重试后仍被限流（HTTP 429）。")
+        if 500 <= status < 600:
+            raise EmbeddingProviderError(f"豆包视觉向量服务重试后仍不可用（HTTP {status}）。")
+        raise FatalEmbeddingProviderError(f"多模态向量模型调用失败（HTTP {status}）。")
+
+    if response is None:  # pragma: no cover - the loop always executes
+        raise EmbeddingProviderError("多模态向量模型请求未执行。")
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise EmbeddingProviderError("多模态向量模型返回内容不是有效 JSON。") from exc
+    if not isinstance(data, dict):
+        raise EmbeddingProviderError("多模态向量模型返回格式异常：根节点不是 JSON 对象。")
+    return extract_embedding_vector(data)
 
 
 def call_multimodal_embedding_cached(runtime: ImageCompetitorRuntimeConfig, image_ref: str) -> List[float]:
     digest = hashlib.sha256(image_ref.encode("utf-8", errors="ignore")).hexdigest()
-    cache_key = f"{runtime.openai_base_url}|{runtime.vision_model}|{digest}"
+    cache_key = (
+        f"{runtime.embedding_provider}|{runtime.embedding_base_url}|"
+        f"{runtime.embedding_api_path}|{runtime.embedding_model}|{digest}"
+    )
     cached = EMBEDDING_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -1472,11 +1895,19 @@ def call_multimodal_embedding_cached(runtime: ImageCompetitorRuntimeConfig, imag
 
 
 def cosine_similarity(left: Sequence[float], right: Sequence[float]) -> float:
+    if not left or not right:
+        raise EmbeddingProviderError("无法比较空的图片向量。")
+    if len(left) != len(right):
+        raise EmbeddingProviderError(
+            f"图片向量维度不一致：来源 {len(left)}，候选 {len(right)}。"
+        )
+    if not all(math.isfinite(value) for value in (*left, *right)):
+        raise EmbeddingProviderError("图片向量包含非有限数值。")
     dot = sum(a * b for a, b in zip(left, right))
     norm_left = math.sqrt(sum(a * a for a in left))
     norm_right = math.sqrt(sum(b * b for b in right))
     if not norm_left or not norm_right:
-        return 0.0
+        raise EmbeddingProviderError("图片向量范数为零，无法计算相似度。")
     return dot / (norm_left * norm_right)
 
 
@@ -1602,20 +2033,27 @@ def call_openai_vision(
             "max_output_tokens": 1800,
             "temperature": 0,
         }
-    response = requests.post(
-        f"{runtime.openai_base_url}/{runtime.openai_api_path}",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-        timeout=runtime.vision_timeout,
-    )
+    try:
+        response = requests.post(
+            f"{runtime.openai_base_url}/{runtime.openai_api_path}",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            timeout=runtime.vision_timeout,
+        )
+    except requests.RequestException as exc:
+        safe_message = redact_sensitive_text(exc, (api_key,))[:300]
+        raise EmbeddingProviderError(f"视觉模型请求失败：{safe_message}") from exc
     if response.status_code >= 400:
-        raise UserFacingError(f"视觉模型调用失败：HTTP {response.status_code} {response.text[:500]}")
-    data = response.json()
+        raise EmbeddingProviderError(f"视觉模型调用失败：HTTP {response.status_code}。")
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise EmbeddingProviderError("视觉模型返回内容不是有效 JSON。") from exc
     text = extract_response_text(data)
     try:
         parsed = parse_json_object(text)
     except json.JSONDecodeError as exc:
-        raise UserFacingError(f"视觉模型返回内容不是有效 JSON：{text[:500]}") from exc
+        raise EmbeddingProviderError("视觉模型返回内容不是有效 JSON。") from exc
     matches = parsed.get("matches") if isinstance(parsed, dict) else []
     return [dict(item) for item in matches if isinstance(item, dict)]
 
@@ -1636,6 +2074,7 @@ def filter_high_confidence_competitors(
 
     by_asin: Dict[str, Dict[str, Any]] = {}
     candidates: List[Dict[str, Any]] = []
+    candidate_preparation_errors: List[str] = []
     for record in records:
         asin = str(record.get("asin") or "").upper()
         if not asin:
@@ -1651,6 +2090,7 @@ def filter_high_confidence_competitors(
             }
             continue
         if not copied.get("candidate_image_url"):
+            candidate_preparation_errors.append(f"{asin}: 缺少可识别图片")
             decisions[asin] = {
                 "is_competitor": False,
                 "match_confidence": "",
@@ -1664,6 +2104,11 @@ def filter_high_confidence_competitors(
         return int(match.group(0)) if match else 9999
 
     if runtime.match_mode == "embedding":
+        if candidate_preparation_errors:
+            summary = "；".join(candidate_preparation_errors[:5])
+            raise EmbeddingProviderError(
+                f"候选图片无法完成向量识别（{summary}）。本次不写入相似竞品数量，请修复后重试。"
+            )
         source_refs = [image_to_data_url(source_image_path)]
         if source_image_ref and source_image_ref not in source_refs:
             source_refs.append(source_image_ref)
@@ -1673,10 +2118,12 @@ def filter_high_confidence_competitors(
             try:
                 source_embedding = call_multimodal_embedding_cached(runtime, source_ref)
                 break
-            except UserFacingError as exc:
+            except FatalEmbeddingProviderError:
+                raise
+            except EmbeddingProviderError as exc:
                 source_errors.append(str(exc)[:240])
         if source_embedding is None:
-            raise UserFacingError("来源图片向量识别失败：" + " | ".join(source_errors))
+            raise EmbeddingProviderError("来源图片向量识别失败：" + " | ".join(source_errors))
 
         def embed_candidate(candidate: Dict[str, Any]) -> tuple[str, Optional[List[float]], str]:
             asin = str(candidate.get("asin") or "").upper()
@@ -1685,12 +2132,16 @@ def filter_high_confidence_competitors(
                 return asin, None, "候选商品缺少可识别图片。"
             try:
                 return asin, call_multimodal_embedding_cached(runtime, image_url), ""
-            except UserFacingError as exc:
+            except FatalEmbeddingProviderError:
+                raise
+            except EmbeddingProviderError as exc:
                 first_error = str(exc)[:180]
             try:
                 data_url = image_url_to_data_url(image_url, timeout=min(runtime.vision_timeout, 45))
                 return asin, call_multimodal_embedding_cached(runtime, data_url), "候选图片 URL 识别失败后已改用本地转码图片。"
-            except (UserFacingError, requests.RequestException) as exc:
+            except FatalEmbeddingProviderError:
+                raise
+            except (EmbeddingProviderError, UserFacingError, requests.RequestException) as exc:
                 return asin, None, f"候选图片识别失败：{first_error}；本地转码重试失败：{str(exc)[:180]}"
 
         max_workers = min(max(runtime.vision_batch_size, 1), 4, max(len(candidates), 1))
@@ -1702,14 +2153,7 @@ def filter_high_confidence_competitors(
                     continue
                 candidate = by_asin[asin]
                 if candidate_embedding is None:
-                    candidate["is_competitor"] = False
-                    candidate["match_confidence"] = ""
-                    candidate["match_reason"] = note
-                    decisions[asin] = {
-                        "is_competitor": False,
-                        "match_confidence": "",
-                        "match_reason": note,
-                    }
+                    candidate_preparation_errors.append(f"{asin}: {note}")
                     continue
                 confidence = cosine_similarity(source_embedding, candidate_embedding)
                 is_competitor = confidence >= runtime.min_match_confidence
@@ -1727,6 +2171,11 @@ def filter_high_confidence_competitors(
                 }
                 if is_competitor:
                     output.append(candidate)
+        if candidate_preparation_errors:
+            summary = "；".join(candidate_preparation_errors[:5])
+            raise EmbeddingProviderError(
+                f"候选图片无法完成向量识别（{summary}）。本次不写入相似竞品数量，请修复后重试。"
+            )
         output.sort(key=lambda item: (-float(item.get("match_confidence") or 0), rank_value(item)))
         if runtime.is_count_only:
             return output, decisions
@@ -1770,6 +2219,7 @@ def enrich_accepted_records(
     driver: WebDriver,
     runtime: ImageCompetitorRuntimeConfig,
     records: Sequence[Dict[str, Any]],
+    state: Optional[ImageCompetitorStateStore] = None,
 ) -> List[Dict[str, Any]]:
     if not runtime.enrich_accepted_results or not records:
         return [dict(record) for record in records]
@@ -1784,21 +2234,32 @@ def enrich_accepted_records(
             asin = str(record.get("asin") or "").upper()
             if not asin:
                 continue
-            driver.get(amazon_search_url_for_asin(runtime.marketplace_domain, asin))
+            open_image_amazon_page(
+                driver,
+                amazon_search_url_for_asin(runtime.marketplace_domain, asin),
+                runtime,
+                state,
+            )
             block_reason = detect_block(driver)
             if block_reason:
-                record["load_status"] = "blocked"
-                record["note"] = f"补抓卖家精灵数据时遇到验证：{block_reason}"
-                break
+                handle_image_verification(driver, runtime, state, block_reason)
             try:
                 wait_for_amazon_products(driver, runtime)  # type: ignore[arg-type]
             except TimeoutException:
                 pass
             plugin_status = wait_for_sellersprite_data(driver, runtime)  # type: ignore[arg-type]
             if plugin_status == "blocked":
-                record["load_status"] = "blocked"
-                record["note"] = "补抓卖家精灵数据时遇到验证。"
-                break
+                handle_image_verification(
+                    driver,
+                    runtime,
+                    state,
+                    "sellersprite_verification",
+                )
+                plugin_status = wait_for_sellersprite_data(driver, runtime)  # type: ignore[arg-type]
+                if plugin_status == "blocked":
+                    raise VerificationUnconfirmedError(
+                        "sellersprite_verification_unconfirmed: 人工确认后页面仍被拦截。"
+                    )
             if runtime.sellersprite_required and plugin_status != "ok":
                 raise UserFacingError(
                     f"卖家精灵数据未达到写入门禁：{plugin_status}。"
@@ -2029,6 +2490,7 @@ def write_count_only_workbook(
 
 
 def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: bool) -> int:
+    prepare_vision_provider(runtime)
     initial_queue = load_products(runtime.products_file, runtime.marketplace_domain, dedupe=not runtime.is_count_only)
     job_dir = ensure_dir(runtime.outputs_root / runtime.job_id)
     records_path = job_dir / "records.jsonl"
@@ -2046,16 +2508,15 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
     print(f"浏览器后端：{runtime.browser_backend}/{runtime.browser_mode}")
     print(f"卖家精灵门禁：{'required' if runtime.sellersprite_required else 'not_required'}")
     print(f"Amazon 站点：{runtime.marketplace_domain}")
+    print(
+        "视觉识别："
+        f"{runtime.embedding_provider}/{runtime.embedding_model if runtime.match_mode == 'embedding' else runtime.vision_model}"
+    )
     print(f"输入数量：{len(initial_queue)}")
     print(f"输出表格：{output_xlsx}")
     if dry_run:
-        print("dry-run：配置和输入表检查完成，未打开浏览器。")
+        print("dry-run：配置、输入表和视觉模型凭据检查完成，未打开浏览器。")
         return 0
-    if not os.environ.get(runtime.openai_api_key_env):
-        raise UserFacingError(
-            f"缺少外部图片识别 API Key 环境变量：{runtime.openai_api_key_env}。"
-            "请先配置该环境变量，或在配置文件中把 openai_api_key_env 改成实际使用的变量名。"
-        )
 
     if not runtime.resume:
         for old_file in (records_path, candidates_path, failures_path, counts_path, output_xlsx):
@@ -2077,40 +2538,46 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
             label = current.get("source_asin") or current.get("source_product_url") or current.get("source_id")
             print(f"处理：{label}")
             try:
-                source_image_path = resolve_source_image(driver, runtime, current, image_dir)
+                source_image_path = resolve_source_image(
+                    driver,
+                    runtime,
+                    current,
+                    image_dir,
+                    state,
+                )
                 state.set_current(current)
 
-                search_method = run_image_search(driver, runtime, current, source_image_path)
+                search_method = run_image_search(
+                    driver,
+                    runtime,
+                    current,
+                    source_image_path,
+                    state,
+                )
                 current["image_search_method"] = search_method
                 block_reason = detect_block(driver)
                 if block_reason:
-                    state.mark_manual_pause(block_reason, driver.current_url)
-                    cleared = wait_for_manual_clear(driver, block_reason, runtime.manual_pause_timeout)
-                    if cleared:
-                        state.clear_manual_pause()
-                    if not cleared:
-                        log_failure(failures_path, state, current, block_reason, "人工处理超时", driver.current_url)
+                    try:
+                        handle_image_verification(driver, runtime, state, block_reason)
+                    except VerificationUnconfirmedError:
                         if runtime.save_debug_snapshots:
                             save_debug_snapshot(driver, debug_dir, block_reason)
-                        break
+                        raise
 
                 try:
                     wait_for_lens_results(driver, runtime)
                 except TimeoutException:
                     if search_method == "sellersprite_find_similar":
-                        upload_image_to_lens(driver, runtime, source_image_path)
+                        upload_image_to_lens(driver, runtime, source_image_path, state)
                         search_method = "amazon_upload_after_find_similar_timeout"
                         block_reason = detect_block(driver)
                         if block_reason:
-                            state.mark_manual_pause(block_reason, driver.current_url)
-                            cleared = wait_for_manual_clear(driver, block_reason, runtime.manual_pause_timeout)
-                            if cleared:
-                                state.clear_manual_pause()
-                            if not cleared:
-                                log_failure(failures_path, state, current, block_reason, "人工处理超时", driver.current_url)
+                            try:
+                                handle_image_verification(driver, runtime, state, block_reason)
+                            except VerificationUnconfirmedError:
                                 if runtime.save_debug_snapshots:
                                     save_debug_snapshot(driver, debug_dir, block_reason)
-                                break
+                                raise
                         wait_for_lens_results(driver, runtime)
                     else:
                         raise
@@ -2118,10 +2585,25 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                     plugin_status = wait_for_lens_sellersprite_data(driver, runtime)
                     state.mark_sellersprite_readiness(getattr(driver, "_sellersprite_readiness", {}))
                     if plugin_status == "blocked":
-                        log_failure(failures_path, state, current, "verification_timeout", "人工处理超时", driver.current_url)
-                        if runtime.save_debug_snapshots:
-                            save_debug_snapshot(driver, debug_dir, "verification_timeout")
-                        break
+                        try:
+                            handle_image_verification(
+                                driver,
+                                runtime,
+                                state,
+                                "sellersprite_verification",
+                            )
+                        except VerificationUnconfirmedError:
+                            if runtime.save_debug_snapshots:
+                                save_debug_snapshot(driver, debug_dir, "verification_timeout")
+                            raise
+                        plugin_status = wait_for_lens_sellersprite_data(driver, runtime)
+                        state.mark_sellersprite_readiness(
+                            getattr(driver, "_sellersprite_readiness", {})
+                        )
+                        if plugin_status == "blocked":
+                            raise VerificationUnconfirmedError(
+                                "sellersprite_verification_unconfirmed: 人工确认后页面仍被拦截。"
+                            )
                     if runtime.sellersprite_required and plugin_status != "ok":
                         raise UserFacingError(
                             f"卖家精灵数据未达到写入门禁：{plugin_status}。"
@@ -2130,6 +2612,11 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                     plugin_status = "skipped_on_lens"
 
                 candidate_records = merge_lens_product_data(driver, runtime, current, plugin_status)
+                if runtime.match_mode == "embedding" and not candidate_records:
+                    raise EmbeddingProviderError(
+                        "Amazon Lens 页面曾检测到结果，但候选商品重新提取为空；"
+                        "本次不写入零竞品，已保留当前来源供重试。"
+                    )
                 accepted_records, decisions = filter_high_confidence_competitors(
                     runtime,
                     source_image_path,
@@ -2145,7 +2632,12 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                     )
                 )
                 if needs_enrichment:
-                    accepted_records = enrich_accepted_records(driver, runtime, accepted_records)
+                    accepted_records = enrich_accepted_records(
+                        driver,
+                        runtime,
+                        accepted_records,
+                        state,
+                    )
                     state.mark_sellersprite_readiness(getattr(driver, "_sellersprite_readiness", {}))
                 candidate_audit_rows = build_candidate_audit_rows(candidate_records, accepted_records, decisions)
 
@@ -2170,6 +2662,60 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                 )
                 batch_pause.after_completed_page()
                 sleep_between_pages(runtime)
+            except EmbeddingProviderError as exc:
+                safe_message = redact_sensitive_text(exc, (runtime.embedding_api_key,))[:500]
+                failure_reason = (
+                    "embedding_provider_fatal"
+                    if isinstance(exc, FatalEmbeddingProviderError)
+                    else "embedding_provider_error"
+                )
+                log_failure(
+                    failures_path,
+                    state,
+                    current,
+                    failure_reason,
+                    safe_message,
+                    getattr(driver, "current_url", ""),
+                )
+                if runtime.save_debug_snapshots:
+                    save_debug_snapshot(driver, debug_dir, failure_reason)
+                print(
+                    "视觉向量识别失败，当前来源已保留在断点中；"
+                    "本次未写入该来源的相似竞品数量。",
+                    file=sys.stderr,
+                )
+                error_type = (
+                    FatalEmbeddingProviderError
+                    if isinstance(exc, FatalEmbeddingProviderError)
+                    else EmbeddingProviderError
+                )
+                raise error_type(safe_message) from exc
+            except DeliveryLocationUnconfirmedError as exc:
+                safe_message = redact_sensitive_text(exc, (runtime.embedding_api_key,))[:500]
+                log_failure(
+                    failures_path,
+                    state,
+                    current,
+                    "delivery_location_unconfirmed",
+                    safe_message,
+                    getattr(driver, "current_url", ""),
+                )
+                if runtime.save_debug_snapshots:
+                    save_debug_snapshot(driver, debug_dir, "delivery_location_unconfirmed")
+                raise
+            except VerificationUnconfirmedError as exc:
+                safe_message = redact_sensitive_text(exc, (runtime.embedding_api_key,))[:500]
+                log_failure(
+                    failures_path,
+                    state,
+                    current,
+                    "verification_unconfirmed",
+                    safe_message,
+                    getattr(driver, "current_url", ""),
+                )
+                if runtime.save_debug_snapshots:
+                    save_debug_snapshot(driver, debug_dir, "verification_unconfirmed")
+                raise VerificationUnconfirmedError(safe_message) from exc
             except (TimeoutException, requests.RequestException) as exc:
                 log_failure(failures_path, state, current, "runtime_error", str(exc)[:500], getattr(driver, "current_url", ""))
                 if runtime.save_debug_snapshots:

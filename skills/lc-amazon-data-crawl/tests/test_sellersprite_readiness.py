@@ -211,7 +211,15 @@ class BrowserBackendTests(unittest.TestCase):
 
 class ConfigCompatibilityTests(unittest.TestCase):
     def test_templates_default_to_cdp(self) -> None:
-        for config_path in (SKILL_ROOT / "assets" / "config").glob("*.json"):
+        template_names = (
+            "amazon_front_bsr_category.json",
+            "amazon_front_keyword_search.json",
+            "amazon_front_storefront.json",
+            "amazon_image_competitors.json",
+            "category_rank_crawler.json",
+        )
+        for template_name in template_names:
+            config_path = SKILL_ROOT / "assets" / "config" / template_name
             raw = json.loads(config_path.read_text(encoding="utf-8"))
             self.assertEqual(raw["browser_backend"], "cdp", config_path.name)
             self.assertEqual(raw["browser_mode"], "reuse", config_path.name)

@@ -53,11 +53,27 @@ mkdir -p "$TARGET_DIR/scripts" "$TARGET_DIR/config" "$TARGET_DIR/inputs" "$TARGE
 cp "$SKILL_DIR"/scripts/*.py "$TARGET_DIR/scripts/"
 cp "$SKILL_DIR/assets/requirements.txt" "$TARGET_DIR/requirements.txt"
 for config_file in "$SKILL_DIR"/assets/config/*.json; do
-  target_config="$TARGET_DIR/config/$(basename "$config_file")"
+  config_name="$(basename "$config_file")"
+  if [[ "$config_name" == "doubao_embedding_vision.example.json" ]]; then
+    continue
+  fi
+  target_config="$TARGET_DIR/config/$config_name"
   if [[ ! -f "$target_config" ]]; then
     cp "$config_file" "$target_config"
   fi
 done
+
+DOUBAO_CONFIG="$TARGET_DIR/config/doubao_embedding_vision.json"
+if [[ ! -f "$DOUBAO_CONFIG" ]]; then
+  cp "$SKILL_DIR/assets/config/doubao_embedding_vision.example.json" "$DOUBAO_CONFIG"
+fi
+chmod 600 "$DOUBAO_CONFIG" 2>/dev/null || true
+
+RUNNER_GITIGNORE="$TARGET_DIR/.gitignore"
+touch "$RUNNER_GITIGNORE"
+if ! grep -Fqx 'config/doubao_embedding_vision.json' "$RUNNER_GITIGNORE"; then
+  printf '\n# Local API credentials\nconfig/doubao_embedding_vision.json\n' >> "$RUNNER_GITIGNORE"
+fi
 if [[ ! -f "$TARGET_DIR/config.json" ]]; then
   cp "$SKILL_DIR/config.json" "$TARGET_DIR/config.json"
 fi
@@ -175,6 +191,7 @@ doctor() {
     echo "python: missing .venv"
   fi
   for file in \
+    config/amazon_delivery_locations.json \
     config/amazon_front_keyword_search.json \
     config/amazon_front_storefront.json \
     config/amazon_front_bsr_category.json \
@@ -189,6 +206,46 @@ doctor() {
       echo "$file: missing"
     fi
   done
+  doubao_config_status
+}
+
+doubao_config_status() {
+  local config_file="$ROOT_DIR/config/doubao_embedding_vision.json"
+  local inspect_python status
+  if [[ ! -f "$config_file" ]]; then
+    echo "doubao_embedding_vision: missing"
+    return
+  fi
+  if [[ -x "$PYTHON_BIN" ]]; then
+    inspect_python="$PYTHON_BIN"
+  else
+    inspect_python="$(command -v python3 || true)"
+  fi
+  if [[ -z "$inspect_python" ]]; then
+    echo "doubao_embedding_vision: unconfigured"
+    return
+  fi
+  status="$($inspect_python - "$config_file" <<'PY' 2>/dev/null || true
+import json
+import sys
+
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        payload = json.load(handle)
+    required = ("api_key", "model", "base_url", "api_path", "encoding_format")
+    ready = isinstance(payload, dict) and all(
+        isinstance(payload.get(field), str) and payload[field].strip()
+        for field in required
+    )
+    print("ready" if ready else "unconfigured")
+except (OSError, ValueError, TypeError):
+    print("unconfigured")
+PY
+)"
+  case "$status" in
+    ready) echo "doubao_embedding_vision: ready" ;;
+    *) echo "doubao_embedding_vision: unconfigured" ;;
+  esac
 }
 
 auto_start_reuse_browser() {

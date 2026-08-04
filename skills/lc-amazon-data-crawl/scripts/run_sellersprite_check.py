@@ -15,6 +15,7 @@ from amazon_category_rank_crawler import (
     build_runtime_config,
     get_sellersprite_readiness,
     load_json,
+    open_amazon_page,
     safe_sellersprite_readiness,
     start_driver,
     wait_for_amazon_products,
@@ -80,7 +81,7 @@ def main() -> int:
     final_status = "browser_unreachable"
     try:
         driver = start_driver(runtime)
-        driver.get(target_url)
+        open_amazon_page(driver, target_url, runtime)
         if getattr(runtime, "mode", "") == "storefront":
             prepare_storefront_page(driver, runtime, current)
         try:

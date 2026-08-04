@@ -6,16 +6,21 @@
 
 ```text
 lc-amazon-data-crawl-runner/
+  .gitignore
   lc-amazon-data-crawl.sh
   requirements.txt
   scripts/
   config/
+    amazon_delivery_locations.json
+    doubao_embedding_vision.json
   inputs/
   outputs/
   chrome_profiles/
 ```
 
 Configs are plain JSON. Relative paths are resolved from the runner root.
+`doubao_embedding_vision.json` is a local credential file: setup creates it
+only when missing, sets mode `0600` where supported, and never overwrites it.
 
 ## Browser Modes
 
@@ -73,6 +78,39 @@ Chrome Profile verification is mandatory for CDP. The Profile Path shown by
 `chrome://version` must equal `chrome_user_data_dir/chrome_profile_directory`.
 This prevents attaching to a different Chrome profile that does not contain the
 expected SellerSprite installation and login session.
+
+## Amazon Delivery Location
+
+All five crawler templates enable marketplace-specific delivery selection:
+
+- `delivery_location_enabled`: default `true`.
+- `delivery_locations_file`: default
+  `config/amazon_delivery_locations.json`.
+- `delivery_location_timeout`: automatic attempt timeout in seconds; default
+  `20`.
+- `manual_pause_timeout`: existing manual-action timeout; default `900`.
+
+The mapping file has a `locations` object keyed by exact Amazon domain. Each
+entry supplies `city`, string-valued `postal_code`, and `strategy`. See
+`references/delivery-locations.md` for the fixed 19-market mapping and UAE
+exception.
+
+For every business navigation, the runner handles Amazon verification first,
+checks the header location, sets the mapped destination if needed, reopens the
+original URL, and confirms the result before extraction. A confirmed result is
+cached only for the current driver and exact domain; browser restarts and
+domain changes require another confirmation.
+
+If automatic selection fails, complete the address prompt in the current
+visible browser. If the location is still unconfirmed after
+`manual_pause_timeout`, the run stops with `delivery_location_unconfirmed` and
+does not write records for that page. The delivery mapping digest is part of
+the non-sensitive resume fingerprint: if an existing job already has records
+and the mapping changed, use a new `job_id` instead of mixing results.
+
+Changing delivery location updates Amazon cookies in the dedicated Chrome
+Profile. It may change price, availability, delivery promises, and search
+results.
 
 ## SellerSprite Readiness
 
@@ -196,8 +234,47 @@ Important fields:
 
 - `marketplace`: for example `美国站`.
 - `result_mode`: `count_only` for competitor counts, `detail` for detailed rows.
-- `match_mode`: `embedding` or `chat`.
-- `openai_api_key_env`, `openai_base_url`, `openai_api_path`, `vision_model`: vision comparison provider settings.
+- `match_mode`: strictly `embedding` or `chat`; the recommended count workflow
+  uses `embedding`.
+- `doubao_embedding_config_file`: default
+  `config/doubao_embedding_vision.json` for embedding mode.
+- `min_match_confidence`: default `0.70`. This value is retained for
+  compatibility and is not claimed to be calibrated for every product set.
+
+Bind the user's own Volcengine Ark API key in the dedicated local file:
+
+```json
+{
+  "api_key": "",
+  "model": "doubao-embedding-vision-251215",
+  "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+  "api_path": "embeddings/multimodal",
+  "encoding_format": "float"
+}
+```
+
+Do not ask the user to paste the key into chat. Do not copy this populated file
+into source control or a release archive. `./lc-amazon-data-crawl.sh doctor`
+reports only `doubao_embedding_vision: missing`, `unconfigured`, or `ready` and
+never prints its content.
+
+In embedding mode, the new config field takes precedence and is validated by
+dry-run before Chrome opens. Missing files, invalid JSON, and empty keys fail
+with an instruction to fill the local file. If the new field is absent, legacy
+`vision_model` and `openai_*` fields remain available with a deprecation
+warning. `chat` mode continues to use those legacy provider fields.
+
+The Ark multimodal request retries timeouts, HTTP 408/429, and 5xx responses.
+Authentication/authorization errors and invalid endpoint or model access fail
+immediately. Returned vectors must be non-empty, finite, and dimensionally
+consistent. If both a candidate URL and local-image fallback fail, the source
+is recorded as failed/retryable instead of being written as zero competitors.
+
+The resume fingerprint includes the non-secret model, endpoint, threshold, and
+delivery mapping digest. It never includes the API key.
+
+Provider references: [Volcengine model purchase guide](https://github.com/volcengine/OpenViking/blob/main/docs/zh/guides/02-volcengine-purchase-guide.md)
+and [Ark multimodal embeddings API](https://api.volcengine.com/api-docs/view?action=EmbeddingsMultimodal&serviceCode=ark&version=2024-01-01).
 
 ## Stall Handling
 

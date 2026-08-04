@@ -1,0 +1,99 @@
+{
+  "locations": {
+    "amazon.com": {
+      "city": "New York",
+      "postal_code": "10001",
+      "strategy": "postal"
+    },
+    "amazon.ca": {
+      "city": "Ottawa",
+      "postal_code": "K1P 1J1",
+      "strategy": "postal"
+    },
+    "amazon.com.mx": {
+      "city": "Mexico City",
+      "postal_code": "06000",
+      "strategy": "postal"
+    },
+    "amazon.co.uk": {
+      "city": "London",
+      "postal_code": "E16 1ZE",
+      "strategy": "postal"
+    },
+    "amazon.de": {
+      "city": "Berlin",
+      "postal_code": "10178",
+      "strategy": "postal"
+    },
+    "amazon.fr": {
+      "city": "Paris",
+      "postal_code": "75004",
+      "strategy": "postal"
+    },
+    "amazon.it": {
+      "city": "Rome",
+      "postal_code": "00186",
+      "strategy": "postal"
+    },
+    "amazon.es": {
+      "city": "Madrid",
+      "postal_code": "28014",
+      "strategy": "postal"
+    },
+    "amazon.co.jp": {
+      "city": "Tokyo",
+      "postal_code": "100-0001",
+      "strategy": "postal"
+    },
+    "amazon.com.au": {
+      "city": "Canberra",
+      "postal_code": "2600",
+      "strategy": "postal"
+    },
+    "amazon.in": {
+      "city": "New Delhi",
+      "postal_code": "110001",
+      "strategy": "postal"
+    },
+    "amazon.nl": {
+      "city": "Amsterdam",
+      "postal_code": "1011 PN",
+      "strategy": "postal"
+    },
+    "amazon.se": {
+      "city": "Stockholm",
+      "postal_code": "111 52",
+      "strategy": "postal"
+    },
+    "amazon.pl": {
+      "city": "Warsaw",
+      "postal_code": "00-950",
+      "strategy": "postal"
+    },
+    "amazon.ae": {
+      "city": "Abu Dhabi",
+      "postal_code": "00000",
+      "strategy": "postal_then_city"
+    },
+    "amazon.sa": {
+      "city": "Riyadh",
+      "postal_code": "12211",
+      "strategy": "postal"
+    },
+    "amazon.sg": {
+      "city": "Singapore",
+      "postal_code": "179434",
+      "strategy": "postal"
+    },
+    "amazon.com.br": {
+      "city": "Brasilia",
+      "postal_code": "70040-010",
+      "strategy": "postal"
+    },
+    "amazon.co.za": {
+      "city": "Pretoria",
+      "postal_code": "0002",
+      "strategy": "postal"
+    }
+  }
+}

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import random
 import re
@@ -51,6 +52,7 @@ except ImportError:  # pragma: no cover
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = ROOT_DIR / "config" / "category_rank_crawler.json"
+DEFAULT_DELIVERY_LOCATIONS_FILE = "config/amazon_delivery_locations.json"
 SELLERSPRITE_EXTENSION_ID = "lnbmbgocenenhhhdojdielgnmeflbnfb"
 ASIN_RE = re.compile(r"\b([A-Z0-9]{10})\b")
 URL_ASIN_RE = re.compile(r"/(?:dp|gp/product)/([A-Z0-9]{10})(?:[/?#]|$)", re.I)
@@ -200,6 +202,18 @@ class UserFacingError(RuntimeError):
     pass
 
 
+class DeliveryLocationUnconfirmedError(UserFacingError):
+    """Stop the whole crawl when the requested marketplace delivery location is not confirmed."""
+
+    pass
+
+
+class VerificationUnconfirmedError(UserFacingError):
+    """Stop the whole crawl when Amazon or SellerSprite verification times out."""
+
+    pass
+
+
 def now_ts() -> str:
     return dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -338,6 +352,89 @@ def validate_amazon_url(url: str) -> None:
         raise UserFacingError("start_url 必须是 Amazon 类目页面地址。")
 
 
+def load_delivery_locations(path: Path) -> Dict[str, Dict[str, str]]:
+    raw = load_json(path)
+    raw_locations = raw.get("locations", raw)
+    if not isinstance(raw_locations, dict) or not raw_locations:
+        raise UserFacingError(f"配送地址配置必须包含非空对象 `locations`：{path}")
+
+    locations: Dict[str, Dict[str, str]] = {}
+    for raw_domain, raw_location in raw_locations.items():
+        domain = str(raw_domain or "").strip().lower().removeprefix("www.").rstrip(".")
+        if not re.fullmatch(r"amazon(?:\.[a-z0-9-]+)+", domain):
+            raise UserFacingError(f"配送地址配置包含无效 Amazon 域名：{raw_domain}")
+        if not isinstance(raw_location, dict):
+            raise UserFacingError(f"配送地址 `{domain}` 必须是对象。")
+        city = normalize_space(str(raw_location.get("city") or ""))
+        postal_code = str(raw_location.get("postal_code") or "").strip()
+        strategy = str(raw_location.get("strategy") or "postal").strip().lower()
+        if not city or not postal_code:
+            raise UserFacingError(f"配送地址 `{domain}` 的 city 和 postal_code 不能为空。")
+        if strategy not in {"postal", "postal_then_city"}:
+            raise UserFacingError(
+                f"配送地址 `{domain}` 的 strategy 只支持 postal 或 postal_then_city。"
+            )
+        locations[domain] = {
+            "city": city,
+            "postal_code": postal_code,
+            "strategy": strategy,
+        }
+    return dict(sorted(locations.items()))
+
+
+def delivery_location_fingerprint(enabled: bool, locations: Dict[str, Dict[str, str]]) -> str:
+    payload = {
+        "enabled": bool(enabled),
+        "locations": locations if enabled else {},
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def build_delivery_location_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    enabled = config_bool(config, "delivery_location_enabled", True)
+    configured_file = (
+        config_text(config, "delivery_locations_file", DEFAULT_DELIVERY_LOCATIONS_FILE)
+        or DEFAULT_DELIVERY_LOCATIONS_FILE
+    )
+    locations_file = resolve_path(configured_file)
+    bundled_file = ROOT_DIR / "assets" / "config" / "amazon_delivery_locations.json"
+    if enabled and configured_file == DEFAULT_DELIVERY_LOCATIONS_FILE and not locations_file.exists():
+        locations_file = bundled_file
+    timeout = config_int(config, "delivery_location_timeout", 20) or 20
+    if timeout <= 0:
+        raise UserFacingError("配置项 `delivery_location_timeout` 必须大于 0。")
+    locations = load_delivery_locations(locations_file) if enabled else {}
+    return {
+        "delivery_location_enabled": enabled,
+        "delivery_locations_file": locations_file,
+        "delivery_location_timeout": timeout,
+        "delivery_locations": locations,
+        "delivery_location_fingerprint": delivery_location_fingerprint(enabled, locations),
+    }
+
+
+def ensure_resume_delivery_fingerprint(
+    state: Dict[str, Any],
+    runtime: Any,
+    records_path: Optional[Path] = None,
+) -> bool:
+    expected = str(getattr(runtime, "delivery_location_fingerprint", "") or "")
+    previous = str(state.get("delivery_location_fingerprint") or "")
+    has_records = bool(
+        int(state.get("records_count") or 0) > 0
+        or state.get("completed_pages")
+        or (records_path is not None and records_path.exists() and records_path.stat().st_size > 0)
+    )
+    if has_records and previous != expected:
+        raise UserFacingError(
+            "配送地址配置与已有断点不一致，拒绝混合续跑。请保留旧输出并改用新的 `job_id`。"
+        )
+    changed = previous != expected
+    state["delivery_location_fingerprint"] = expected
+    return changed
+
+
 def extract_node_id(url: str) -> str:
     parsed = urlparse(url)
     query = parse_qs(parsed.query)
@@ -402,6 +499,11 @@ class RuntimeConfig:
     plugin_second_relaunch_retry_attempts: int
     plugin_second_relaunch_wait_seconds: float
     manual_pause_timeout: int
+    delivery_location_enabled: bool
+    delivery_locations_file: Path
+    delivery_location_timeout: int
+    delivery_locations: Dict[str, Dict[str, str]]
+    delivery_location_fingerprint: str
     delay_seconds_min: float
     delay_seconds_max: float
     batch_pause_pages_min: int
@@ -477,6 +579,7 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         raise UserFacingError("配置项 page_scroll_step_ratio 必须大于 0。")
     page_scroll_wait_seconds = max(config_float(config, "page_scroll_wait_seconds", 1.0) or 0, 0)
     page_scroll_stable_rounds = max(config_int(config, "page_scroll_stable_rounds", 2) or 1, 1)
+    delivery_config = build_delivery_location_config(config)
 
     raw_selectors = config.get("field_selectors") or {}
     field_selectors: Dict[str, List[str]] = {}
@@ -512,6 +615,7 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         plugin_second_relaunch_retry_attempts=max(config_int(config, "plugin_second_relaunch_retry_attempts", 3) or 0, 0),
         plugin_second_relaunch_wait_seconds=max(config_float(config, "plugin_second_relaunch_wait_seconds", 600) or 0, 0),
         manual_pause_timeout=config_int(config, "manual_pause_timeout", 900) or 900,
+        **delivery_config,
         delay_seconds_min=min_delay,
         delay_seconds_max=max_delay,
         batch_pause_pages_min=batch_pages_min,
@@ -550,7 +654,19 @@ class StateStore:
     def load_or_create(self) -> None:
         if self.runtime.resume and self.path.exists():
             self.data = load_json(self.path)
+            if ensure_resume_delivery_fingerprint(
+                self.data,
+                self.runtime,
+                self.path.with_name("records.jsonl"),
+            ):
+                self.flush()
             return
+        if self.runtime.resume:
+            ensure_resume_delivery_fingerprint(
+                {},
+                self.runtime,
+                self.path.with_name("records.jsonl"),
+            )
         root_name = infer_category_name_from_url(self.runtime.start_url)
         root_node = {
             "url": self.runtime.start_url,
@@ -571,6 +687,7 @@ class StateStore:
             "processed_categories_count": 0,
             "records_count": 0,
             "failures_count": 0,
+            "delivery_location_fingerprint": self.runtime.delivery_location_fingerprint,
         }
         self.flush()
 
@@ -769,8 +886,82 @@ def start_driver_legacy(runtime: RuntimeConfig) -> WebDriver:
 
 
 class AppleScriptElement:
-    def __init__(self, text: str = "") -> None:
+    def __init__(
+        self,
+        text: str = "",
+        driver: Optional["AppleScriptChromeDriver"] = None,
+        selector: str = "",
+    ) -> None:
         self.text = text
+        self._driver = driver
+        self._selector = selector
+
+    def clear(self) -> None:
+        if self._driver is None or not self._selector:
+            raise WebDriverException("AppleScript 元素缺少可操作的 CSS 选择器。")
+        changed = self._driver.execute_script(
+            r"""
+const selector = arguments[0];
+const input = [...document.querySelectorAll(selector)].find(el => el.offsetParent !== null)
+  || document.querySelector(selector);
+if (!input) return false;
+const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+if (descriptor && descriptor.set) descriptor.set.call(input, ''); else input.value = '';
+for (const eventName of ['input', 'change']) input.dispatchEvent(new Event(eventName, {bubbles: true}));
+return true;
+""",
+            self._selector,
+        )
+        if not changed:
+            raise WebDriverException(f"没有找到可清空的 AppleScript 元素：{self._selector}")
+
+    def send_keys(self, value: str) -> None:
+        if self._driver is None or not self._selector:
+            raise WebDriverException("AppleScript 元素缺少可操作的 CSS 选择器。")
+        typed = self._driver.execute_script(
+            r"""
+const selector = arguments[0];
+const text = String(arguments[1] || '');
+const input = [...document.querySelectorAll(selector)].find(el => el.offsetParent !== null)
+  || document.querySelector(selector);
+if (!input) return false;
+const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+let current = String(input.value || '');
+for (const character of text) {
+  input.dispatchEvent(new KeyboardEvent('keydown', {key: character, bubbles: true}));
+  current += character;
+  if (descriptor && descriptor.set) descriptor.set.call(input, current); else input.value = current;
+  input.dispatchEvent(new InputEvent('input', {data: character, inputType: 'insertText', bubbles: true}));
+  input.dispatchEvent(new KeyboardEvent('keyup', {key: character, bubbles: true}));
+}
+input.dispatchEvent(new Event('change', {bubbles: true}));
+return true;
+""",
+            self._selector,
+            value,
+        )
+        if not typed:
+            raise WebDriverException(f"没有找到可输入的 AppleScript 元素：{self._selector}")
+
+    def type_text(self, value: str) -> None:
+        self.send_keys(value)
+
+    def click(self) -> None:
+        if self._driver is None or not self._selector:
+            raise WebDriverException("AppleScript 元素缺少可操作的 CSS 选择器。")
+        clicked = self._driver.execute_script(
+            r"""
+const selector = arguments[0];
+const element = [...document.querySelectorAll(selector)].find(el => el.offsetParent !== null)
+  || document.querySelector(selector);
+if (!element) return false;
+element.click();
+return true;
+""",
+            self._selector,
+        )
+        if not clicked:
+            raise WebDriverException(f"没有找到可点击的 AppleScript 元素：{self._selector}")
 
 
 class AppleScriptChromeDriver:
@@ -855,12 +1046,12 @@ end tell
     def find_element(self, by: str = By.ID, value: Optional[str] = None) -> AppleScriptElement:
         if by == By.TAG_NAME and value and value.lower() == "body":
             text = str(self.execute_script("return document.body ? document.body.innerText : '';") or "")
-            return AppleScriptElement(text)
+            return AppleScriptElement(text, self, "body")
         if by == By.CSS_SELECTOR and value:
             exists = bool(self.execute_script("return !!document.querySelector(arguments[0]);", value))
             if exists:
                 text = str(self.execute_script("const el = document.querySelector(arguments[0]); return el ? (el.innerText || el.textContent || '') : '';", value) or "")
-                return AppleScriptElement(text)
+                return AppleScriptElement(text, self, value)
         raise NoSuchElementException(value or "")
 
     def execute_script(self, script: str, *args: Any) -> Any:
@@ -966,8 +1157,13 @@ def detect_block(driver: WebDriver) -> Optional[str]:
     ]
     for reason, markers in checks:
         if any(marker in haystack for marker in markers):
-            if reason == "amazon_sign_in" and "amazon.com/ap/signin" not in driver.current_url:
-                continue
+            if reason == "amazon_sign_in":
+                sign_in_url = urlparse(str(getattr(driver, "current_url", "") or ""))
+                if (
+                    "/ap/signin" not in sign_in_url.path.lower()
+                    or "amazon." not in sign_in_url.netloc.lower()
+                ):
+                    continue
             return reason
     return None
 
@@ -997,11 +1193,895 @@ def wait_for_manual_continue(timeout: int) -> bool:
 def wait_for_manual_clear(driver: WebDriver, reason: str, timeout: int) -> bool:
     print(f"检测到需要人工处理：{reason}")
     print("脚本已暂停并保留当前页面。请在 Chrome 中手动输入验证数字或完成登录。")
-    while wait_for_manual_continue(timeout):
+    deadline = time.time() + max(int(timeout), 1)
+    while True:
+        remaining = deadline - time.time()
+        if remaining <= 0 or not wait_for_manual_continue(max(int(remaining), 1)):
+            return False
         if not detect_block(driver):
             return True
         print("页面仍显示验证或限制，请继续处理后再确认。")
+
+
+def amazon_marketplace_domain(url: str, locations: Dict[str, Dict[str, str]]) -> str:
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    for domain in sorted(locations, key=len, reverse=True):
+        if host == domain or host.endswith(f".{domain}"):
+            return domain
+    return ""
+
+
+def normalize_delivery_value(value: str) -> str:
+    return re.sub(r"[^0-9a-z]+", "", str(value or "").lower())
+
+
+def delivery_value_is_present(snapshot: str, expected: str) -> bool:
+    """Match a normalized value without allowing a longer alphanumeric value."""
+    characters = re.findall(r"[0-9a-z]", str(expected or "").lower())
+    if not characters:
+        return False
+    pattern = (
+        r"(?<![0-9a-z])"
+        + r"[^0-9a-z]*".join(re.escape(character) for character in characters)
+        + r"(?![0-9a-z])"
+    )
+    return re.search(pattern, str(snapshot or "").lower()) is not None
+
+
+def delivery_postal_candidates(postal_code: str) -> List[str]:
+    original = str(postal_code or "").strip()
+    compact = re.sub(r"[\s-]+", "", original)
+    return [value for index, value in enumerate((original, compact)) if value and value not in (original, compact)[:index]]
+
+
+def _runtime_delivery_locations(runtime: Any) -> Dict[str, Dict[str, str]]:
+    locations = getattr(runtime, "delivery_locations", None)
+    if isinstance(locations, dict) and locations:
+        return locations
+    path = getattr(runtime, "delivery_locations_file", None)
+    if path:
+        return load_delivery_locations(Path(path))
+    return build_delivery_location_config({})["delivery_locations"]
+
+
+def _delivery_location_snapshot(driver: WebDriver) -> str:
+    script = r"""
+/* lc_delivery_snapshot */
+const selectors = [
+  '#glow-ingress-block', '#glow-ingress-line1', '#glow-ingress-line2',
+  '#nav-global-location-popover-link', '#nav-global-location-slot',
+  '#nav-global-location-data-modal-action', '#GLUXHiddenSuccessMessage',
+  '#GLUXHiddenSuccessDialog', '#GLUXHiddenSuccessSelectedAddressPlaceholder',
+  '#GLUXHiddenSuccessSubTextAisEgress',
+  '[data-action="GLUXPostalInputAction"] .a-alert-content',
+  '[data-action="GLUXConfirmAction"]'
+];
+const values = [];
+for (const selector of selectors) {
+  for (const el of document.querySelectorAll(selector)) {
+    values.push(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '');
+  }
+}
+return values.join(' ').replace(/\s+/g, ' ').trim();
+"""
+    try:
+        return normalize_space(str(driver.execute_script(script) or ""))
+    except (JavascriptException, WebDriverException):
+        return ""
+
+
+def delivery_location_is_confirmed(
+    driver: WebDriver,
+    location: Dict[str, str],
+) -> bool:
+    snapshot = _delivery_location_snapshot(driver)
+    if not snapshot:
+        return False
+    expected = location["city"] if location.get("strategy") == "postal_then_city" else location["postal_code"]
+    return delivery_value_is_present(snapshot, expected)
+
+
+def _submitted_delivery_location_is_confirmed(
+    driver: WebDriver,
+    location: Dict[str, str],
+    allow_reloaded_city_input: bool = False,
+) -> bool:
+    """Confirm an exact submit using only persisted post-navigation evidence.
+
+    Some marketplaces, including amazon.ca, replace the last postal character in
+    the reopened header with a zero-width mask. UAE confirmation may read the full
+    city restored in the modal only after the transient value was cleared and the
+    target URL reopened. A fresh driver still has to submit and confirm again
+    because the initial check remains exact.
+    """
+    if delivery_location_is_confirmed(driver, location):
+        return True
+    if location.get("strategy") == "postal_then_city":
+        if not allow_reloaded_city_input:
+            return False
+        script = r"""
+/* lc_delivery_city_input_snapshot */
+const input = [...document.querySelectorAll('#GLUXCityWithDistrictCityInput')]
+  .find(el => el.offsetParent !== null);
+return input ? input.value : '';
+"""
+        try:
+            selected_city = str(driver.execute_script(script) or "")
+        except (JavascriptException, WebDriverException):
+            return False
+        if normalize_delivery_value(selected_city) != normalize_delivery_value(location["city"]):
+            return False
+        return _close_delivery_city_dialog(driver)
+    script = r"""
+/* lc_delivery_header_snapshot */
+const el = document.querySelector('#glow-ingress-line2');
+return el ? (el.innerText || el.textContent || '') : '';
+"""
+    try:
+        header = str(driver.execute_script(script) or "")
+    except (JavascriptException, WebDriverException):
+        return False
+    privacy_masks = ("\u200b", "\u200c", "\u200d", "\u2060", "\ufeff")
+    expected = normalize_delivery_value(location["postal_code"])
+    if len(expected) <= 1:
+        return False
+    for index, character in enumerate(header):
+        if character not in privacy_masks:
+            continue
+        before_mask = normalize_delivery_value(header[:index])
+        after_mask = normalize_delivery_value(header[index + 1 :])
+        if before_mask == expected[:-1] and not after_mask:
+            return True
     return False
+
+
+def _dismiss_delivery_obstructions(driver: WebDriver) -> None:
+    """Close only SellerSprite extension dialogs that cover Amazon's location UI."""
+    script = r"""
+/* lc_delivery_dismiss_obstructions */
+const roots = [...document.querySelectorAll('#seller-sprite-extension-app [role="dialog"]')]
+  .filter(el => el.offsetParent !== null);
+for (const root of roots) {
+  const selectors = [
+    '.el-dialog__headerbtn', '.el-message-box__headerbtn',
+    'button[aria-label*="close" i]', '[role="button"][aria-label*="close" i]'
+  ];
+  for (const selector of selectors) {
+    const button = root.querySelector(selector);
+    if (button && button.offsetParent !== null) { button.click(); return true; }
+  }
+}
+return false;
+"""
+    try:
+        driver.execute_script(script)
+    except (JavascriptException, WebDriverException):
+        pass
+
+
+def _close_delivery_city_dialog(driver: WebDriver) -> bool:
+    script = r"""
+/* lc_delivery_city_dialog_close */
+const cityInput = [...document.querySelectorAll('#GLUXCityWithDistrictCityInput')]
+  .find(el => el.offsetParent !== null);
+const root = cityInput && cityInput.closest('.a-popover-modal, [role="dialog"]');
+if (root && !root.closest('#seller-sprite-extension-app')) {
+  const selectors = [
+    '.a-button-close', '[data-action="a-popover-close"]',
+    'button[aria-label*="close" i]', '[role="button"][aria-label*="close" i]'
+  ];
+  for (const selector of selectors) {
+    const button = root.querySelector(selector);
+    if (button && button.offsetParent !== null) { button.click(); return true; }
+  }
+}
+return false;
+"""
+    try:
+        clicked = bool(driver.execute_script(script))
+    except (JavascriptException, WebDriverException):
+        return False
+    if not clicked:
+        return False
+    hidden_deadline = time.time() + 1.5
+    visible_script = r"""
+/* lc_delivery_city_dialog_visible */
+return [...document.querySelectorAll('#GLUXCityWithDistrictCityInput')]
+  .some(el => el.offsetParent !== null);
+"""
+    while time.time() < hidden_deadline:
+        try:
+            if not bool(driver.execute_script(visible_script)):
+                return True
+        except (JavascriptException, WebDriverException):
+            return False
+        time.sleep(0.1)
+    try:
+        return not bool(driver.execute_script(visible_script))
+    except (JavascriptException, WebDriverException):
+        return False
+
+
+def _clear_transient_delivery_city_input(driver: WebDriver) -> bool:
+    """Clear any current UAE form value before a navigation-based persistence check."""
+    script = r"""
+/* lc_delivery_city_input_reset */
+const input = document.querySelector('#GLUXCityWithDistrictCityInput');
+if (!input) return 'absent';
+const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+if (descriptor && descriptor.set) descriptor.set.call(input, ''); else input.value = '';
+return input.value === '' ? 'cleared' : 'failed';
+"""
+    try:
+        return str(driver.execute_script(script) or "") in {"absent", "cleared"}
+    except (JavascriptException, WebDriverException):
+        return False
+
+
+def _click_delivery_trigger(driver: WebDriver) -> bool:
+    _dismiss_delivery_obstructions(driver)
+    visible_input_script = r"""
+/* lc_delivery_open_visible */
+const visibleInputs = [
+  '#GLUXZipUpdateInput', 'input[name="zipCode"]', 'input[name="postalCode"]',
+  '#GLUXPostalCodeWithCity_PostalCodeInput',
+  '#GLUXCityWithDistrictCityInput',
+  '[data-action="GLUXPostalInputAction"] input[type="text"]'
+];
+const inputVisible = visibleInputs.some(selector => {
+  return [...document.querySelectorAll(selector)].some(input => input.offsetParent !== null);
+});
+const deliverySurfaceVisible = [
+  '#GLUXAddressBlock', '#GLUXSpecifyLocationDiv', '#GLUXHiddenSuccessDialog',
+  '#GLUXHiddenSuccessSelectedAddressPlaceholder'
+].some(selector => [...document.querySelectorAll(selector)].some(el => el.offsetParent !== null));
+return inputVisible || deliverySurfaceVisible;
+"""
+    try:
+        if bool(driver.execute_script(visible_input_script)):
+            return True
+    except (JavascriptException, WebDriverException):
+        pass
+
+    current_domain = (urlparse(str(getattr(driver, "current_url", "") or "")).hostname or "").lower()
+    try:
+        opened_domain, opened_at = getattr(driver, "_lc_delivery_trigger_opened", ("", 0.0))
+        if opened_domain == current_domain and time.time() - float(opened_at) < 5:
+            return True
+    except (TypeError, ValueError):
+        pass
+
+    selectors = [
+        "#nav-global-location-popover-link",
+        "#nav-global-location-slot",
+        "#nav-global-location-data-modal-action",
+        '[data-csa-c-content-id="nav-global-location-slot"]',
+    ]
+    for selector in selectors:
+        try:
+            driver.find_element(By.CSS_SELECTOR, selector).click()
+            setattr(driver, "_lc_delivery_trigger_opened", (current_domain, time.time()))
+            return True
+        except (AttributeError, NoSuchElementException, WebDriverException):
+            continue
+
+    script = r"""
+/* lc_delivery_open */
+const selectors = [
+  '#nav-global-location-popover-link', '#nav-global-location-slot',
+  '#nav-global-location-data-modal-action', '[data-csa-c-content-id="nav-global-location-slot"]'
+];
+for (const selector of selectors) {
+  const el = document.querySelector(selector);
+  if (el) { el.click(); return true; }
+}
+return false;
+"""
+    try:
+        clicked = bool(driver.execute_script(script))
+        if clicked:
+            setattr(driver, "_lc_delivery_trigger_opened", (current_domain, time.time()))
+        return clicked
+    except (JavascriptException, WebDriverException):
+        return False
+
+
+def _submit_delivery_postal(driver: WebDriver, postal_code: str, city: str = "") -> Optional[bool]:
+    city_only_script = r"""
+/* lc_delivery_city_only_form */
+return [...document.querySelectorAll('#GLUXCityWithDistrictCityInput')]
+  .some(el => el.offsetParent !== null);
+"""
+    try:
+        if bool(driver.execute_script(city_only_script)):
+            return None
+    except (JavascriptException, WebDriverException):
+        pass
+
+    postal_with_city_script = r"""
+/* lc_delivery_postal_with_city_submit */
+const postal = String(arguments[0] || '');
+const city = String(arguments[1] || '');
+const input = [...document.querySelectorAll('#GLUXPostalCodeWithCity_PostalCodeInput')]
+  .find(el => el.offsetParent !== null);
+if (!input) return 'not_applicable';
+if (input.value !== postal) {
+  return 'needs_typing';
+}
+const norm = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+const select = [...document.querySelectorAll('#GLUXPostalCodeWithCity_DropdownList')]
+  .find(el => el.offsetParent !== null);
+if (!select) return 'waiting';
+const option = [...select.options].find(item => item.value && norm(item.textContent).includes(norm(city)));
+if (!option) return 'waiting';
+if (select.value !== option.value) {
+  select.value = option.value;
+  for (const eventName of ['input', 'change']) select.dispatchEvent(new Event(eventName, {bubbles: true}));
+}
+for (const button of document.querySelectorAll('#GLUXPostalCodeWithCityApplyButton')) {
+  if (button.offsetParent !== null) { button.click(); return 'submitted'; }
+}
+return 'waiting';
+"""
+    if city:
+        try:
+            postal_with_city_status = str(
+                driver.execute_script(postal_with_city_script, postal_code, city) or ""
+            )
+        except (JavascriptException, WebDriverException):
+            postal_with_city_status = ""
+        if postal_with_city_status == "submitted":
+            return True
+        if postal_with_city_status == "needs_typing":
+            try:
+                postal_input = driver.find_element(
+                    By.CSS_SELECTOR,
+                    "#GLUXPostalCodeWithCity_PostalCodeInput",
+                )
+                postal_input.clear()
+                type_text = getattr(postal_input, "type_text", None)
+                if callable(type_text):
+                    type_text(postal_code)
+                else:
+                    postal_input.send_keys(postal_code)
+            except (AttributeError, NoSuchElementException, WebDriverException):
+                pass
+            return False
+        if postal_with_city_status == "waiting":
+            return False
+
+    input_selectors = [
+        "#GLUXZipUpdateInput",
+        'input[name="zipCode"]',
+        'input[name="postalCode"]',
+        '[data-action="GLUXPostalInputAction"] input[type="text"]',
+        'input[autocomplete="postal-code"]',
+    ]
+    submit_selectors = [
+        "#GLUXZipUpdate",
+        '[data-action="GLUXPostalInputAction"] input[type="submit"]',
+        '[data-action="GLUXPostalInputAction"] button',
+        'button[name="glowDoneButton"]',
+    ]
+    split_fields_script = r"""
+/* lc_delivery_split_postal_fields */
+return [...document.querySelectorAll('input[id^="GLUXZipUpdateInput_"]')]
+  .filter(input => input.offsetParent !== null)
+  .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+  .map(input => ({id: input.id, maxLength: Number(input.maxLength || 0), value: input.value || ''}));
+"""
+    try:
+        split_fields = driver.execute_script(split_fields_script) or []
+    except (JavascriptException, WebDriverException):
+        split_fields = []
+    if isinstance(split_fields, list) and len(split_fields) >= 2:
+        compact = re.sub(r"[\s-]+", "", postal_code)
+        offset = 0
+        chunks: List[str] = []
+        for index, field in enumerate(split_fields):
+            remaining_inputs = len(split_fields) - index
+            configured_length = int(field.get("maxLength") or 0) if isinstance(field, dict) else 0
+            remaining_characters = max(len(compact) - offset, 0)
+            chunk_length = configured_length if configured_length > 0 else (
+                (remaining_characters + remaining_inputs - 1) // remaining_inputs
+            )
+            chunks.append(compact[offset : offset + chunk_length])
+            offset += chunk_length
+        typed = False
+        for field, chunk in zip(split_fields, chunks):
+            if not isinstance(field, dict) or str(field.get("value") or "") == chunk:
+                continue
+            try:
+                split_input = driver.find_element(By.CSS_SELECTOR, f"#{field['id']}")
+                split_input.clear()
+                type_text = getattr(split_input, "type_text", None)
+                if callable(type_text):
+                    type_text(chunk)
+                else:
+                    split_input.send_keys(chunk)
+                typed = True
+            except (AttributeError, KeyError, NoSuchElementException, WebDriverException):
+                split_fields = []
+                break
+        if split_fields and typed:
+            return False
+
+    split_input_script = r"""
+/* lc_delivery_split_postal_fill */
+const compact = String(arguments[0] || '').replace(/[\s-]+/g, '');
+const inputs = [...document.querySelectorAll('input[id^="GLUXZipUpdateInput_"]')]
+  .filter(input => input.offsetParent !== null)
+  .sort((a, b) => String(a.id).localeCompare(String(b.id)));
+if (inputs.length < 2 || !compact) return false;
+let offset = 0;
+for (let index = 0; index < inputs.length; index += 1) {
+  const input = inputs[index];
+  const remainingInputs = inputs.length - index;
+  const configuredLength = Number(input.maxLength || 0);
+  const chunkLength = configuredLength > 0
+    ? configuredLength
+    : Math.ceil((compact.length - offset) / remainingInputs);
+  const value = compact.slice(offset, offset + chunkLength);
+  offset += chunkLength;
+  const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+  if (descriptor && descriptor.set) descriptor.set.call(input, value); else input.value = value;
+  for (const eventName of ['input', 'change']) {
+    input.dispatchEvent(new Event(eventName, {bubbles: true}));
+  }
+}
+return offset >= compact.length;
+"""
+    if split_fields:
+        split_ready = True
+    else:
+        try:
+            split_ready = bool(driver.execute_script(split_input_script, postal_code))
+        except (JavascriptException, WebDriverException):
+            split_ready = False
+    if split_ready:
+        split_submit_script = r"""
+/* lc_delivery_split_postal_submit */
+const selectors = [
+        '#GLUXZipUpdate', '[data-action="GLUXPostalInputAction"] input[type="submit"]',
+        '[data-action="GLUXPostalInputAction"] button', 'button[name="glowDoneButton"]'
+];
+for (const selector of selectors) {
+  for (const button of document.querySelectorAll(selector)) {
+    if (button.offsetParent !== null) { button.click(); return true; }
+  }
+}
+return false;
+"""
+        try:
+            if bool(driver.execute_script(split_submit_script)):
+                return True
+        except (JavascriptException, WebDriverException):
+            pass
+        for selector in submit_selectors:
+            try:
+                driver.find_element(By.CSS_SELECTOR, selector).click()
+                return True
+            except (AttributeError, NoSuchElementException, WebDriverException):
+                continue
+
+    native_input = None
+    for selector in input_selectors:
+        try:
+            native_input = driver.find_element(By.CSS_SELECTOR, selector)
+            native_input.clear()
+            native_input.send_keys(postal_code)
+            break
+        except (AttributeError, NoSuchElementException, WebDriverException):
+            native_input = None
+    if native_input is not None:
+        for selector in submit_selectors:
+            try:
+                driver.find_element(By.CSS_SELECTOR, selector).click()
+                return True
+            except (AttributeError, NoSuchElementException, WebDriverException):
+                continue
+
+    script = r"""
+/* lc_delivery_postal_submit */
+const postal = arguments[0];
+const inputSelectors = [
+  '#GLUXZipUpdateInput', 'input[name="zipCode"]', 'input[name="postalCode"]',
+  '[data-action="GLUXPostalInputAction"] input[type="text"]',
+  'input[autocomplete="postal-code"]'
+];
+let input = null;
+for (const selector of inputSelectors) {
+  for (const candidate of document.querySelectorAll(selector)) {
+    if (candidate.offsetParent !== null) { input = candidate; break; }
+  }
+  if (input) break;
+}
+if (!input) return false;
+const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+if (descriptor && descriptor.set) descriptor.set.call(input, postal); else input.value = postal;
+for (const eventName of ['input', 'change']) input.dispatchEvent(new Event(eventName, {bubbles: true}));
+const submitSelectors = [
+  '#GLUXZipUpdate', '[data-action="GLUXPostalInputAction"] input[type="submit"]',
+  '[data-action="GLUXPostalInputAction"] button', 'button[name="glowDoneButton"]'
+];
+for (const selector of submitSelectors) {
+  for (const button of document.querySelectorAll(selector)) {
+    if (button.offsetParent !== null) { button.click(); return true; }
+  }
+}
+if (input.form) { input.form.requestSubmit ? input.form.requestSubmit() : input.form.submit(); return true; }
+return false;
+"""
+    try:
+        return bool(driver.execute_script(script, postal_code))
+    except (JavascriptException, WebDriverException):
+        return False
+
+
+def _submit_delivery_city(driver: WebDriver, city: str) -> bool:
+    city_with_district_script = r"""
+/* lc_delivery_city_with_district_submit */
+const city = String(arguments[0] || '');
+const norm = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+for (const selector of [
+  '#GLUXConfirmClose', '[data-action="GLUXConfirmAction"] button',
+  'button[name="glowDoneButton"]'
+]) {
+  for (const button of document.querySelectorAll(selector)) {
+    if (button.offsetParent !== null) { button.click(); return 'submitted'; }
+  }
+}
+const input = [...document.querySelectorAll('#GLUXCityWithDistrictCityInput')]
+  .find(el => el.offsetParent !== null);
+if (!input) return 'not_applicable';
+if (norm(input.value) !== norm(city)) return 'needs_typing';
+const suggestion = [...document.querySelectorAll('#GLUXCityWithDistrictCityList li')]
+  .find(el => el.offsetParent !== null && norm(el.textContent) === norm(city));
+if (suggestion) { suggestion.click(); return 'waiting'; }
+for (const button of document.querySelectorAll('#GLUXCityWithDistrictApplyButton')) {
+  if (button.offsetParent !== null) { button.click(); return 'submitted'; }
+}
+return 'waiting';
+"""
+    try:
+        city_with_district_status = str(
+            driver.execute_script(city_with_district_script, city) or ""
+        )
+    except (JavascriptException, WebDriverException):
+        city_with_district_status = ""
+    if city_with_district_status == "submitted":
+        return True
+    if city_with_district_status == "needs_typing":
+        try:
+            city_input = driver.find_element(
+                By.CSS_SELECTOR,
+                "#GLUXCityWithDistrictCityInput",
+            )
+            city_input.clear()
+            type_text = getattr(city_input, "type_text", None)
+            if callable(type_text):
+                type_text(city)
+            else:
+                city_input.send_keys(city)
+        except (AttributeError, NoSuchElementException, WebDriverException):
+            pass
+        return False
+    if city_with_district_status == "waiting":
+        return False
+
+    script = r"""
+/* lc_delivery_city_submit */
+const city = String(arguments[0] || '');
+const norm = value => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+const target = norm(city);
+const clickable = [...document.querySelectorAll('button, a, [role="button"], [role="option"], label')]
+  .find(el => el.offsetParent !== null && norm(el.innerText || el.textContent || el.getAttribute('aria-label')).includes(target));
+if (clickable) { clickable.click(); return true; }
+const inputSelectors = [
+  'input[name*="city" i]', 'input[placeholder*="city" i]', 'input[aria-label*="city" i]',
+  '[role="dialog"] input[type="text"]'
+];
+for (const selector of inputSelectors) {
+  for (const input of document.querySelectorAll(selector)) {
+    if (input.offsetParent === null) continue;
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    if (descriptor && descriptor.set) descriptor.set.call(input, city); else input.value = city;
+    for (const eventName of ['input', 'change']) input.dispatchEvent(new Event(eventName, {bubbles: true}));
+    input.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', bubbles: true}));
+    input.dispatchEvent(new KeyboardEvent('keyup', {key: 'Enter', code: 'Enter', bubbles: true}));
+    return true;
+  }
+}
+return false;
+"""
+    try:
+        return bool(driver.execute_script(script, city))
+    except (JavascriptException, WebDriverException):
+        return False
+
+
+def _dismiss_delivery_dialog(driver: WebDriver) -> None:
+    script = r"""
+/* lc_delivery_dismiss */
+for (const selector of ['#GLUXConfirmClose', 'button[name="glowDoneButton"]', '[data-action="GLUXConfirmAction"] button']) {
+  for (const button of document.querySelectorAll(selector)) {
+    if (button.offsetParent !== null) { button.click(); return true; }
+  }
+}
+return false;
+"""
+    try:
+        driver.execute_script(script)
+    except (JavascriptException, WebDriverException):
+        pass
+
+
+def handle_amazon_verification(
+    driver: WebDriver,
+    runtime: Any,
+    on_manual_pause: Optional[Any] = None,
+    on_manual_resume: Optional[Any] = None,
+) -> None:
+    reason = detect_block(driver)
+    if not reason:
+        return
+    if on_manual_pause:
+        on_manual_pause(reason, str(getattr(driver, "current_url", "") or ""))
+    if not wait_for_manual_clear(driver, reason, int(getattr(runtime, "manual_pause_timeout", 900) or 900)):
+        raise VerificationUnconfirmedError(
+            f"{reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+        )
+    if on_manual_resume:
+        on_manual_resume()
+
+
+def _delivery_cache(runtime: Any, driver: WebDriver) -> set[str]:
+    try:
+        cache = getattr(driver, "_lc_delivery_location_cache", None)
+        if not isinstance(cache, set):
+            cache = set()
+            setattr(driver, "_lc_delivery_location_cache", cache)
+        return cache
+    except Exception:
+        cache = getattr(runtime, "_lc_delivery_location_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            setattr(runtime, "_lc_delivery_location_cache", cache)
+        return cache.setdefault(id(driver), set())
+
+
+def _wait_for_delivery_confirmation(
+    driver: WebDriver,
+    location: Dict[str, str],
+    deadline: float,
+    allow_reloaded_city_input: bool = False,
+) -> bool:
+    while time.time() < deadline:
+        if _submitted_delivery_location_is_confirmed(
+            driver,
+            location,
+            allow_reloaded_city_input=allow_reloaded_city_input,
+        ):
+            return True
+        if allow_reloaded_city_input and location.get("strategy") == "postal_then_city":
+            _click_delivery_trigger(driver)
+        time.sleep(0.25)
+    return _submitted_delivery_location_is_confirmed(
+        driver,
+        location,
+        allow_reloaded_city_input=allow_reloaded_city_input,
+    )
+
+
+def _attempt_delivery_value(
+    driver: WebDriver,
+    value: str,
+    deadline: float,
+    submitter: Any,
+) -> Optional[bool]:
+    while time.time() < deadline:
+        _click_delivery_trigger(driver)
+        submitted = submitter(driver, value)
+        if submitted is None:
+            return None
+        if submitted:
+            return True
+        time.sleep(0.25)
+    return False
+
+
+def _reopen_amazon_target(
+    driver: WebDriver,
+    target_url: str,
+    runtime: Any,
+    on_manual_pause: Optional[Any],
+    on_manual_resume: Optional[Any],
+    clear_transient_city_input: bool = False,
+) -> bool:
+    city_input_reset = (
+        _clear_transient_delivery_city_input(driver)
+        if clear_transient_city_input
+        else False
+    )
+    last_error: Optional[WebDriverException] = None
+    for attempt in range(3):
+        try:
+            driver.get(target_url)
+            last_error = None
+            break
+        except WebDriverException as exc:
+            if "ERR_ABORTED" not in str(exc).upper():
+                raise
+            last_error = exc
+            time.sleep(0.75 * (attempt + 1))
+    if last_error is not None:
+        raise last_error
+    try:
+        delattr(driver, "_lc_delivery_trigger_opened")
+    except (AttributeError, TypeError):
+        pass
+    handle_amazon_verification(driver, runtime, on_manual_pause, on_manual_resume)
+    return city_input_reset
+
+
+def ensure_amazon_delivery_location(
+    driver: WebDriver,
+    runtime: Any,
+    original_url: str = "",
+    on_manual_pause: Optional[Any] = None,
+    on_manual_resume: Optional[Any] = None,
+) -> None:
+    if not bool(getattr(runtime, "delivery_location_enabled", True)):
+        return
+    locations = _runtime_delivery_locations(runtime)
+    current_url = str(getattr(driver, "current_url", "") or original_url)
+    domain = amazon_marketplace_domain(current_url or original_url, locations)
+    if not domain:
+        raise DeliveryLocationUnconfirmedError(
+            f"delivery_location_unsupported: 当前 Amazon 站点没有配送地址映射：{current_url or original_url}"
+        )
+    location = locations[domain]
+    fingerprint = str(getattr(runtime, "delivery_location_fingerprint", "") or "")
+    cache_key = f"{fingerprint}:{domain}"
+    cache = _delivery_cache(runtime, driver)
+    if cache_key in cache:
+        return
+    if delivery_location_is_confirmed(driver, location):
+        cache.add(cache_key)
+        return
+
+    target_url = original_url or current_url
+    timeout = max(int(getattr(runtime, "delivery_location_timeout", 20) or 20), 1)
+    for postal_code in delivery_postal_candidates(location["postal_code"]):
+        deadline = time.time() + timeout
+        submitted = _attempt_delivery_value(
+            driver,
+            postal_code,
+            deadline,
+            lambda current_driver, value: _submit_delivery_postal(
+                current_driver,
+                value,
+                location["city"],
+            ),
+        )
+        if submitted is None:
+            break
+        if not submitted:
+            continue
+        ready_deadline = min(deadline, time.time() + 5)
+        _wait_for_delivery_confirmation(driver, location, ready_deadline)
+        _dismiss_delivery_dialog(driver)
+        time.sleep(min(0.75, max(deadline - time.time(), 0)))
+        city_input_reloaded = False
+        if target_url:
+            city_input_reloaded = _reopen_amazon_target(
+                driver,
+                target_url,
+                runtime,
+                on_manual_pause,
+                on_manual_resume,
+                clear_transient_city_input=location.get("strategy") == "postal_then_city",
+            )
+        if _wait_for_delivery_confirmation(
+            driver,
+            location,
+            time.time() + timeout,
+            allow_reloaded_city_input=city_input_reloaded,
+        ):
+            cache.add(cache_key)
+            return
+
+    if location.get("strategy") == "postal_then_city":
+        deadline = time.time() + timeout
+        submitted = _attempt_delivery_value(
+            driver,
+            location["city"],
+            deadline,
+            _submit_delivery_city,
+        )
+        if submitted:
+            ready_deadline = min(deadline, time.time() + 5)
+            _wait_for_delivery_confirmation(driver, location, ready_deadline)
+            _dismiss_delivery_dialog(driver)
+            time.sleep(min(0.75, max(deadline - time.time(), 0)))
+            city_input_reloaded = False
+            if target_url:
+                city_input_reloaded = _reopen_amazon_target(
+                    driver,
+                    target_url,
+                    runtime,
+                    on_manual_pause,
+                    on_manual_resume,
+                    clear_transient_city_input=True,
+                )
+            if _wait_for_delivery_confirmation(
+                driver,
+                location,
+                time.time() + timeout,
+                allow_reloaded_city_input=city_input_reloaded,
+            ):
+                cache.add(cache_key)
+                return
+
+    reason = "delivery_location_unconfirmed"
+    if on_manual_pause:
+        on_manual_pause(reason, str(getattr(driver, "current_url", "") or target_url))
+    print(
+        f"自动设置配送地址失败。请在当前 Chrome 页面手动设置 {domain} 配送地址为 "
+        f"{location['city']} / {location['postal_code']}。"
+    )
+    manual_deadline = time.time() + max(int(getattr(runtime, "manual_pause_timeout", 900) or 900), 1)
+    while time.time() < manual_deadline:
+        remaining = max(int(manual_deadline - time.time()), 1)
+        if not wait_for_manual_continue(remaining):
+            break
+        if delivery_location_is_confirmed(driver, location):
+            if on_manual_resume:
+                on_manual_resume()
+            cache.add(cache_key)
+            return
+        if target_url:
+            city_input_reloaded = _reopen_amazon_target(
+                driver,
+                target_url,
+                runtime,
+                on_manual_pause,
+                on_manual_resume,
+                clear_transient_city_input=location.get("strategy") == "postal_then_city",
+            )
+            confirmation_deadline = min(manual_deadline, time.time() + timeout)
+            if _wait_for_delivery_confirmation(
+                driver,
+                location,
+                confirmation_deadline,
+                allow_reloaded_city_input=city_input_reloaded,
+            ):
+                if on_manual_resume:
+                    on_manual_resume()
+                cache.add(cache_key)
+                return
+        print("配送地址仍未确认，请继续在当前 Chrome 页面处理。")
+    raise DeliveryLocationUnconfirmedError(
+        "delivery_location_unconfirmed: 配送地址人工确认超时，任务已停止且未提取当前页数据。"
+    )
+
+
+def open_amazon_page(
+    driver: WebDriver,
+    url: str,
+    runtime: Any,
+    on_manual_pause: Optional[Any] = None,
+    on_manual_resume: Optional[Any] = None,
+) -> None:
+    driver.get(url)
+    handle_amazon_verification(driver, runtime, on_manual_pause, on_manual_resume)
+    ensure_amazon_delivery_location(
+        driver,
+        runtime,
+        original_url=url,
+        on_manual_pause=on_manual_pause,
+        on_manual_resume=on_manual_resume,
+    )
 
 
 def wait_for_amazon_products(driver: WebDriver, runtime: RuntimeConfig) -> None:
@@ -2172,7 +3252,13 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
         if wait_seconds > 0:
             time.sleep(wait_seconds)
         driver = start_driver(runtime)
-        driver.get(page_url)
+        open_amazon_page(
+            driver,
+            page_url,
+            runtime,
+            on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
+            on_manual_resume=state.clear_manual_pause,
+        )
         try:
             wait_for_amazon_products(driver, runtime)
         except TimeoutException:
@@ -2196,7 +3282,13 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
             print(f"处理类目：{' > '.join(node.get('path') or [])} / 第 {page_number} 页")
 
             try:
-                driver.get(page_url)
+                open_amazon_page(
+                    driver,
+                    page_url,
+                    runtime,
+                    on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
+                    on_manual_resume=state.clear_manual_pause,
+                )
                 wait_for_page_or_manual(driver, runtime, state, failures_path, debug_dir, node, page_number, page_url)
                 page_path = extract_current_category_path(driver)
                 if page_path:
@@ -2232,7 +3324,9 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
                 if plugin_status == "blocked":
                     log_failure(failures_path, state, runtime, node, page_number, page_url, "verification_timeout", "人工处理超时")
                     save_debug_snapshot(driver, debug_dir, "verification_timeout")
-                    break
+                    raise VerificationUnconfirmedError(
+                        "sellersprite_verification_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+                    )
 
                 key = page_key(node, page_number, page_url)
                 records: List[Dict[str, Any]] = []
@@ -2305,7 +3399,9 @@ def wait_for_page_or_manual(
             log_failure(failures_path, state, runtime, node, page_number, page_url, block_reason, "人工处理超时")
             if runtime.save_debug_snapshots:
                 save_debug_snapshot(driver, debug_dir, block_reason)
-            raise TimeoutException(block_reason)
+            raise VerificationUnconfirmedError(
+                f"{block_reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+            )
     wait_for_amazon_products(driver, runtime)
 
 

@@ -17,7 +17,7 @@ Use this skill to create and operate a local Amazon crawler runner. The bundled 
 
 Before editing configs, installing dependencies, opening Chrome, running a dry-run, or starting any crawl, the Laochen cloud auth gate must pass.
 
-This gate only verifies whether the current user may use this skill. It does not change the crawler logic and does not replace the user's Amazon, Chrome, SellerSprite, OpenAI, or local browser setup.
+This gate only verifies whether the current user may use this skill. It does not change the crawler logic and does not replace the user's Amazon, Chrome, SellerSprite, Doubao, or local browser setup.
 
 The user's key goes in `config.json`:
 
@@ -56,6 +56,12 @@ bash "$SKILL_DIR/scripts/setup_runner.sh" ./lc-amazon-data-crawl-runner
 
 Then use the generated runner folder for all task-specific config edits and executions.
 
+Setup creates `config/doubao_embedding_vision.json` from an empty public
+example, protects it with mode `0600` where supported, and adds it to the
+runner `.gitignore`. It never overwrites that file on later setup runs. Before
+an image-competitor embedding run, the user must put their own Volcengine Ark
+API key in that local file. Never ask the user to paste the key into chat.
+
 ## Runner Commands
 
 Run these from the generated runner folder:
@@ -67,6 +73,7 @@ Run these from the generated runner folder:
 ./lc-amazon-data-crawl.sh amazon-front-run --config config/amazon_front_keyword_search.json
 ./lc-amazon-data-crawl.sh amazon-front-run --config config/amazon_front_storefront.json
 ./lc-amazon-data-crawl.sh category-rank-run --config config/category_rank_crawler.json
+./lc-amazon-data-crawl.sh image-competitor-dry-run --config config/amazon_image_competitors.json
 ./lc-amazon-data-crawl.sh image-competitor-run --config config/amazon_image_competitors.json
 ./lc-amazon-data-crawl.sh cdp-browser-start --config config/amazon_front_keyword_search.json
 ./lc-amazon-data-crawl.sh sellersprite-check --config config/amazon_front_keyword_search.json
@@ -76,9 +83,20 @@ Always run the matching `*-dry-run` command before a real run after editing conf
 
 ## Configuration Rules
 
-Read `references/configuration.md` when creating or editing configs. The key operational rules are:
+Read `references/configuration.md` when creating or editing configs and
+`references/delivery-locations.md` before changing delivery behavior. The key
+operational rules are:
 
 - Replace example input files under `inputs/` with the user's real Excel/CSV files, or point config paths to the real files.
+- Keep `delivery_location_enabled: true`,
+  `delivery_locations_file: "config/amazon_delivery_locations.json"`, and
+  `delivery_location_timeout: 20` in crawler configs. Before extraction, the
+  crawler confirms the marketplace-specific delivery city/postal code. If
+  automatic and manual confirmation both fail, it stops without writing that
+  page.
+- Delivery selection updates Amazon cookies in the dedicated Chrome Profile
+  and can change price, stock, shipping promises, and search results. A new
+  browser driver or exact Amazon domain must confirm the address again.
 - For keyword search sorting, set `keyword_sort_orders` to any of: `Featured`, `Price: Low to High`, `Price: High to Low`, `Avg. Customer Review`, `Newest Arrivals`, `Best Sellers`.
 - For storefront crawling, set `store_sort_orders` with the same labels and set `store_page_limit` from 1 to 20.
 - Default to `browser_backend: "cdp"` and `browser_mode: "reuse"` with
@@ -111,6 +129,18 @@ Read `references/configuration.md` when creating or editing configs. The key ope
 - When `sellersprite_required` is true, do not write page records until at
   least the configured number of ASINs contains real SellerSprite-only fields
   and the data remains stable for the configured number of checks.
+- For image-competitor quantity matching, recommend `match_mode: "embedding"`
+  with `doubao-embedding-vision-251215` through Volcengine Ark
+  `/api/v3/embeddings/multimodal`. Keep the API key only in
+  `config/doubao_embedding_vision.json`, referenced by
+  `doubao_embedding_config_file`; do not put it in a crawl config, log, state,
+  archive, or message.
+- Run `doctor` to see only whether the Doubao credential is `missing`,
+  `unconfigured`, or `ready`. Run the image-competitor dry-run before opening
+  Chrome; missing, invalid, or empty credential configuration must fail there.
+- `match_mode` accepts only `embedding` and `chat`. New Doubao configuration
+  takes precedence. Legacy `openai_*` fields remain a deprecated compatibility
+  path, while `chat` keeps its existing provider behavior.
 - Do not use legacy third-party browser-container workflows; this skill is only
   for normal visible Chrome crawling through CDP, with Selenium as a fallback.
 
@@ -120,6 +150,10 @@ For real runs, monitor terminal output and the `outputs/<job_id>/state.json` fil
 
 - If no new records, state updates, or browser actions happen for more than 3 minutes, report the current reason to the user.
 - If Amazon or SellerSprite needs manual action, tell the user exactly which browser window/page is waiting.
+- If delivery auto-selection fails, tell the user to set the requested location
+  in the current visible Amazon page. After `manual_pause_timeout`, treat an
+  unconfirmed location as `delivery_location_unconfirmed` and stop before
+  extraction.
 - Before writing records, the crawler scrolls the page until the Amazon/product DOM and SellerSprite/plugin DOM stop changing, then waits for SellerSprite data to stabilize.
 - CDP reachability, plugin injection, plugin login prompts and actual enriched
   fields are separate readiness checks. A plugin node or empty table alone is
@@ -141,3 +175,8 @@ When updating this skill, update the bundled scripts in `scripts/`, templates in
 ```bash
 python3 /path/to/skill-creator/scripts/quick_validate.py /path/to/lc-amazon-data-crawl
 ```
+
+Public packages may include
+`assets/config/doubao_embedding_vision.example.json`, but must never include a
+populated `config/doubao_embedding_vision.json`, browser Profiles, cookies, or
+crawl outputs. Preserve existing archives when creating a new dated package.
