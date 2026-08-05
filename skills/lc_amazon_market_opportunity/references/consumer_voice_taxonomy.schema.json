@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.codex.skills/lc_amazon_market_opportunity/consumer_voice_taxonomy.schema.json",
+  "title": "Project consumer voice taxonomy profile",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "profile_id",
+    "product_label",
+    "product_terms",
+    "implicit_product_terms",
+    "semantic_extensions",
+    "topics",
+    "segments",
+    "kano_mapping"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "profile_id": {"type": "string", "pattern": "^[a-z][a-z0-9_.-]{2,63}$"},
+    "product_label": {"type": "string", "minLength": 1},
+    "product_terms": {"$ref": "#/$defs/nonEmptyStrings"},
+    "product_patterns": {"$ref": "#/$defs/strings"},
+    "implicit_product_terms": {"$ref": "#/$defs/nonEmptyStrings"},
+    "implicit_product_patterns": {"$ref": "#/$defs/strings"},
+    "implicit_experience_patterns": {"$ref": "#/$defs/strings"},
+    "semantic_extensions": {
+      "type": "object",
+      "propertyNames": {
+        "enum": [
+          "purchase_selection_recommendation",
+          "failure_complaint_return_alternative",
+          "satisfaction_recommendation_repurchase",
+          "installation_compatibility_scenario",
+          "diy_modification_workaround",
+          "feature_reverse_innovation"
+        ]
+      },
+      "additionalProperties": {"$ref": "#/$defs/patternSet"}
+    },
+    "topics": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/topic"}
+    },
+    "segments": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/segment"}
+    },
+    "kano_mapping": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "enum": ["必备型", "期望型", "魅力型", "无差异型", "反向型"]
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "strings": {
+      "type": "array",
+      "items": {"type": "string", "minLength": 1}
+    },
+    "nonEmptyStrings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "patternSet": {
+      "type": "object",
+      "properties": {
+        "terms": {"$ref": "#/$defs/strings"},
+        "patterns": {"$ref": "#/$defs/strings"}
+      },
+      "additionalProperties": false
+    },
+    "topic": {
+      "type": "object",
+      "required": ["code", "label"],
+      "properties": {
+        "code": {"type": "string", "pattern": "^[a-z][a-z0-9_]{2,63}$"},
+        "label": {"type": "string", "minLength": 1},
+        "terms": {"$ref": "#/$defs/strings"},
+        "patterns": {"$ref": "#/$defs/strings"}
+      },
+      "anyOf": [{"required": ["terms"]}, {"required": ["patterns"]}],
+      "additionalProperties": false
+    },
+    "segment": {
+      "type": "object",
+      "required": ["segment_id", "rank", "dimension", "feature"],
+      "properties": {
+        "segment_id": {
+          "type": "string",
+          "pattern": "^segment_[a-z0-9_]+_all_history$"
+        },
+        "rank": {"type": "integer", "minimum": 1, "maximum": 3},
+        "dimension": {"type": "string", "minLength": 1},
+        "feature": {"type": "string", "minLength": 1},
+        "terms": {"$ref": "#/$defs/strings"},
+        "patterns": {"$ref": "#/$defs/strings"}
+      },
+      "anyOf": [{"required": ["terms"]}, {"required": ["patterns"]}],
+      "additionalProperties": false
+    }
+  }
+}

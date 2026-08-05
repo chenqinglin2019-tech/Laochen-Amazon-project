@@ -1,36 +1,57 @@
 ---
 name: lc_amazon_market_opportunity
-description: 仅在当前对话上下文已经有 lc_amazon_market_research 刚生成并明确输出的 market_project_<YYYYMMDD_HHmmss>/ 项目根目录时，继续做 Amazon 商品机会深挖：通过服务器端关键词词根能力拆解 Top90 关键词，生成消费者决策维度候选，让 agent 完成维度确认和逐 listing 打标，再由本地 CLI 计算特征分布、维度透视、多维组合供需指数、正式机会组合和单文件 HTML 看板。上下文没有真实项目目录时必须停止，不询问路径、不扫描猜测、不重新读取原始 Excel；agent 只调用统一后端，不接触外部供应商接口或凭据。
+description: 仅在当前对话已经有 lc_amazon_market_research 明确输出的 market_project_YYYYMMDD_HHmmss 项目根目录时，继续做 Amazon 商品机会深挖：拆解关键词词根、确认消费者决策维度、逐 Listing 打标，并生成特征分布、供需指数、正式机会组合和离线 HTML 看板。用户要求消费者声音、KANO、产品创意或产品开发时，按本地已采集语料的全历史口径处理全部硬身份唯一留言：发布日期只作描述、不作筛选；六类语义任一命中即可成为候选消费者表达；只合并同一底层留言，不做文本或语义去重；不输出置信度层级或“证据不足”KANO。上下文没有真实项目目录时必须停止，不询问路径、不扫描猜测、不重新读取原始 Excel。
 ---
 
 # Amazon Market Opportunity
 
-> 最近更新：2026-07-30 23:42（UTC+8）
+> 最近更新：2026-08-05（UTC+8）
 
-本 skill 是 `lc_amazon_market_research` 的下一段：商品维度打标、多维透视和供需指数。它是连续上下文专用 skill，不是独立入口；不重新跑市场主报告，也不重新读原始 Excel。
+本 skill 是 `lc_amazon_market_research` 的连续下游：先完成商品机会深挖；用户要求时，再完成全历史消费者声音与产品开发。它不是独立入口，不重新读取原始 Excel。
 
-支持继承的站点为 `US`、`UK`、`DE`、`FR`、`JP`、`AU`、`CA`、`IT`、`ES`、`MX`。站点只能来自上一段项目，不能在本段重新询问、默认或覆盖；旧项目里的 `GB` 会规范为 `UK`。
+## 商品机会深挖
 
-## 使用方式
+1. 完整阅读 `INSTRUCTIONS.md`。
+2. 只从当前对话读取上一段明确输出的项目根目录。没有真实 `market_project_<YYYYMMDD_HHmmss>/` 路径时，按固定停止话术结束；不补问、不扫描、不猜测最新项目。
+3. 按当前系统选择 `tools/bin/` 中唯一对应的 CLI，并用 `inspect-report` 校验项目。
+4. 继承 manifest 中的站点和 `listing_language`；不得重新询问、默认或覆盖站点。
+5. 依次执行 `fetch-roots`、`dimension-candidates`、Agent 维度确认、`tagging-template`、Agent 全量 Listing 打标和 `analyze-tags`。
+6. 维度确认、归一化和打标完整遵循 `references/agent_workflow.md`。原文证据保留源语言，HTML 展示标签使用中文。
+7. 只从 `07_opportunity_analysis.json.feature_distribution` 选择消费者声音阶段的 Top3：有效维度、有效特征、`3% <= listing_share <= 20%`，按原始供需指数及固定并列规则排序；不足 3 个时不放宽门槛。
 
-1. 先读 `INSTRUCTIONS.md`。
-2. 先从当前对话上下文读取上一段明确输出的 `本次项目目录`、`PROJECT_ROOT` 或真实 `market_project_<YYYYMMDD_HHmmss>/` 路径。
-3. 如果当前上下文没有该路径，立即停止，不询问用户补路径、不扫描本地目录、不选择最新项目。
-4. 按当前系统选择对应平台 CLI 二进制，不要调用其他平台文件。
-5. 调用 CLI 的 `inspect-report` 检查目录；传项目根时 CLI 会自动定位 `market_research/`。
-6. 检查 `inspect-report` 返回的 `marketplace` 和 `listing_language`，后续所有语义判断都按该站点语言执行。
-7. 调用 `fetch-roots`。关键词词根请求必须走我们的统一后端 `/market-opportunity/keyword-roots`；agent 不接触外部供应商接口、账号或凭据。
-8. 调用 `dimension-candidates` 聚合词根需求覆盖，生成维度候选。
-9. Agent 基于候选词根和品类常识确认 3-6 个最终维度，写 `agent_dimensions.json`。
-10. 调用 `tagging-template` 生成待打标 listing 工作区。
-11. Agent 逐 listing 判断所有确认维度，写 `agent_listing_tags.json`。必须理解目标站点语言并保留原文证据；文本不能判断时再按固定顺序查看图片或商品链接，仍无法判断才填“不可识别”，中文看板使用中文展示标签。
-12. 调用 `analyze-tags` 计算特征分布、维度有效性、多维组合供需指数和 HTML 看板；HTML 里每个有效维度都要展示“两柱一线”透视图：Listing占比和销量占比用柱状图，平均销量用单独折线。传项目根作为 `--output-dir` 时，结果会自动写入同项目的 `market_opportunity/` 并更新 `project_manifest.json`。
+## 全历史消费者声音与产品开发
 
-## 资源
+8. 用户已明确要求消费者声音/KANO/产品创意时直接继续；否则在机会看板完成后只询问一次。
+9. 开始前完整阅读 `references/consumer_voice_workflow.md`、`references/consumer_voice_contract.md`、两个全历史 Schema，以及本轮实际调用的采集 Skill。
+10. 将分析范围固定为“本项目本地已采集语料的全历史”。`published_at` 可缺失，只作追溯和年份分布，不参与纳入、排除、权重或排序。报告不得暗示穷尽互联网全历史。
+11. 已有明确来源的 `collector.sqlite3` 时直接全量处理，不再联网；不得扫描其他项目寻找数据库。只有用户明确要求首次采集或刷新数据时，才使用 `consumer_voice_collector.py`、`last30days`、`agent-reach` 和 YouTube Data API 获取候选。采集档位只限制本次新增采集的预算和时长，不形成分析时间窗、样本截断或报告分母。
+12. 为当前品类生成或复核项目级 `consumer_voice_taxonomy.json`，再运行 `scripts/consumer_voice_local_reprocess.py`；必须通过 `--dashboard` 传入原机会看板以记录并复核其 SHA-256。内置词典只适用于明确识别出的车载手机支架项目；其他品类必须提供项目级 taxonomy，不得套用手机支架词典。
+13. 全量检查源 DB 的每条硬身份唯一记录。只有同时满足“产品相关、消费者表达、非广告/机器人/纯链接/无观点引用”，并命中以下至少一类，才进入消费者表达分母：
 
-- `tools/bin/market-opportunity-linux-amd64`：Linux CLI。
-- `tools/bin/market-opportunity-darwin-arm64`：macOS Apple Silicon CLI。
-- `tools/bin/market-opportunity-darwin-amd64`：macOS Intel CLI。
-- `tools/bin/market-opportunity-windows-amd64.exe`：Windows CLI。
-- `references/input_contract.md`：输入、agent 中间文件和输出约定。
-- `references/agent_workflow.md`：维度确认、逐 listing 打标、特征归一化和解释边界。
+   - 购买、选型和推荐
+   - 故障、抱怨、退货和替代
+   - 满意、推荐和复购
+   - 安装、兼容性和使用场景
+   - DIY、改装和绕行方案
+   - 新功能、反向需求和创意
+14. 只合并同一平台内容/评论 ID、同一留言直链或确定性替代身份证明为同一底层留言的重复发现。不同 ID 即使原文或语义相同，也分别计数；同一留言可命中多类，但联合分母只计一次。
+15. Coding、Analysis 和 HTML 均不得包含置信度字段、置信度徽标或把“证据不足”当作 KANO 类型。KANO 只展示有方向性依据的“必备型、期望型、魅力型、无差异型、反向型”；无法分类的需求直接不进入 KANO 表。
+16. 使用 `scripts/consumer_all_history_report.py render` 生成独立离线 HTML，再用 `check` 校验。报告沿用 `assets/consumer_all_history_report.template.html`，不得修改或覆盖原 `市场机会深挖看板.html`。
+17. 产品分析默认输出 3 个方向，覆盖 JTBD、场景、消费者证据、KANO、技术方案、结构/材质/CMF、BOM、风险、验收指标、Design Thinking、MoSCoW、提示词和概念图。Agent 创意不得伪装成消费者直接留言。
+18. 用 `scripts/consumer_all_history_report.py finalize-manifest` 原子增加全历史消费者声音的 3 个 artifact 键和 1 个状态键；既有 manifest 键、源 DB 和原机会看板必须保持不变。
+
+## 核心资源
+
+- `INSTRUCTIONS.md`：完整执行指令。
+- `references/agent_workflow.md`：维度确认、归一化和逐 Listing 打标契约。
+- `references/consumer_voice_workflow.md`：全历史消费者声音、KANO、产品开发和报告工作流。
+- `references/consumer_voice_contract.md`：全历史数据、计数、状态、HTML 和 manifest 契约。
+- `references/social_voice_all_history_coding.schema.json`：逐条编码 Schema。
+- `references/social_voice_all_history_analysis.schema.json`：汇总分析 Schema。
+- `references/consumer_voice_taxonomy.schema.json`：项目级产品语义词典 Schema。
+- `scripts/consumer_voice_local_reprocess.py`：只读全量清洗、六语义编码和确定性汇总。
+- `scripts/consumer_all_history_report.py`：离线 HTML 渲染、检查和 manifest 最终化。
+- `assets/consumer_all_history_report.template.html`：固定报告模板。
+- `scripts/consumer_voice_collector.py`：仅在用户明确要求首次采集或刷新时使用的候选采集器；其旧 v2 编码/报告入口不属于默认主链。
+
+旧 `social_voice_coding.schema.json`、`social_voice_analysis.schema.json`、`consumer_product_report.py` 的 v2 分析/渲染命令和 `consumer_product_report.template.html` 仅用于复核历史产物；新任务不得调用。`consumer_product_report.py select-segments` 在独立 Top3 选择器完成迁移前可兼容使用，但其输出必须映射为 `*_all_history` scope。

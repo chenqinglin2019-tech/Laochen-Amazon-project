@@ -1,0 +1,1058 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.codex.skills/lc_amazon_market_opportunity/social_voice_coding.schema.json",
+  "title": "Social Voice Coding Contract",
+  "description": "兼容v1读取、以v2写出的消费者声音可追溯编码契约。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "project",
+    "generated_at",
+    "end_at",
+    "windows",
+    "top3_selection",
+    "segments",
+    "query_plan",
+    "source_runs",
+    "agent_reach_health",
+    "need_dictionary",
+    "voices",
+    "dedup_groups",
+    "excluded_records",
+    "llm_calls"
+  ],
+  "properties": {
+    "schema_version": {
+      "enum": ["1.0.0", "2.0.0"]
+    },
+    "project": {
+      "$ref": "#/$defs/project"
+    },
+    "generated_at": {
+      "$ref": "#/$defs/dateTime"
+    },
+    "end_at": {
+      "$ref": "#/$defs/dateTime"
+    },
+    "windows": {
+      "$ref": "#/$defs/windows"
+    },
+    "top3_selection": {
+      "$ref": "#/$defs/top3Selection"
+    },
+    "segments": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/segment"
+      }
+    },
+    "query_plan": {
+      "$ref": "#/$defs/queryPlan"
+    },
+    "source_runs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sourceRun"
+      }
+    },
+    "agent_reach_health": {
+      "$ref": "#/$defs/agentReachHealth"
+    },
+    "need_dictionary": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/needDictionaryItem"
+      }
+    },
+    "voices": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/voice"
+      }
+    },
+    "dedup_groups": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/dedupGroup"
+      }
+    },
+    "excluded_records": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/excludedRecord"
+      }
+    },
+    "llm_calls": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/llmCall"
+      }
+    },
+    "research_plan": {
+      "$ref": "#/$defs/researchPlan"
+    },
+    "collection_funnel": {
+      "$ref": "#/$defs/collectionFunnel"
+    },
+    "stop_reason": {
+      "$ref": "#/$defs/stopReason"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"schema_version": {"const": "2.0.0"}},
+        "required": ["schema_version"]
+      },
+      "then": {
+        "required": ["research_plan", "collection_funnel", "stop_reason"],
+        "properties": {
+          "windows": {
+            "properties": {
+              "segment_90d": {
+                "properties": {"recent_30d_start_at": false}
+              }
+            }
+          },
+          "voices": {
+            "type": "array",
+            "items": {
+              "properties": {
+                "is_recent_30d": false,
+                "period_bucket": false,
+                "temporal_buckets": false
+              }
+            }
+          },
+          "dedup_groups": {
+            "type": "array",
+            "items": {"$ref": "#/$defs/hardDedupGroup"}
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "nullableString": {
+      "type": ["string", "null"]
+    },
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "nullableDateTime": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/dateTime"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "fraction": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "nullableFraction": {
+      "type": ["number", "null"],
+      "minimum": 0,
+      "maximum": 1
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/nonEmptyString"
+      },
+      "uniqueItems": true
+    },
+    "scopeId": {
+      "enum": [
+        "category_30d",
+        "segment_1_90d",
+        "segment_2_90d",
+        "segment_3_90d"
+      ]
+    },
+    "segmentId": {
+      "enum": [
+        "segment_1_90d",
+        "segment_2_90d",
+        "segment_3_90d"
+      ]
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "no_results",
+        "partial",
+        "auth_failed",
+        "rate_limited",
+        "timeout",
+        "unavailable",
+        "error",
+        "not_run"
+      ]
+    },
+    "confidence": {
+      "enum": ["low", "medium", "high"]
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "project_root",
+        "marketplace",
+        "listing_language",
+        "category_keyword",
+        "opportunity_analysis",
+        "opportunity_dashboard"
+      ],
+      "properties": {
+        "project_root": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "marketplace": {
+          "enum": ["US", "UK", "DE", "FR", "JP", "AU", "CA", "IT", "ES", "MX"]
+        },
+        "listing_language": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "category_keyword": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "category_node": {
+          "$ref": "#/$defs/nullableString"
+        },
+        "opportunity_analysis": {
+          "$ref": "#/$defs/sourceArtifact"
+        },
+        "opportunity_dashboard": {
+          "$ref": "#/$defs/sourceArtifact"
+        }
+      }
+    },
+    "sourceArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "snapshot_at"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-fA-F0-9]{64}$"
+        },
+        "snapshot_at": {
+          "$ref": "#/$defs/dateTime"
+        }
+      }
+    },
+    "windows": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interval_semantics", "category_30d", "segment_90d"],
+      "properties": {
+        "interval_semantics": {
+          "const": "[start_at,end_at)"
+        },
+        "category_30d": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["scope_id", "days", "start_at", "end_at"],
+          "properties": {
+            "scope_id": {
+              "const": "category_30d"
+            },
+            "days": {
+              "const": 30
+            },
+            "start_at": {
+              "$ref": "#/$defs/dateTime"
+            },
+            "end_at": {
+              "$ref": "#/$defs/dateTime"
+            }
+          }
+        },
+        "segment_90d": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["days", "start_at", "end_at"],
+          "properties": {
+            "days": {
+              "const": 90
+            },
+            "start_at": {
+              "$ref": "#/$defs/dateTime"
+            },
+            "recent_30d_start_at": {
+              "$ref": "#/$defs/dateTime"
+            },
+            "end_at": {
+              "$ref": "#/$defs/dateTime"
+            }
+          }
+        }
+      }
+    },
+    "top3Selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_field",
+        "dimension_status_source_field",
+        "listing_share_min",
+        "listing_share_max",
+        "boundaries_inclusive",
+        "required_dimension_valid",
+        "required_effective_feature",
+        "excluded_feature_values",
+        "sort_order",
+        "candidate_count_before_filter",
+        "candidate_count_after_filter",
+        "normalization_decisions",
+        "ranked_candidates",
+        "selected_segment_ids",
+        "unavailable_ranks"
+      ],
+      "properties": {
+        "source_field": {
+          "const": "07_opportunity_analysis.json.feature_distribution"
+        },
+        "dimension_status_source_field": {
+          "const": "07_opportunity_analysis.json.dimension_statuses"
+        },
+        "listing_share_min": {
+          "const": 0.03
+        },
+        "listing_share_max": {
+          "const": 0.2
+        },
+        "boundaries_inclusive": {
+          "const": true
+        },
+        "required_dimension_valid": {
+          "const": true
+        },
+        "required_effective_feature": {
+          "const": true
+        },
+        "excluded_feature_values": {
+          "$ref": "#/$defs/stringArray"
+        },
+        "sort_order": {
+          "type": "array",
+          "prefixItems": [
+            {"const": "supply_demand_index:desc"},
+            {"const": "listing_count:desc"},
+            {"const": "sales_share:desc"},
+            {"const": "dimension_rank:asc"},
+            {"const": "dimension_feature_name:asc"}
+          ],
+          "items": false,
+          "minItems": 5,
+          "maxItems": 5
+        },
+        "candidate_count_before_filter": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "candidate_count_after_filter": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "normalization_decisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["canonical_key", "kept_label", "merged_labels", "reason"],
+            "properties": {
+              "canonical_key": {"$ref": "#/$defs/nonEmptyString"},
+              "kept_label": {"$ref": "#/$defs/nonEmptyString"},
+              "merged_labels": {"$ref": "#/$defs/stringArray"},
+              "reason": {"$ref": "#/$defs/nonEmptyString"}
+            }
+          }
+        },
+        "ranked_candidates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "dimension",
+              "feature",
+              "canonical_key",
+              "dimension_valid",
+              "is_effective_feature",
+              "listing_count",
+              "listing_share",
+              "sales_share",
+              "supply_demand_index",
+              "dimension_rank",
+              "eligible",
+              "selected",
+              "exclusion_reasons"
+            ],
+            "properties": {
+              "dimension": {"$ref": "#/$defs/nonEmptyString"},
+              "feature": {"$ref": "#/$defs/nonEmptyString"},
+              "canonical_key": {"$ref": "#/$defs/nonEmptyString"},
+              "dimension_valid": {"type": "boolean"},
+              "is_effective_feature": {"type": "boolean"},
+              "listing_count": {"type": "integer", "minimum": 0},
+              "listing_share": {"$ref": "#/$defs/fraction"},
+              "sales_share": {"$ref": "#/$defs/fraction"},
+              "supply_demand_index": {"type": "number", "minimum": 0},
+              "dimension_rank": {"type": "integer", "minimum": 1},
+              "eligible": {"type": "boolean"},
+              "selected": {"type": "boolean"},
+              "exclusion_reasons": {"$ref": "#/$defs/stringArray"}
+            }
+          }
+        },
+        "selected_segment_ids": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/segmentId"},
+          "uniqueItems": true
+        },
+        "unavailable_ranks": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {"type": "integer", "minimum": 1, "maximum": 3},
+          "uniqueItems": true
+        }
+      }
+    },
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_id",
+        "rank",
+        "dimension",
+        "feature",
+        "canonical_key",
+        "listing_count",
+        "listing_share",
+        "sales_share",
+        "supply_demand_index",
+        "dimension_rank",
+        "synonyms"
+      ],
+      "properties": {
+        "segment_id": {"$ref": "#/$defs/segmentId"},
+        "rank": {"type": "integer", "minimum": 1, "maximum": 3},
+        "dimension": {"$ref": "#/$defs/nonEmptyString"},
+        "feature": {"$ref": "#/$defs/nonEmptyString"},
+        "canonical_key": {"$ref": "#/$defs/nonEmptyString"},
+        "listing_count": {"type": "integer", "minimum": 0},
+        "listing_share": {"type": "number", "minimum": 0.03, "maximum": 0.2},
+        "sales_share": {"$ref": "#/$defs/fraction"},
+        "supply_demand_index": {"type": "number", "minimum": 0},
+        "dimension_rank": {"type": "integer", "minimum": 1},
+        "synonyms": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "queryPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query_language", "primary_lanes", "gap_fill_queries"],
+      "properties": {
+        "query_language": {"$ref": "#/$defs/nonEmptyString"},
+        "primary_lanes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "items": {"$ref": "#/$defs/queryLane"}
+        },
+        "gap_fill_queries": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/gapFillQuery"}
+        }
+      }
+    },
+    "queryLane": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query_id",
+        "scope_id",
+        "primary_tool",
+        "days",
+        "as_of_utc_date",
+        "start_at",
+        "end_at",
+        "queries",
+        "intents",
+        "target_platforms"
+      ],
+      "properties": {
+        "query_id": {"$ref": "#/$defs/nonEmptyString"},
+        "scope_id": {"$ref": "#/$defs/scopeId"},
+        "primary_tool": {"const": "last30days"},
+        "days": {"enum": [30, 90]},
+        "as_of_utc_date": {"type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+        "start_at": {"$ref": "#/$defs/dateTime"},
+        "end_at": {"$ref": "#/$defs/dateTime"},
+        "queries": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmptyString"}, "uniqueItems": true},
+        "intents": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "enum": [
+              "purchase_selection",
+              "usage_scenario",
+              "satisfaction_recommendation",
+              "failure_complaint_return",
+              "alternative_replacement",
+              "diy_workaround",
+              "feature_request",
+              "reverse_need"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "target_platforms": {"$ref": "#/$defs/stringArray"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"scope_id": {"const": "category_30d"}}},
+          "then": {"properties": {"days": {"const": 30}}},
+          "else": {"properties": {"days": {"const": 90}}}
+        }
+      ]
+    },
+    "gapFillQuery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["query_id", "scope_ids", "tool", "reason", "platform", "query"],
+      "properties": {
+        "query_id": {"$ref": "#/$defs/nonEmptyString"},
+        "scope_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/scopeId"}, "uniqueItems": true},
+        "tool": {"const": "agent-reach"},
+        "reason": {"$ref": "#/$defs/nonEmptyString"},
+        "platform": {"$ref": "#/$defs/nonEmptyString"},
+        "query": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "sourceRun": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "tool",
+        "role",
+        "scope_ids",
+        "query_ids",
+        "started_at",
+        "finished_at",
+        "status",
+        "platform_statuses",
+        "raw_artifact",
+        "error_summary"
+      ],
+      "properties": {
+        "run_id": {"$ref": "#/$defs/nonEmptyString"},
+        "tool": {"enum": ["last30days", "agent-reach", "youtube-data-api", "yt-dlp"]},
+        "role": {"enum": ["broad_primary_collection", "targeted_gap_fill", "deep_thread_read", "supply_validation"]},
+        "scope_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/scopeId"}, "uniqueItems": true},
+        "query_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmptyString"}, "uniqueItems": true},
+        "started_at": {"$ref": "#/$defs/dateTime"},
+        "finished_at": {"$ref": "#/$defs/dateTime"},
+        "status": {"$ref": "#/$defs/status"},
+        "platform_statuses": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/platformStatus"}
+        },
+        "raw_artifact": {"$ref": "#/$defs/nullableString"},
+        "error_summary": {"$ref": "#/$defs/nullableString"}
+      }
+    },
+    "platformStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "backend", "status", "result_count", "message"],
+      "properties": {
+        "platform": {"$ref": "#/$defs/nonEmptyString"},
+        "backend": {"$ref": "#/$defs/nullableString"},
+        "status": {"$ref": "#/$defs/status"},
+        "result_count": {"type": "integer", "minimum": 0},
+        "message": {"$ref": "#/$defs/nullableString"}
+      }
+    },
+    "agentReachHealth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doctor", "check_update"],
+      "properties": {
+        "doctor": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ran_at", "status", "active_backends", "raw_artifact"],
+          "properties": {
+            "ran_at": {"$ref": "#/$defs/dateTime"},
+            "status": {"$ref": "#/$defs/status"},
+            "active_backends": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["platform", "active_backend", "status"],
+                "properties": {
+                  "platform": {"$ref": "#/$defs/nonEmptyString"},
+                  "active_backend": {"$ref": "#/$defs/nullableString"},
+                  "status": {"$ref": "#/$defs/status"}
+                }
+              }
+            },
+            "raw_artifact": {"$ref": "#/$defs/nullableString"}
+          }
+        },
+        "check_update": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ran_at", "status", "current_version", "latest_version", "message"],
+          "properties": {
+            "ran_at": {"$ref": "#/$defs/nullableDateTime"},
+            "status": {"$ref": "#/$defs/status"},
+            "current_version": {"$ref": "#/$defs/nullableString"},
+            "latest_version": {"$ref": "#/$defs/nullableString"},
+            "message": {"$ref": "#/$defs/nullableString"}
+          }
+        }
+      }
+    },
+    "researchPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["research_level", "sample_target", "time_budget_minutes"],
+      "properties": {
+        "research_level": {"enum": ["quick", "standard", "deep"]},
+        "sample_target": {"type": "object"},
+        "time_budget_minutes": {"type": "object"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"research_level": {"const": "quick"}}, "required": ["research_level"]},
+          "then": {
+            "properties": {
+              "sample_target": {"const": {"total_valid_min": 500, "total_valid_max": 1000, "per_scope": {"category_30d": {"share": 0.4, "valid_min": 200, "valid_max": 400}, "segment_1_90d": {"share": 0.2, "valid_min": 100, "valid_max": 200}, "segment_2_90d": {"share": 0.2, "valid_min": 100, "valid_max": 200}, "segment_3_90d": {"share": 0.2, "valid_min": 100, "valid_max": 200}}, "min_platforms": 3}},
+              "time_budget_minutes": {"const": {"collection": 35, "total": 60}}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"research_level": {"const": "standard"}}, "required": ["research_level"]},
+          "then": {
+            "properties": {
+              "sample_target": {"const": {"total_valid_min": 1000, "total_valid_max": 3000, "per_scope": {"category_30d": {"share": 0.4, "valid_min": 400, "valid_max": 1200}, "segment_1_90d": {"share": 0.2, "valid_min": 200, "valid_max": 600}, "segment_2_90d": {"share": 0.2, "valid_min": 200, "valid_max": 600}, "segment_3_90d": {"share": 0.2, "valid_min": 200, "valid_max": 600}}, "min_platforms": 3}},
+              "time_budget_minutes": {"const": {"collection": 55, "total": 90}}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"research_level": {"const": "deep"}}, "required": ["research_level"]},
+          "then": {
+            "properties": {
+              "sample_target": {"const": {"total_valid_min": 3000, "total_valid_max": 5000, "per_scope": {"category_30d": {"share": 0.4, "valid_min": 1200, "valid_max": 2000}, "segment_1_90d": {"share": 0.2, "valid_min": 600, "valid_max": 1000}, "segment_2_90d": {"share": 0.2, "valid_min": 600, "valid_max": 1000}, "segment_3_90d": {"share": 0.2, "valid_min": 600, "valid_max": 1000}}, "min_platforms": 3}},
+              "time_budget_minutes": {"const": {"collection": 75, "total": 120}}
+            }
+          }
+        }
+      ]
+    },
+    "stopReason": {
+      "enum": ["upper_bound_reached", "queues_exhausted", "low_increment_3_batches", "platform_or_quota_limit", "collection_deadline", "total_deadline", "manual_stop"]
+    },
+    "collectionFunnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fetched_records", "unique_records", "within_window_records", "relevant_records", "consumer_records", "deduplicated_records", "valid_voices", "excluded_records", "per_scope", "per_platform", "exclusion_reasons"],
+      "properties": {
+        "fetched_records": {"type": "integer", "minimum": 0},
+        "unique_records": {"type": "integer", "minimum": 0},
+        "within_window_records": {"type": "integer", "minimum": 0},
+        "relevant_records": {"type": "integer", "minimum": 0},
+        "consumer_records": {"type": "integer", "minimum": 0},
+        "deduplicated_records": {"type": "integer", "minimum": 0},
+        "valid_voices": {"type": "integer", "minimum": 0},
+        "excluded_records": {"type": "integer", "minimum": 0},
+        "per_scope": {"type": "array", "minItems": 4, "maxItems": 4, "items": {"$ref": "#/$defs/scopeFunnel"}},
+        "per_platform": {"type": "array", "items": {"$ref": "#/$defs/platformFunnel"}},
+        "exclusion_reasons": {"type": "array", "items": {"$ref": "#/$defs/exclusionReasonCount"}}
+      }
+    },
+    "scopeFunnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scope_id", "fetched_records", "unique_records", "within_window_records", "relevant_records", "consumer_records", "deduplicated_records", "valid_voices"],
+      "properties": {
+        "scope_id": {"$ref": "#/$defs/scopeId"},
+        "fetched_records": {"type": "integer", "minimum": 0},
+        "unique_records": {"type": "integer", "minimum": 0},
+        "within_window_records": {"type": "integer", "minimum": 0},
+        "relevant_records": {"type": "integer", "minimum": 0},
+        "consumer_records": {"type": "integer", "minimum": 0},
+        "deduplicated_records": {"type": "integer", "minimum": 0},
+        "valid_voices": {"type": "integer", "minimum": 0}
+      }
+    },
+    "platformFunnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["platform", "fetched_records", "valid_voices"],
+      "properties": {
+        "platform": {"$ref": "#/$defs/nonEmptyString"},
+        "fetched_records": {"type": "integer", "minimum": 0},
+        "valid_voices": {"type": "integer", "minimum": 0}
+      }
+    },
+    "exclusionReasonCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "count"],
+      "properties": {
+        "reason": {"$ref": "#/$defs/nonEmptyString"},
+        "count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "needDictionaryItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["need_code", "name_zh", "definition", "inclusions", "exclusions", "synonyms"],
+      "properties": {
+        "need_code": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]*$"},
+        "name_zh": {"$ref": "#/$defs/nonEmptyString"},
+        "definition": {"$ref": "#/$defs/nonEmptyString"},
+        "inclusions": {"$ref": "#/$defs/stringArray"},
+        "exclusions": {"$ref": "#/$defs/stringArray"},
+        "synonyms": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "voice": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "voice_id",
+        "platform",
+        "backend",
+        "content_type",
+        "content_id",
+        "thread_id",
+        "parent_id",
+        "community",
+        "author_hash",
+        "author_label",
+        "author_identity_status",
+        "published_at",
+        "collected_at",
+        "language",
+        "region_hint",
+        "excerpt",
+        "summary_zh",
+        "normalized_url",
+        "engagement",
+        "actor_type",
+        "eligible_for_quantitation",
+        "exclusion_reasons",
+        "collection_scopes",
+        "query_ids",
+        "segment_memberships",
+        "discoveries",
+        "coding"
+      ],
+      "properties": {
+        "voice_id": {"type": "string", "pattern": "^voice_[A-Za-z0-9._-]+$"},
+        "platform": {"$ref": "#/$defs/nonEmptyString"},
+        "backend": {"$ref": "#/$defs/nonEmptyString"},
+        "content_type": {"enum": ["post", "comment", "reply", "video_comment", "forum_entry", "other"]},
+        "content_id": {"$ref": "#/$defs/nullableString"},
+        "thread_id": {"$ref": "#/$defs/nullableString"},
+        "parent_id": {"$ref": "#/$defs/nullableString"},
+        "parent_content_id": {"$ref": "#/$defs/nullableString"},
+        "community": {"$ref": "#/$defs/nullableString"},
+        "author_hash": {"$ref": "#/$defs/nonEmptyString"},
+        "author_label": {"$ref": "#/$defs/nullableString"},
+        "author_identity_status": {"enum": ["identified", "pseudonymous", "unknown"]},
+        "published_at": {"$ref": "#/$defs/dateTime"},
+        "collected_at": {"$ref": "#/$defs/dateTime"},
+        "language": {"$ref": "#/$defs/nonEmptyString"},
+        "region_hint": {"$ref": "#/$defs/nullableString"},
+        "excerpt": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "summary_zh": {"$ref": "#/$defs/nonEmptyString"},
+        "normalized_url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+        "engagement": {"$ref": "#/$defs/engagement"},
+        "actor_type": {"const": "consumer"},
+        "eligible_for_quantitation": {"const": true},
+        "exclusion_reasons": {"type": "array", "maxItems": 0},
+        "collection_scopes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/scopeId"},
+          "uniqueItems": true
+        },
+        "query_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmptyString"}, "uniqueItems": true},
+        "segment_memberships": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/segmentMembership"}
+        },
+        "temporal_buckets": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1,
+          "items": {"enum": ["recent_30d", "days_31_90"]},
+          "uniqueItems": true
+        },
+        "discoveries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/discovery"}
+        },
+        "coding": {"$ref": "#/$defs/coding"},
+        "merged_voice_ids": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "engagement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["likes", "replies", "shares", "views", "score", "captured_at"],
+      "properties": {
+        "likes": {"type": ["integer", "null"], "minimum": 0},
+        "replies": {"type": ["integer", "null"], "minimum": 0},
+        "shares": {"type": ["integer", "null"], "minimum": 0},
+        "views": {"type": ["integer", "null"], "minimum": 0},
+        "score": {"type": ["number", "null"]},
+        "captured_at": {"$ref": "#/$defs/dateTime"}
+      }
+    },
+    "segmentMembership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["segment_id", "is_member", "evidence", "confidence", "method"],
+      "properties": {
+        "segment_id": {"$ref": "#/$defs/segmentId"},
+        "is_member": {"type": "boolean"},
+        "evidence": {"$ref": "#/$defs/nonEmptyString"},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "method": {"enum": ["explicit_text", "semantic_inference", "manual_review"]}
+      }
+    },
+    "discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discovery_id",
+        "source_run_id",
+        "query_id",
+        "scope_id",
+        "platform",
+        "backend",
+        "source_content_id",
+        "source_url",
+        "retrieved_at"
+      ],
+      "properties": {
+        "discovery_id": {"$ref": "#/$defs/nonEmptyString"},
+        "source_run_id": {"$ref": "#/$defs/nonEmptyString"},
+        "query_id": {"$ref": "#/$defs/nonEmptyString"},
+        "scope_id": {"$ref": "#/$defs/scopeId"},
+        "platform": {"$ref": "#/$defs/nonEmptyString"},
+        "backend": {"$ref": "#/$defs/nonEmptyString"},
+        "source_content_id": {"$ref": "#/$defs/nonEmptyString"},
+        "source_url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+        "retrieved_at": {"$ref": "#/$defs/dateTime"}
+      }
+    },
+    "coding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sentiment",
+        "use_scenes",
+        "persona_tags",
+        "need_codes",
+        "satisfaction_codes",
+        "dissatisfaction_codes",
+        "innovation_signals",
+        "kano_evidence",
+        "evidence_confidence",
+        "coding_notes"
+      ],
+      "properties": {
+        "sentiment": {"enum": ["positive", "negative", "mixed", "neutral"]},
+        "use_scenes": {"$ref": "#/$defs/stringArray"},
+        "persona_tags": {"$ref": "#/$defs/stringArray"},
+        "need_codes": {"$ref": "#/$defs/stringArray"},
+        "satisfaction_codes": {"$ref": "#/$defs/stringArray"},
+        "dissatisfaction_codes": {"$ref": "#/$defs/stringArray"},
+        "innovation_signals": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/innovationSignal"}
+        },
+        "kano_evidence": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/kanoEvidence"}
+        },
+        "evidence_confidence": {"$ref": "#/$defs/confidence"},
+        "coding_notes": {"$ref": "#/$defs/nullableString"}
+      }
+    },
+    "innovationSignal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["signal_type", "need_code", "description", "evidence_excerpt"],
+      "properties": {
+        "signal_type": {"enum": ["consumer_explicit_idea", "diy_workaround", "repeated_pain_signal"]},
+        "need_code": {"$ref": "#/$defs/nonEmptyString"},
+        "description": {"$ref": "#/$defs/nonEmptyString"},
+        "evidence_excerpt": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    },
+    "kanoEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["need_code", "evidence_type", "evidence_excerpt"],
+      "properties": {
+        "need_code": {"$ref": "#/$defs/nonEmptyString"},
+        "evidence_type": {
+          "enum": [
+            "absence_complaint",
+            "presence_baseline",
+            "performance_positive",
+            "performance_negative",
+            "surprise_delight",
+            "explicit_feature_wish",
+            "explicit_indifference",
+            "explicit_rejection",
+            "harm_or_negative_utility",
+            "conflicting_or_weak"
+          ]
+        },
+        "evidence_excerpt": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    },
+    "dedupGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dedup_group_id", "canonical_voice_id", "duplicate_record_ids", "method", "similarity", "reason"],
+      "properties": {
+        "dedup_group_id": {"$ref": "#/$defs/nonEmptyString"},
+        "canonical_voice_id": {"$ref": "#/$defs/nonEmptyString"},
+        "duplicate_record_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmptyString"}, "uniqueItems": true},
+        "method": {
+          "enum": [
+            "content_id",
+            "comment_permalink",
+            "fallback_composite",
+            "normalized_url",
+            "text_hash",
+            "near_duplicate_text",
+            "cross_platform_repost",
+            "parent_quote",
+            "same_author_same_thread_opinion"
+          ]
+        },
+        "similarity": {"$ref": "#/$defs/nullableFraction"},
+        "reason": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "hardDedupGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dedup_group_id", "canonical_voice_id", "duplicate_record_ids", "method", "similarity", "reason"],
+      "properties": {
+        "dedup_group_id": {"$ref": "#/$defs/nonEmptyString"},
+        "canonical_voice_id": {"$ref": "#/$defs/nonEmptyString"},
+        "duplicate_record_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/nonEmptyString"}, "uniqueItems": true},
+        "method": {"enum": ["content_id", "comment_permalink", "fallback_composite"]},
+        "similarity": {"const": null},
+        "reason": {"$ref": "#/$defs/nonEmptyString"}
+      }
+    },
+    "excludedRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "record_id",
+        "source_run_id",
+        "query_id",
+        "scope_id",
+        "platform",
+        "backend",
+        "content_id",
+        "published_at",
+        "url",
+        "excerpt",
+        "exclusion_reasons"
+      ],
+      "properties": {
+        "record_id": {"$ref": "#/$defs/nonEmptyString"},
+        "source_run_id": {"$ref": "#/$defs/nonEmptyString"},
+        "query_id": {"$ref": "#/$defs/nonEmptyString"},
+        "scope_id": {"$ref": "#/$defs/scopeId"},
+        "platform": {"$ref": "#/$defs/nonEmptyString"},
+        "backend": {"$ref": "#/$defs/nonEmptyString"},
+        "content_id": {"$ref": "#/$defs/nonEmptyString"},
+        "published_at": {"$ref": "#/$defs/nullableDateTime"},
+        "url": {"type": "string", "format": "uri", "pattern": "^https?://"},
+        "excerpt": {"type": "string", "maxLength": 1000},
+        "exclusion_reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "missing_or_unreliable_date",
+              "outside_window",
+              "off_topic",
+              "non_target_language",
+              "brand_or_seller_promotion",
+              "media_or_news_repost",
+              "bot_or_spam",
+              "no_consumer_opinion",
+              "untraceable_source",
+              "duplicate_of_canonical",
+              "other"
+            ]
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "llmCall": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["call_id", "call_type", "input_summary", "output_summary", "is_inference", "ran_at"],
+      "properties": {
+        "call_id": {"$ref": "#/$defs/nonEmptyString"},
+        "call_type": {
+          "enum": [
+            "segment_semantic_dedup",
+            "query_planning",
+            "voice_relevance",
+            "voice_coding",
+            "segment_membership",
+            "near_duplicate_review",
+            "translation_summary"
+          ]
+        },
+        "input_summary": {"$ref": "#/$defs/nonEmptyString"},
+        "output_summary": {"$ref": "#/$defs/nonEmptyString"},
+        "is_inference": {"type": "boolean"},
+        "ran_at": {"$ref": "#/$defs/dateTime"}
+      }
+    }
+  }
+}
