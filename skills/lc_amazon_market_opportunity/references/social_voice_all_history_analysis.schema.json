@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local.codex.skills/lc_amazon_market_opportunity/social_voice_all_history_analysis.schema.json",
+  "title": "All-history local consumer voice analysis v3",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "metadata",
+    "project",
+    "funnel",
+    "sample_structure",
+    "semantic_categories",
+    "category_summary",
+    "top_segments",
+    "kano",
+    "new_needs",
+    "product_concepts",
+    "validation",
+    "limitations",
+    "representative_voices"
+  ],
+  "properties": {
+    "schema_version": {"const": "3.0.0-all-history"},
+    "metadata": {
+      "type": "object",
+      "required": ["mode", "no_network", "date_filter_applied", "source_db_sha256", "taxonomy_profile"],
+      "properties": {
+        "mode": {"const": "all_history_local_reprocess"},
+        "no_network": {"const": true},
+        "date_filter_applied": {"const": false},
+        "source_db_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "project": {"type": "object"},
+    "funnel": {"$ref": "social_voice_all_history_coding.schema.json#/$defs/funnel"},
+    "sample_structure": {"type": "object"},
+    "semantic_categories": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "prefixItems": [
+        {"allOf": [{"$ref": "#/$defs/semanticMetric"}, {"properties": {"code": {"const": "purchase_selection_recommendation"}, "label": {"const": "购买、选型和推荐"}}}]},
+        {"allOf": [{"$ref": "#/$defs/semanticMetric"}, {"properties": {"code": {"const": "failure_complaint_return_alternative"}, "label": {"const": "故障、抱怨、退货和替代"}}}]},
+        {"allOf": [{"$ref": "#/$defs/semanticMetric"}, {"properties": {"code": {"const": "satisfaction_recommendation_repurchase"}, "label": {"const": "满意、推荐和复购"}}}]},
+        {"allOf": [{"$ref": "#/$defs/semanticMetric"}, {"properties": {"code": {"const": "installation_compatibility_scenario"}, "label": {"const": "安装、兼容性和使用场景"}}}]},
+        {"allOf": [{"$ref": "#/$defs/semanticMetric"}, {"properties": {"code": {"const": "diy_modification_workaround"}, "label": {"const": "DIY、改装和绕行方案"}}}]},
+        {"allOf": [{"$ref": "#/$defs/semanticMetric"}, {"properties": {"code": {"const": "feature_reverse_innovation"}, "label": {"const": "新功能、反向需求和创意"}}}]}
+      ],
+      "items": false
+    },
+    "category_summary": {"type": "object"},
+    "top_segments": {"type": "array", "maxItems": 3},
+    "kano": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["need", "kano_type", "count", "share"],
+        "properties": {
+          "kano_type": {"enum": ["必备型", "期望型", "魅力型", "无差异型", "反向型"]},
+          "count": {"type": "integer", "minimum": 0},
+          "share": {"type": "number", "minimum": 0, "maximum": 1}
+        }
+      }
+    },
+    "new_needs": {"type": "array"},
+    "product_concepts": {"type": "array", "minItems": 3, "maxItems": 3},
+    "validation": {"type": "object"},
+    "limitations": {"type": "array"},
+    "representative_voices": {"type": "array"}
+  },
+  "allOf": [{"$ref": "social_voice_all_history_coding.schema.json#/$defs/cleanNode"}],
+  "$defs": {
+    "semanticMetric": {
+      "type": "object",
+      "required": ["code", "label", "count", "share", "authors", "threads", "platforms"],
+      "properties": {
+        "code": {"$ref": "social_voice_all_history_coding.schema.json#/$defs/semanticCode"},
+        "label": {"type": "string", "minLength": 1},
+        "count": {"type": "integer", "minimum": 0},
+        "share": {"type": "number", "minimum": 0, "maximum": 1},
+        "authors": {"type": "integer", "minimum": 0},
+        "threads": {"type": "integer", "minimum": 0},
+        "platforms": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

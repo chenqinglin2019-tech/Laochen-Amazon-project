@@ -351,6 +351,169 @@ HTML 看板要求：
 
 ---
 
+## 7. 全历史消费者声音与产品创意开发（可选第二阶段）
+
+仅在基础机会看板成功后执行。用户已明确要求消费者声音、KANO 或产品创意开发时直接继续；否则只询问一次。开始前完整阅读 `references/consumer_voice_workflow.md`、`references/consumer_voice_contract.md` 和两个全历史 Schema。
+
+运行目录固定为：
+
+```text
+<PROJECT_ROOT>/market_opportunity/consumer_voice_all_history_<YYYYMMDD_HHmmss>/
+```
+
+### 7.1 数据来源
+
+优先使用当前上下文已经明确给出的 `collector.sqlite3`：
+
+- 只读打开，不扫描其他项目寻找数据库。
+- 不执行 collector `run/resume`。
+- 不调用 `last30days`、`agent-reach`、YouTube Data API、yt-dlp 或其他网络请求。
+- 记录源 DB 和原 `市场机会深挖看板.html` 的 SHA-256，结束前复核不变。
+
+只有用户明确要求首次采集、继续采集或刷新数据时，才进入采集流程。此时 collector 的 `quick/standard/deep` 只控制新增采集的预算和时长；不形成分析时间窗、样本截断、分母或状态门槛。未指定采集档位时沿用 collector 的非阻塞默认与提醒，不等待二次确认。
+
+新采集时：
+
+- `last30days` 只发现公开候选，其搜索能力不构成报告时间窗。
+- `agent-reach` 先运行 `doctor --json`，实际深读队列中的 Reddit/X 线程，最后运行 `check-update`。
+- YouTube Data API 分页抓取已发现视频的公开一级评论和回复；yt-dlp 仅作降级。
+- 平台/API 失败不能中断其他平台；密钥、原始来源状态和错误串只留在采集回执，不进入用户可见 HTML。
+- 采集结束后仍以源 DB 全部硬身份唯一记录为清洗输入，不使用 collector 的旧窗口资格或 v2 编码结果。
+
+### 7.2 Top3 与项目级 Taxonomy
+
+Top3 只从 `07_opportunity_analysis.json.feature_distribution` 选择：
+
+- 维度 `valid=true` 且标签 `is_effective_feature=true`。
+- 排除空值、其他、不可识别及同义占位项。
+- `3% <= listing_share <= 20%`，边界包含。
+- 按原始供需指数、Listing 数、销量占比、维度顺序和名称执行固定排序。
+- 父子或同义标签先做语义去重；不足 3 个时不放宽门槛。
+
+兼容选择命令：
+
+```bash
+python3 scripts/consumer_product_report.py select-segments \
+  --analysis <PROJECT_ROOT>/market_opportunity/07_opportunity_analysis.json \
+  --output <RUN_DIR>/selected_segments.json
+```
+
+随后由 Agent 依据项目核心词、站点语言、Listing 标题/参数、Top3 和抽样原声，生成 `<RUN_DIR>/consumer_voice_taxonomy.json`。结构遵循 `references/consumer_voice_taxonomy.schema.json`，至少包括产品显式词、隐式组件/场景词、六语义扩展词、可行动主题、Top3 词和 KANO 映射。
+
+内置 taxonomy 只适用于明确识别为车载手机支架的项目。其他品类未提供项目级 taxonomy 时停止处理，不得套用错误品类词典。
+
+### 7.3 全量清洗与六语义 OR
+
+指定 task 下每条硬身份唯一记录都必须被检查，且最终只能进入 `voices` 或 `excluded_records`。
+
+进入消费者表达分母必须同时满足：
+
+- 原文非空，包含独立观点、经验、意图、问题或建议。
+- 能由本条原文、已保存父级/根内容或多作者产品锚点确认与目标商品相关。
+- 是消费者表达，不是品牌、卖家、媒体正文、创作者口播或新闻转述。
+- 不是广告、促销、机器人、纯链接、纯转发或无新观点引用。
+- 命中六类固定语义至少一类。
+
+六类语义固定为以下六类，并采用任一命中即可纳入的 OR 规则：
+
+1. 购买、选型和推荐。
+2. 故障、抱怨、退货和替代。
+3. 满意、推荐和复购。
+4. 安装、兼容性和使用场景。
+5. DIY、改装和绕行方案。
+6. 新功能、反向需求和创意。
+
+发布日期允许为空，只作追溯和年份分布；不得用于准入、排除、权重、排序或 KANO。旧 `within_window`、`technical_eligible`、30/90 scope 和 v2 分母不得成为新统计输入。
+
+只合并能证明为同一底层留言的重复发现：相同平台内容/评论 ID、同一留言直链或确定性替代 ID。不同 ID 即使文本、语义或作者相同也分别计数；500 条不同留言表达同一需求，该需求计数为 500。
+
+### 7.4 执行与确定性对账
+
+执行：
+
+```bash
+python3 scripts/consumer_voice_local_reprocess.py \
+  --source-db <SOURCE_RUN_DIR>/collector.sqlite3 \
+  --output-dir <RUN_DIR> \
+  --task-id <TASK_ID> \
+  --selection-file <RUN_DIR>/selected_segments.json \
+  --taxonomy-profile <RUN_DIR>/consumer_voice_taxonomy.json \
+  --dashboard <PROJECT_ROOT>/market_opportunity/市场机会深挖看板.html \
+  --prior-analysis <可选旧分析JSON>
+```
+
+输出：
+
+```text
+<RUN_DIR>/source_snapshot.json
+<RUN_DIR>/social_voice_all_history_coding.json
+<RUN_DIR>/social_voice_all_history_analysis.json
+<RUN_DIR>/local_reprocess_receipt.json
+```
+
+必须满足：
+
+```text
+examined_records = hard_unique_records
+hard_unique_records = qualified_consumer_voices + excluded_records
+```
+
+`voices` 与 `excluded_records` 的 ID 必须各自唯一、互斥，且并集等于源 task 全部硬身份唯一记录。`discovered_records` 是发现关系数，只作审计，不能作为占比分母。
+
+主分母为 `N_all_history = qualified_consumer_voices`。六语义、需求、满意、不满意、场景、DIY 和创意都用该分母；Top3 各用自己的 `segment_*_all_history` 成员留言数。同一留言可多标签，因此各项占比之和可以超过 100%。
+
+### 7.5 KANO、新需求与产品开发
+
+KANO 是方向性归纳，`formal_survey=false`。用户可见类型只允许：必备型、期望型、魅力型、无差异型、反向型。无差异型必须有明确“不在乎”原声，反向型必须有明确拒绝或负效用原声。无法形成方向性判断的主题直接不进入 KANO 表。
+
+Coding、Analysis 和 HTML 均不得包含 `confidence`、`evidence_confidence`、高/中/低徽标，或把“证据不足/待验证”用作 KANO 类型。
+
+满意和不满意分别输出全品类 Top10 与各 Top3 主要项。每项显示留言数、占比、作者数、线程数、平台数和最多 3 条代表性原声；完整逐条证据留在 Coding JSON，不在 HTML 展示内部证据 ID。
+
+正式“经消费者证据支持的新需求”至少需要 5 名独立作者、3 个线程、可追溯原声，以及失败、绕行或现有方案不足证据。Agent 设计创意的直接留言数固定为 0。
+
+默认生成 3 个产品方向，每项包括消费者/JTBD/场景、消费者证据、KANO、功能与技术、结构/材料/CMF、目标价格/BOM、风险依赖、验收指标、Design Thinking、MoSCoW、完整提示词和概念图。未执行的工程、专利、法规、认证和正式问卷只能列为计划。
+
+### 7.6 HTML、状态与 Manifest
+
+渲染并检查：
+
+```bash
+python3 scripts/consumer_all_history_report.py render \
+  --analysis <RUN_DIR>/social_voice_all_history_analysis.json \
+  --output <PROJECT_ROOT>/market_opportunity/消费者声音与产品创意开发报告-全历史-<timestamp>.html \
+  --concept-image <CONCEPT_ID>=<IMAGE_PATH>
+
+python3 scripts/consumer_all_history_report.py check \
+  --report <PROJECT_ROOT>/market_opportunity/消费者声音与产品创意开发报告-全历史-<timestamp>.html>
+```
+
+报告固定使用 `assets/consumer_all_history_report.template.html`：单文件、CSS/图片内嵌、无外部运行依赖，支持桌面、移动和 A4 打印。不展示来源状态、证据 ID、证据类型计数、内部字段名、旧 scope、时间窗或置信度。每项洞察最多展示 3 条代表性原声，并明确“全历史”只指本地已采集语料。
+
+状态：
+
+- `ready`：源 task 全量检查与对账完成；两份 JSON、HTML、3 个产品方向和所需概念图完整；无时间筛选或置信度残留；源 DB、机会看板和 Manifest 门禁通过。
+- `partial`：核心全量清洗与报告可复算，但供给验证、产品方案或概念图存在明确缺项。
+- `failed`：无法完成全量对账、无法形成任何可复算消费者表达，或核心 JSON/HTML 无法通过契约。
+
+平台数量、发布日期覆盖率、采集档位和旧样本上下限不参与状态判定，只作为样本结构和限制披露。
+
+最终化：
+
+```bash
+python3 scripts/consumer_all_history_report.py finalize-manifest \
+  --manifest <PROJECT_ROOT>/project_manifest.json \
+  --coding <RUN_DIR>/social_voice_all_history_coding.json \
+  --analysis <RUN_DIR>/social_voice_all_history_analysis.json \
+  --report <REPORT_HTML> \
+  --source-db <SOURCE_RUN_DIR>/collector.sqlite3 \
+  --source-snapshot <RUN_DIR>/source_snapshot.json \
+  --dashboard <PROJECT_ROOT>/market_opportunity/市场机会深挖看板.html \
+  --status <ready|partial|failed>
+```
+
+Manifest 只能原子增加 `consumer_voice_all_history_coding`、`consumer_voice_all_history_analysis`、`consumer_voice_all_history_report_html` 和 `status.consumer_voice_all_history`。任何校验失败都必须在写入前停止；既有键、源 DB 和原机会看板不得改变。
+
 ## 解释口径
 
 - 供需指数 = 该标签或组合的销量占比 / Listing 数量占比。数值越大，表示样本内“销量占比相对供给占比”越强。
@@ -378,3 +541,5 @@ HTML 看板要求：
 ```
 
 项目路径必须来自当前上下文中上一段真实项目，并经 `inspect-report` 校验；不要重新扫描或猜测。说明本次实际处理的清洗后 listing 数、最终有效维度数和正式机会组合数，并明确结果性质为“结构化计算 + Agent 语义打标”。不要启动本地 HTTP 服务。
+
+若执行了消费者声音第二阶段，还要同时突出新的独立 HTML、四路有效留言量（仅合并同一底层留言）、Top3 名称、`ready|partial|failed` 状态及未完成项；不要把它说成对原机会看板的覆盖更新。
