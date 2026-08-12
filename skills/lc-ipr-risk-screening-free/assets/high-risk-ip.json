@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.1",
+  "updated_at": "2026-07-21",
+  "entries": [
+    {"id": "ip-disney", "type": "entertainment", "owner": "The Walt Disney Company", "aliases": ["Disney", "Mickey Mouse", "Minnie Mouse", "Frozen", "Elsa"]},
+    {"id": "ip-marvel", "type": "entertainment", "owner": "Marvel", "aliases": ["Marvel", "Spider-Man", "Iron Man", "Avengers"]},
+    {"id": "ip-pokemon", "type": "game-character", "owner": "The Pokemon Company", "aliases": ["Pokemon", "Pikachu"]},
+    {"id": "ip-sanrio", "type": "character", "owner": "Sanrio", "aliases": ["Sanrio", "Hello Kitty", "Kuromi", "Cinnamoroll"]},
+    {"id": "ip-nintendo", "type": "game-character", "owner": "Nintendo", "aliases": ["Nintendo", "Super Mario", "Mario", "Zelda"]},
+    {"id": "ip-star-wars", "type": "entertainment", "owner": "Lucasfilm", "aliases": ["Star Wars", "Darth Vader", "Grogu", "Yoda"]},
+    {"id": "ip-harry-potter", "type": "entertainment", "owner": "Warner Bros.", "aliases": ["Harry Potter", "Hogwarts"]}
+  ]
+}

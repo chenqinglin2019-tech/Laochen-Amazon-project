@@ -1,0 +1,6 @@
+interface:
+  display_name: "LC IPR Risk Screening Free"
+  short_description: "免费数据源驱动的亚马逊知识产权风险排查"
+  default_prompt: "Use $lc-ipr-risk-screening-free to screen this Amazon product with free-tier patent, trademark, design, copyright, and enforcement sources."
+policy:
+  allow_implicit_invocation: false
