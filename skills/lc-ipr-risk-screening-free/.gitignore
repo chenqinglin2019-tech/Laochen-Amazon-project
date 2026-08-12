@@ -1,0 +1,7 @@
+config.local.json
+__pycache__/
+.ruff_cache/
+.evidence.lock
+*.py[cod]
+runs-free/
+.DS_Store

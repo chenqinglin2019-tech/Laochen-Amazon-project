@@ -1,0 +1,118 @@
+{
+  "schema_version": "2.2-free",
+  "backend_url": "https://mcp.yixunkuajing.com",
+  "backend_token": "",
+  "auth": {
+    "timeout_seconds": 20,
+    "binary_sha256": {
+      "lc-ipr-auth-check-darwin-amd64": "d2915e2174895fa65838076626096bb9ca95f0264cef1522f693d810d2698c02",
+      "lc-ipr-auth-check-darwin-arm64": "06907e26166b7d6c0137a8b5ed929038ba094003b371ecd411494df07f9fa0da",
+      "lc-ipr-auth-check-linux-amd64": "e86ecbee568e858cbd0a3324c53133952d2aa76f0afbcb575ac8d4f8da4663f5",
+      "lc-ipr-auth-check-windows-amd64.exe": "1a79c560120dddd2cda3b8d885be3bf43e11225dc6409e3d5a1c6cc30ad0cda6"
+    }
+  },
+  "default_runs_dir": "/Users/laochen/Documents/产品专利等知识产权排查/runs-free",
+  "http": {
+    "timeout_seconds": 30,
+    "retries": 2,
+    "user_agent": "lc-ipr-risk-screening-free/2.2"
+  },
+  "free_policy": {
+    "allow_paid": false,
+    "allow_plan_upgrade": false,
+    "allow_overage": false,
+    "stop_on_required_quota_gap": true
+  },
+  "freshness": {
+    "signa_max_age_days": 14,
+    "provider_probe_max_age_hours": 24
+  },
+  "performance": {
+    "max_api_concurrency": 3,
+    "preflight_cache_minutes": 30,
+    "official_browser_execution": "sequential"
+  },
+  "limits": {
+    "serpapi_google_patents_queries_per_task": 6,
+    "epo_search_queries_per_task": 6,
+    "serper_patents_queries_per_task": 8,
+    "serper_web_queries_per_task": 8,
+    "serper_images_queries_per_task": 4,
+    "wipo_patentscope_browser_queries_per_task": 3,
+    "uspto_patent_browser_queries_per_task": 3,
+    "epo_candidate_detail_limit": 20,
+    "trademark_queries_per_strategy": 5
+  },
+  "cdp": {
+    "chrome_executable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "profile_dir": "~/.codex/browser-profiles/lc-ipr-free-cdp",
+    "runtime_dir": "~/.codex/runtime/lc-ipr-free-cdp",
+    "navigation_timeout_ms": 45000,
+    "action_timeout_ms": 15000,
+    "semantic_poll_ms": 750,
+    "semantic_stable_samples": 3,
+    "headless": false
+  },
+  "providers": {
+    "epo_ops": {
+      "base_url": "https://ops.epo.org/3.2/rest-services",
+      "auth_url": "https://ops.epo.org/3.2/auth/accesstoken",
+      "documented_free_bytes_per_week": 4294967296
+    },
+    "wipo_patentscope_browser": {
+      "search_url": "https://patentscope.wipo.int/",
+      "capture_transport": "manual",
+      "browser_allowed_hosts": ["patentscope.wipo.int", "patentscope2.wipo.int"]
+    },
+    "espacenet_browser": {
+      "legacy_only": true,
+      "search_url": "https://worldwide.espacenet.com/",
+      "browser_allowed_hosts": ["worldwide.espacenet.com"]
+    },
+    "serpapi": {
+      "base_url": "https://serpapi.com",
+      "engine": "google_patents"
+    },
+    "serper": {
+      "base_url": "https://google.serper.dev",
+      "lens_optional": true
+    },
+    "signa": {
+      "base_url": "https://api.signa.so",
+      "offices_path": "/v1/offices",
+      "trademarks_path": "/v1/trademarks",
+      "known_mark_probe": "NIKE"
+    },
+    "rapidapi_uspto_trademark": {
+      "base_url": "https://uspto-trademark.p.rapidapi.com",
+      "host": "uspto-trademark.p.rapidapi.com",
+      "database_status_path": "/v1/databaseStatus"
+    },
+    "tsdr": {
+      "capture_transport": "cdp",
+      "browser_base_url": "https://tsdr.uspto.gov/",
+      "browser_allowed_hosts": ["tsdr.uspto.gov", "tsdrsec.uspto.gov"]
+    },
+    "uspto_tmsearch_browser": {
+      "capture_transport": "cdp",
+      "search_url": "https://tmsearch.uspto.gov/",
+      "browser_allowed_hosts": ["tmsearch.uspto.gov"]
+    },
+    "uspto_patent_browser": {
+      "verification_browser": "chrome_desktop",
+      "capture_transport": "cdp",
+      "basic_search_url": "https://ppubs.uspto.gov/basic/",
+      "browser_allowed_hosts": ["ppubs.uspto.gov", "patents.uspto.gov"]
+    },
+    "euipo": {
+      "environment": "sandbox",
+      "authoritative_for_final_rating": false,
+      "portal_url": "https://dev-sandbox.euipo.europa.eu",
+      "token_url": "https://auth-sandbox.euipo.europa.eu/oidc/accessToken",
+      "client_credentials_scope": "uid",
+      "trademark_base_url": "https://api-sandbox.euipo.europa.eu/trademark-search",
+      "design_base_url": "https://api-sandbox.euipo.europa.eu/design-search",
+      "sandbox_fixture_design_number": "000000013-0001"
+    }
+  }
+}
