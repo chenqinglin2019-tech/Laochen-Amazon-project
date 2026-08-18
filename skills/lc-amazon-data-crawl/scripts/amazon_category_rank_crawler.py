@@ -11,15 +11,20 @@ manual handling in the visible browser.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime as dt
 import hashlib
 import json
+import os
+import queue
 import random
 import re
 import select
+import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -42,6 +47,16 @@ from selenium.webdriver.support.ui import WebDriverWait
 
 from browser_runtime import CdpWebDriver
 
+try:  # POSIX process lock
+    import fcntl as _fcntl
+except ImportError:  # pragma: no cover - Windows
+    _fcntl = None
+
+try:  # Windows process lock
+    import msvcrt as _msvcrt
+except ImportError:  # pragma: no cover - POSIX
+    _msvcrt = None
+
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
@@ -56,6 +71,22 @@ DEFAULT_DELIVERY_LOCATIONS_FILE = "config/amazon_delivery_locations.json"
 SELLERSPRITE_EXTENSION_ID = "lnbmbgocenenhhhdojdielgnmeflbnfb"
 ASIN_RE = re.compile(r"\b([A-Z0-9]{10})\b")
 URL_ASIN_RE = re.compile(r"/(?:dp|gp/product)/([A-Z0-9]{10})(?:[/?#]|$)", re.I)
+FULFILLMENT_METHODS = {"FBA", "FBM", "AMZ"}
+RECORD_SCHEMA_VERSION = 2
+CATEGORY_STATE_SCHEMA_VERSION = 2
+CRAWL_PLAN_SCHEMA_VERSION = 1
+CATEGORY_MAX_TASK_RETRIES = 2
+SUBCATEGORY_BSR_SEMANTICS = {
+    "single_row_is_child": True,
+    "multiple_rows_skip_first": True,
+    "preserve_all_children": True,
+}
+FULFILLMENT_SEMANTICS = {
+    "version": 3,
+    "known_methods": sorted(FULFILLMENT_METHODS),
+    "explicit_known_prefix_accepts_any_suffix": True,
+    "unknown_nonempty_is_missing": False,
+}
 
 
 OUTPUT_HEADERS = [
@@ -74,6 +105,7 @@ OUTPUT_HEADERS = [
     "卖家名称",
     "品牌名称",
     "卖家所处国家",
+    "子类目节点排名",
     "近30天销量（子体）",
     "近30天销量（父体）",
     "FBA费用",
@@ -104,6 +136,7 @@ FIELD_TO_HEADER = {
     "seller_name": "卖家名称",
     "brand_name": "品牌名称",
     "seller_country": "卖家所处国家",
+    "subcategory_bsr_ranks": "子类目节点排名",
     "sales_30_days_child": "近30天销量（子体）",
     "sales_30_days_parent": "近30天销量（父体）",
     "fba_fee": "FBA费用",
@@ -214,6 +247,147 @@ class VerificationUnconfirmedError(UserFacingError):
     pass
 
 
+class ConcurrentWorkerCancelled(UserFacingError):
+    """Internal cooperative cancellation used after another worker fails fatally."""
+
+    pass
+
+
+@dataclass(frozen=True)
+class ProductFilterConfig:
+    allowed_fulfillment_methods: Tuple[str, ...] = ()
+    allow_missing_fulfillment: bool = False
+    require_subcategory_rank: bool = False
+    excluded_fulfillment_methods: Tuple[str, ...] = ()
+
+    @property
+    def enabled(self) -> bool:
+        return bool(
+            self.allowed_fulfillment_methods
+            or self.excluded_fulfillment_methods
+            or self.allow_missing_fulfillment
+            or self.require_subcategory_rank
+        )
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            "allowed_fulfillment_methods": list(self.allowed_fulfillment_methods),
+            "excluded_fulfillment_methods": list(self.excluded_fulfillment_methods),
+            "allow_missing_fulfillment": self.allow_missing_fulfillment,
+            "require_subcategory_rank": self.require_subcategory_rank,
+        }
+
+
+def _strict_json_bool(value: Any, field_name: str, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise UserFacingError(f"配置项 `{field_name}` 必须是 JSON 布尔值 true 或 false。")
+    return value
+
+
+def _fulfillment_method_config_list(value: Any, field_name: str) -> Tuple[str, ...]:
+    if not isinstance(value, list):
+        raise UserFacingError(f"配置项 `product_filters.{field_name}` 必须是数组。")
+    methods: List[str] = []
+    for raw_method in value:
+        if not isinstance(raw_method, str):
+            raise UserFacingError(
+                f"配置项 `product_filters.{field_name}` 只能包含字符串。"
+            )
+        method = raw_method.strip().upper()
+        if method not in FULFILLMENT_METHODS:
+            raise UserFacingError(
+                f"配置项 `product_filters.{field_name}` 只支持 FBA、FBM 或 AMZ。"
+            )
+        if method not in methods:
+            methods.append(method)
+    return tuple(sorted(methods))
+
+
+def build_product_filter_config(config: Dict[str, Any]) -> ProductFilterConfig:
+    raw = config.get("product_filters")
+    if raw is None:
+        return ProductFilterConfig()
+    if not isinstance(raw, dict):
+        raise UserFacingError("配置项 `product_filters` 必须是对象。")
+
+    supported_keys = {
+        "allowed_fulfillment_methods",
+        "excluded_fulfillment_methods",
+        "allow_missing_fulfillment",
+        "require_subcategory_rank",
+    }
+    unknown_keys = sorted(str(key) for key in raw if key not in supported_keys)
+    if unknown_keys:
+        raise UserFacingError(
+            "配置项 `product_filters` 包含不支持的字段：" + ", ".join(unknown_keys)
+        )
+
+    allowed_methods = _fulfillment_method_config_list(
+        raw.get("allowed_fulfillment_methods", []),
+        "allowed_fulfillment_methods",
+    )
+    excluded_methods = _fulfillment_method_config_list(
+        raw.get("excluded_fulfillment_methods", []),
+        "excluded_fulfillment_methods",
+    )
+    if allowed_methods and excluded_methods:
+        raise UserFacingError(
+            "配置项 `product_filters.allowed_fulfillment_methods` 与 "
+            "`product_filters.excluded_fulfillment_methods` 不能同时设置。"
+        )
+
+    return ProductFilterConfig(
+        allowed_fulfillment_methods=allowed_methods,
+        allow_missing_fulfillment=_strict_json_bool(
+            raw.get("allow_missing_fulfillment"),
+            "product_filters.allow_missing_fulfillment",
+            False,
+        ),
+        require_subcategory_rank=_strict_json_bool(
+            raw.get("require_subcategory_rank"),
+            "product_filters.require_subcategory_rank",
+            False,
+        ),
+        excluded_fulfillment_methods=excluded_methods,
+    )
+
+
+def record_contract_fingerprint(product_filters: ProductFilterConfig) -> str:
+    payload = {
+        "schema_version": RECORD_SCHEMA_VERSION,
+        "product_filters": product_filters.as_dict(),
+        "subcategory_bsr_semantics": SUBCATEGORY_BSR_SEMANTICS,
+        "fulfillment_semantics": FULFILLMENT_SEMANTICS,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def crawl_plan_fingerprint(
+    start_url: str,
+    include_root: bool,
+    max_depth: Optional[int],
+    max_pages_per_category: Optional[int],
+    field_selectors: Dict[str, List[str]],
+) -> str:
+    normalized_selectors = {
+        str(key): [normalize_space(str(value)) for value in values]
+        for key, values in sorted(field_selectors.items())
+    }
+    payload = {
+        "schema_version": CRAWL_PLAN_SCHEMA_VERSION,
+        "start_url": normalize_space(start_url),
+        "include_root": bool(include_root),
+        "max_depth": max_depth,
+        "max_pages_per_category": max_pages_per_category,
+        "field_selectors": normalized_selectors,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def now_ts() -> str:
     return dt.datetime.now().strftime("%Y%m%d-%H%M%S")
 
@@ -227,6 +401,71 @@ def ensure_dir(path: Path) -> Path:
     return path
 
 
+class JobRunLock:
+    """Prevent two crawler processes from mutating one job checkpoint."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self._handle: Optional[Any] = None
+
+    def acquire(self) -> None:
+        if self._handle is not None:
+            return
+        ensure_dir(self.path.parent)
+        handle = self.path.open("a+", encoding="utf-8")
+        try:
+            if _fcntl is not None:
+                _fcntl.flock(handle.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+            elif _msvcrt is not None:  # pragma: no cover - Windows
+                handle.seek(0, os.SEEK_END)
+                if handle.tell() == 0:
+                    handle.write(" ")
+                    handle.flush()
+                handle.seek(0)
+                _msvcrt.locking(handle.fileno(), _msvcrt.LK_NBLCK, 1)
+            else:  # pragma: no cover - unsupported platform
+                raise UserFacingError("当前系统不支持任务级文件锁。")
+        except (BlockingIOError, OSError) as exc:
+            handle.close()
+            raise UserFacingError(
+                f"同一 job_id 已有抓取进程运行：{self.path.parent.name}。"
+                "请等待其结束或使用新的 job_id。"
+            ) from exc
+
+        handle.seek(0)
+        handle.truncate()
+        handle.write(
+            json.dumps(
+                {"pid": os.getpid(), "acquired_at": now_iso()},
+                ensure_ascii=False,
+            )
+        )
+        handle.flush()
+        os.fsync(handle.fileno())
+        self._handle = handle
+
+    def release(self) -> None:
+        handle = self._handle
+        self._handle = None
+        if handle is None:
+            return
+        try:
+            handle.seek(0)
+            if _fcntl is not None:
+                _fcntl.flock(handle.fileno(), _fcntl.LOCK_UN)
+            elif _msvcrt is not None:  # pragma: no cover - Windows
+                _msvcrt.locking(handle.fileno(), _msvcrt.LK_UNLCK, 1)
+        finally:
+            handle.close()
+
+    def __enter__(self) -> "JobRunLock":
+        self.acquire()
+        return self
+
+    def __exit__(self, _exc_type: Any, _exc: Any, _traceback: Any) -> None:
+        self.release()
+
+
 def load_json(path: Path) -> Dict[str, Any]:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -237,7 +476,26 @@ def load_json(path: Path) -> Dict[str, Any]:
 
 
 def dump_json(path: Path, data: Dict[str, Any]) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    ensure_dir(path.parent)
+    file_descriptor, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
+            json.dump(data, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except BaseException:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def append_jsonl(path: Path, record: Dict[str, Any]) -> None:
@@ -318,6 +576,206 @@ def normalize_header(value: str) -> str:
     value = value.replace("（", "(").replace("）", ")")
     value = re.sub(r"[\s_:/|]+", " ", value)
     return value
+
+
+_BSR_RANK_START_RE = re.compile(r"#\s*([\d][\d,]*)\s+in\s+", re.I)
+_BSR_CATEGORY_TRAILING_FIELDS_RE = re.compile(
+    r"\s+(?=(?:"
+    r"近30天销量(?:\([^)]*\))?|销售额|FBA费用|毛利率|变体数|"
+    r"评分(?:\(评分数\))?|价格|全部流量词|搜索推荐词|自然搜索词|"
+    r"广告(?:搜索|流量)词|上架时间|配送(?:时长)?|卖家|品牌|ASIN|"
+    r"Color|Size"
+    r")\s*[:：]|加入产品库(?:\s|$))",
+    re.I,
+)
+
+
+def normalize_subcategory_bsr_ranks(value: Any) -> List[Dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    normalized: List[Dict[str, Any]] = []
+    seen: set[Tuple[int, str]] = set()
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        raw_rank = item.get("rank")
+        if isinstance(raw_rank, bool):
+            continue
+        try:
+            rank = int(str(raw_rank).replace(",", "").strip())
+        except (TypeError, ValueError):
+            continue
+        category_name = normalize_space(str(item.get("category_name") or ""))
+        if rank <= 0 or not category_name:
+            continue
+        key = (rank, category_name.casefold())
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append({"rank": rank, "category_name": category_name})
+    return normalized
+
+
+def parse_subcategory_bsr_ranks(text: str) -> List[Dict[str, Any]]:
+    normalized_text = normalize_space(text)
+    matches = list(_BSR_RANK_START_RE.finditer(normalized_text))
+    if not matches:
+        return []
+
+    parsed: List[Dict[str, Any]] = []
+    start_index = 0 if len(matches) == 1 else 1
+    for index, match in enumerate(matches[start_index:], start=start_index):
+        category_end = matches[index + 1].start() if index + 1 < len(matches) else len(normalized_text)
+        category_name = normalized_text[match.end() : category_end]
+        trailing = _BSR_CATEGORY_TRAILING_FIELDS_RE.search(category_name)
+        if trailing:
+            category_name = category_name[: trailing.start()]
+        category_name = normalize_space(category_name).strip(" -|;；,，。")
+        try:
+            rank = int(match.group(1).replace(",", ""))
+        except (TypeError, ValueError):
+            continue
+        if rank > 0 and category_name:
+            parsed.append({"rank": rank, "category_name": category_name})
+    return normalize_subcategory_bsr_ranks(parsed)
+
+
+def format_subcategory_bsr_ranks(value: Any) -> str:
+    return " ; ".join(
+        f"#{item['rank']:,} in {item['category_name']}"
+        for item in normalize_subcategory_bsr_ranks(value)
+    )
+
+
+def normalize_fulfillment_method(value: Any) -> str:
+    if not isinstance(value, str):
+        return ""
+    method = normalize_space(value).upper()
+    return method if method in FULFILLMENT_METHODS else ""
+
+
+_FULFILLMENT_LABEL_PATTERN = (
+    r"(?:配送(?!\s*(?:时长|费))\s*(?:方式)?|"
+    r"fulfillment(?:\s+method)?|fulfilment(?:\s+method)?)"
+)
+_FULFILLMENT_LABEL_RE = re.compile(
+    _FULFILLMENT_LABEL_PATTERN
+    + r"\s*(?:[:：]\s*|\s+)([^:：|;,，；]{1,120})",
+    re.I,
+)
+_FULFILLMENT_KNOWN_PREFIX_RE = re.compile(
+    r"^(FBA|FBM|AMZ)",
+    re.I,
+)
+
+
+def _known_fulfillment_prefix(value: str) -> str:
+    match = _FULFILLMENT_KNOWN_PREFIX_RE.match(normalize_space(value))
+    return match.group(1).upper() if match else ""
+
+
+def parse_fulfillment_evidence(text: Any, *, explicit_value: bool = False) -> Tuple[str, str]:
+    """Return (canonical_method, raw_evidence) without hiding unknown values.
+
+    Free-form product text only counts as evidence when it has an explicit
+    fulfillment label. Values originating from a mapped table column or an
+    explicit selector use ``explicit_value=True`` and therefore remain evidence
+    even when SellerSprite introduces a value that is not FBA/FBM/AMZ.
+    """
+
+    if not isinstance(text, str):
+        return "", ""
+    normalized_text = normalize_space(text)
+    if not normalized_text:
+        return "", ""
+    match = _FULFILLMENT_LABEL_RE.search(normalized_text)
+    if match:
+        raw = normalize_space(match.group(1))[:120]
+        method = normalize_fulfillment_method(raw) or _known_fulfillment_prefix(raw)
+        return method, raw
+    if explicit_value:
+        raw = normalized_text[:120]
+        return _known_fulfillment_prefix(raw), raw
+    return "", ""
+
+
+def select_fulfillment_evidence(
+    *evidence: Tuple[Any, Any],
+) -> Tuple[str, str]:
+    """Select evidence in source-priority order without hiding unknown values.
+
+    A canonical value from any source is stronger than unknown raw evidence.
+    Among equally strong values the first source wins, so callers can pass
+    explicit selector, structured table and labelled card text in that order.
+    """
+
+    prepared: List[Tuple[str, str]] = []
+    for method_value, raw_value in evidence:
+        method = normalize_fulfillment_method(method_value)
+        raw = normalize_space(str(raw_value or ""))[:120]
+        prepared.append((method, raw))
+    for method, raw in prepared:
+        if method:
+            return method, raw or method
+    for _method, raw in prepared:
+        if raw:
+            return "", raw
+    return "", ""
+
+
+def parse_fulfillment_method(text: str) -> str:
+    method, _raw = parse_fulfillment_evidence(text)
+    return method
+
+
+def filter_product_records(
+    records: Sequence[Dict[str, Any]],
+    product_filters: ProductFilterConfig,
+) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    if not product_filters.enabled:
+        return list(records), {}
+
+    accepted: List[Dict[str, Any]] = []
+    rejection_counts: Dict[str, int] = {}
+    allowed = set(product_filters.allowed_fulfillment_methods)
+    excluded = set(product_filters.excluded_fulfillment_methods)
+    fulfillment_filter_enabled = bool(
+        allowed or excluded or product_filters.allow_missing_fulfillment
+    )
+    for record in records:
+        rejected_reasons: List[str] = []
+        if fulfillment_filter_enabled:
+            fulfillment_value = record.get("fulfillment_method")
+            raw_evidence = record.get("fulfillment_method_raw")
+            method = normalize_fulfillment_method(fulfillment_value)
+            if not method and raw_evidence:
+                method, _parsed_raw = parse_fulfillment_evidence(
+                    str(raw_evidence),
+                    explicit_value=True,
+                )
+            evidence_text = normalize_space(str(raw_evidence or "")) or normalize_space(
+                str(fulfillment_value or "")
+            )
+            truly_missing = not evidence_text
+            if excluded:
+                fulfillment_allowed = method not in excluded
+            else:
+                fulfillment_allowed = method in allowed or (
+                    truly_missing and product_filters.allow_missing_fulfillment
+                )
+            if not fulfillment_allowed:
+                rejected_reasons.append("fulfillment_method_not_allowed")
+        if product_filters.require_subcategory_rank and not normalize_subcategory_bsr_ranks(
+            record.get("subcategory_bsr_ranks")
+        ):
+            rejected_reasons.append("subcategory_bsr_rank_missing")
+
+        if rejected_reasons:
+            for reason in rejected_reasons:
+                rejection_counts[reason] = rejection_counts.get(reason, 0) + 1
+            continue
+        accepted.append(record)
+    return accepted, rejection_counts
 
 
 def country_from_flag_code_or_text(value: str) -> str:
@@ -435,6 +893,60 @@ def ensure_resume_delivery_fingerprint(
     return changed
 
 
+def ensure_resume_record_contract_fingerprint(
+    state: Dict[str, Any],
+    runtime: Any,
+    records_path: Optional[Path] = None,
+) -> bool:
+    expected = str(getattr(runtime, "record_contract_fingerprint", "") or "")
+    previous = str(state.get("record_contract_fingerprint") or "")
+    has_records = bool(
+        int(state.get("records_count") or 0) > 0
+        or state.get("completed_pages")
+        or (records_path is not None and records_path.exists() and records_path.stat().st_size > 0)
+    )
+    if has_records and previous != expected:
+        raise UserFacingError(
+            "产品过滤条件、子类目排名或配送方式输出语义与已有断点不一致，拒绝混合续跑。"
+            "请保留旧输出并改用新的 `job_id`。"
+        )
+    changed = previous != expected
+    state["record_contract_fingerprint"] = expected
+    return changed
+
+
+def ensure_resume_crawl_plan_fingerprint(
+    state: Dict[str, Any],
+    runtime: Any,
+    records_path: Optional[Path] = None,
+    page_results_dir: Optional[Path] = None,
+) -> bool:
+    expected = str(getattr(runtime, "crawl_plan_fingerprint", "") or "")
+    previous = str(state.get("crawl_plan_fingerprint") or "")
+    has_page_results = bool(
+        page_results_dir is not None
+        and page_results_dir.exists()
+        and any(page_results_dir.glob("*.json"))
+    )
+    has_progress = bool(
+        int(state.get("processed_categories_count") or 0) > 0
+        or state.get("completed_pages")
+        or state.get("done_categories")
+        or state.get("current")
+        or state.get("in_flight_categories")
+        or has_page_results
+        or (records_path is not None and records_path.exists() and records_path.stat().st_size > 0)
+    )
+    if has_progress and previous != expected:
+        raise UserFacingError(
+            "起始类目、递归深度、分页上限或字段选择器与已有断点不一致，拒绝混合续跑。"
+            "请保留旧输出并改用新的 `job_id`。"
+        )
+    changed = previous != expected
+    state["crawl_plan_fingerprint"] = expected
+    return changed
+
+
 def extract_node_id(url: str) -> str:
     parsed = urlparse(url)
     query = parse_qs(parsed.query)
@@ -482,6 +994,7 @@ class RuntimeConfig:
     chrome_user_data_dir: Path
     chrome_profile_directory: str
     debugger_address: str
+    browser_tab_concurrency: int
     extension_path: Path
     include_root: bool
     max_depth: Optional[int]
@@ -504,6 +1017,9 @@ class RuntimeConfig:
     delivery_location_timeout: int
     delivery_locations: Dict[str, Dict[str, str]]
     delivery_location_fingerprint: str
+    product_filters: ProductFilterConfig
+    record_contract_fingerprint: str
+    crawl_plan_fingerprint: str
     delay_seconds_min: float
     delay_seconds_max: float
     batch_pause_pages_min: int
@@ -523,6 +1039,33 @@ class RuntimeConfig:
     field_selectors: Dict[str, List[str]] = field(default_factory=dict)
 
 
+@dataclass
+class CategoryPageBatch:
+    key: str
+    page_number: int
+    page_url: str
+    plugin_status: str
+    extracted_count: int
+    records: List[Dict[str, Any]]
+    rejection_counts: Dict[str, int]
+
+
+@dataclass
+class CategoryCrawlBatch:
+    node: Dict[str, Any]
+    pages: List[CategoryPageBatch] = field(default_factory=list)
+    children: List[Dict[str, Any]] = field(default_factory=list)
+    skipped_intermediate: bool = False
+    failures: List[Dict[str, Any]] = field(default_factory=list)
+    terminal_error_type: str = ""
+    terminal_error_message: str = ""
+    retryable_error_type: str = ""
+    retryable_error_message: str = ""
+
+
+MANUAL_INTERACTION_LOCK = threading.Lock()
+
+
 def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: bool) -> RuntimeConfig:
     start_url = config_text(config, "start_url")
     if not start_url:
@@ -537,6 +1080,17 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
     browser_mode = config_text(config, "browser_mode", "launch").lower()
     if browser_mode not in {"launch", "attach", "reuse", "applescript"}:
         raise UserFacingError("配置项 `browser_mode` 只支持 launch、attach、reuse 或 applescript。")
+    browser_tab_concurrency = config_int(config, "browser_tab_concurrency", 1)
+    browser_tab_concurrency = 1 if browser_tab_concurrency is None else browser_tab_concurrency
+    if browser_tab_concurrency < 1 or browser_tab_concurrency > 3:
+        raise UserFacingError("配置项 `browser_tab_concurrency` 必须是 1-3 的整数。")
+    if browser_tab_concurrency > 1 and not (
+        browser_backend == "cdp" and browser_mode in {"attach", "reuse"}
+    ):
+        raise UserFacingError(
+            "browser_tab_concurrency 大于 1 时只支持 browser_backend=cdp，"
+            "且 browser_mode 必须是 attach 或 reuse。"
+        )
 
     chrome_binary = config_text(config, "chrome_binary")
     chrome_user_data_dir = resolve_path(config_text(config, "chrome_user_data_dir", "chrome_profiles/category-rank-sellersprite"))
@@ -580,6 +1134,13 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
     page_scroll_wait_seconds = max(config_float(config, "page_scroll_wait_seconds", 1.0) or 0, 0)
     page_scroll_stable_rounds = max(config_int(config, "page_scroll_stable_rounds", 2) or 1, 1)
     delivery_config = build_delivery_location_config(config)
+    product_filters = build_product_filter_config(config)
+    sellersprite_required = config_bool(config, "sellersprite_required", True)
+    if product_filters.enabled and not sellersprite_required:
+        raise UserFacingError(
+            "启用 product_filters 时必须设置 `sellersprite_required: true`，"
+            "否则无法可靠判断配送方式和子类目节点排名。"
+        )
 
     raw_selectors = config.get("field_selectors") or {}
     field_selectors: Dict[str, List[str]] = {}
@@ -587,6 +1148,10 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         for key, value in raw_selectors.items():
             if isinstance(value, list):
                 field_selectors[key] = [str(item).strip() for item in value if str(item).strip()]
+
+    include_root = config_bool(config, "include_root", False)
+    max_depth = config_int(config, "max_depth")
+    max_pages_per_category = config_int(config, "max_pages_per_category")
 
     return RuntimeConfig(
         start_url=start_url,
@@ -598,10 +1163,11 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         chrome_user_data_dir=chrome_user_data_dir,
         chrome_profile_directory=chrome_profile_directory,
         debugger_address=debugger_address,
+        browser_tab_concurrency=browser_tab_concurrency,
         extension_path=extension_path,
-        include_root=config_bool(config, "include_root", False),
-        max_depth=config_int(config, "max_depth"),
-        max_pages_per_category=config_int(config, "max_pages_per_category"),
+        include_root=include_root,
+        max_depth=max_depth,
+        max_pages_per_category=max_pages_per_category,
         max_categories=config_int(config, "max_categories"),
         resume=False if no_resume else config_bool(config, "resume", True),
         activate_plugin=config_bool(config, "activate_plugin", True),
@@ -616,6 +1182,15 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         plugin_second_relaunch_wait_seconds=max(config_float(config, "plugin_second_relaunch_wait_seconds", 600) or 0, 0),
         manual_pause_timeout=config_int(config, "manual_pause_timeout", 900) or 900,
         **delivery_config,
+        product_filters=product_filters,
+        record_contract_fingerprint=record_contract_fingerprint(product_filters),
+        crawl_plan_fingerprint=crawl_plan_fingerprint(
+            start_url,
+            include_root,
+            max_depth,
+            max_pages_per_category,
+            field_selectors,
+        ),
         delay_seconds_min=min_delay,
         delay_seconds_max=max_delay,
         batch_pause_pages_min=batch_pages_min,
@@ -627,7 +1202,7 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         page_scroll_step_ratio=page_scroll_step_ratio,
         page_scroll_wait_seconds=page_scroll_wait_seconds,
         page_scroll_stable_rounds=page_scroll_stable_rounds,
-        sellersprite_required=config_bool(config, "sellersprite_required", True),
+        sellersprite_required=sellersprite_required,
         sellersprite_min_enriched_records=max(
             config_int(config, "sellersprite_min_enriched_records", 1) or 1,
             1,
@@ -649,24 +1224,10 @@ class StateStore:
     def __init__(self, path: Path, runtime: RuntimeConfig) -> None:
         self.path = path
         self.runtime = runtime
+        self.page_results_dir = self.path.parent / "page_results"
         self.data: Dict[str, Any] = {}
 
-    def load_or_create(self) -> None:
-        if self.runtime.resume and self.path.exists():
-            self.data = load_json(self.path)
-            if ensure_resume_delivery_fingerprint(
-                self.data,
-                self.runtime,
-                self.path.with_name("records.jsonl"),
-            ):
-                self.flush()
-            return
-        if self.runtime.resume:
-            ensure_resume_delivery_fingerprint(
-                {},
-                self.runtime,
-                self.path.with_name("records.jsonl"),
-            )
+    def _new_data(self) -> Dict[str, Any]:
         root_name = infer_category_name_from_url(self.runtime.start_url)
         root_node = {
             "url": self.runtime.start_url,
@@ -675,25 +1236,202 @@ class StateStore:
             "node_id": extract_node_id(self.runtime.start_url),
             "depth": 0,
         }
-        self.data = {
+        return {
+            "state_version": CATEGORY_STATE_SCHEMA_VERSION,
             "job_id": self.runtime.job_id,
             "start_url": self.runtime.start_url,
             "created_at": now_iso(),
             "queue": [root_node],
             "current": None,
+            "in_flight_categories": {},
             "seen_categories": [category_key(root_node)],
             "done_categories": [],
             "completed_pages": [],
+            "completed_page_order": [],
             "processed_categories_count": 0,
             "records_count": 0,
+            "filtered_out_count": 0,
+            "filter_rejection_counts": {},
             "failures_count": 0,
             "delivery_location_fingerprint": self.runtime.delivery_location_fingerprint,
+            "record_contract_fingerprint": self.runtime.record_contract_fingerprint,
+            "crawl_plan_fingerprint": self.runtime.crawl_plan_fingerprint,
         }
+
+    def load_or_create(self) -> None:
+        ensure_dir(self.page_results_dir)
+        if self.runtime.resume and self.path.exists():
+            self.data = load_json(self.path)
+            delivery_changed = ensure_resume_delivery_fingerprint(
+                self.data,
+                self.runtime,
+                self.path.with_name("records.jsonl"),
+            )
+            contract_changed = ensure_resume_record_contract_fingerprint(
+                self.data,
+                self.runtime,
+                self.path.with_name("records.jsonl"),
+            )
+            plan_changed = ensure_resume_crawl_plan_fingerprint(
+                self.data,
+                self.runtime,
+                self.path.with_name("records.jsonl"),
+                self.page_results_dir,
+            )
+            if plan_changed:
+                # A pending-only checkpoint has no committed work and can be
+                # safely rebuilt from the new start URL/plan. Keeping its old
+                # queue would relabel stale work with the new fingerprint.
+                self.data = self._new_data()
+                self.flush()
+                return
+            self._recover_from_page_results()
+            if delivery_changed or contract_changed or plan_changed:
+                self.data["checkpoint_contract_updated_at"] = now_iso()
+            self.flush()
+            return
+        if self.runtime.resume:
+            records_path = self.path.with_name("records.jsonl")
+            has_records = records_path.exists() and records_path.stat().st_size > 0
+            has_page_results = any(self.page_results_dir.glob("*.json"))
+            if not has_page_results:
+                ensure_resume_delivery_fingerprint({}, self.runtime, records_path)
+                ensure_resume_record_contract_fingerprint({}, self.runtime, records_path)
+                ensure_resume_crawl_plan_fingerprint(
+                    {},
+                    self.runtime,
+                    records_path,
+                    self.page_results_dir,
+                )
+            if has_records and not has_page_results:
+                raise UserFacingError(
+                    "现有 records.jsonl 没有原子 page shard，不能安全续跑；请更换 job_id。"
+                )
+        self.data = self._new_data()
+        if self.runtime.resume:
+            self._recover_from_page_results()
         self.flush()
 
     def flush(self) -> None:
+        # Keep the generic state-v2 vocabulary alongside the recursive
+        # category crawler's legacy queue/done names for operators and tooling.
+        self.data["schema_version"] = CATEGORY_STATE_SCHEMA_VERSION
+        self.data["pending"] = list(self.data.get("queue") or [])
+        self.data["in_flight"] = dict(self.data.get("in_flight_categories") or {})
+        self.data["completed_sources"] = list(self.data.get("done_categories") or [])
         self.data["updated_at"] = now_iso()
         dump_json(self.path, self.data)
+
+    def page_result_path(self, key: str) -> Path:
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        return self.page_results_dir / f"{digest}.json"
+
+    def _read_page_result(self, path: Path) -> Dict[str, Any]:
+        try:
+            payload = load_json(path)
+        except Exception as exc:
+            raise UserFacingError(f"页面提交文件损坏，无法安全恢复：{path.name}: {exc}") from exc
+        if int(payload.get("schema_version") or 0) != CATEGORY_STATE_SCHEMA_VERSION:
+            raise UserFacingError(f"页面提交文件版本不兼容：{path.name}；请更换 job_id。")
+        if str(payload.get("record_contract_fingerprint") or "") != self.runtime.record_contract_fingerprint:
+            raise UserFacingError(f"页面提交文件与当前数据契约不一致：{path.name}；请更换 job_id。")
+        if str(payload.get("delivery_location_fingerprint") or "") != self.runtime.delivery_location_fingerprint:
+            raise UserFacingError(f"页面提交文件与当前配送地址配置不一致：{path.name}；请更换 job_id。")
+        if str(payload.get("crawl_plan_fingerprint") or "") != self.runtime.crawl_plan_fingerprint:
+            raise UserFacingError(f"页面提交文件与当前抓取计划不一致：{path.name}；请更换 job_id。")
+        return payload
+
+    def iter_page_results(self) -> List[Dict[str, Any]]:
+        by_key: Dict[str, Dict[str, Any]] = {}
+        for path in sorted(self.page_results_dir.glob("*.json")):
+            payload = self._read_page_result(path)
+            key = str(payload.get("page_key") or "")
+            if key:
+                by_key[key] = payload
+        ordered: List[Dict[str, Any]] = []
+        for key in [str(item) for item in self.data.get("completed_page_order") or []]:
+            payload = by_key.pop(key, None)
+            if payload:
+                ordered.append(payload)
+        ordered.extend(
+            sorted(
+                by_key.values(),
+                key=lambda item: (
+                    str(item.get("committed_at") or ""),
+                    str(item.get("page_key") or ""),
+                ),
+            )
+        )
+        return ordered
+
+    def _recover_from_page_results(self) -> None:
+        payloads = self.iter_page_results()
+        shard_keys = [str(payload.get("page_key") or "") for payload in payloads]
+        shard_key_set = {key for key in shard_keys if key}
+        completed_in_state = set(self.data.get("completed_pages") or [])
+        missing_shards = sorted(completed_in_state - shard_key_set)
+        if missing_shards:
+            raise UserFacingError(
+                "现有类目断点缺少原子 page shard，不能保证 records 去重恢复；"
+                "请保留旧输出并更换 job_id。"
+            )
+
+        records_count = 0
+        scanned_count = 0
+        rejection_counts: Dict[str, int] = {}
+        for payload in payloads:
+            records = payload.get("records") or []
+            records_count += len(records) if isinstance(records, list) else 0
+            scanned_count += max(int(payload.get("extracted_count") or 0), 0)
+            for reason, count in dict(payload.get("rejection_counts") or {}).items():
+                rejection_counts[str(reason)] = rejection_counts.get(str(reason), 0) + max(
+                    int(count or 0), 0
+                )
+        self.data["state_version"] = CATEGORY_STATE_SCHEMA_VERSION
+        self.data["completed_pages"] = shard_keys
+        self.data["completed_page_order"] = shard_keys
+        self.data["records_count"] = records_count
+        self.data["filtered_out_count"] = max(scanned_count - records_count, 0)
+        self.data["filter_rejection_counts"] = rejection_counts
+        self.data["record_contract_fingerprint"] = self.runtime.record_contract_fingerprint
+        self.data["delivery_location_fingerprint"] = self.runtime.delivery_location_fingerprint
+        self.data["crawl_plan_fingerprint"] = self.runtime.crawl_plan_fingerprint
+
+    def commit_page_batch(self, page: CategoryPageBatch) -> bool:
+        if self.is_page_completed(page.key):
+            return False
+        normalized_records: List[Dict[str, Any]] = []
+        seen_asins: set[str] = set()
+        for record in page.records:
+            if not isinstance(record, dict):
+                continue
+            asin = str(record.get("asin") or "")
+            if asin in seen_asins:
+                continue
+            seen_asins.add(asin)
+            normalized_records.append(record)
+        payload = {
+            "schema_version": CATEGORY_STATE_SCHEMA_VERSION,
+            "record_contract_fingerprint": self.runtime.record_contract_fingerprint,
+            "delivery_location_fingerprint": self.runtime.delivery_location_fingerprint,
+            "crawl_plan_fingerprint": self.runtime.crawl_plan_fingerprint,
+            "page_key": page.key,
+            "page_number": page.page_number,
+            "page_url": page.page_url,
+            "plugin_status": page.plugin_status,
+            "extracted_count": page.extracted_count,
+            "records": normalized_records,
+            "rejection_counts": page.rejection_counts,
+            "committed_at": now_iso(),
+        }
+        dump_json(self.page_result_path(page.key), payload)
+        self.mark_page_completed(
+            page.key,
+            len(normalized_records),
+            page.extracted_count - len(normalized_records),
+            page.rejection_counts,
+        )
+        return True
 
     def next_work(self) -> Optional[Dict[str, Any]]:
         current = self.data.get("current")
@@ -715,6 +1453,142 @@ class StateStore:
         self.flush()
         return current
 
+    def prepare_concurrent_resume(self) -> None:
+        """Recover stale work and migrate the legacy single-current checkpoint."""
+
+        recovered: List[Dict[str, Any]] = []
+        current = self.data.get("current")
+        if isinstance(current, dict) and isinstance(current.get("node"), dict):
+            recovered.append(dict(current["node"]))
+        in_flight = self.data.get("in_flight_categories") or {}
+        if isinstance(in_flight, dict):
+            for item in in_flight.values():
+                if isinstance(item, dict) and isinstance(item.get("node"), dict):
+                    recovered.append(dict(item["node"]))
+
+        done = set(self.data.setdefault("done_categories", []))
+        pending: List[Dict[str, Any]] = []
+        pending_keys: set[str] = set()
+        for node in [*recovered, *(self.data.get("queue") or [])]:
+            if not isinstance(node, dict) or not node.get("url"):
+                continue
+            key = category_key(node)
+            if key in done or key in pending_keys:
+                continue
+            pending_keys.add(key)
+            pending.append(node)
+        self.data["state_version"] = 2
+        self.data["queue"] = pending
+        self.data["current"] = None
+        self.data["in_flight_categories"] = {}
+        self.flush()
+
+    def recover_stale_in_flight(self) -> None:
+        """Make a crashed concurrent run resumable in sequential mode too."""
+
+        in_flight = self.data.get("in_flight_categories") or {}
+        if not isinstance(in_flight, dict) or not in_flight:
+            self.data.setdefault("in_flight_categories", {})
+            self.data.setdefault("state_version", 2)
+            return
+        done = set(self.data.setdefault("done_categories", []))
+        queue_items = list(self.data.get("queue") or [])
+        queued_keys = {category_key(node) for node in queue_items if isinstance(node, dict)}
+        recovered: List[Dict[str, Any]] = []
+        for item in in_flight.values():
+            node = item.get("node") if isinstance(item, dict) else None
+            if not isinstance(node, dict) or not node.get("url"):
+                continue
+            key = category_key(node)
+            if key in done or key in queued_keys:
+                continue
+            queued_keys.add(key)
+            recovered.append(node)
+        self.data["state_version"] = 2
+        self.data["queue"] = [*recovered, *queue_items]
+        self.data["in_flight_categories"] = {}
+        self.flush()
+
+    def claim_next_category(self) -> Optional[Tuple[str, Dict[str, Any]]]:
+        queue_items = list(self.data.get("queue") or [])
+        done = set(self.data.setdefault("done_categories", []))
+        in_flight = self.data.setdefault("in_flight_categories", {})
+        while queue_items:
+            node = queue_items.pop(0)
+            if not isinstance(node, dict) or not node.get("url"):
+                continue
+            key = category_key(node)
+            if key in done or key in in_flight:
+                continue
+            self.data["queue"] = queue_items
+            in_flight[key] = {
+                "node": node,
+                "claimed_at": now_iso(),
+            }
+            self.flush()
+            return key, node
+        self.data["queue"] = []
+        self.flush()
+        return None
+
+    def complete_claimed_category(self, claim_key: str, node: Dict[str, Any]) -> None:
+        in_flight = self.data.setdefault("in_flight_categories", {})
+        in_flight.pop(claim_key, None)
+        done = set(self.data.setdefault("done_categories", []))
+        done.add(claim_key)
+        done.add(category_key(node))
+        self.data["done_categories"] = sorted(done)
+        seen = set(self.data.setdefault("seen_categories", []))
+        seen.add(claim_key)
+        seen.add(category_key(node))
+        self.data["seen_categories"] = sorted(seen)
+        self.data["processed_categories_count"] = int(
+            self.data.get("processed_categories_count") or 0
+        ) + 1
+        self.flush()
+
+    def requeue_claimed_categories(self, claim_keys: Sequence[str]) -> None:
+        in_flight = self.data.setdefault("in_flight_categories", {})
+        queue_items = list(self.data.get("queue") or [])
+        done = set(self.data.setdefault("done_categories", []))
+        queued_keys = {category_key(node) for node in queue_items if isinstance(node, dict)}
+        recovered: List[Dict[str, Any]] = []
+        for claim_key in claim_keys:
+            item = in_flight.pop(claim_key, None)
+            node = item.get("node") if isinstance(item, dict) else None
+            if not isinstance(node, dict) or not node.get("url"):
+                continue
+            key = category_key(node)
+            if claim_key in done or key in done or key in queued_keys:
+                continue
+            queued_keys.add(key)
+            recovered.append(node)
+        self.data["queue"] = [*recovered, *queue_items]
+        self.flush()
+
+    def requeue_claimed_category(
+        self,
+        claim_key: str,
+        updated_node: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        in_flight = self.data.setdefault("in_flight_categories", {})
+        item = in_flight.pop(claim_key, None)
+        original_node = item.get("node") if isinstance(item, dict) else None
+        node = updated_node if isinstance(updated_node, dict) else original_node
+        queue_items = list(self.data.get("queue") or [])
+        if isinstance(node, dict) and node.get("url"):
+            key = category_key(node)
+            done = set(self.data.setdefault("done_categories", []))
+            queued_keys = {
+                category_key(pending)
+                for pending in queue_items
+                if isinstance(pending, dict)
+            }
+            if claim_key not in done and key not in done and key not in queued_keys:
+                queue_items.insert(0, node)
+        self.data["queue"] = queue_items
+        self.flush()
+
     def set_current(self, current: Optional[Dict[str, Any]]) -> None:
         self.data["current"] = current
         self.flush()
@@ -735,11 +1609,26 @@ class StateStore:
         self.flush()
         return added
 
-    def mark_page_completed(self, key: str, count: int) -> None:
+    def mark_page_completed(
+        self,
+        key: str,
+        count: int,
+        filtered_out_count: int = 0,
+        rejection_counts: Optional[Dict[str, int]] = None,
+    ) -> None:
         completed = set(self.data.setdefault("completed_pages", []))
         completed.add(key)
         self.data["completed_pages"] = sorted(completed)
+        order = self.data.setdefault("completed_page_order", [])
+        if key not in order:
+            order.append(key)
         self.data["records_count"] = int(self.data.get("records_count") or 0) + count
+        self.data["filtered_out_count"] = (
+            int(self.data.get("filtered_out_count") or 0) + max(filtered_out_count, 0)
+        )
+        totals = self.data.setdefault("filter_rejection_counts", {})
+        for reason, rejected_count in (rejection_counts or {}).items():
+            totals[reason] = int(totals.get(reason) or 0) + max(int(rejected_count), 0)
         self.flush()
 
     def is_page_completed(self, key: str) -> bool:
@@ -756,15 +1645,27 @@ class StateStore:
         self.data["current"] = None
         self.flush()
 
-    def log_failure(self) -> None:
-        self.data["failures_count"] = int(self.data.get("failures_count") or 0) + 1
+    def log_failure(self, count: int = 1) -> None:
+        self.data["failures_count"] = int(self.data.get("failures_count") or 0) + max(
+            int(count), 0
+        )
         self.flush()
 
     def mark_sellersprite_readiness(self, report: Dict[str, Any]) -> None:
         self.data["sellersprite_readiness"] = safe_sellersprite_readiness(report)
         self.flush()
 
-    def mark_manual_pause(self, reason: str, page_url: str) -> None:
+    def mark_manual_pause(self, reason: str, page_url: str, work_key: str = "") -> None:
+        if work_key:
+            pauses = self.data.setdefault("manual_pauses", {})
+            pauses[work_key] = {
+                "paused_at": now_iso(),
+                "reason": reason,
+                "page_url": page_url,
+                "in_flight": (self.data.get("in_flight_categories") or {}).get(work_key),
+            }
+            self.flush()
+            return
         self.data["manual_pause"] = {
             "paused_at": now_iso(),
             "reason": reason,
@@ -773,9 +1674,58 @@ class StateStore:
         }
         self.flush()
 
-    def clear_manual_pause(self) -> None:
+    def clear_manual_pause(self, work_key: str = "") -> None:
+        if work_key:
+            pauses = self.data.get("manual_pauses") or {}
+            if pauses.pop(work_key, None) is not None:
+                if pauses:
+                    self.data["manual_pauses"] = pauses
+                else:
+                    self.data.pop("manual_pauses", None)
+                self.flush()
+            return
         if self.data.pop("manual_pause", None) is not None:
             self.flush()
+
+
+def write_jsonl_atomic(path: Path, records: Sequence[Dict[str, Any]]) -> None:
+    ensure_dir(path.parent)
+    file_descriptor, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=str(path.parent),
+    )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except BaseException:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def materialize_category_records(state: StateStore, records_path: Path) -> int:
+    records: List[Dict[str, Any]] = []
+    seen: set[Tuple[str, str]] = set()
+    for payload in state.iter_page_results():
+        key = str(payload.get("page_key") or "")
+        for record in payload.get("records") or []:
+            if not isinstance(record, dict):
+                continue
+            identity = (key, str(record.get("asin") or ""))
+            if identity in seen:
+                continue
+            seen.add(identity)
+            records.append(record)
+    write_jsonl_atomic(records_path, records)
+    return len(records)
 
 
 def start_driver(runtime: RuntimeConfig) -> WebDriver:
@@ -1098,6 +2048,7 @@ class BatchPauseScheduler:
         self.runtime = runtime
         self.pages_since_pause = 0
         self.next_pause_after = self._pick_next_pause_after()
+        self._lock = threading.Lock()
 
     def _pick_next_pause_after(self) -> int:
         min_pages = self.runtime.batch_pause_pages_min
@@ -1107,17 +2058,51 @@ class BatchPauseScheduler:
         return random.randint(min_pages, max_pages)
 
     def after_completed_page(self) -> None:
-        if not self.next_pause_after:
-            return
-        self.pages_since_pause += 1
-        if self.pages_since_pause < self.next_pause_after:
-            return
-        duration = random.uniform(self.runtime.batch_pause_seconds_min, self.runtime.batch_pause_seconds_max)
-        if duration > 0:
-            print(f"已连续抓取 {self.pages_since_pause} 页，自动休息 {duration / 60:.1f} 分钟以降低风控风险。")
-            time.sleep(duration)
-        self.pages_since_pause = 0
-        self.next_pause_after = self._pick_next_pause_after()
+        with self._lock:
+            if not self.next_pause_after:
+                return
+            self.pages_since_pause += 1
+            if self.pages_since_pause < self.next_pause_after:
+                return
+            duration = random.uniform(self.runtime.batch_pause_seconds_min, self.runtime.batch_pause_seconds_max)
+            if duration > 0:
+                print(f"已连续抓取 {self.pages_since_pause} 页，自动休息 {duration / 60:.1f} 分钟以降低风控风险。")
+                time.sleep(duration)
+            self.pages_since_pause = 0
+            self.next_pause_after = self._pick_next_pause_after()
+
+
+class NavigationThrottle:
+    """Globally stagger browser navigations across category workers."""
+
+    def __init__(self, minimum: float, maximum: float) -> None:
+        self.minimum = max(float(minimum), 0.0)
+        self.maximum = max(float(maximum), self.minimum)
+        self._lock = threading.Lock()
+        self._next_navigation_at = 0.0
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            navigation_at = max(now, self._next_navigation_at)
+            self._next_navigation_at = navigation_at + random.uniform(
+                self.minimum,
+                self.maximum,
+            )
+        delay = navigation_at - time.monotonic()
+        if delay > 0:
+            time.sleep(delay)
+
+
+class DeliveryDomainLocks:
+    def __init__(self) -> None:
+        self._guard = threading.Lock()
+        self._locks: Dict[str, threading.Lock] = {}
+
+    def for_url(self, url: str) -> threading.Lock:
+        domain = (urlparse(url).hostname or "unknown").lower()
+        with self._guard:
+            return self._locks.setdefault(domain, threading.Lock())
 
 
 def safe_find_text(driver: WebDriver) -> str:
@@ -1168,14 +2153,38 @@ def detect_block(driver: WebDriver) -> Optional[str]:
     return None
 
 
-def wait_for_manual_continue(timeout: int) -> bool:
-    deadline = time.time() + timeout
+def _raise_if_stop_requested(stop_event: Optional[threading.Event]) -> None:
+    if stop_event is not None and stop_event.is_set():
+        raise ConcurrentWorkerCancelled("并发任务正在停止，已取消等待操作。")
+
+
+def _sleep_with_stop(seconds: float, stop_event: Optional[threading.Event]) -> None:
+    duration = max(float(seconds), 0.0)
+    if duration <= 0:
+        _raise_if_stop_requested(stop_event)
+        return
+    if stop_event is None:
+        time.sleep(duration)
+        return
+    if stop_event.wait(duration):
+        raise ConcurrentWorkerCancelled("并发任务正在停止，已取消等待操作。")
+
+
+def wait_for_manual_continue(
+    timeout: int,
+    stop_event: Optional[threading.Event] = None,
+) -> bool:
+    started_at = time.time()
+    deadline = started_at + timeout
+    next_status_at = started_at + 30
     prompt = "人工处理完成后按 Enter 继续；在 Codex 中请告诉我“继续”："
+    print(prompt, flush=True)
     while time.time() < deadline:
+        _raise_if_stop_requested(stop_event)
         remaining = max(0, deadline - time.time())
-        print(prompt, flush=True)
         try:
-            ready, _, _ = select.select([sys.stdin], [], [], min(remaining, 30))
+            poll_seconds = 0.25 if stop_event is not None else 30
+            ready, _, _ = select.select([sys.stdin], [], [], min(remaining, poll_seconds))
         except (OSError, ValueError):
             ready = []
         if ready:
@@ -1186,17 +2195,33 @@ def wait_for_manual_continue(timeout: int) -> bool:
             if line == "":
                 return False
             return True
-        print("仍在等待人工确认继续。", flush=True)
+        now = time.time()
+        if now >= next_status_at:
+            print("仍在等待人工确认继续。", flush=True)
+            next_status_at = now + 30
     return False
 
 
-def wait_for_manual_clear(driver: WebDriver, reason: str, timeout: int) -> bool:
+def wait_for_manual_clear(
+    driver: WebDriver,
+    reason: str,
+    timeout: int,
+    stop_event: Optional[threading.Event] = None,
+) -> bool:
     print(f"检测到需要人工处理：{reason}")
     print("脚本已暂停并保留当前页面。请在 Chrome 中手动输入验证数字或完成登录。")
     deadline = time.time() + max(int(timeout), 1)
     while True:
         remaining = deadline - time.time()
-        if remaining <= 0 or not wait_for_manual_continue(max(int(remaining), 1)):
+        continued = False
+        if remaining > 0:
+            wait_seconds = max(int(remaining), 1)
+            continued = (
+                wait_for_manual_continue(wait_seconds)
+                if stop_event is None
+                else wait_for_manual_continue(wait_seconds, stop_event=stop_event)
+            )
+        if not continued:
             return False
         if not detect_block(driver):
             return True
@@ -1669,7 +2694,11 @@ return false;
         try:
             native_input = driver.find_element(By.CSS_SELECTOR, selector)
             native_input.clear()
-            native_input.send_keys(postal_code)
+            type_text = getattr(native_input, "type_text", None)
+            if callable(type_text):
+                type_text(postal_code)
+            else:
+                native_input.send_keys(postal_code)
             break
         except (AttributeError, NoSuchElementException, WebDriverException):
             native_input = None
@@ -1821,13 +2850,21 @@ def handle_amazon_verification(
     runtime: Any,
     on_manual_pause: Optional[Any] = None,
     on_manual_resume: Optional[Any] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> None:
+    _raise_if_stop_requested(stop_event)
     reason = detect_block(driver)
     if not reason:
         return
     if on_manual_pause:
         on_manual_pause(reason, str(getattr(driver, "current_url", "") or ""))
-    if not wait_for_manual_clear(driver, reason, int(getattr(runtime, "manual_pause_timeout", 900) or 900)):
+    timeout = int(getattr(runtime, "manual_pause_timeout", 900) or 900)
+    cleared = (
+        wait_for_manual_clear(driver, reason, timeout)
+        if stop_event is None
+        else wait_for_manual_clear(driver, reason, timeout, stop_event=stop_event)
+    )
+    if not cleared:
         raise VerificationUnconfirmedError(
             f"{reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
         )
@@ -1855,8 +2892,10 @@ def _wait_for_delivery_confirmation(
     location: Dict[str, str],
     deadline: float,
     allow_reloaded_city_input: bool = False,
+    stop_event: Optional[threading.Event] = None,
 ) -> bool:
     while time.time() < deadline:
+        _raise_if_stop_requested(stop_event)
         if _submitted_delivery_location_is_confirmed(
             driver,
             location,
@@ -1865,7 +2904,8 @@ def _wait_for_delivery_confirmation(
             return True
         if allow_reloaded_city_input and location.get("strategy") == "postal_then_city":
             _click_delivery_trigger(driver)
-        time.sleep(0.25)
+        _sleep_with_stop(0.25, stop_event)
+    _raise_if_stop_requested(stop_event)
     return _submitted_delivery_location_is_confirmed(
         driver,
         location,
@@ -1878,15 +2918,17 @@ def _attempt_delivery_value(
     value: str,
     deadline: float,
     submitter: Any,
+    stop_event: Optional[threading.Event] = None,
 ) -> Optional[bool]:
     while time.time() < deadline:
+        _raise_if_stop_requested(stop_event)
         _click_delivery_trigger(driver)
         submitted = submitter(driver, value)
         if submitted is None:
             return None
         if submitted:
             return True
-        time.sleep(0.25)
+        _sleep_with_stop(0.25, stop_event)
     return False
 
 
@@ -1897,6 +2939,7 @@ def _reopen_amazon_target(
     on_manual_pause: Optional[Any],
     on_manual_resume: Optional[Any],
     clear_transient_city_input: bool = False,
+    stop_event: Optional[threading.Event] = None,
 ) -> bool:
     city_input_reset = (
         _clear_transient_delivery_city_input(driver)
@@ -1905,6 +2948,7 @@ def _reopen_amazon_target(
     )
     last_error: Optional[WebDriverException] = None
     for attempt in range(3):
+        _raise_if_stop_requested(stop_event)
         try:
             driver.get(target_url)
             last_error = None
@@ -1913,14 +2957,20 @@ def _reopen_amazon_target(
             if "ERR_ABORTED" not in str(exc).upper():
                 raise
             last_error = exc
-            time.sleep(0.75 * (attempt + 1))
+            _sleep_with_stop(0.75 * (attempt + 1), stop_event)
     if last_error is not None:
         raise last_error
     try:
         delattr(driver, "_lc_delivery_trigger_opened")
     except (AttributeError, TypeError):
         pass
-    handle_amazon_verification(driver, runtime, on_manual_pause, on_manual_resume)
+    handle_amazon_verification(
+        driver,
+        runtime,
+        on_manual_pause,
+        on_manual_resume,
+        stop_event=stop_event,
+    )
     return city_input_reset
 
 
@@ -1930,7 +2980,9 @@ def ensure_amazon_delivery_location(
     original_url: str = "",
     on_manual_pause: Optional[Any] = None,
     on_manual_resume: Optional[Any] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> None:
+    _raise_if_stop_requested(stop_event)
     if not bool(getattr(runtime, "delivery_location_enabled", True)):
         return
     locations = _runtime_delivery_locations(runtime)
@@ -1952,10 +3004,62 @@ def ensure_amazon_delivery_location(
 
     target_url = original_url or current_url
     timeout = max(int(getattr(runtime, "delivery_location_timeout", 20) or 20), 1)
+
+    def attempt_value(value: str, deadline: float, submitter: Any) -> Optional[bool]:
+        if stop_event is None:
+            return _attempt_delivery_value(driver, value, deadline, submitter)
+        return _attempt_delivery_value(
+            driver,
+            value,
+            deadline,
+            submitter,
+            stop_event=stop_event,
+        )
+
+    def wait_confirmation(
+        deadline: float,
+        allow_reloaded_city_input: bool = False,
+    ) -> bool:
+        if stop_event is None:
+            return _wait_for_delivery_confirmation(
+                driver,
+                location,
+                deadline,
+                allow_reloaded_city_input=allow_reloaded_city_input,
+            )
+        return _wait_for_delivery_confirmation(
+            driver,
+            location,
+            deadline,
+            allow_reloaded_city_input=allow_reloaded_city_input,
+            stop_event=stop_event,
+        )
+
+    def reopen_target(clear_transient_city_input: bool) -> bool:
+        if not target_url:
+            return False
+        if stop_event is None:
+            return _reopen_amazon_target(
+                driver,
+                target_url,
+                runtime,
+                on_manual_pause,
+                on_manual_resume,
+                clear_transient_city_input=clear_transient_city_input,
+            )
+        return _reopen_amazon_target(
+            driver,
+            target_url,
+            runtime,
+            on_manual_pause,
+            on_manual_resume,
+            clear_transient_city_input=clear_transient_city_input,
+            stop_event=stop_event,
+        )
+
     for postal_code in delivery_postal_candidates(location["postal_code"]):
         deadline = time.time() + timeout
-        submitted = _attempt_delivery_value(
-            driver,
+        submitted = attempt_value(
             postal_code,
             deadline,
             lambda current_driver, value: _submit_delivery_postal(
@@ -1969,22 +3073,15 @@ def ensure_amazon_delivery_location(
         if not submitted:
             continue
         ready_deadline = min(deadline, time.time() + 5)
-        _wait_for_delivery_confirmation(driver, location, ready_deadline)
+        wait_confirmation(ready_deadline)
         _dismiss_delivery_dialog(driver)
         time.sleep(min(0.75, max(deadline - time.time(), 0)))
         city_input_reloaded = False
         if target_url:
-            city_input_reloaded = _reopen_amazon_target(
-                driver,
-                target_url,
-                runtime,
-                on_manual_pause,
-                on_manual_resume,
-                clear_transient_city_input=location.get("strategy") == "postal_then_city",
+            city_input_reloaded = reopen_target(
+                location.get("strategy") == "postal_then_city"
             )
-        if _wait_for_delivery_confirmation(
-            driver,
-            location,
+        if wait_confirmation(
             time.time() + timeout,
             allow_reloaded_city_input=city_input_reloaded,
         ):
@@ -1993,30 +3090,20 @@ def ensure_amazon_delivery_location(
 
     if location.get("strategy") == "postal_then_city":
         deadline = time.time() + timeout
-        submitted = _attempt_delivery_value(
-            driver,
+        submitted = attempt_value(
             location["city"],
             deadline,
             _submit_delivery_city,
         )
         if submitted:
             ready_deadline = min(deadline, time.time() + 5)
-            _wait_for_delivery_confirmation(driver, location, ready_deadline)
+            wait_confirmation(ready_deadline)
             _dismiss_delivery_dialog(driver)
             time.sleep(min(0.75, max(deadline - time.time(), 0)))
             city_input_reloaded = False
             if target_url:
-                city_input_reloaded = _reopen_amazon_target(
-                    driver,
-                    target_url,
-                    runtime,
-                    on_manual_pause,
-                    on_manual_resume,
-                    clear_transient_city_input=True,
-                )
-            if _wait_for_delivery_confirmation(
-                driver,
-                location,
+                city_input_reloaded = reopen_target(True)
+            if wait_confirmation(
                 time.time() + timeout,
                 allow_reloaded_city_input=city_input_reloaded,
             ):
@@ -2033,7 +3120,12 @@ def ensure_amazon_delivery_location(
     manual_deadline = time.time() + max(int(getattr(runtime, "manual_pause_timeout", 900) or 900), 1)
     while time.time() < manual_deadline:
         remaining = max(int(manual_deadline - time.time()), 1)
-        if not wait_for_manual_continue(remaining):
+        continued = (
+            wait_for_manual_continue(remaining)
+            if stop_event is None
+            else wait_for_manual_continue(remaining, stop_event=stop_event)
+        )
+        if not continued:
             break
         if delivery_location_is_confirmed(driver, location):
             if on_manual_resume:
@@ -2041,18 +3133,11 @@ def ensure_amazon_delivery_location(
             cache.add(cache_key)
             return
         if target_url:
-            city_input_reloaded = _reopen_amazon_target(
-                driver,
-                target_url,
-                runtime,
-                on_manual_pause,
-                on_manual_resume,
-                clear_transient_city_input=location.get("strategy") == "postal_then_city",
+            city_input_reloaded = reopen_target(
+                location.get("strategy") == "postal_then_city"
             )
             confirmation_deadline = min(manual_deadline, time.time() + timeout)
-            if _wait_for_delivery_confirmation(
-                driver,
-                location,
+            if wait_confirmation(
                 confirmation_deadline,
                 allow_reloaded_city_input=city_input_reloaded,
             ):
@@ -2072,19 +3157,32 @@ def open_amazon_page(
     runtime: Any,
     on_manual_pause: Optional[Any] = None,
     on_manual_resume: Optional[Any] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> None:
+    _raise_if_stop_requested(stop_event)
     driver.get(url)
-    handle_amazon_verification(driver, runtime, on_manual_pause, on_manual_resume)
+    handle_amazon_verification(
+        driver,
+        runtime,
+        on_manual_pause,
+        on_manual_resume,
+        stop_event=stop_event,
+    )
     ensure_amazon_delivery_location(
         driver,
         runtime,
         original_url=url,
         on_manual_pause=on_manual_pause,
         on_manual_resume=on_manual_resume,
+        stop_event=stop_event,
     )
 
 
-def wait_for_amazon_products(driver: WebDriver, runtime: RuntimeConfig) -> None:
+def wait_for_amazon_products(
+    driver: WebDriver,
+    runtime: RuntimeConfig,
+    stop_event: Optional[threading.Event] = None,
+) -> None:
     selectors = [
         "#gridItemRoot",
         ".zg-grid-general-faceout",
@@ -2092,8 +3190,22 @@ def wait_for_amazon_products(driver: WebDriver, runtime: RuntimeConfig) -> None:
         "[data-asin]:not([data-asin=''])",
         ".s-result-item[data-asin]:not([data-asin=''])",
     ]
-    condition = EC.presence_of_element_located((By.CSS_SELECTOR, ",".join(selectors)))
-    WebDriverWait(driver, runtime.page_timeout).until(condition)
+    combined_selector = ",".join(selectors)
+    if stop_event is None:
+        condition = EC.presence_of_element_located((By.CSS_SELECTOR, combined_selector))
+        WebDriverWait(driver, runtime.page_timeout).until(condition)
+        return
+
+    deadline = time.monotonic() + max(float(runtime.page_timeout), 0.1)
+    while time.monotonic() < deadline:
+        _raise_if_stop_requested(stop_event)
+        try:
+            driver.find_element(By.CSS_SELECTOR, combined_selector)
+            return
+        except NoSuchElementException:
+            pass
+        _sleep_with_stop(0.25, stop_event)
+    raise TimeoutException("等待 Amazon 商品卡片超时。")
 
 
 def try_activate_plugin(driver: WebDriver) -> bool:
@@ -2248,24 +3360,81 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
         if normalize_space(str(item.get("asin") or ""))
     }
     field_counts_by_asin: Dict[str, int] = {}
+    bsr_ranks_by_asin: Dict[str, List[Dict[str, Any]]] = {}
+    fulfillment_by_asin: Dict[str, str] = {}
+    table_fulfillment_by_asin: Dict[str, Tuple[str, str]] = {}
     for row in rows:
         asin = normalize_space(str(row.get("asin") or "")).upper()
         if not asin:
             continue
         parsed = parse_table_row_fields(row)
-        count = sum(1 for field_name in SELLERSPRITE_EVIDENCE_FIELDS if parsed.get(field_name))
+        table_evidence = (
+            parsed.get("fulfillment_method"),
+            parsed.get("fulfillment_method_raw"),
+        )
+        table_fulfillment_by_asin[asin] = select_fulfillment_evidence(
+            table_fulfillment_by_asin.get(asin, ("", "")),
+            table_evidence,
+        )
+        count = sum(
+            1
+            for field_name in SELLERSPRITE_EVIDENCE_FIELDS
+            if field_name != "fulfillment_method" and parsed.get(field_name)
+        ) + int(bool(table_evidence[0] or table_evidence[1]))
         field_counts_by_asin[asin] = max(field_counts_by_asin.get(asin, 0), count)
+        selected_method, selected_raw = table_fulfillment_by_asin[asin]
+        if selected_method or selected_raw:
+            fulfillment_by_asin[asin] = selected_method or f"raw:{selected_raw}"
+        row_bsr_text = str(row.get("bsr_text") or "")
+        row_ranks = parse_subcategory_bsr_ranks(
+            row_bsr_text or str(row.get("text") or "")
+        )
+        if row_ranks:
+            bsr_ranks_by_asin[asin] = normalize_subcategory_bsr_ranks(
+                [*(bsr_ranks_by_asin.get(asin) or []), *row_ranks]
+            )
+    runtime_field_selectors = getattr(runtime, "field_selectors", {}) or {}
+    fulfillment_selector_map = {}
+    if runtime_field_selectors.get("fulfillment_method"):
+        fulfillment_selector_map["fulfillment_method"] = runtime_field_selectors[
+            "fulfillment_method"
+        ]
     for card in cards:
         asin = normalize_space(str(card.get("asin") or "")).upper()
         if not asin:
             continue
         text = str(card.get("text") or "")
+        selector_values = (
+            extract_by_selectors(driver, card, fulfillment_selector_map)
+            if fulfillment_selector_map
+            else {}
+        )
+        selector_evidence = parse_fulfillment_evidence(
+            str(selector_values.get("fulfillment_method") or ""),
+            explicit_value=True,
+        )
+        card_evidence = parse_fulfillment_evidence(text)
+        fulfillment_evidence = select_fulfillment_evidence(
+            selector_evidence,
+            table_fulfillment_by_asin.get(asin, ("", "")),
+            card_evidence,
+        )
         count = sum(
             1
             for field_name in SELLERSPRITE_EVIDENCE_FIELDS
-            if parse_sellersprite_inline_field(field_name, text)
-        )
+            if field_name != "fulfillment_method"
+            and parse_sellersprite_inline_field(field_name, text)
+        ) + int(bool(fulfillment_evidence[0] or fulfillment_evidence[1]))
         field_counts_by_asin[asin] = max(field_counts_by_asin.get(asin, 0), count)
+        fulfillment_method, fulfillment_raw = fulfillment_evidence
+        if fulfillment_method or fulfillment_raw:
+            fulfillment_by_asin[asin] = fulfillment_method or f"raw:{fulfillment_raw}"
+        card_bsr_text = str(card.get("bsr_text") or "")
+        card_ranks = parse_subcategory_bsr_ranks(card_bsr_text or text)
+        if card_ranks:
+            bsr_ranks_by_asin[asin] = normalize_subcategory_bsr_ranks(
+                [*(bsr_ranks_by_asin.get(asin) or []), *card_ranks]
+            )
 
     min_fields = max(int(getattr(runtime, "sellersprite_min_fields_per_record", 2) or 2), 1)
     enriched_records = sum(1 for count in field_counts_by_asin.values() if count >= min_fields)
@@ -2275,6 +3444,8 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
             str(len(product_asins)),
             str(len(rows)),
             ",".join(f"{asin}:{count}" for asin, count in sorted(field_counts_by_asin.items())),
+            json.dumps(fulfillment_by_asin, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            json.dumps(bsr_ranks_by_asin, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
         ]
     )
     report: Dict[str, Any] = {
@@ -2299,18 +3470,31 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
     return report
 
 
-def wait_for_user_plugin_action(driver: WebDriver, reason: str) -> None:
+def wait_for_user_plugin_action(
+    driver: WebDriver,
+    reason: str,
+    before_refresh: Optional[Any] = None,
+    manual_pause_timeout: int = 900,
+    stop_event: Optional[threading.Event] = None,
+) -> bool:
     print(f"卖家精灵插件需要人工处理：{reason}")
     print("请在当前 Chrome 窗口安装/启用卖家精灵插件，并完成登录。")
     print("处理完成后回到这里按 Enter；如果是 Codex 正在运行，请告诉我“已登录插件，继续”。")
+    wait_seconds = max(int(manual_pause_timeout), 1)
+    continued = (
+        wait_for_manual_continue(wait_seconds)
+        if stop_event is None
+        else wait_for_manual_continue(wait_seconds, stop_event=stop_event)
+    )
+    if not continued:
+        return False
     try:
-        input("插件处理完成后按 Enter 继续：")
-    except EOFError:
-        pass
-    try:
+        if before_refresh:
+            before_refresh()
         driver.refresh()
     except WebDriverException:
         pass
+    return True
 
 
 def wait_for_sellersprite_data_or_prompt(
@@ -2320,7 +3504,10 @@ def wait_for_sellersprite_data_or_prompt(
     on_manual_resume: Optional[Any] = None,
     restart_driver: Optional[Any] = None,
     on_readiness: Optional[Any] = None,
+    before_navigation: Optional[Any] = None,
+    stop_event: Optional[threading.Event] = None,
 ) -> str:
+    _raise_if_stop_requested(stop_event)
     if not bool(getattr(runtime, "sellersprite_required", True)):
         report = {
             "status": "not_required",
@@ -2339,7 +3526,20 @@ def wait_for_sellersprite_data_or_prompt(
     def handle_block(current_driver: WebDriver) -> Optional[str]:
         if on_manual_pause:
             on_manual_pause("sellersprite_or_amazon_verification", current_driver.current_url)
-        cleared = wait_for_manual_clear(current_driver, "sellersprite_or_amazon_verification", runtime.manual_pause_timeout)
+        cleared = (
+            wait_for_manual_clear(
+                current_driver,
+                "sellersprite_or_amazon_verification",
+                runtime.manual_pause_timeout,
+            )
+            if stop_event is None
+            else wait_for_manual_clear(
+                current_driver,
+                "sellersprite_or_amazon_verification",
+                runtime.manual_pause_timeout,
+                stop_event=stop_event,
+            )
+        )
         if cleared and on_manual_resume:
             on_manual_resume()
         return None if cleared else "blocked"
@@ -2347,19 +3547,31 @@ def wait_for_sellersprite_data_or_prompt(
     def retry_with_refresh(current_driver: WebDriver, attempts: int, label: str) -> tuple[str, WebDriver]:
         last_status = "plugin_timeout"
         for attempt in range(1, attempts + 1):
+            _raise_if_stop_requested(stop_event)
             wait_seconds = random_plugin_retry_wait(runtime)
             print(
                 f"{label} {attempt}/{attempts}：刷新当前页后最多等待 {wait_seconds:.1f} 秒，重新检测卖家精灵数据。"
             )
             try:
+                if before_navigation:
+                    before_navigation()
                 current_driver.refresh()
             except WebDriverException:
                 pass
             try:
-                wait_for_amazon_products(current_driver, runtime)
+                wait_for_amazon_products(
+                    current_driver,
+                    runtime,
+                    stop_event=stop_event,
+                )
             except TimeoutException:
                 pass
-            last_status = wait_for_sellersprite_data(current_driver, runtime, wait_seconds)
+            last_status = wait_for_sellersprite_data(
+                current_driver,
+                runtime,
+                wait_seconds,
+                stop_event=stop_event,
+            )
             publish(current_driver)
             if last_status == "ok":
                 return last_status, current_driver
@@ -2370,7 +3582,8 @@ def wait_for_sellersprite_data_or_prompt(
         return last_status, current_driver
 
     while True:
-        status = wait_for_sellersprite_data(driver, runtime)
+        _raise_if_stop_requested(stop_event)
+        status = wait_for_sellersprite_data(driver, runtime, stop_event=stop_event)
         publish(driver)
         if status == "ok":
             return status
@@ -2414,19 +3627,41 @@ def wait_for_sellersprite_data_or_prompt(
 
         report = get_sellersprite_readiness(driver)
         status = str(report.get("status") or status)
+        manual_reason = "sellersprite_manual_action"
+        if on_manual_pause:
+            on_manual_pause(manual_reason, str(getattr(driver, "current_url", "") or ""))
         if status == "plugin_absent":
-            wait_for_user_plugin_action(driver, "当前页面未检测到卖家精灵插件注入，可能未安装、未启用或当前 Chrome 不是安装插件的用户资料。")
+            action_reason = "当前页面未检测到卖家精灵插件注入，可能未安装、未启用或当前 Chrome 不是安装插件的用户资料。"
         elif status == "login_required":
-            wait_for_user_plugin_action(driver, "卖家精灵插件需要登录、重新授权或确认登录状态。")
+            action_reason = "卖家精灵插件需要登录、重新授权或确认登录状态。"
         else:
-            wait_for_user_plugin_action(driver, "已检测到卖家精灵插件，但真实字段尚未稳定显示。")
+            action_reason = "已检测到卖家精灵插件，但真实字段尚未稳定显示。"
         try:
-            wait_for_amazon_products(driver, runtime)
+            continued = wait_for_user_plugin_action(
+                driver,
+                action_reason,
+                before_refresh=before_navigation,
+                manual_pause_timeout=int(
+                    getattr(runtime, "manual_pause_timeout", 900) or 900
+                ),
+                stop_event=stop_event,
+            )
+        finally:
+            if on_manual_resume:
+                on_manual_resume()
+        if not continued:
+            return "blocked"
+        try:
+            wait_for_amazon_products(driver, runtime, stop_event=stop_event)
         except TimeoutException:
             pass
 
 
-def extract_product_cards(driver: WebDriver) -> List[Dict[str, Any]]:
+def extract_product_cards(
+    driver: WebDriver,
+    *,
+    strict: bool = False,
+) -> List[Dict[str, Any]]:
     script = r"""
 const asinRe = /\b([A-Z0-9]{10})\b/;
 const asinUrlRe = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i;
@@ -2493,6 +3728,10 @@ const getSellerCountryFlagCode = (el) => {
   }
   return '';
 };
+const getBsrText = (el) => [...el.querySelectorAll('.rank-number-box .bsr-list-item')]
+  .map(item => norm(item.innerText || item.textContent || ''))
+  .filter(Boolean)
+  .join('\n');
 const selectors = [
   '#gridItemRoot',
   '.zg-grid-general-faceout',
@@ -2514,6 +3753,7 @@ for (const selector of selectors) {
       product_url: getUrl(el, asin),
       rank: getRank(el),
       seller_country_flag_code: getSellerCountryFlagCode(el),
+      bsr_text: getBsrText(el),
       text: norm(el.innerText || el.textContent || '')
     });
   }
@@ -2529,23 +3769,29 @@ return [...byAsin.values()];
     try:
         return list(driver.execute_script(script) or [])
     except (JavascriptException, WebDriverException):
+        if strict:
+            raise
         return []
 
 
-def extract_table_rows(driver: WebDriver) -> List[Dict[str, Any]]:
+def extract_table_rows(
+    driver: WebDriver,
+    *,
+    strict: bool = False,
+) -> List[Dict[str, Any]]:
     script = r"""
 const asinRe = /\b([A-Z0-9]{10})\b/;
 const norm = (text) => (text || '').replace(/\s+/g, ' ').trim();
 const directCellText = (row) => {
   let cells = [...row.querySelectorAll(':scope > td, :scope > th, :scope > [role="cell"], :scope > [class*="cell"], :scope > div')];
   if (!cells.length) cells = [...row.children];
-  return cells.map(cell => norm(cell.innerText || cell.textContent || '')).filter(Boolean);
+  return cells.map(cell => norm(cell.innerText || cell.textContent || ''));
 };
 const headerTexts = (row) => {
   const table = row.closest('table,[role="table"],[class*="table"],[class*="vxe"]');
   if (!table) return [];
   const headers = [...table.querySelectorAll('thead th, [role="columnheader"], .vxe-header--column')];
-  return headers.map(cell => norm(cell.innerText || cell.textContent || '')).filter(Boolean);
+  return headers.map(cell => norm(cell.innerText || cell.textContent || ''));
 };
 const rows = [];
 const selectors = ['tr', '[role="row"]', '.vxe-body--row', '[class*="body--row"]', '[class*="table-row"]'];
@@ -2560,6 +3806,10 @@ for (const selector of selectors) {
     rows.push({
       asin: match[1],
       text,
+      bsr_text: [...row.querySelectorAll('.rank-number-box .bsr-list-item')]
+        .map(item => norm(item.innerText || item.textContent || ''))
+        .filter(Boolean)
+        .join('\n'),
       cells: directCellText(row),
       headers: headerTexts(row)
     });
@@ -2570,6 +3820,8 @@ return rows;
     try:
         return list(driver.execute_script(script) or [])
     except (JavascriptException, WebDriverException):
+        if strict:
+            raise
         return []
 
 
@@ -2668,7 +3920,7 @@ def parse_field_from_text(field_name: str, text: str) -> str:
     if field_name == "gross_margin":
         return first_regex(text, [r"毛利率[:：]\s*(N/A|[\d,.]+%)", r"([\d,.]+%)\s*(?:gross margin|margin|毛利率)", r"(?:gross margin|margin|毛利率)\D{0,12}([\d,.]+%)"])
     if field_name == "fulfillment_method":
-        return first_regex(text, [r"\b(FBA|FBM|AMZ)\b"])
+        return parse_fulfillment_method(text)
     if field_name in {"organic_keywords_count", "ad_keywords_count"}:
         return first_regex(text, [r"([\d,]+)\s*(?:keywords?|词)"])
 
@@ -2680,6 +3932,9 @@ def parse_field_from_text(field_name: str, text: str) -> str:
 
 
 def parse_sellersprite_inline_field(field_name: str, text: str) -> str:
+    if field_name == "fulfillment_method":
+        method, _raw = parse_fulfillment_evidence(text)
+        return method
     patterns = {
         "brand_name": [r"品牌[:：]\s*(.*?)\s+卖家[:：]"],
         "seller_name": [r"卖家[:：]\s*(.*?)\s+配送[:：]"],
@@ -2689,7 +3944,6 @@ def parse_sellersprite_inline_field(field_name: str, text: str) -> str:
         "sales_30_days_parent": [r"近30天销量\(父体\)[:：]\s*([^\s]+)"],
         "fba_fee": [r"FBA费用[:：]\s*(N/A|\$?\s*[\d,.]+)"],
         "gross_margin": [r"毛利率[:：]\s*(N/A|[\d,.]+%)"],
-        "fulfillment_method": [r"配送[:：]\s*(FBA|FBM|AMZ)"],
         "delivery_duration": [r"(?<!Prime)配送时长[:：]\s*([^\s]+)"],
         "launch_date": [r"上架时间[:：]\s*(\d{4}-\d{2}-\d{2}(?:\s*\([^)]+\))?)"],
         "organic_keywords_count": [r"自然搜索词[:：]\s*([\d,]+)"],
@@ -2734,11 +3988,22 @@ def parse_table_row_fields(row: Dict[str, Any]) -> Dict[str, str]:
     header_mapping = map_headers_to_fields(headers)
     for index, field_name in header_mapping.items():
         if index < len(cells) and cells[index]:
-            output[field_name] = cells[index]
+            if field_name == "fulfillment_method":
+                method, raw = parse_fulfillment_evidence(cells[index], explicit_value=True)
+                output[field_name] = method
+                output["fulfillment_method_raw"] = raw
+            else:
+                output[field_name] = cells[index]
     text = str(row.get("text") or "")
     for field_name in REQUESTED_DATA_FIELDS:
+        if field_name == "fulfillment_method":
+            continue
         if not output.get(field_name):
             output[field_name] = parse_field_from_text(field_name, text)
+    if not output.get("fulfillment_method_raw"):
+        method, raw = parse_fulfillment_evidence(text)
+        output["fulfillment_method"] = method
+        output["fulfillment_method_raw"] = raw
     return output
 
 
@@ -2749,9 +4014,12 @@ def merge_product_data(
     page_number: int,
     plugin_status: str,
 ) -> List[Dict[str, Any]]:
-    cards = extract_product_cards(driver)
-    table_rows = extract_table_rows(driver)
-    table_by_asin: Dict[str, Dict[str, str]] = {}
+    cards = extract_product_cards(driver, strict=True)
+    table_rows = extract_table_rows(
+        driver,
+        strict=bool(getattr(runtime, "sellersprite_required", True)),
+    )
+    table_by_asin: Dict[str, Dict[str, Any]] = {}
     for row in table_rows:
         asin = str(row.get("asin") or "")
         if not asin:
@@ -2759,8 +4027,30 @@ def merge_product_data(
         parsed = parse_table_row_fields(row)
         current = table_by_asin.setdefault(asin, {})
         for key, value in parsed.items():
+            if key in {"fulfillment_method", "fulfillment_method_raw"}:
+                continue
             if value and not current.get(key):
                 current[key] = value
+        table_method, table_raw = select_fulfillment_evidence(
+            (
+                current.get("fulfillment_method"),
+                current.get("fulfillment_method_raw"),
+            ),
+            (
+                parsed.get("fulfillment_method"),
+                parsed.get("fulfillment_method_raw"),
+            ),
+        )
+        current["fulfillment_method"] = table_method
+        current["fulfillment_method_raw"] = table_raw
+        row_bsr_text = str(row.get("bsr_text") or "")
+        row_ranks = parse_subcategory_bsr_ranks(
+            row_bsr_text or str(row.get("text") or "")
+        )
+        if row_ranks:
+            current["subcategory_bsr_ranks"] = normalize_subcategory_bsr_ranks(
+                [*(current.get("subcategory_bsr_ranks") or []), *row_ranks]
+            )
 
     records: List[Dict[str, Any]] = []
     for card in cards:
@@ -2781,20 +4071,63 @@ def merge_product_data(
             "scraped_at": now_iso(),
             "load_status": plugin_status,
             "note": "",
+            "subcategory_bsr_ranks": [],
+            "fulfillment_method_raw": "",
         }
         text = str(card.get("text") or "")
         for field_name in REQUESTED_DATA_FIELDS:
             record[field_name] = ""
         for field_name, value in table_by_asin.get(asin, {}).items():
+            if field_name == "fulfillment_method":
+                continue
             if field_name in REQUESTED_DATA_FIELDS and value:
                 record[field_name] = value
+            elif field_name == "fulfillment_method_raw" and value:
+                record[field_name] = normalize_space(str(value))[:120]
+        record["subcategory_bsr_ranks"] = normalize_subcategory_bsr_ranks(
+            table_by_asin.get(asin, {}).get("subcategory_bsr_ranks")
+        )
         selector_values = extract_by_selectors(driver, card, runtime.field_selectors)
         for field_name, value in selector_values.items():
             if field_name in REQUESTED_DATA_FIELDS and value:
-                record[field_name] = normalize_space(str(value))
+                if field_name == "fulfillment_method":
+                    continue
+                else:
+                    record[field_name] = normalize_space(str(value))
+        selector_bsr = selector_values.get("subcategory_bsr_ranks")
+        if selector_bsr:
+            record["subcategory_bsr_ranks"] = parse_subcategory_bsr_ranks(
+                str(selector_bsr)
+            )
         for field_name in REQUESTED_DATA_FIELDS:
+            if field_name == "fulfillment_method":
+                continue
             if not record.get(field_name):
                 record[field_name] = parse_field_from_text(field_name, text)
+        selector_fulfillment = parse_fulfillment_evidence(
+            str(selector_values.get("fulfillment_method") or ""),
+            explicit_value=True,
+        )
+        table_fulfillment = (
+            table_by_asin.get(asin, {}).get("fulfillment_method"),
+            table_by_asin.get(asin, {}).get("fulfillment_method_raw"),
+        )
+        card_fulfillment = parse_fulfillment_evidence(text)
+        method, raw = select_fulfillment_evidence(
+            selector_fulfillment,
+            table_fulfillment,
+            card_fulfillment,
+        )
+        record["fulfillment_method"] = method
+        record["fulfillment_method_raw"] = raw
+        if not record["subcategory_bsr_ranks"]:
+            card_bsr_text = str(card.get("bsr_text") or "")
+            record["subcategory_bsr_ranks"] = parse_subcategory_bsr_ranks(
+                card_bsr_text or text
+            )
+        record["fulfillment_method"] = normalize_fulfillment_method(
+            record.get("fulfillment_method")
+        )
         if not record.get("seller_country"):
             record["seller_country"] = country_from_flag_code_or_text(str(card.get("seller_country_flag_code") or ""))
         missing_count = sum(1 for field_name in REQUESTED_DATA_FIELDS if not record.get(field_name))
@@ -2930,7 +4263,13 @@ return {
             time.sleep(wait_seconds)
 
 
-def wait_for_sellersprite_data(driver: WebDriver, runtime: RuntimeConfig, timeout_seconds: Optional[float] = None) -> str:
+def wait_for_sellersprite_data(
+    driver: WebDriver,
+    runtime: RuntimeConfig,
+    timeout_seconds: Optional[float] = None,
+    stop_event: Optional[threading.Event] = None,
+) -> str:
+    _raise_if_stop_requested(stop_event)
     if not bool(getattr(runtime, "sellersprite_required", True)):
         report = {
             "status": "not_required",
@@ -2948,6 +4287,7 @@ def wait_for_sellersprite_data(driver: WebDriver, runtime: RuntimeConfig, timeou
     last_signature = ""
     last_status = "data_loading"
     while time.time() < deadline:
+        _raise_if_stop_requested(stop_event)
         report = inspect_sellersprite_readiness(driver, runtime)
         status = str(report.get("status") or "data_loading")
         if status == "blocked":
@@ -2968,7 +4308,7 @@ def wait_for_sellersprite_data(driver: WebDriver, runtime: RuntimeConfig, timeou
         last_status = str(report.get("status") or status)
         set_sellersprite_readiness(driver, report)
         last_signature = signature
-        time.sleep(2)
+        _sleep_with_stop(2, stop_event)
     return last_status
 
 
@@ -2976,7 +4316,12 @@ def random_plugin_retry_wait(runtime: RuntimeConfig) -> float:
     return random.uniform(runtime.plugin_retry_wait_seconds, runtime.plugin_retry_wait_seconds_max)
 
 
-def discover_child_categories(driver: WebDriver, node: Dict[str, Any]) -> List[Dict[str, Any]]:
+def discover_child_categories(
+    driver: WebDriver,
+    node: Dict[str, Any],
+    *,
+    strict: bool = False,
+) -> List[Dict[str, Any]]:
     script = r"""
 const norm = (text) => (text || '').replace(/\s+/g, ' ').trim();
 const absUrl = (href) => {
@@ -3028,6 +4373,8 @@ return output;
     try:
         raw_children = list(driver.execute_script(script) or [])
     except (JavascriptException, WebDriverException):
+        if strict:
+            raise
         raw_children = []
 
     parent_path = [str(part) for part in node.get("path") or []]
@@ -3083,7 +4430,7 @@ def should_descend(runtime: RuntimeConfig, node: Dict[str, Any], children: Seque
     return True
 
 
-def find_next_page_url(driver: WebDriver) -> str:
+def find_next_page_url(driver: WebDriver, *, strict: bool = False) -> str:
     script = r"""
 const absUrl = (href) => {
   try { return new URL(href, location.href).href; } catch (err) { return href || ''; }
@@ -3105,6 +4452,8 @@ return '';
     try:
         return str(driver.execute_script(script) or "")
     except (JavascriptException, WebDriverException):
+        if strict:
+            raise
         return ""
 
 
@@ -3123,6 +4472,28 @@ def save_debug_snapshot(driver: WebDriver, debug_dir: Path, label: str) -> None:
         pass
 
 
+def build_failure_record(
+    runtime: RuntimeConfig,
+    node: Dict[str, Any],
+    page_number: int,
+    url: str,
+    reason: str,
+    message: str,
+) -> Dict[str, Any]:
+    return {
+        "time": now_iso(),
+        "root_url": runtime.start_url,
+        "category_path": " > ".join(str(part) for part in node.get("path") or []),
+        "category_name": node.get("name") or "",
+        "category_node_id": node.get("node_id") or "",
+        "category_url": node.get("url") or "",
+        "page_number": page_number,
+        "page_url": url,
+        "reason": reason,
+        "message": message,
+    }
+
+
 def log_failure(
     failures_path: Path,
     state: StateStore,
@@ -3135,18 +4506,7 @@ def log_failure(
 ) -> None:
     append_jsonl(
         failures_path,
-        {
-            "time": now_iso(),
-            "root_url": runtime.start_url,
-            "category_path": " > ".join(str(part) for part in node.get("path") or []),
-            "category_name": node.get("name") or "",
-            "category_node_id": node.get("node_id") or "",
-            "category_url": node.get("url") or "",
-            "page_number": page_number,
-            "page_url": url,
-            "reason": reason,
-            "message": message,
-        },
+        build_failure_record(runtime, node, page_number, url, reason, message),
     )
     state.log_failure()
 
@@ -3184,9 +4544,17 @@ def write_sheet(ws: Any, headers: Sequence[str], rows: Sequence[Dict[str, Any]],
         if raw_headers:
             ws.append([row.get(header, "") for header in headers])
         else:
-            ws.append([row.get(field, "") for field, header in FIELD_TO_HEADER.items() if header in headers])
+            ws.append(
+                [
+                    format_subcategory_bsr_ranks(row.get(field))
+                    if field == "subcategory_bsr_ranks"
+                    else row.get(field, "")
+                    for field, header in FIELD_TO_HEADER.items()
+                    if header in headers
+                ]
+            )
     for column_index, header in enumerate(headers, start=1):
-        width = min(max(len(str(header)) + 2, 12), 36)
+        width = 42 if header == "子类目节点排名" else min(max(len(str(header)) + 2, 12), 36)
         letter = get_column_letter(column_index)
         ws.column_dimensions[letter].width = width
     ws.freeze_panes = "A2"
@@ -3202,6 +4570,20 @@ def build_dedup_rows(records: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
             continue
         target = grouped.setdefault(asin, dict(row))
         for key, value in row.items():
+            if key == "subcategory_bsr_ranks":
+                merged: List[Dict[str, Any]] = []
+                seen_categories: set[str] = set()
+                for item in [
+                    *normalize_subcategory_bsr_ranks(target.get(key)),
+                    *normalize_subcategory_bsr_ranks(value),
+                ]:
+                    category_name_key = str(item["category_name"]).casefold()
+                    if category_name_key in seen_categories:
+                        continue
+                    seen_categories.add(category_name_key)
+                    merged.append(dict(item))
+                target[key] = merged
+                continue
             if value and not target.get(key):
                 target[key] = value
         path = str(row.get("category_path") or "")
@@ -3217,7 +4599,608 @@ def build_dedup_rows(records: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return output
 
 
-def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
+class WorkerManualGate:
+    """Serialize interactive prompts while reporting state changes to the main thread."""
+
+    def __init__(
+        self,
+        claim_key: str,
+        events: "queue.Queue[Dict[str, Any]]",
+        stop_event: threading.Event,
+    ) -> None:
+        self.claim_key = claim_key
+        self.events = events
+        self.stop_event = stop_event
+        self._held = False
+
+    def pause(self, reason: str, page_url: str) -> None:
+        if not self._held:
+            while not MANUAL_INTERACTION_LOCK.acquire(timeout=0.25):
+                if self.stop_event.is_set():
+                    raise ConcurrentWorkerCancelled("并发任务正在停止，已取消等待人工操作。")
+            if self.stop_event.is_set():
+                MANUAL_INTERACTION_LOCK.release()
+                raise ConcurrentWorkerCancelled("并发任务正在停止，已取消等待人工操作。")
+            self._held = True
+        self.events.put(
+            {
+                "type": "manual_pause",
+                "claim_key": self.claim_key,
+                "reason": reason,
+                "page_url": page_url,
+            }
+        )
+
+    def resume(self) -> None:
+        if not self._held:
+            return
+        self.events.put({"type": "manual_resume", "claim_key": self.claim_key})
+        self._held = False
+        MANUAL_INTERACTION_LOCK.release()
+
+    def close(self) -> None:
+        self.resume()
+
+
+def _drain_worker_events(
+    events: "queue.Queue[Dict[str, Any]]",
+    state: StateStore,
+) -> None:
+    while True:
+        try:
+            event = events.get_nowait()
+        except queue.Empty:
+            return
+        event_type = str(event.get("type") or "")
+        claim_key = str(event.get("claim_key") or "")
+        if event_type == "manual_pause":
+            state.mark_manual_pause(
+                str(event.get("reason") or "manual_action"),
+                str(event.get("page_url") or ""),
+                claim_key,
+            )
+        elif event_type == "manual_resume":
+            state.clear_manual_pause(claim_key)
+        elif event_type == "readiness":
+            report = event.get("report")
+            if isinstance(report, dict):
+                state.mark_sellersprite_readiness(report)
+
+
+def _wait_for_page_without_worker_writes(
+    driver: WebDriver,
+    runtime: RuntimeConfig,
+    manual_gate: WorkerManualGate,
+    stop_event: threading.Event,
+) -> None:
+    block_reason = detect_block(driver)
+    if block_reason:
+        manual_gate.pause(block_reason, str(getattr(driver, "current_url", "") or ""))
+        cleared = wait_for_manual_clear(
+            driver,
+            block_reason,
+            runtime.manual_pause_timeout,
+            stop_event=stop_event,
+        )
+        if cleared:
+            manual_gate.resume()
+        if not cleared:
+            raise VerificationUnconfirmedError(
+                f"{block_reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+            )
+    wait_for_amazon_products(driver, runtime, stop_event=stop_event)
+
+
+def crawl_category_source(
+    runtime: RuntimeConfig,
+    claim_key: str,
+    source_node: Dict[str, Any],
+    completed_page_keys: set[str],
+    debug_dir: Path,
+    events: "queue.Queue[Dict[str, Any]]",
+    stop_event: threading.Event,
+    navigation_throttle: NavigationThrottle,
+    delivery_locks: DeliveryDomainLocks,
+) -> CategoryCrawlBatch:
+    """Crawl one category source serially; never write shared state or JSONL files."""
+
+    node = dict(source_node)
+    node["path"] = list(source_node.get("path") or [])
+    result = CategoryCrawlBatch(node=node)
+    manual_gate = WorkerManualGate(claim_key, events, stop_event)
+    driver: Optional[WebDriver] = None
+    confirmed_domains: set[str] = set()
+    page_number = 1
+    page_url = str(node.get("url") or "")
+
+    def open_worker_page(current_driver: WebDriver, target_url: str) -> None:
+        if stop_event.is_set():
+            raise ConcurrentWorkerCancelled("并发任务正在停止，已取消页面导航。")
+        navigation_throttle.wait()
+        if stop_event.is_set():
+            raise ConcurrentWorkerCancelled("并发任务正在停止，已取消页面导航。")
+        domain = (urlparse(target_url).hostname or "unknown").lower()
+        if domain not in confirmed_domains:
+            with delivery_locks.for_url(target_url):
+                open_amazon_page(
+                    current_driver,
+                    target_url,
+                    runtime,
+                    on_manual_pause=manual_gate.pause,
+                    on_manual_resume=manual_gate.resume,
+                    stop_event=stop_event,
+                )
+            confirmed_domains.add(domain)
+            return
+        open_amazon_page(
+            current_driver,
+            target_url,
+            runtime,
+            on_manual_pause=manual_gate.pause,
+            on_manual_resume=manual_gate.resume,
+            stop_event=stop_event,
+        )
+
+    def restart_plugin_driver(
+        current_driver: WebDriver,
+        target_url: str,
+        wait_seconds: float,
+    ) -> WebDriver:
+        nonlocal driver
+        try:
+            current_driver.quit()
+        except WebDriverException:
+            pass
+        if wait_seconds > 0:
+            _sleep_with_stop(wait_seconds, stop_event)
+        if stop_event.is_set():
+            raise ConcurrentWorkerCancelled("并发任务正在停止，已取消浏览器重启。")
+        driver = start_driver(runtime)
+        confirmed_domains.clear()
+        open_worker_page(driver, target_url)
+        try:
+            wait_for_amazon_products(driver, runtime, stop_event=stop_event)
+        except TimeoutException:
+            pass
+        return driver
+
+    try:
+        driver = start_driver(runtime)
+        while not stop_event.is_set():
+            print(
+                f"并发处理类目：{' > '.join(node.get('path') or [])} / 第 {page_number} 页",
+                flush=True,
+            )
+            try:
+                open_worker_page(driver, page_url)
+                _wait_for_page_without_worker_writes(
+                    driver,
+                    runtime,
+                    manual_gate,
+                    stop_event,
+                )
+
+                page_path = extract_current_category_path(driver)
+                if page_path:
+                    node["path"] = page_path
+                    node["name"] = page_path[-1]
+                    node["node_id"] = node.get("node_id") or extract_node_id(
+                        str(getattr(driver, "current_url", "") or page_url)
+                    )
+                    result.node = node
+
+                children: List[Dict[str, Any]] = []
+                if page_number == 1:
+                    children = discover_child_categories(driver, node, strict=True)
+                    if should_descend(runtime, node, children):
+                        result.children = children
+                        if not runtime.include_root:
+                            result.skipped_intermediate = True
+                            return result
+
+                key = page_key(node, page_number, page_url)
+                if key in completed_page_keys:
+                    print(f"断点已完成，跳过并发页写入：{key}", flush=True)
+                else:
+                    plugin_status = wait_for_sellersprite_data_or_prompt(
+                        driver,
+                        runtime,
+                        on_manual_pause=manual_gate.pause,
+                        on_manual_resume=manual_gate.resume,
+                        restart_driver=restart_plugin_driver,
+                        on_readiness=lambda report: events.put(
+                            {
+                                "type": "readiness",
+                                "claim_key": claim_key,
+                                "report": dict(report),
+                            }
+                        ),
+                        before_navigation=navigation_throttle.wait,
+                        stop_event=stop_event,
+                    )
+                    if plugin_status == "blocked":
+                        result.failures.append(
+                            build_failure_record(
+                                runtime,
+                                node,
+                                page_number,
+                                page_url,
+                                "verification_timeout",
+                                "人工处理超时",
+                            )
+                        )
+                        if runtime.save_debug_snapshots:
+                            save_debug_snapshot(
+                                driver,
+                                debug_dir,
+                                f"verification_timeout_{slugify(claim_key)}_{page_number}",
+                            )
+                        result.terminal_error_type = "verification_unconfirmed"
+                        result.terminal_error_message = (
+                            "sellersprite_verification_unconfirmed: "
+                            "人工处理超时，任务已停止且未提取当前页数据。"
+                        )
+                        stop_event.set()
+                        return result
+
+                    extracted_records = merge_product_data(
+                        driver,
+                        runtime,
+                        node,
+                        page_number,
+                        plugin_status,
+                    )
+                    if not extracted_records:
+                        raise WebDriverException(
+                            "页面已检测到商品卡片，但提取结果为空；"
+                            "为避免静默漏页，保留断点并重试。"
+                        )
+                    accepted_records, rejection_counts = filter_product_records(
+                        extracted_records,
+                        runtime.product_filters,
+                    )
+                    result.pages.append(
+                        CategoryPageBatch(
+                            key=key,
+                            page_number=page_number,
+                            page_url=page_url,
+                            plugin_status=plugin_status,
+                            extracted_count=len(extracted_records),
+                            records=accepted_records,
+                            rejection_counts=rejection_counts,
+                        )
+                    )
+                    node.pop("worker_retry_count", None)
+                    result.node = node
+                    if plugin_status != "ok" and runtime.save_debug_snapshots:
+                        save_debug_snapshot(
+                            driver,
+                            debug_dir,
+                            f"plugin_{plugin_status}_{slugify(claim_key)}_{page_number}",
+                        )
+
+                next_url = find_next_page_url(driver, strict=True)
+                page_limit = runtime.max_pages_per_category
+                if not next_url or (page_limit is not None and page_number >= page_limit):
+                    return result
+                page_number += 1
+                page_url = next_url
+            except DeliveryLocationUnconfirmedError as exc:
+                result.failures.append(
+                    build_failure_record(
+                        runtime,
+                        node,
+                        page_number,
+                        page_url,
+                        "delivery_location_unconfirmed",
+                        str(exc),
+                    )
+                )
+                result.terminal_error_type = "delivery_location_unconfirmed"
+                result.terminal_error_message = str(exc)
+                stop_event.set()
+                return result
+            except VerificationUnconfirmedError as exc:
+                result.failures.append(
+                    build_failure_record(
+                        runtime,
+                        node,
+                        page_number,
+                        page_url,
+                        "verification_timeout",
+                        str(exc),
+                    )
+                )
+                if runtime.save_debug_snapshots:
+                    save_debug_snapshot(
+                        driver,
+                        debug_dir,
+                        f"verification_timeout_{slugify(claim_key)}_{page_number}",
+                    )
+                result.terminal_error_type = "verification_unconfirmed"
+                result.terminal_error_message = str(exc)
+                stop_event.set()
+                return result
+            except TimeoutException as exc:
+                result.failures.append(
+                    build_failure_record(
+                        runtime,
+                        node,
+                        page_number,
+                        page_url,
+                        "page_timeout",
+                        str(exc),
+                    )
+                )
+                if runtime.save_debug_snapshots:
+                    save_debug_snapshot(
+                        driver,
+                        debug_dir,
+                        f"page_timeout_{slugify(claim_key)}_{page_number}",
+                    )
+                result.retryable_error_type = "page_timeout"
+                result.retryable_error_message = str(exc)[:500]
+                return result
+            except WebDriverException as exc:
+                result.failures.append(
+                    build_failure_record(
+                        runtime,
+                        node,
+                        page_number,
+                        page_url,
+                        "webdriver_error",
+                        str(exc)[:500],
+                    )
+                )
+                if runtime.save_debug_snapshots:
+                    save_debug_snapshot(
+                        driver,
+                        debug_dir,
+                        f"webdriver_error_{slugify(claim_key)}_{page_number}",
+                    )
+                result.retryable_error_type = "webdriver_error"
+                result.retryable_error_message = str(exc)[:500]
+                return result
+        raise ConcurrentWorkerCancelled(
+            "并发任务已收到停止信号，当前类目保留在断点中。"
+        )
+    finally:
+        manual_gate.close()
+        if driver is not None:
+            try:
+                driver.quit()
+            except WebDriverException:
+                pass
+
+
+def _commit_category_batch(
+    batch: CategoryCrawlBatch,
+    claim_key: str,
+    runtime: RuntimeConfig,
+    state: StateStore,
+    records_path: Path,
+    failures_path: Path,
+) -> int:
+    committed_pages = 0
+    for page in batch.pages:
+        if not state.commit_page_batch(page):
+            print(f"主线程提交时发现页面已完成，跳过：{page.key}")
+            continue
+        committed_pages += 1
+        materialize_category_records(state, records_path)
+        written_count = len(
+            {
+                str(record.get("asin") or "")
+                for record in page.records
+                if isinstance(record, dict)
+            }
+        )
+        filtered_out_count = page.extracted_count - written_count
+        print(
+            f"提取商品 {page.extracted_count} 条，写入 {written_count} 条，"
+            f"过滤 {filtered_out_count} 条，插件状态：{page.plugin_status}"
+        )
+
+    for failure in batch.failures:
+        append_jsonl(failures_path, failure)
+    if batch.failures:
+        state.log_failure(len(batch.failures))
+
+    if batch.children:
+        added = state.enqueue_children(batch.children)
+        if batch.skipped_intermediate:
+            print(f"发现下级类目 {len(batch.children)} 个，新增 {added} 个；跳过当前中间节点。")
+        else:
+            print(f"当前节点已抓取，同时新增下级类目 {added} 个。")
+
+    state.clear_manual_pause(claim_key)
+    if not batch.terminal_error_type and not batch.retryable_error_type:
+        state.complete_claimed_category(claim_key, batch.node)
+    return committed_pages
+
+
+def _raise_concurrent_terminal(batch: CategoryCrawlBatch) -> None:
+    if batch.terminal_error_type == "delivery_location_unconfirmed":
+        raise DeliveryLocationUnconfirmedError(batch.terminal_error_message)
+    if batch.terminal_error_type == "verification_unconfirmed":
+        raise VerificationUnconfirmedError(batch.terminal_error_message)
+    if batch.terminal_error_type:
+        raise UserFacingError(batch.terminal_error_message or batch.terminal_error_type)
+
+
+def preflight_category_delivery(runtime: RuntimeConfig, state: StateStore) -> None:
+    if runtime.browser_tab_concurrency <= 1 or not runtime.delivery_location_enabled:
+        return
+    first_url_by_domain: Dict[str, str] = {}
+    for node in state.data.get("queue") or []:
+        if not isinstance(node, dict):
+            continue
+        url = str(node.get("url") or "")
+        domain = (urlparse(url).hostname or "").lower()
+        if domain and domain not in first_url_by_domain:
+            first_url_by_domain[domain] = url
+    if not first_url_by_domain:
+        return
+
+    print(f"并发预检：串行确认 {len(first_url_by_domain)} 个 Amazon 域名的配送地址。")
+    driver = start_driver(runtime)
+    try:
+        for domain, url in first_url_by_domain.items():
+            open_amazon_page(
+                driver,
+                url,
+                runtime,
+                on_manual_pause=lambda reason, page_url: state.mark_manual_pause(
+                    reason,
+                    page_url,
+                ),
+                on_manual_resume=state.clear_manual_pause,
+            )
+            print(f"配送地址已确认：{domain}")
+    finally:
+        try:
+            driver.quit()
+        except WebDriverException:
+            pass
+
+
+def run_crawl_concurrent(
+    runtime: RuntimeConfig,
+    state: StateStore,
+    records_path: Path,
+    failures_path: Path,
+    debug_dir: Path,
+) -> None:
+    """Run independent category sources concurrently with main-thread persistence."""
+
+    state.prepare_concurrent_resume()
+    preflight_category_delivery(runtime, state)
+    events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
+    stop_event = threading.Event()
+    batch_pause = BatchPauseScheduler(runtime)
+    navigation_throttle = NavigationThrottle(
+        runtime.delay_seconds_min,
+        runtime.delay_seconds_max,
+    )
+    delivery_locks = DeliveryDomainLocks()
+    executor = concurrent.futures.ThreadPoolExecutor(
+        max_workers=runtime.browser_tab_concurrency,
+        thread_name_prefix="amazon-category",
+    )
+    futures: Dict[
+        concurrent.futures.Future[CategoryCrawlBatch],
+        Tuple[str, Dict[str, Any]],
+    ] = {}
+    claimed_in_this_run = 0
+
+    try:
+        while True:
+            _drain_worker_events(events, state)
+            limit_reached = (
+                runtime.max_categories is not None
+                and claimed_in_this_run >= runtime.max_categories
+            )
+            manual_paused = bool(
+                state.data.get("manual_pause") or state.data.get("manual_pauses")
+            )
+            while (
+                len(futures) < runtime.browser_tab_concurrency
+                and not limit_reached
+                and not manual_paused
+                and not stop_event.is_set()
+            ):
+                claim = state.claim_next_category()
+                if claim is None:
+                    break
+                claim_key, node = claim
+                completed_page_keys = set(state.data.get("completed_pages") or [])
+                future = executor.submit(
+                    crawl_category_source,
+                    runtime,
+                    claim_key,
+                    node,
+                    completed_page_keys,
+                    debug_dir,
+                    events,
+                    stop_event,
+                    navigation_throttle,
+                    delivery_locks,
+                )
+                futures[future] = (claim_key, node)
+                claimed_in_this_run += 1
+                limit_reached = (
+                    runtime.max_categories is not None
+                    and claimed_in_this_run >= runtime.max_categories
+                )
+
+            _drain_worker_events(events, state)
+            if not futures:
+                if limit_reached:
+                    print("达到 max_categories，本次停止；可继续 resume。")
+                else:
+                    print("队列已完成。")
+                break
+
+            done, _pending = concurrent.futures.wait(
+                futures,
+                timeout=0.5,
+                return_when=concurrent.futures.FIRST_COMPLETED,
+            )
+            _drain_worker_events(events, state)
+            if not done:
+                continue
+            for future in done:
+                claim_key, _node = futures.pop(future)
+                try:
+                    batch = future.result()
+                except ConcurrentWorkerCancelled:
+                    state.requeue_claimed_category(claim_key)
+                    continue
+                committed_pages = _commit_category_batch(
+                    batch,
+                    claim_key,
+                    runtime,
+                    state,
+                    records_path,
+                    failures_path,
+                )
+                for _index in range(committed_pages):
+                    batch_pause.after_completed_page()
+                if batch.retryable_error_type:
+                    retry_node = dict(batch.node)
+                    retry_count = int(retry_node.get("worker_retry_count") or 0)
+                    retry_node["worker_retry_count"] = min(
+                        retry_count + 1, CATEGORY_MAX_TASK_RETRIES
+                    )
+                    state.requeue_claimed_category(claim_key, retry_node)
+                    if retry_count < CATEGORY_MAX_TASK_RETRIES:
+                        print(
+                            f"页面暂时失败（{batch.retryable_error_type}），"
+                            "已保留断点并重新排队当前类目。"
+                        )
+                        continue
+                    raise UserFacingError(
+                        batch.retryable_error_message
+                        or "页面重试仍失败，当前类目已保留在断点中。"
+                    )
+                _raise_concurrent_terminal(batch)
+    except BaseException:
+        stop_event.set()
+        for future in futures:
+            future.cancel()
+        executor.shutdown(wait=True, cancel_futures=True)
+        _drain_worker_events(events, state)
+        claim_keys = list((state.data.get("in_flight_categories") or {}).keys())
+        for claim_key in claim_keys:
+            state.clear_manual_pause(claim_key)
+        state.requeue_claimed_categories(claim_keys)
+        raise
+    else:
+        executor.shutdown(wait=True)
+        _drain_worker_events(events, state)
+
+
+def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
     job_dir = ensure_dir(runtime.outputs_root / runtime.job_id)
     records_path = job_dir / "records.jsonl"
     failures_path = job_dir / "failures.jsonl"
@@ -3228,18 +5211,39 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
     print(f"任务目录：{job_dir}")
     print(f"起始类目：{runtime.start_url}")
     print(f"浏览器后端：{runtime.browser_backend}/{runtime.browser_mode}")
+    print(f"浏览器标签并发：{runtime.browser_tab_concurrency}")
     print(f"卖家精灵门禁：{'required' if runtime.sellersprite_required else 'not_required'}")
+    print(
+        "产品过滤："
+        + json.dumps(runtime.product_filters.as_dict(), ensure_ascii=False, sort_keys=True)
+    )
     print(f"输出表格：{output_xlsx}")
     if dry_run:
         print("dry-run：配置检查完成，未打开浏览器。")
         return 0
     if not runtime.resume:
-        for old_file in (records_path, failures_path, output_xlsx):
+        for old_file in (records_path, failures_path, state_path, output_xlsx):
             if old_file.exists():
                 old_file.unlink()
+        page_results_dir = job_dir / "page_results"
+        if page_results_dir.exists():
+            shutil.rmtree(page_results_dir)
 
     state = StateStore(state_path, runtime)
     state.load_or_create()
+    materialize_category_records(state, records_path)
+    if runtime.browser_tab_concurrency > 1:
+        run_crawl_concurrent(
+            runtime,
+            state,
+            records_path,
+            failures_path,
+            debug_dir,
+        )
+        write_workbook(records_path, failures_path, output_xlsx)
+        print(f"已生成 Excel：{output_xlsx}")
+        return 0
+    state.recover_stale_in_flight()
     driver = start_driver(runtime)
     batch_pause = BatchPauseScheduler(runtime)
 
@@ -3299,7 +5303,7 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
                     state.set_current(current)
                 children = []
                 if page_number == 1 and not current.get("children_enqueued"):
-                    children = discover_child_categories(driver, node)
+                    children = discover_child_categories(driver, node, strict=True)
                     current["children"] = children
                     current["children_enqueued"] = True
                     state.set_current(current)
@@ -3333,11 +5337,35 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
                 if state.is_page_completed(key):
                     print("当前页已在断点中标记完成，跳过写入。")
                 else:
-                    records = merge_product_data(driver, runtime, node, page_number, plugin_status)
-                    for record in records:
-                        append_jsonl(records_path, record)
-                    state.mark_page_completed(key, len(records))
-                    print(f"写入商品 {len(records)} 条，插件状态：{plugin_status}")
+                    extracted_records = merge_product_data(
+                        driver, runtime, node, page_number, plugin_status
+                    )
+                    if not extracted_records:
+                        raise WebDriverException(
+                            "页面已检测到商品卡片，但提取结果为空；"
+                            "为避免静默漏页，保留断点并重试。"
+                        )
+                    records, rejection_counts = filter_product_records(
+                        extracted_records,
+                        runtime.product_filters,
+                    )
+                    filtered_out_count = len(extracted_records) - len(records)
+                    state.commit_page_batch(
+                        CategoryPageBatch(
+                            key=key,
+                            page_number=page_number,
+                            page_url=page_url,
+                            plugin_status=plugin_status,
+                            extracted_count=len(extracted_records),
+                            records=records,
+                            rejection_counts=rejection_counts,
+                        )
+                    )
+                    materialize_category_records(state, records_path)
+                    print(
+                        f"提取商品 {len(extracted_records)} 条，写入 {len(records)} 条，"
+                        f"过滤 {filtered_out_count} 条，插件状态：{plugin_status}"
+                    )
                     batch_pause.after_completed_page()
                     if plugin_status != "ok" and runtime.save_debug_snapshots:
                         save_debug_snapshot(driver, debug_dir, f"plugin_{plugin_status}_{extract_node_id(page_url)}_{page_number}")
@@ -3346,7 +5374,8 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
                     added = state.enqueue_children(children)
                     print(f"当前节点已抓取，同时新增下级类目 {added} 个。")
 
-                next_url = find_next_page_url(driver)
+                next_url = find_next_page_url(driver, strict=True)
+                current.pop("worker_retry_count", None)
                 page_limit = runtime.max_pages_per_category
                 if next_url and (page_limit is None or page_number < page_limit):
                     current["page_number"] = page_number + 1
@@ -3356,18 +5385,41 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
                     state.finish_current_category()
                     processed_in_this_run += 1
                 sleep_between_pages(runtime)
-            except TimeoutException as exc:
-                log_failure(failures_path, state, runtime, node, page_number, page_url, "page_timeout", str(exc))
+            except (TimeoutException, WebDriverException) as exc:
+                reason = (
+                    "page_timeout" if isinstance(exc, TimeoutException) else "webdriver_error"
+                )
+                log_failure(
+                    failures_path,
+                    state,
+                    runtime,
+                    node,
+                    page_number,
+                    page_url,
+                    reason,
+                    str(exc)[:500],
+                )
                 if runtime.save_debug_snapshots:
-                    save_debug_snapshot(driver, debug_dir, "page_timeout")
-                state.finish_current_category()
-                processed_in_this_run += 1
-            except WebDriverException as exc:
-                log_failure(failures_path, state, runtime, node, page_number, page_url, "webdriver_error", str(exc)[:500])
-                if runtime.save_debug_snapshots:
-                    save_debug_snapshot(driver, debug_dir, "webdriver_error")
-                state.finish_current_category()
-                processed_in_this_run += 1
+                    save_debug_snapshot(driver, debug_dir, reason)
+                retry_count = int(current.get("worker_retry_count") or 0)
+                current["worker_retry_count"] = min(
+                    retry_count + 1, CATEGORY_MAX_TASK_RETRIES
+                )
+                state.set_current(current)
+                if retry_count >= CATEGORY_MAX_TASK_RETRIES:
+                    raise UserFacingError(
+                        f"页面连续 {CATEGORY_MAX_TASK_RETRIES + 1} 次失败"
+                        f"（{reason}），当前类目已保留在断点中。"
+                    ) from exc
+                print(
+                    f"页面暂时失败（{reason}），"
+                    "保留当前类目断点并重启标签页后重试。"
+                )
+                try:
+                    driver.quit()
+                except WebDriverException:
+                    pass
+                driver = start_driver(runtime)
     finally:
         try:
             driver.quit()
@@ -3377,6 +5429,14 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
     write_workbook(records_path, failures_path, output_xlsx)
     print(f"已生成 Excel：{output_xlsx}")
     return 0
+
+
+def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
+    if dry_run:
+        return _run_crawl_unlocked(runtime, dry_run=True)
+    job_dir = runtime.outputs_root / runtime.job_id
+    with JobRunLock(job_dir / ".run.lock"):
+        return _run_crawl_unlocked(runtime, dry_run=False)
 
 
 def wait_for_page_or_manual(

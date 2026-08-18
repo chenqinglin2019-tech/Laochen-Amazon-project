@@ -1,6 +1,8 @@
 ---
 name: lc-amazon-data-crawl
 description: Run and maintain a reusable Amazon data crawler for front-end product collection with SellerSprite-enriched fields. Use when the user needs to crawl Amazon keyword search result pages with selectable sort orders, Best Sellers/New Releases category ranking nodes, storefront product lists with selectable sort orders and up to 20 pages per store, or image-search similar competitor counts/details; also use when packaging this crawler for another Codex installation.
+metadata:
+  last_updated: 2026-08-18
 ---
 
 # Lc amazon Data Crawl
@@ -12,6 +14,10 @@ Use this skill to create and operate a local Amazon crawler runner. The bundled 
 - `bsr_category`: crawl a single Amazon ranking/listing URL through the unified front crawler.
 - `category-rank`: crawl a ranking category node recursively, including child category nodes.
 - `image-competitor`: crawl Amazon image-search similar products and optionally compare/count competitors.
+
+Front and category crawls also collect SellerSprite child-category BSR ranks in
+`subcategory_bsr_ranks` and can optionally filter products by fulfillment and
+the presence of a child-category rank before records are written.
 
 ## Cloud Auth Gate
 
@@ -56,11 +62,12 @@ bash "$SKILL_DIR/scripts/setup_runner.sh" ./lc-amazon-data-crawl-runner
 
 Then use the generated runner folder for all task-specific config edits and executions.
 
-Setup creates `config/doubao_embedding_vision.json` from an empty public
-example, protects it with mode `0600` where supported, and adds it to the
-runner `.gitignore`. It never overwrites that file on later setup runs. Before
-an image-competitor embedding run, the user must put their own Volcengine Ark
-API key in that local file. Never ask the user to paste the key into chat.
+Setup creates `config/doubao_embedding_vision.json` and
+`config/doubao_same_product_mini.json` from empty public examples, protects
+both with mode `0600` where supported, and adds both to the runner
+`.gitignore`. It never overwrites either file on later setup runs. Before an
+image-competitor cascade run, the user must bind their own Volcengine Ark API
+key in both local files. Never ask the user to paste the key into chat.
 
 ## Runner Commands
 
@@ -118,6 +125,10 @@ operational rules are:
 - With `browser_mode: "reuse"`, the runner connects to a separate crawl tab and
   does not close the user-owned browser. `cdp-browser-start` remains available
   when the browser should be prepared before a check or crawl command.
+- `browser_tab_concurrency` defaults to `1` and accepts `1` to `3`. Values above
+  `1` are supported only by CDP with `browser_mode: "reuse"` or `"attach"`.
+  Tabs process independent sources concurrently while pagination within one
+  source remains serial.
 - A fixed local extension folder remains supported in `extension_path`; leave
   it empty only when the dedicated Profile already has the extension.
 - Keep `activate_plugin: false` by default. SellerSprite content scripts inject
@@ -129,18 +140,76 @@ operational rules are:
 - When `sellersprite_required` is true, do not write page records until at
   least the configured number of ASINs contains real SellerSprite-only fields
   and the data remains stable for the configured number of checks.
-- For image-competitor quantity matching, recommend `match_mode: "embedding"`
-  with `doubao-embedding-vision-251215` through Volcengine Ark
-  `/api/v3/embeddings/multimodal`. Keep the API key only in
-  `config/doubao_embedding_vision.json`, referenced by
-  `doubao_embedding_config_file`; do not put it in a crawl config, log, state,
-  archive, or message.
-- Run `doctor` to see only whether the Doubao credential is `missing`,
-  `unconfigured`, or `ready`. Run the image-competitor dry-run before opening
-  Chrome; missing, invalid, or empty credential configuration must fail there.
-- `match_mode` accepts only `embedding` and `chat`. New Doubao configuration
-  takes precedence. Legacy `openai_*` fields remain a deprecated compatibility
-  path, while `chat` keeps its existing provider behavior.
+- `subcategory_bsr_ranks` is a structured list such as
+  `[{"rank": 130, "category_name": "Fruit Bowls"}]`. A single BSR row is kept
+  as a child category; when multiple rows exist, the first broad parent row is
+  excluded and all subsequent child-category rows are retained.
+- `product_filters` defaults to no filtering. It supports mutually exclusive
+  fulfillment allow/deny lists through `allowed_fulfillment_methods` and
+  `excluded_fulfillment_methods`, plus `allow_missing_fulfillment` and
+  `require_subcategory_rank`; active conditions are combined with AND. Use
+  `excluded_fulfillment_methods: ["FBA"]` with a required child rank when every
+  confirmed non-FBA, missing, or unknown method should be retained.
+- Fulfillment evidence is parsed only from an explicit fulfillment label,
+  mapped table column, or configured selector. SellerSprite text such as
+  `配送:FBM卖家:1` is normalized to `FBM` while the captured raw evidence remains
+  in JSONL. Within those explicit fulfillment contexts, a value beginning with
+  `FBA`, `FBM`, or `AMZ` uses that canonical method regardless of its suffix;
+  unrelated card fields such as a standalone `FBA费用` do not count as
+  fulfillment.
+- Changing the output schema, fulfillment parsing semantics, or
+  `product_filters` is incompatible with an old job that already contains
+  records or completed pages. Use a new `job_id` instead of mixing old and new
+  records.
+- One process owns a `job_id` at a time. Atomic page shards drive JSONL
+  materialization and crash recovery; a second process using the same job is
+  rejected instead of racing the state writer.
+- For same-product quantity matching, recommend `match_mode: "cascade"`.
+  `doubao-embedding-vision-251215` performs a low-cost visual prescreen; only
+  sources with at most 10 prescreen matches are reviewed by
+  `doubao-seed-2-0-mini-260428`. The final business count comes only from the
+  Mini review, never directly from embedding similarity.
+- Cascade currently requires `result_mode: "count_only"`; use the legacy modes
+  for detailed competitor rows.
+- Keep Ark API keys only in `config/doubao_embedding_vision.json` and
+  `config/doubao_same_product_mini.json`, referenced by
+  `doubao_embedding_config_file` and `doubao_mini_config_file`. Never put a key
+  in a crawl config, log, state, archive, or message.
+- Treat those as two independent local provider interfaces. A user of a shared
+  Skill fills only their own `api_key` in each file; setup creates both with
+  mode `0600`, preserves existing values, and release packages contain empty
+  examples only. Dedicated Doubao endpoints must be HTTPS and never follow
+  redirects.
+- Cascade processes Lens candidates in page order. Zero prescreen matches means
+  `verified_zero` with final count `0`. One to ten matches enter Mini review in
+  batches of six. On the 11th prescreen match, stop additional embedding calls,
+  skip Mini, mark `prescreen_excluded`, and leave `same_product_count` blank.
+  The final Excel also adds `mini复核确认同款数量`: it shows a numeric count only
+  for `verified` Mini-reviewed results, stays blank for `verified_zero`, and
+  shows `Embedding判断同款数量大于10` for `prescreen_excluded`.
+- Mini judges the primary product and ignores color, accessory quantity, sale
+  quantity, bundle count, composition, and background when the product's core
+  function and structure are the same. Different category, core function, or
+  core structure is not the same product.
+- Bind resumable cascade jobs to the input-file digest and normalized source
+  order. Commit each completed source to an atomic `source_results/` shard and
+  materialize aggregate JSONL from those shards, so a crash cannot duplicate a
+  paid model call or attach an old row's count to a different ASIN.
+- Image-competitor runs close every popup/result tab explicitly created while
+  processing a product as soon as that product is committed or abandoned.
+  Tabs that existed before the product started are preserved, and the crawler
+  restores its original working tab before continuing to the next product.
+- Run `doctor` to see only whether each Doubao credential is `missing`,
+  `unconfigured`, or `ready`. Run image-competitor dry-run before opening
+  Chrome; missing, invalid, or empty required credential configuration must
+  fail there.
+- `match_mode` accepts `cascade`, `embedding`, and `chat`. The latter two remain
+  backward-compatible modes; legacy `openai_*` fields remain a deprecated
+  compatibility path for their existing provider behavior.
+- Do not claim 90% same-product precision without validation data. Calibrate
+  the embedding threshold on a category-stratified set of at least 300 labeled
+  image pairs, keep a frozen evaluation split, and report measured Mini
+  precision from that frozen split.
 - Do not use legacy third-party browser-container workflows; this skill is only
   for normal visible Chrome crawling through CDP, with Selenium as a fallback.
 
@@ -166,7 +235,37 @@ Outputs are written under `outputs/<job_id>/`.
 
 - Unified front crawler writes `records.jsonl`, `state.json`, optional `failures.jsonl`, and `dedup_total.xlsx`.
 - Category-rank crawler writes `records.jsonl`, `state.json`, optional `failures.jsonl`, and `total_<job_id>_merged.xlsx`.
-- Image competitor crawler writes mode-specific JSONL files and an Excel result ending in `_相似竞品数量.xlsx` or a detailed competitor workbook.
+- Image competitor crawler writes mode-specific JSONL files and an Excel result
+  ending in `_相似竞品数量.xlsx` or a detailed competitor workbook. Cascade
+  count output includes `prescreen_visual_match_count`, `processing_status`,
+  `same_product_count`, `same_product_confidence`, and `match_reason`;
+  `prescreen_excluded` rows intentionally have a blank final count. The final
+  review workbook permanently removes `最佳页码`、`最佳排名`、`加载状态`、`备注` and
+  `mini复核确认同款数量`, and adds a duplicate, clickable `商品URL` immediately
+  before `相似竞品数量` for manual review.
+  `same_product_confidence` is the minimum confidence among Mini-accepted
+  products and remains blank when the final count is zero. The JSONL also
+  records non-secret provider call/token metrics for paid-pilot cost review.
+
+## Historical Fulfillment Repair
+
+Completed jobs are not rewritten when fulfillment parsing semantics change.
+Use the conservative sidecar repair tool when the historical JSONL retained
+auditable raw values such as `FBM卖家` or `FBA卖家`:
+
+```bash
+.venv/bin/python scripts/repair_fulfillment_outputs.py \
+  outputs/<old-job-id> \
+  --output-dir outputs/<old-job-id>-repaired \
+  --expected-record-count <count> \
+  --expected-unique-asin-count <count>
+```
+
+The destination must not exist and must be outside the source job. The tool
+does not modify source state, page shards, JSONL, or workbooks. It promotes raw
+fulfillment values beginning with `FBA`, `FBM`, or `AMZ`, reports all remaining
+unknown raw evidence without inferring it, and produces full plus ranked
+non-FBA comparison workbooks in the new directory.
 
 ## Maintenance
 
@@ -176,7 +275,8 @@ When updating this skill, update the bundled scripts in `scripts/`, templates in
 python3 /path/to/skill-creator/scripts/quick_validate.py /path/to/lc-amazon-data-crawl
 ```
 
-Public packages may include
-`assets/config/doubao_embedding_vision.example.json`, but must never include a
-populated `config/doubao_embedding_vision.json`, browser Profiles, cookies, or
-crawl outputs. Preserve existing archives when creating a new dated package.
+Public packages may include the empty
+`assets/config/doubao_embedding_vision.example.json` and
+`assets/config/doubao_same_product_mini.example.json`, but must never include
+populated local credential files, browser Profiles, cookies, or crawl outputs.
+Preserve existing archives when creating a new dated package.

@@ -12,6 +12,7 @@
   "store_sort_orders": [],
   "browser_backend": "cdp",
   "browser_mode": "reuse",
+  "browser_tab_concurrency": 1,
   "chrome_binary": "auto",
   "chrome_user_data_dir": "chrome_profiles/lc-amazon-data-crawl-cft",
   "chrome_profile_directory": "Default",
@@ -37,6 +38,12 @@
   "sellersprite_min_enriched_records": 1,
   "sellersprite_min_fields_per_record": 2,
   "sellersprite_stable_checks": 3,
+  "product_filters": {
+    "allowed_fulfillment_methods": [],
+    "excluded_fulfillment_methods": [],
+    "allow_missing_fulfillment": false,
+    "require_subcategory_rank": false
+  },
   "manual_pause_timeout": 900,
   "delivery_location_enabled": true,
   "delivery_locations_file": "config/amazon_delivery_locations.json",
@@ -59,6 +66,7 @@
     "fba_fee": [],
     "gross_margin": [],
     "fulfillment_method": [],
+    "subcategory_bsr_ranks": [],
     "delivery_duration": [],
     "launch_date": [],
     "organic_keywords_count": [],

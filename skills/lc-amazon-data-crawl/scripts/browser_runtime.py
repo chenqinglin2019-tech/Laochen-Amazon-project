@@ -136,7 +136,7 @@ class CdpWebDriver:
         self._context = None
         self._page = None
         self._browser_cdp_session = None
-        self._initial_page_ids: set[int] = set()
+        self._owned_pages: Dict[int, Any] = {}
         self.switch_to = CdpSwitchTo(self)
 
         try:
@@ -150,9 +150,9 @@ class CdpWebDriver:
                 raise WebDriverException("CDP 浏览器没有可用的默认上下文。")
             self._browser_cdp_session = self._browser.new_browser_cdp_session()
             self._context = self._browser.contexts[0]
-            self._initial_page_ids = {id(page) for page in self._context.pages}
             self._verify_profile(expected_user_data_dir, profile_directory)
             self._page = self._context.new_page()
+            self._remember_owned_page(self._page)
             self._page.set_default_timeout(self._page_timeout * 1000)
             self._page.set_default_navigation_timeout(self._page_timeout * 1000)
         except WebDriverException:
@@ -230,6 +230,14 @@ class CdpWebDriver:
     def window_handles(self) -> List[str]:
         return list(self._page_map())
 
+    @property
+    def current_window_handle(self) -> str:
+        current_page = self._require_page()
+        for handle, page in self._page_map().items():
+            if page is current_page:
+                return handle
+        raise WebDriverException("当前 CDP 标签页不存在。")
+
     def set_page_load_timeout(self, timeout: int) -> None:
         self._page_timeout = max(int(timeout), 1)
         if self._page is not None:
@@ -292,16 +300,74 @@ class CdpWebDriver:
         except Exception as exc:
             raise self._translate(exc) from exc
 
-    def _close_owned_pages(self) -> None:
-        if self._context is None:
+    def _remember_owned_page(self, page: Any) -> None:
+        """Record a page explicitly created by this driver connection."""
+        if page is None:
             return
-        for page in list(self._context.pages):
-            if id(page) in self._initial_page_ids:
-                continue
+        self._owned_pages[id(page)] = page
+
+    def register_owned_window_handle(self, handle: str) -> None:
+        """Claim a popup created by an explicit crawler action.
+
+        Some Amazon/SellerSprite popups use ``noopener`` and therefore have no
+        Playwright opener relationship. The caller must only register a handle
+        observed immediately after its own click/upload action.
+        """
+        page = self._page_map().get(handle)
+        if page is None:
+            raise WebDriverException(f"没有找到要登记的 CDP 标签页：{handle}")
+        self._remember_owned_page(page)
+
+    def close(self) -> None:
+        page = self._require_page()
+        page_id = id(page)
+        try:
+            page.close()
+        except Exception as exc:
+            raise self._translate(exc) from exc
+        self._owned_pages.pop(page_id, None)
+        remaining = self._page_map()
+        self._page = next(iter(remaining.values()), None)
+
+    def _owned_pages_with_descendants(self) -> List[Any]:
+        """Return owned pages and their popup descendants, children first.
+
+        Every CDP connection sees all pages in the shared browser context, so
+        creation time does not establish ownership. Another worker or the user
+        may create a tab after this driver connects. Ownership starts only from
+        pages explicitly created by this instance and expands through
+        Playwright's opener relationship.
+        """
+        owned = dict(self._owned_pages)
+        if self._context is None:
+            return list(reversed(list(owned.values())))
+
+        changed = True
+        while changed:
+            changed = False
+            for page in list(self._context.pages):
+                page_id = id(page)
+                if page_id in owned:
+                    continue
+                try:
+                    opener = page.opener()
+                except Exception:
+                    continue
+                if opener is not None and id(opener) in owned:
+                    owned[page_id] = page
+                    changed = True
+
+        return list(reversed(list(owned.values())))
+
+    def _close_owned_pages(self) -> None:
+        for page in self._owned_pages_with_descendants():
             try:
+                if page.is_closed():
+                    continue
                 page.close()
             except Exception:
                 pass
+        self._owned_pages.clear()
 
     def _disconnect_only(self) -> None:
         if self._playwright is not None:
@@ -314,6 +380,7 @@ class CdpWebDriver:
         self._browser_cdp_session = None
         self._context = None
         self._page = None
+        self._owned_pages = {}
         self._owned_process = None
 
     def quit(self) -> None:
