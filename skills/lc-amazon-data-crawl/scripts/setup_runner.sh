@@ -54,9 +54,11 @@ cp "$SKILL_DIR"/scripts/*.py "$TARGET_DIR/scripts/"
 cp "$SKILL_DIR/assets/requirements.txt" "$TARGET_DIR/requirements.txt"
 for config_file in "$SKILL_DIR"/assets/config/*.json; do
   config_name="$(basename "$config_file")"
-  if [[ "$config_name" == "doubao_embedding_vision.example.json" ]]; then
-    continue
-  fi
+  case "$config_name" in
+    doubao_embedding_vision.example.json|doubao_same_product_mini.example.json)
+      continue
+      ;;
+  esac
   target_config="$TARGET_DIR/config/$config_name"
   if [[ ! -f "$target_config" ]]; then
     cp "$config_file" "$target_config"
@@ -65,14 +67,23 @@ done
 
 DOUBAO_CONFIG="$TARGET_DIR/config/doubao_embedding_vision.json"
 if [[ ! -f "$DOUBAO_CONFIG" ]]; then
-  cp "$SKILL_DIR/assets/config/doubao_embedding_vision.example.json" "$DOUBAO_CONFIG"
+  (umask 077; cp "$SKILL_DIR/assets/config/doubao_embedding_vision.example.json" "$DOUBAO_CONFIG")
 fi
 chmod 600 "$DOUBAO_CONFIG" 2>/dev/null || true
+
+DOUBAO_MINI_CONFIG="$TARGET_DIR/config/doubao_same_product_mini.json"
+if [[ ! -f "$DOUBAO_MINI_CONFIG" ]]; then
+  (umask 077; cp "$SKILL_DIR/assets/config/doubao_same_product_mini.example.json" "$DOUBAO_MINI_CONFIG")
+fi
+chmod 600 "$DOUBAO_MINI_CONFIG" 2>/dev/null || true
 
 RUNNER_GITIGNORE="$TARGET_DIR/.gitignore"
 touch "$RUNNER_GITIGNORE"
 if ! grep -Fqx 'config/doubao_embedding_vision.json' "$RUNNER_GITIGNORE"; then
   printf '\n# Local API credentials\nconfig/doubao_embedding_vision.json\n' >> "$RUNNER_GITIGNORE"
+fi
+if ! grep -Fqx 'config/doubao_same_product_mini.json' "$RUNNER_GITIGNORE"; then
+  printf 'config/doubao_same_product_mini.json\n' >> "$RUNNER_GITIGNORE"
 fi
 if [[ ! -f "$TARGET_DIR/config.json" ]]; then
   cp "$SKILL_DIR/config.json" "$TARGET_DIR/config.json"
@@ -206,14 +217,23 @@ doctor() {
       echo "$file: missing"
     fi
   done
-  doubao_config_status
+  doubao_config_status \
+    "doubao_embedding_vision" \
+    "$ROOT_DIR/config/doubao_embedding_vision.json" \
+    api_key model base_url api_path encoding_format
+  doubao_config_status \
+    "doubao_same_product_mini" \
+    "$ROOT_DIR/config/doubao_same_product_mini.json" \
+    api_key model base_url api_path
 }
 
 doubao_config_status() {
-  local config_file="$ROOT_DIR/config/doubao_embedding_vision.json"
+  local status_name="$1"
+  local config_file="$2"
   local inspect_python status
+  shift 2
   if [[ ! -f "$config_file" ]]; then
-    echo "doubao_embedding_vision: missing"
+    echo "$status_name: missing"
     return
   fi
   if [[ -x "$PYTHON_BIN" ]]; then
@@ -222,17 +242,17 @@ doubao_config_status() {
     inspect_python="$(command -v python3 || true)"
   fi
   if [[ -z "$inspect_python" ]]; then
-    echo "doubao_embedding_vision: unconfigured"
+    echo "$status_name: unconfigured"
     return
   fi
-  status="$($inspect_python - "$config_file" <<'PY' 2>/dev/null || true
+  status="$($inspect_python - "$config_file" "$@" <<'PY' 2>/dev/null || true
 import json
 import sys
 
 try:
     with open(sys.argv[1], encoding="utf-8") as handle:
         payload = json.load(handle)
-    required = ("api_key", "model", "base_url", "api_path", "encoding_format")
+    required = tuple(sys.argv[2:])
     ready = isinstance(payload, dict) and all(
         isinstance(payload.get(field), str) and payload[field].strip()
         for field in required
@@ -243,8 +263,8 @@ except (OSError, ValueError, TypeError):
 PY
 )"
   case "$status" in
-    ready) echo "doubao_embedding_vision: ready" ;;
-    *) echo "doubao_embedding_vision: unconfigured" ;;
+    ready) echo "$status_name: ready" ;;
+    *) echo "$status_name: unconfigured" ;;
   esac
 }
 

@@ -222,6 +222,62 @@ class DoubaoEmbeddingTests(unittest.TestCase):
             "https://ark.cn-beijing.volces.com/api/v3/embeddings/multimodal",
         )
         self.assertEqual(kwargs["timeout"], 10)
+        self.assertIs(kwargs["allow_redirects"], False)
+
+    def test_embedding_usage_metrics_include_prompt_total_and_image_tokens(self) -> None:
+        runtime = self.prepared_runtime()
+        response = FakeResponse(
+            200,
+            {
+                "data": [{"embedding": [0.25, 0.75]}],
+                "usage": {
+                    "prompt_tokens": 42,
+                    "total_tokens": 42,
+                    "prompt_tokens_details": {"image_tokens": 39},
+                },
+            },
+        )
+        with patch.object(image.requests, "post", return_value=response):
+            image.call_multimodal_embedding(runtime, "https://example.com/image.jpg")
+
+        self.assertEqual(runtime.provider_metrics["embedding_api_calls"], 1)
+        self.assertEqual(runtime.provider_metrics["embedding_prompt_tokens"], 42)
+        self.assertEqual(runtime.provider_metrics["embedding_total_tokens"], 42)
+        self.assertEqual(runtime.provider_metrics["embedding_image_tokens"], 39)
+
+    def test_private_embedding_config_rejects_insecure_or_ambiguous_endpoints(self) -> None:
+        invalid_endpoints = {
+            "http": {"base_url": "http://ark.cn-beijing.volces.com/api/v3"},
+            "userinfo": {
+                "base_url": "https://user:password@ark.cn-beijing.volces.com/api/v3"
+            },
+            "query_in_base": {
+                "base_url": "https://ark.cn-beijing.volces.com/api/v3?region=test"
+            },
+            "fragment_in_base": {
+                "base_url": "https://ark.cn-beijing.volces.com/api/v3#credentials"
+            },
+            "query_in_path": {"api_path": "embeddings/multimodal?region=test"},
+            "fragment_in_path": {"api_path": "embeddings/multimodal#credentials"},
+        }
+        for label, overrides in invalid_endpoints.items():
+            with self.subTest(label=label):
+                runtime = self.build_runtime(self.write_provider(**overrides))
+                with self.assertRaises(image.UserFacingError):
+                    image.prepare_vision_provider(runtime)
+
+    def test_embedding_redirect_is_not_followed_and_fails_closed(self) -> None:
+        runtime = self.prepared_runtime()
+        with patch.object(
+            image.requests,
+            "post",
+            return_value=FakeResponse(302, text="redirect"),
+        ) as post:
+            with self.assertRaises(image.FatalEmbeddingProviderError):
+                image.call_multimodal_embedding(runtime, "https://example.com/image.jpg")
+
+        self.assertEqual(post.call_count, 1)
+        self.assertIs(post.call_args.kwargs["allow_redirects"], False)
 
     def test_auth_and_model_errors_do_not_retry_or_leak_key(self) -> None:
         runtime = self.prepared_runtime()

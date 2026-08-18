@@ -297,6 +297,52 @@ class DeliveryLocationFlowTests(unittest.TestCase):
         self.assertEqual(driver.values, {"GLUXZipUpdateInput_0": "100", "GLUXZipUpdateInput_1": "0001"})
         self.assertTrue(category._submit_delivery_postal(driver, "100-0001"))
 
+    def test_single_postal_form_uses_native_typing_before_submit(self) -> None:
+        class NativeDriver(FakeDriver):
+            def __init__(self) -> None:
+                super().__init__("https://www.amazon.com/")
+                self.typed = ""
+
+            def execute_script(self, script: str, *args: object) -> object:
+                if "lc_delivery_city_only_form" in script:
+                    return False
+                if "lc_delivery_postal_with_city_submit" in script:
+                    return "not_applicable"
+                if "lc_delivery_split_postal_fields" in script:
+                    return []
+                if "lc_delivery_split_postal_fill" in script:
+                    return False
+                return super().execute_script(script, *args)
+
+            def find_element(self, _by: str, selector: str) -> object:
+                driver = self
+
+                if selector == "#GLUXZipUpdateInput":
+                    class PostalInput:
+                        def clear(self) -> None:
+                            driver.typed = ""
+
+                        def type_text(self, value: str) -> None:
+                            driver.typed = value
+
+                        def send_keys(self, _value: str) -> None:
+                            raise AssertionError("CDP should use sequential native typing")
+
+                    return PostalInput()
+
+                if selector == "#GLUXZipUpdate":
+                    class SubmitButton:
+                        def click(self) -> None:
+                            return None
+
+                    return SubmitButton()
+
+                raise AssertionError(f"unexpected selector: {selector}")
+
+        driver = NativeDriver()
+        self.assertTrue(category._submit_delivery_postal(driver, "10001", "New York"))
+        self.assertEqual(driver.typed, "10001")
+
     def test_postal_with_city_form_waits_for_city_then_submits(self) -> None:
         class PostalWithCityDriver(FakeDriver):
             statuses = iter(("waiting", "submitted"))

@@ -249,6 +249,68 @@ class ConfigCompatibilityTests(unittest.TestCase):
         self.assertTrue(runtime.is_count_only)
         self.assertFalse(runtime.sellersprite_required)
 
+    def test_image_detail_reuses_explicit_fulfillment_prefix_parser(self) -> None:
+        asin = "B000000001"
+        runtime = SimpleNamespace(
+            is_count_only=False,
+            max_candidates_per_source=10,
+            field_selectors={},
+        )
+        card = {
+            "asin": asin,
+            "title": "fixture",
+            "product_url": f"https://www.amazon.com/dp/{asin}",
+            "candidate_image_url": "https://example.invalid/image.jpg",
+            "rank": 1,
+            "text": f"ASIN:{asin} FBA费用:$3.81",
+        }
+        table_row = {
+            "asin": asin,
+            "headers": ["ASIN", "配送方式"],
+            "cells": [asin, "FBMPlus"],
+            "text": f"ASIN:{asin} 配送:FBMPlus",
+        }
+        with (
+            patch.object(image, "collect_lens_candidate_cards", return_value=[card]),
+            patch.object(image, "extract_table_rows", return_value=[table_row]),
+            patch.object(image, "extract_by_selectors", return_value={}),
+        ):
+            records = image.merge_lens_product_data(
+                SimpleNamespace(),
+                runtime,
+                {"source_id": "fixture", "source_asin": "B000000099"},
+                "ok",
+            )
+        self.assertEqual(records[0]["fulfillment_method"], "FBM")
+
+    def test_image_count_only_still_skips_fulfillment_enrichment(self) -> None:
+        asin = "B000000001"
+        runtime = SimpleNamespace(
+            is_count_only=True,
+            max_candidates_per_source=10,
+            field_selectors={},
+        )
+        card = {
+            "asin": asin,
+            "title": "fixture",
+            "product_url": f"https://www.amazon.com/dp/{asin}",
+            "candidate_image_url": "https://example.invalid/image.jpg",
+            "rank": 1,
+            "text": f"ASIN:{asin} 配送:FBMPlus",
+        }
+        with (
+            patch.object(image, "collect_lens_candidate_cards", return_value=[card]),
+            patch.object(image, "extract_table_rows") as extract_table_rows,
+        ):
+            records = image.merge_lens_product_data(
+                SimpleNamespace(),
+                runtime,
+                {"source_id": "fixture", "source_asin": "B000000099"},
+                "not_required",
+            )
+        extract_table_rows.assert_not_called()
+        self.assertEqual(records[0]["fulfillment_method"], "")
+
 
 if __name__ == "__main__":
     unittest.main()

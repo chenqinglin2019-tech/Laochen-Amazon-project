@@ -1,0 +1,6 @@
+{
+  "api_key": "",
+  "model": "doubao-seed-2-0-mini-260428",
+  "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+  "api_path": "chat/completions"
+}
