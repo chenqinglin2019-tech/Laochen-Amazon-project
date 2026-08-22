@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:assessment:0.1",
+  "title": "Evidence-Bound Assessment",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "query_plan_digest", "evidence_digest", "evidence_revision", "readiness_digest", "assessment_version", "status", "module_findings", "constraints", "overall", "reviews", "resolution_path", "resolution_digest", "created_at", "digest"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "query_plan_digest": {"$ref": "#/$defs/digest"},
+    "evidence_digest": {"$ref": "#/$defs/digest"},
+    "evidence_revision": {"type": "integer", "minimum": 1},
+    "readiness_digest": {"$ref": "#/$defs/digest"},
+    "assessment_version": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["complete", "incomplete"]},
+    "module_findings": {"type": "array", "minItems": 7, "maxItems": 7, "items": {"$ref": "#/$defs/module"}},
+    "constraints": {"type": "array", "items": {"$ref": "#/$defs/constraint"}},
+    "overall": {"$ref": "#/$defs/overall"},
+    "reviews": {"type": "array", "minItems": 1, "maxItems": 2, "items": {"$ref": "#/$defs/review_ref"}},
+    "resolution_path": {"type": ["string", "null"], "pattern": "^normalized/resolutions/.+\\.json$"},
+    "resolution_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "created_at": {"type": "string", "format": "date-time"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "risk": {"enum": ["very_low", "low", "medium", "high", "critical", "not_assessable"]},
+    "confidence": {"enum": ["low", "medium", "high", "not_assessable"]},
+    "string_list": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
+    "finding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["finding_id", "title", "candidate_id", "jurisdiction", "official_status", "owner", "similarities", "differences", "evidence_refs", "verification_refs", "recommended_actions"],
+      "properties": {
+        "finding_id": {"type": "string", "pattern": "^F-[A-Za-z0-9_-]{4,100}$"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 500},
+        "candidate_id": {"type": ["string", "null"], "pattern": "^C-[A-Za-z0-9_-]{4,100}$"},
+        "jurisdiction": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+        "official_status": {"enum": ["active", "pending", "expired", "cancelled", "abandoned", "rejected", "disputed", "unknown", "not_found", "not_applicable"]},
+        "owner": {"type": ["string", "null"], "maxLength": 500},
+        "similarities": {"$ref": "#/$defs/string_list"}, "differences": {"$ref": "#/$defs/string_list"},
+        "evidence_refs": {"$ref": "#/$defs/string_list"}, "verification_refs": {"$ref": "#/$defs/string_list"}, "recommended_actions": {"$ref": "#/$defs/string_list"}
+      }
+    },
+    "module": {
+      "type": "object", "additionalProperties": false,
+      "required": ["module", "risk_before_constraints", "confidence_before_constraints", "risk", "confidence", "reasoning", "findings", "recommended_actions"],
+      "properties": {
+        "module": {"enum": ["appearance_design", "utility_patent", "pending_patent", "word_mark", "figurative_trade_dress", "copyright_creative_ip", "enforcement_public_signals"]},
+        "risk_before_constraints": {"enum": ["very_low", "low", "medium", "high", "critical"]},
+        "confidence_before_constraints": {"enum": ["low", "medium", "high"]},
+        "risk": {"enum": ["very_low", "low", "medium", "high", "critical"]},
+        "confidence": {"enum": ["low", "medium", "high"]},
+        "reasoning": {"type": "string", "minLength": 1, "maxLength": 20000},
+        "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
+        "recommended_actions": {"$ref": "#/$defs/string_list"}
+      }
+    },
+    "constraint": {
+      "type": "object", "additionalProperties": false,
+      "required": ["constraint_id", "module", "kind", "trigger_refs", "before", "after", "reason"],
+      "properties": {
+        "constraint_id": {"type": "string", "pattern": "^CON-[a-f0-9]{24}$"},
+        "module": {"type": "string", "minLength": 1, "maxLength": 80},
+        "kind": {"enum": ["risk_floor", "confidence_cap", "formal_conclusion_blocked"]},
+        "trigger_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+        "before": {"type": "string", "minLength": 1, "maxLength": 100},
+        "after": {"type": "string", "minLength": 1, "maxLength": 100},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    },
+    "overall": {
+      "type": "object", "additionalProperties": false,
+      "required": ["risk", "confidence", "formal_conclusion_allowed", "second_review_required", "human_resolution_required", "summary"],
+      "properties": {
+        "risk": {"$ref": "#/$defs/risk"}, "confidence": {"$ref": "#/$defs/confidence"},
+        "formal_conclusion_allowed": {"type": "boolean"}, "second_review_required": {"type": "boolean"}, "human_resolution_required": {"type": "boolean"},
+        "summary": {"type": "string", "minLength": 1, "maxLength": 10000}
+      }
+    },
+    "review_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["review_id", "round", "path", "digest"],
+      "properties": {
+        "review_id": {"type": "string", "pattern": "^REV-[a-f0-9]{24}$"},
+        "round": {"enum": ["first", "second"]},
+        "path": {"type": "string", "pattern": "^normalized/reviews/.+\\.json$"},
+        "digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

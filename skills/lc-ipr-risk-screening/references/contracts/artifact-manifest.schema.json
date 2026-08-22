@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:artifact-manifest:0.1",
+  "title": "Release Artifact Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "manifest_type", "report_data_digest", "assessment_digest", "artifacts", "created_at", "manifest_digest"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "manifest_type": {"enum": ["formal", "draft"]},
+    "report_data_digest": {"$ref": "#/$defs/digest"},
+    "assessment_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "artifacts": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["artifact_id", "kind", "path", "sha256", "bytes", "formal"],
+        "properties": {
+          "artifact_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "kind": {"enum": ["json", "html", "markdown", "csv", "pdf", "image", "validation", "other"]},
+          "path": {"type": "string", "pattern": "^(?!/)(?!.*\\.\\./).+"},
+          "sha256": {"$ref": "#/$defs/digest"},
+          "bytes": {"type": "integer", "minimum": 0},
+          "formal": {"type": "boolean"}
+        }
+      }
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "manifest_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {"digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+}

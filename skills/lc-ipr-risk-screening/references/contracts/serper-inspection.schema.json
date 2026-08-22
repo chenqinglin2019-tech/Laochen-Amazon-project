@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:serper-inspection:0.1",
+  "title": "Serper Response Inspection",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "status",
+    "reason_code",
+    "raw_item_count",
+    "item_count",
+    "items",
+    "warnings"
+  ],
+  "$defs": {
+    "http_url": {
+      "type": "string",
+      "pattern": "^https?://",
+      "maxLength": 5000
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["title", "link"],
+      "properties": {
+        "position": {"type": "integer", "minimum": 1},
+        "title": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "link": {"$ref": "#/$defs/http_url"},
+        "snippet": {"type": "string", "maxLength": 5000},
+        "source": {"type": "string", "maxLength": 500},
+        "domain": {"type": "string", "maxLength": 500},
+        "image_url": {"$ref": "#/$defs/http_url"},
+        "thumbnail_url": {"$ref": "#/$defs/http_url"},
+        "publication_number": {"type": "string", "minLength": 1, "maxLength": 200},
+        "priority_date": {"type": "string", "maxLength": 100},
+        "filing_date": {"type": "string", "maxLength": 100},
+        "grant_date": {"type": "string", "maxLength": 100},
+        "publication_date": {"type": "string", "maxLength": 100},
+        "inventor": {"type": "string", "maxLength": 1000},
+        "assignee": {"type": "string", "maxLength": 1000},
+        "language": {"type": "string", "maxLength": 40},
+        "pdf_url": {"$ref": "#/$defs/http_url"}
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "status": {"enum": ["ready", "no_result", "partial", "failed"]},
+    "reason_code": {"type": "string", "minLength": 1, "maxLength": 100},
+    "endpoint": {"enum": ["search", "patents", "images", "lens"]},
+    "http_status": {"type": "integer", "minimum": 100, "maximum": 599},
+    "result_key": {"enum": ["organic", "images"]},
+    "raw_item_count": {"type": "integer", "minimum": 0, "maximum": 500},
+    "item_count": {"type": "integer", "minimum": 0, "maximum": 500},
+    "credits": {"type": "integer", "minimum": 1},
+    "raw_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "items": {"type": "array", "maxItems": 500, "items": {"$ref": "#/$defs/item"}},
+    "warnings": {"type": "array", "items": {"type": "string", "maxLength": 500}},
+    "error": {"type": "string", "minLength": 1, "maxLength": 1000}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"enum": ["ready", "no_result", "partial"]}}},
+      "then": {"required": ["endpoint", "http_status", "result_key", "credits", "raw_sha256"]}
+    },
+    {
+      "if": {"properties": {"status": {"const": "no_result"}}},
+      "then": {
+        "properties": {
+          "raw_item_count": {"const": 0},
+          "item_count": {"const": 0},
+          "items": {"maxItems": 0}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:candidate-disposition-input:0.1",
+  "title": "Candidate Disposition Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "candidate_id", "disposition", "deterministic_triggers", "exclusion_codes", "rationale", "decided_by"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "candidate_id": {"type": "string", "pattern": "^C-[A-Za-z0-9_-]{4,100}$"},
+    "disposition": {"enum": ["material", "not_material", "needs_review"]},
+    "deterministic_triggers": {"type": "array", "uniqueItems": true, "items": {"enum": ["exact_record_match", "title_or_identifier_match", "technical_claim_overlap", "related_family_or_continuation", "visual_similarity", "word_mark_similarity", "figurative_mark_similarity", "goods_services_overlap", "enforcement_subject_match", "provenance_or_ownership_conflict", "status_or_owner_uncertainty"]}},
+    "exclusion_codes": {"type": "array", "uniqueItems": true, "items": {"enum": ["different_jurisdiction", "different_right_type", "different_product_category", "different_technical_scope", "different_visual_impression", "different_mark", "different_goods_services", "duplicate_record", "non_product_specific_signal", "invalid_or_non_right_record"]}},
+    "rationale": {"type": "string", "minLength": 1, "maxLength": 5000},
+    "decided_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "session_id"],
+      "properties": {
+        "type": {"enum": ["agent", "human", "backend", "reviewer"]},
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    }
+  }
+}

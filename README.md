@@ -17,6 +17,12 @@ Public repository for Laochen Amazon workflow skills.
   from SellerSprite Excel exports. Last updated: 2026-07-30 23:42 (UTC+8).
 - `skills/lc_amazon_niche/` - Score and rank Amazon niche candidates by seller
   profile.
+- `skills/lc-ipr-risk-screening/` - Screen one US Amazon product for
+  intellectual-property risks with cloud-managed discovery, full candidate
+  disposition, seven-module review, and offline evidence-bound reports.
+  Last updated: 2026-08-22 19:43 (UTC+8).
+- `skills/lc-ipr-risk-screening-free/` - Run the existing free-tier IPR
+  screening workflow with browser-based official-source verification.
 
 ## Install Path
 
@@ -36,6 +42,8 @@ https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_market_opportunity
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_market_research
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_niche
+https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-ipr-risk-screening
+https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-ipr-risk-screening-free
 ```
 
 ## Security

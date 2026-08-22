@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:human-resolution:0.1",
+  "title": "Immutable Human Review Resolution",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "resolution_id", "task_id", "context_digest", "evidence_digest", "resolver", "module_results", "evidence_refs", "reason", "lawyer_override", "resolved_at", "digest"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "resolution_id": {"type": "string", "pattern": "^RES-[a-f0-9]{24}$"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "context_digest": {"$ref": "#/$defs/digest"},
+    "evidence_digest": {"$ref": "#/$defs/digest"},
+    "resolver": {"$ref": "#/$defs/actor"},
+    "module_results": {"type": "array", "minItems": 7, "maxItems": 7, "items": {"$ref": "#/$defs/module"}},
+    "evidence_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 10000},
+    "lawyer_override": {"type": "boolean"},
+    "resolved_at": {"type": "string", "format": "date-time"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "actor": {"type": "object", "additionalProperties": false, "required": ["type", "id", "session_id"], "properties": {"type": {"enum": ["human", "reviewer"]}, "id": {"type": "string", "minLength": 1, "maxLength": 128}, "session_id": {"type": "string", "minLength": 1, "maxLength": 128}}},
+    "module": {"type": "object", "additionalProperties": false, "required": ["module", "risk", "confidence", "rationale"], "properties": {
+      "module": {"enum": ["appearance_design", "utility_patent", "pending_patent", "word_mark", "figurative_trade_dress", "copyright_creative_ip", "enforcement_public_signals"]},
+      "risk": {"enum": ["very_low", "low", "medium", "high", "critical"]},
+      "confidence": {"enum": ["low", "medium", "high"]},
+      "rationale": {"type": "string", "minLength": 1, "maxLength": 5000}
+    }}
+  }
+}

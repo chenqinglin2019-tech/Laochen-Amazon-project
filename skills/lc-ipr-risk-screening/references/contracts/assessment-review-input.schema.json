@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:assessment-review-input:0.1",
+  "title": "Assessment Review Input",
+  "$ref": "#/$defs/review_input",
+  "$defs": {
+    "risk": {"enum": ["very_low", "low", "medium", "high", "critical"]},
+    "confidence": {"enum": ["low", "medium", "high"]},
+    "actor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "id", "session_id"],
+      "properties": {
+        "type": {"enum": ["agent", "human", "reviewer"]},
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "finding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["finding_id", "title", "candidate_id", "jurisdiction", "official_status", "owner", "similarities", "differences", "evidence_refs", "verification_refs", "recommended_actions"],
+      "properties": {
+        "finding_id": {"type": "string", "pattern": "^F-[A-Za-z0-9_-]{4,100}$"},
+        "title": {"type": "string", "minLength": 1, "maxLength": 500},
+        "candidate_id": {"type": ["string", "null"], "pattern": "^C-[A-Za-z0-9_-]{4,100}$"},
+        "jurisdiction": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+        "official_status": {"enum": ["active", "pending", "expired", "cancelled", "abandoned", "rejected", "disputed", "unknown", "not_found", "not_applicable"]},
+        "owner": {"type": ["string", "null"], "maxLength": 500},
+        "similarities": {"$ref": "#/$defs/string_list"},
+        "differences": {"$ref": "#/$defs/string_list"},
+        "evidence_refs": {"$ref": "#/$defs/string_list"},
+        "verification_refs": {"$ref": "#/$defs/string_list"},
+        "recommended_actions": {"$ref": "#/$defs/string_list"}
+      }
+    },
+    "module": {
+      "type": "object", "additionalProperties": false,
+      "required": ["module", "risk", "confidence", "reasoning", "findings"],
+      "properties": {
+        "module": {"enum": ["appearance_design", "utility_patent", "pending_patent", "word_mark", "figurative_trade_dress", "copyright_creative_ip", "enforcement_public_signals"]},
+        "risk": {"$ref": "#/$defs/risk"},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "reasoning": {"type": "string", "minLength": 1, "maxLength": 10000},
+        "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}}
+      }
+    },
+    "string_list": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
+    "review_input": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "task_id", "round", "reviewer", "context_digest", "evidence_digest", "declared_input_refs", "isolation", "modules", "compound_escalation", "review_triggers", "summary_reasons", "recommended_actions", "submitted_at"],
+      "properties": {
+        "schema_version": {"const": "0.1"},
+        "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+        "round": {"enum": ["first", "second"]},
+        "reviewer": {"$ref": "#/$defs/actor"},
+        "context_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "evidence_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "declared_input_refs": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 500}},
+        "isolation": {
+          "type": "object", "additionalProperties": false,
+          "required": ["mode", "prior_review_read", "proof_id"],
+          "properties": {
+            "mode": {"enum": ["declared_only", "runtime_enforced"]},
+            "prior_review_read": {"const": false},
+            "proof_id": {"type": ["string", "null"], "maxLength": 256}
+          }
+        },
+        "modules": {"type": "array", "minItems": 7, "maxItems": 7, "items": {"$ref": "#/$defs/module"}},
+        "compound_escalation": {
+          "type": "object", "additionalProperties": false,
+          "required": ["enabled", "justification"],
+          "properties": {"enabled": {"type": "boolean"}, "justification": {"type": "string", "maxLength": 5000}}
+        },
+        "review_triggers": {"type": "array", "uniqueItems": true, "items": {"enum": ["uncertain_material_status", "disputed_class_overlap", "incomplete_copyright_provenance", "module_conflict", "optional_source_failure", "image_coverage_limited"]}},
+        "summary_reasons": {"$ref": "#/$defs/string_list"},
+        "recommended_actions": {"$ref": "#/$defs/string_list"},
+        "submitted_at": {"type": "string", "format": "date-time"}
+      }
+    }
+  }
+}

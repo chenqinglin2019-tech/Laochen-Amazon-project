@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lc IPR Risk Screening"
+  short_description: "美国 Amazon 单品知识产权风险正式筛查"
+  default_prompt: "Use $lc-ipr-risk-screening to screen one US Amazon product through cloud-managed discovery, complete full-batch candidate review, and deliver an evidence-bound seven-module risk report."

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:candidate-record-input:0.1",
+  "title": "Candidate Record Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "run_id", "source_index", "record_number", "title", "owner", "source_locator", "summary", "supporting_raw_refs"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_-]{4,100}$"},
+    "source_index": {"type": "integer", "minimum": 0},
+    "record_number": {"type": ["string", "null"], "maxLength": 200},
+    "title": {"type": ["string", "null"], "maxLength": 500},
+    "owner": {"type": ["string", "null"], "maxLength": 500},
+    "source_locator": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "summary": {"type": "string", "minLength": 1, "maxLength": 5000},
+    "supporting_raw_refs": {"type": "array", "maxItems": 20, "uniqueItems": true, "items": {"type": "string", "pattern": "^(?:raw|screenshots)/.+"}}
+  }
+}

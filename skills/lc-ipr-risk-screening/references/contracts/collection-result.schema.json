@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:collection-result:0.1",
+  "title": "Product Collection Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "status", "reason_code", "resolved_input_mode", "missing_fields", "warnings"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "status": {"enum": ["ready", "needs_confirmation", "failed"]},
+    "reason_code": {"type": "string", "minLength": 1, "maxLength": 100},
+    "resolved_input_mode": {"type": ["string", "null"], "enum": ["manual_detail", "asin_lookup", null]},
+    "task_id": {"type": ["string", "null"], "maxLength": 128},
+    "product_facts_path": {"type": ["string", "null"], "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)).+"},
+    "missing_fields": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "warnings": {"type": "array", "items": {"type": "string", "maxLength": 1000}},
+    "error": {"type": "string", "minLength": 1, "maxLength": 4000},
+    "seller_lookup": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["asin", "marketplace", "provider", "action", "normalized_fields"],
+      "properties": {
+        "asin": {"type": "string", "pattern": "^[A-Z0-9]{10}$"},
+        "marketplace": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+        "provider": {"const": "laochen_backend"},
+        "action": {"const": "product_detail"},
+        "normalized_fields": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

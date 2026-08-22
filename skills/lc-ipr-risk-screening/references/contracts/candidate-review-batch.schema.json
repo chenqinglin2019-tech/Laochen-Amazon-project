@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:candidate-review-batch:0.1",
+  "title": "Candidate Review Batch",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "evidence_digest", "decided_by", "decisions"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "evidence_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "decided_by": {
+      "type": "object", "additionalProperties": false,
+      "required": ["type", "id", "session_id"],
+      "properties": {
+        "type": {"enum": ["agent", "human"]},
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "decisions": {
+      "type": "array", "maxItems": 10000,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["candidate_id", "disposition", "deterministic_triggers", "exclusion_codes", "rationale"],
+        "properties": {
+          "candidate_id": {"type": "string", "pattern": "^C-[A-Za-z0-9_-]{4,100}$"},
+          "disposition": {"enum": ["material", "not_material", "needs_review"]},
+          "deterministic_triggers": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "exclusion_codes": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "rationale": {"type": "string", "minLength": 1, "maxLength": 5000}
+        }
+      }
+    }
+  }
+}
