@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:product-facts:0.1",
+  "title": "Normalized Product Facts",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "product_id",
+    "marketplace",
+    "input_mode",
+    "facts",
+    "images",
+    "feature_inventory",
+    "provenance_declarations",
+    "frozen_at",
+    "digest"
+  ],
+  "$defs": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_type", "collected_at"],
+      "properties": {
+        "source_type": {"enum": ["user", "sellersprite", "amazon_page", "agent_derived"]},
+        "source_ref": {"type": ["string", "null"], "maxLength": 500},
+        "collected_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "value", "sources"],
+      "properties": {
+        "state": {"enum": ["provided", "not_applicable", "unknown"]},
+        "value": {},
+        "sources": {"type": "array", "items": {"$ref": "#/$defs/source"}}
+      }
+    },
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["image_id", "role", "path", "sha256", "original_name", "source_rank", "source"],
+      "properties": {
+        "image_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "role": {"enum": ["main", "product_detail", "packaging", "logo", "pattern", "mechanism", "other"]},
+        "path": {"type": "string", "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)).+"},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "original_name": {"type": "string", "minLength": 1, "maxLength": 255},
+        "source_rank": {"type": "integer", "minimum": 0},
+        "public_url": {"type": ["string", "null"], "format": "uri", "maxLength": 2000},
+        "source": {"$ref": "#/$defs/source"}
+      }
+    }
+  },
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "minLength": 1},
+    "product_id": {"type": "string", "minLength": 1},
+    "marketplace": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+    "asin": {"type": ["string", "null"], "pattern": "^[A-Z0-9]{10}$"},
+    "input_mode": {"enum": ["asin_lookup", "manual_detail"]},
+    "facts": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/fact"},
+      "required": ["title", "brand", "category", "bullet_points", "description", "materials", "technical_functions"]
+    },
+    "images": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/image"}},
+    "feature_inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["feature_id", "kind", "state", "description", "source_refs", "sources"],
+        "properties": {
+          "feature_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "kind": {"enum": ["shape", "structure", "mechanism", "word", "logo", "character", "pattern", "packaging", "creative_asset", "claim", "other"]},
+          "state": {"enum": ["provided", "not_applicable", "unknown"]},
+          "description": {"type": "string", "maxLength": 3000},
+          "source_refs": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "sources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/source"}}
+        }
+      }
+    },
+    "provenance_declarations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_ref", "asset_sha256", "state", "details", "creator", "rights_owner", "rights_basis", "license_scope", "territory", "term", "evidence_refs", "sources"],
+        "properties": {
+          "asset_ref": {"type": "string", "minLength": 1},
+          "asset_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+          "state": {"enum": ["provided", "not_applicable", "unknown"]},
+          "details": {"type": "string", "maxLength": 3000},
+          "creator": {"type": "string", "maxLength": 500},
+          "rights_owner": {"type": "string", "maxLength": 500},
+          "rights_basis": {"type": "string", "maxLength": 64},
+          "license_scope": {"type": "string", "maxLength": 2000},
+          "territory": {"type": "string", "maxLength": 500},
+          "term": {"type": "string", "maxLength": 500},
+          "evidence_refs": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 2000}},
+          "sources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/source"}}
+        },
+        "allOf": [
+          {"if": {"properties": {"state": {"const": "provided"}}}, "then": {"properties": {"asset_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}}}
+        ]
+      }
+    },
+    "frozen_at": {"type": "string", "format": "date-time"},
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:assessment-readiness:0.1",
+  "title": "Assessment Readiness",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "query_plan_digest", "evidence_digest", "evidence_revision", "coverage_digest", "candidate_verification_digest", "status", "gaps", "prepared_at", "context_digest", "digest"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "query_plan_digest": {"$ref": "#/$defs/digest"},
+    "evidence_digest": {"$ref": "#/$defs/digest"},
+    "evidence_revision": {"type": "integer", "minimum": 1},
+    "coverage_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "candidate_verification_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "status": {"enum": ["ready", "incomplete"]},
+    "gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}},
+    "prepared_at": {"type": "string", "format": "date-time"},
+    "context_digest": {"$ref": "#/$defs/digest"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "scope_type", "scope_id", "message"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 160},
+        "scope_type": {"type": "string", "minLength": 1, "maxLength": 80},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    }
+  }
+}

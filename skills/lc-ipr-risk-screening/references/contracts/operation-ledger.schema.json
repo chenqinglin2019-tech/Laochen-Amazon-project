@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:operation-ledger:0.1",
+  "title": "Task Operation Ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "revision", "operations", "updated_at", "digest"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operation_id", "provider", "capability", "query_id", "status",
+          "idempotency_key", "request_digest", "billable", "attempt_count",
+          "created_at", "updated_at"
+        ],
+        "properties": {
+          "operation_id": {"type": "string", "pattern": "^OP-[A-Za-z0-9_-]{4,100}$"},
+          "provider": {"type": "string", "minLength": 1, "maxLength": 80},
+          "capability": {"type": "string", "minLength": 1, "maxLength": 120},
+          "query_id": {"type": ["string", "null"], "pattern": "^Q-[A-Za-z0-9_-]{4,80}$"},
+          "status": {
+            "enum": [
+              "submitting", "submitted", "processing", "uncertain",
+              "success", "no_result", "partial", "failed",
+              "needs_user_action", "access_limited"
+            ]
+          },
+          "idempotency_key": {"type": "string", "pattern": "^idem_[a-f0-9]{64}$"},
+          "request_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+          "billable": {"type": "boolean"},
+          "attempt_count": {"type": "integer", "minimum": 1},
+          "provider_request_id": {"type": ["string", "null"], "maxLength": 256},
+          "result_path": {
+            "type": ["string", "null"],
+            "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$)).+"
+          },
+          "result_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+          "safe_error_code": {"type": ["string", "null"], "maxLength": 80},
+          "created_at": {"type": "string", "format": "date-time"},
+          "updated_at": {"type": "string", "format": "date-time"}
+        }
+      }
+    },
+    "updated_at": {"type": "string", "format": "date-time"},
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

@@ -1,0 +1,104 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:provider-result:0.1",
+  "title": "Validated Provider Result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "run_id",
+    "operation_id",
+    "query_id",
+    "provider",
+    "capability",
+    "query",
+    "jurisdiction",
+    "right_type",
+    "evidence_type",
+    "coverage_modules",
+    "status",
+    "started_at",
+    "finished_at",
+    "raw_path",
+    "raw_sha256",
+    "parser",
+    "counts",
+    "cost"
+  ],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "minLength": 1},
+    "run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_-]{4,100}$"},
+    "operation_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "query_id": {"type": "string", "pattern": "^Q-[A-Za-z0-9_-]{4,80}$"},
+    "provider": {"type": "string", "minLength": 1, "maxLength": 80},
+    "capability": {"type": "string", "minLength": 1, "maxLength": 120},
+    "query": {"type": "string", "minLength": 1, "maxLength": 2000},
+    "jurisdiction": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+    "right_type": {"type": "string", "minLength": 1, "maxLength": 80},
+    "evidence_type": {"type": "string", "minLength": 1, "maxLength": 120},
+    "coverage_modules": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "appearance_design",
+          "utility_patent",
+          "pending_patent",
+          "word_mark",
+          "figurative_trade_dress",
+          "copyright_creative_ip",
+          "enforcement_public_signals"
+        ]
+      }
+    },
+    "status": {"enum": ["success", "no_result", "partial", "failed", "needs_user_action", "access_limited"]},
+    "started_at": {"type": "string", "format": "date-time"},
+    "finished_at": {"type": "string", "format": "date-time"},
+    "http_status": {"type": ["integer", "null"], "minimum": 100, "maximum": 599},
+    "raw_path": {"type": "string", "pattern": "^raw/(?!.*(?:^|[/\\\\])\\.\\.(?:[/\\\\]|$))[^\\\\]+$"},
+    "raw_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "parser": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "schema_valid"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "schema_valid": {"type": "boolean"},
+        "warnings": {"type": "array", "items": {"type": "string", "maxLength": 500}}
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["items"],
+      "properties": {
+        "items": {"type": "integer", "minimum": 0},
+        "total": {"type": ["integer", "null"], "minimum": 0}
+      }
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["billable", "units", "unit_name"],
+      "properties": {
+        "billable": {"type": "boolean"},
+        "units": {"type": "number", "minimum": 0},
+        "unit_name": {"type": "string", "minLength": 1, "maxLength": 40}
+      }
+    },
+    "safe_error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 80},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "retryable": {"type": "boolean"}
+      }
+    }
+  }
+}

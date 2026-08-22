@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:query-plan:0.1",
+  "title": "Frozen Query Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "product_facts_digest", "plan_version", "items", "frozen_at", "digest"],
+  "$defs": {
+    "module": {
+      "enum": [
+        "appearance_design",
+        "utility_patent",
+        "pending_patent",
+        "word_mark",
+        "figurative_trade_dress",
+        "copyright_creative_ip",
+        "enforcement_public_signals"
+      ]
+    }
+  },
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "minLength": 1},
+    "product_facts_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "plan_version": {"type": "integer", "minimum": 1},
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "query_id",
+          "module",
+          "target_jurisdiction",
+          "provider_jurisdiction",
+          "right_type",
+          "evidence_type",
+          "query_family",
+          "query",
+          "strategy",
+          "required",
+          "allowed_providers",
+          "preferred_provider",
+          "capability",
+          "execution_state",
+          "completion_rule",
+          "input_refs"
+        ],
+        "properties": {
+          "query_id": {"type": "string", "pattern": "^Q-[A-Za-z0-9_-]{4,80}$"},
+          "module": {"$ref": "#/$defs/module"},
+          "target_jurisdiction": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+          "provider_jurisdiction": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+          "right_type": {"type": "string", "minLength": 1, "maxLength": 80},
+          "evidence_type": {"type": "string", "minLength": 1, "maxLength": 120},
+          "query_family": {"type": "string", "minLength": 1, "maxLength": 120},
+          "query": {"type": "string", "minLength": 1, "maxLength": 2000},
+          "strategy": {"type": "string", "minLength": 1, "maxLength": 2000},
+          "required": {"type": "boolean"},
+          "allowed_providers": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1, "maxLength": 80}
+          },
+          "preferred_provider": {"type": "string", "minLength": 1, "maxLength": 80},
+          "capability": {"type": "string", "minLength": 1, "maxLength": 120},
+          "execution_state": {"enum": ["ready", "needs_user_action", "access_limited"]},
+          "blocking_reason": {"type": "string", "minLength": 1, "maxLength": 160},
+          "completion_rule": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["accepted_statuses", "schema_validator"],
+            "properties": {
+              "accepted_statuses": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"enum": ["success", "no_result"]}
+              },
+              "schema_validator": {"type": "string", "minLength": 1, "maxLength": 160}
+            }
+          },
+          "input_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "notes": {"type": "string", "maxLength": 2000}
+        },
+        "allOf": [
+          {
+            "if": {"properties": {"execution_state": {"const": "ready"}}},
+            "then": {"not": {"required": ["blocking_reason"]}},
+            "else": {"required": ["blocking_reason"]}
+          }
+        ]
+      }
+    },
+    "frozen_at": {"type": "string", "format": "date-time"},
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

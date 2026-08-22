@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:candidate-verification-report:0.1",
+  "title": "Candidate Verification Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "query_plan_digest", "evidence_digest", "coverage_digest", "status", "coverage_ready", "inventory_ready", "disposition_ready", "official_ready", "stage5_ready", "expected_item_total", "recorded_item_total", "candidate_total", "material_total", "official_complete", "inventory_rows", "candidate_rows", "gaps", "evaluated_at", "digest"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "query_plan_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "evidence_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "coverage_digest": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+    "status": {"enum": ["complete", "incomplete"]},
+    "coverage_ready": {"type": "boolean"},
+    "inventory_ready": {"type": "boolean"},
+    "disposition_ready": {"type": "boolean"},
+    "official_ready": {"type": "boolean"},
+    "stage5_ready": {"type": "boolean"},
+    "expected_item_total": {"type": "integer", "minimum": 0},
+    "recorded_item_total": {"type": "integer", "minimum": 0},
+    "candidate_total": {"type": "integer", "minimum": 0},
+    "material_total": {"type": "integer", "minimum": 0},
+    "official_complete": {"type": "integer", "minimum": 0},
+    "inventory_rows": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/inventory_row"}
+    },
+    "candidate_rows": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/candidate_row"}
+    },
+    "gaps": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/gap"}
+    },
+    "evaluated_at": {"type": "string", "format": "date-time"},
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "$defs": {
+    "inventory_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_id", "query_id", "provider_status", "expected_items", "recorded_items", "inventory_status", "reason_code"],
+      "properties": {
+        "run_id": {"type": "string", "pattern": "^RUN-[A-Za-z0-9_-]{4,100}$"},
+        "query_id": {"type": "string", "pattern": "^Q-[A-Za-z0-9_-]{4,80}$"},
+        "provider_status": {"enum": ["success", "no_result", "partial", "failed", "needs_user_action", "access_limited"]},
+        "expected_items": {"type": "integer", "minimum": 0},
+        "recorded_items": {"type": "integer", "minimum": 0},
+        "inventory_status": {"enum": ["complete", "incomplete"]},
+        "reason_code": {"type": "string", "minLength": 1, "maxLength": 160}
+      }
+    },
+    "candidate_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "candidate_key", "module", "jurisdiction", "right_type", "disposition", "official_required", "official_status", "reason_code", "verification_ids", "provenance_verification_ids"],
+      "properties": {
+        "candidate_id": {"type": "string", "pattern": "^C-[A-Za-z0-9_-]{4,100}$"},
+        "candidate_key": {"type": "string", "minLength": 1, "maxLength": 500},
+        "module": {
+          "enum": [
+            "appearance_design",
+            "utility_patent",
+            "pending_patent",
+            "word_mark",
+            "figurative_trade_dress",
+            "copyright_creative_ip",
+            "enforcement_public_signals"
+          ]
+        },
+        "jurisdiction": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+        "right_type": {"type": "string", "minLength": 1, "maxLength": 80},
+        "disposition": {
+          "oneOf": [
+            {"type": "null"},
+            {"enum": ["material", "not_material", "needs_review"]}
+          ]
+        },
+        "official_required": {"type": "boolean"},
+        "official_status": {"enum": ["not_required", "not_required_for_right_type", "complete", "incomplete"]},
+        "reason_code": {"type": "string", "minLength": 1, "maxLength": 160},
+        "verification_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^V-[A-Za-z0-9_-]{4,100}$"}
+        },
+        "provenance_verification_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^CPV-[a-f0-9]{24}$"}
+        }
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "scope_type", "scope_id", "message"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 160},
+        "scope_type": {"enum": ["task", "provider_run", "candidate"]},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1000}
+      }
+    }
+  }
+}

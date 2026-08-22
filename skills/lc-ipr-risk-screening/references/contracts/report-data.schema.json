@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:report-data:0.1",
+  "title": "IPR Screening Report View Model",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "task_id", "report_mode", "product", "overview", "coverage", "gaps", "modules", "candidates", "constraints", "trace", "generated_at", "digest"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "report_mode": {"enum": ["formal", "draft"]},
+    "product": {"type": "object"},
+    "overview": {"type": "object", "required": ["status", "risk", "confidence", "formal_conclusion_allowed", "summary", "legal_boundary"]},
+    "coverage": {"type": "object", "required": ["required_total", "completed_total", "gap_total", "candidate_total", "material_total", "official_complete"]},
+    "gaps": {"type": "array", "items": {"type": "object", "required": ["code", "scope_type", "scope_id", "message"]}},
+    "modules": {"type": "array", "minItems": 7, "maxItems": 7},
+    "candidates": {"type": "array"},
+    "visual_evidence": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidate_id", "module", "jurisdiction", "record_number", "title", "owner", "similarity", "reason", "image_path", "image_sha256"],
+        "properties": {
+          "candidate_id": {"type": "string"},
+          "module": {"type": "string"},
+          "jurisdiction": {"type": "string"},
+          "record_number": {"type": "string"},
+          "title": {"type": "string"},
+          "owner": {"type": ["string", "null"]},
+          "similarity": {"type": "string"},
+          "reason": {"type": "string"},
+          "image_path": {"type": "string", "pattern": "^us-screen/evidence-images/.+\\.img$"},
+          "image_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        }
+      }
+    },
+    "constraints": {"type": "array"},
+    "trace": {"type": "object", "required": ["product_facts_digest", "query_plan_digest", "evidence_digest", "assessment_digest", "evidence_revision"]},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

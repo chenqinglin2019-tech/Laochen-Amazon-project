@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:task:0.1",
+  "title": "LC IPR Risk Screening Task",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "product_id",
+    "input_mode",
+    "status",
+    "selected_tier",
+    "target_jurisdictions",
+    "product_facts_path",
+    "product_facts_digest",
+    "operation_ledger_path",
+    "created_at",
+    "updated_at",
+    "revision",
+    "transitions"
+  ],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "product_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "input_mode": {"enum": ["asin_lookup", "manual_detail"]},
+    "status": {
+      "enum": [
+        "created",
+        "collecting_product_facts",
+        "needs_user_action",
+        "preflight",
+        "planning_queries",
+        "collecting_evidence",
+        "verifying_candidates",
+        "ready_for_assessment",
+        "reviewing",
+        "rendering",
+        "validating",
+        "completed",
+        "incomplete",
+        "failed"
+      ]
+    },
+    "selected_tier": {"enum": ["low_cost", "high_risk"]},
+    "target_jurisdictions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,15}$"}
+    },
+    "product_facts_path": {"const": "02_product_facts.json"},
+    "product_facts_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "product_corroboration_path": {
+      "type": ["string", "null"],
+      "enum": ["input-metadata/product-corroboration.json", null]
+    },
+    "product_corroboration_digest": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "operation_ledger_path": {"const": "03_operation_ledger.json"},
+    "query_plan_path": {
+      "type": ["string", "null"],
+      "enum": ["04_query_plan.json", null]
+    },
+    "query_plan_digest": {
+      "type": ["string", "null"],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "evidence_ledger_path": {
+      "type": ["string", "null"],
+      "enum": ["05_evidence_ledger.json", null]
+    },
+    "created_at": {"type": "string", "format": "date-time"},
+    "updated_at": {"type": "string", "format": "date-time"},
+    "revision": {"type": "integer", "minimum": 1},
+    "current_operation_id": {"type": ["string", "null"], "maxLength": 128},
+    "needs_user_action": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["code", "message", "recovery_action", "paid_submission_occurred"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 80},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "recovery_action": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "paid_submission_occurred": {"type": "boolean"}
+      }
+    },
+    "transitions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["transition_id", "from", "to", "at", "actor", "reason", "basis_digests"],
+        "properties": {
+          "transition_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "from": {"type": ["string", "null"]},
+          "to": {"type": "string", "minLength": 1},
+          "at": {"type": "string", "format": "date-time"},
+          "actor": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["type", "id"],
+            "properties": {
+              "type": {"enum": ["user", "agent", "cli", "backend", "reviewer"]},
+              "id": {"type": "string", "minLength": 1, "maxLength": 128}
+            }
+          },
+          "reason": {"type": "string", "minLength": 1, "maxLength": 1000},
+          "basis_digests": {
+            "type": "array",
+            "items": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"required": ["query_plan_path"], "properties": {"query_plan_path": {"type": "string"}}},
+      "then": {"required": ["query_plan_digest"]}
+    },
+    {
+      "if": {"required": ["query_plan_digest"], "properties": {"query_plan_digest": {"type": "string"}}},
+      "then": {"required": ["query_plan_path"]}
+    },
+    {
+      "if": {"properties": {"input_mode": {"const": "asin_lookup"}}},
+      "then": {
+        "required": ["product_corroboration_path", "product_corroboration_digest"],
+        "properties": {
+          "product_corroboration_path": {"const": "input-metadata/product-corroboration.json"},
+          "product_corroboration_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:product-input:0.1",
+  "title": "Product Collection Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["product", "images"],
+  "properties": {
+    "schema_version": {"const": "0.1"},
+    "input_mode": {"enum": ["auto", "manual_detail", "asin_lookup"]},
+    "screening_tier": {"enum": ["low_cost", "high_risk"]},
+    "marketplace": {"type": ["string", "null"], "pattern": "^[A-Za-z][A-Za-z0-9-]{1,15}$"},
+    "asin": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9]{10}$"},
+    "product_url": {"type": ["string", "null"], "format": "uri", "maxLength": 2000},
+    "image_folder": {"type": ["string", "null"], "maxLength": 4096},
+    "jurisdictions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9-]{1,15}$"}
+    },
+    "feishu_record_id": {"type": ["string", "null"], "maxLength": 500},
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "marketplace": {"type": ["string", "null"], "pattern": "^[A-Za-z][A-Za-z0-9-]{1,15}$"},
+        "asin": {"type": ["string", "null"], "pattern": "^[A-Za-z0-9]{10}$"},
+        "title": {"type": ["string", "null"], "maxLength": 1000},
+        "subtitle": {"type": ["string", "null"], "maxLength": 1000},
+        "brand": {"type": ["string", "null"], "maxLength": 500},
+        "platform_category": {"type": ["string", "null"], "maxLength": 1000},
+        "bullet_points": {"type": "array", "items": {"type": "string", "maxLength": 3000}},
+        "long_description": {"type": ["string", "null"], "maxLength": 20000},
+        "materials": {"type": "array", "items": {"type": "string", "maxLength": 500}},
+        "technical_functions": {"type": "array", "items": {"type": "string", "maxLength": 2000}},
+        "features": {"type": "array", "items": {"type": "string", "maxLength": 2000}},
+        "claims": {"type": "array", "items": {"type": "string", "maxLength": 3000}},
+        "sku": {"type": ["string", "null"], "maxLength": 200},
+        "model_number": {"type": ["string", "null"], "maxLength": 200},
+        "manufacturer": {"type": ["string", "null"], "maxLength": 500},
+        "color": {"type": ["string", "null"], "maxLength": 200},
+        "dimensions": {"type": ["string", "null"], "maxLength": 500}
+      }
+    },
+    "images": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "role"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1, "maxLength": 4096},
+          "role": {"enum": ["main", "product_detail", "packaging", "logo", "pattern", "mechanism", "other"]},
+          "source_rank": {"type": "integer", "minimum": 0},
+          "public_url": {"type": ["string", "null"], "format": "uri", "maxLength": 2000},
+          "external_upload_allowed": {"type": ["boolean", "null"]}
+        }
+      }
+    },
+    "feature_inventory": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["feature_id", "kind", "state", "description"],
+        "properties": {
+          "feature_id": {"type": "string", "minLength": 1, "maxLength": 128},
+          "kind": {"enum": ["shape", "structure", "mechanism", "word", "logo", "character", "pattern", "packaging", "creative_asset", "claim", "other"]},
+          "state": {"enum": ["provided", "not_applicable", "unknown"]},
+          "description": {"type": "string", "maxLength": 3000},
+          "source_refs": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "provenance_declarations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["asset_ref", "state", "details"],
+        "properties": {
+          "asset_ref": {"type": "string", "minLength": 1},
+          "state": {"enum": ["provided", "not_applicable", "unknown"]},
+          "details": {"type": "string", "maxLength": 3000},
+          "creator": {"type": "string", "maxLength": 500},
+          "rights_owner": {"type": "string", "maxLength": 500},
+          "rights_basis": {"enum": ["original", "license", "assignment", "employment", "commissioned", "public_domain"]},
+          "license_scope": {"type": "string", "maxLength": 2000},
+          "territory": {"type": "string", "maxLength": 500},
+          "term": {"type": "string", "maxLength": 500},
+          "evidence_refs": {"type": "array", "items": {"type": "string", "minLength": 1, "maxLength": 2000}}
+        }
+      }
+    }
+  }
+}
