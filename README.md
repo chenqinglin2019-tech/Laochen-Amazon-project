@@ -18,9 +18,9 @@ Public repository for Laochen Amazon workflow skills.
 - `skills/lc_amazon_niche/` - Score and rank Amazon niche candidates by seller
   profile.
 - `skills/lc-ipr-risk-screening/` - Screen one US Amazon product for
-  intellectual-property risks with cloud-managed discovery, full candidate
-  disposition, seven-module review, and offline evidence-bound reports.
-  Last updated: 2026-08-22 19:43 (UTC+8).
+  intellectual-property risks with cloud-managed discovery, optional local
+  Serper supplementation, full candidate disposition, seven-module review,
+  and offline evidence-bound reports. Last updated: 2026-08-28 10:19 (UTC+8).
 - `skills/lc-ipr-risk-screening-free/` - Run the existing free-tier IPR
   screening workflow with browser-based official-source verification.
 

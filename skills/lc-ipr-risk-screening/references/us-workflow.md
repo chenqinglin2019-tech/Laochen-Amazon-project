@@ -1,6 +1,6 @@
 # 美国风险筛查工作流
 
-本工作流只接受 US。公开网页检索与云端知识产权服务是互补的候选发现层。两条链都使用老陈云端，用户只提供 `LAOCHEN_BACKEND_TOKEN`，不配置上游 Key，也不需要确认调用次数或积分计划。
+本工作流只接受 US。公开网页检索与云端知识产权服务是互补的候选发现层。云端知识产权发现使用 `LAOCHEN_BACKEND_TOKEN`。公开网页检索先读 `SERPER_API_KEY`：有则本机执行；没有就问一次。用户把 Key 发在对话里时注入当前会话环境变量并立刻继续，不要要求改系统变量或重启 Agent。用户明确没有则跳过公开网页、云端核心继续。不向用户逐次确认调用次数或积分。
 
 ## 七模块与能力分工
 
@@ -26,7 +26,7 @@
   --task-dir <task-dir>
 ```
 
-命令会生成冻结计划与内部执行授权，用于稳定请求 ID、防重复提交、断点恢复和调用留痕。返回 `status=ready` 后直接继续，不向用户索要上游 Key 或费用确认。
+命令会生成冻结计划与内部执行授权，用于稳定请求 ID、防重复提交、断点恢复和调用留痕。返回 `status=ready` 后直接继续，不向用户索要云端积分确认。云端知识产权发现不依赖 `SERPER_API_KEY`。
 
 ## 执行与证据导入
 
@@ -49,7 +49,7 @@
   --approval <task-dir>/serper/approval.json
 ```
 
-`import-us-screen-evidence` 和 `run-serper-plan` 把完成的 operation 写入同一 evidence ledger。人工本地图由 `us-screen` 上传一次；随后的 `prepare-serper-run` 从绑定的运行状态读取受控 HTTPS 地址，补齐图形商标/商业外观与版权两条反向图搜。供应商 Key 不得进入用户环境、`config.json`、任务目录、命令参数、报告或聊天。
+`import-us-screen-evidence` 和 `run-serper-plan` 把完成的 operation 写入同一 evidence ledger。人工本地图由 `us-screen` 上传一次；随后的 `prepare-serper-run` 从绑定的运行状态读取受控 HTTPS 地址，补齐图形商标/商业外观与版权两条反向图搜。云端知识产权服务的供应商 Key 不得进入用户环境、`config.json`、任务目录、命令参数、报告或聊天。公开网页检索只使用进程环境变量 `SERPER_API_KEY`。用户在对话中提供时，只注入当前会话后继续；不得写入 `config.json`、任务目录、命令参数、报告。
 
 ## 图片与远程边界
 
@@ -64,7 +64,7 @@
 - `uncertain` 表示结果状态未知且可能已计费：停止当前付费链，不得换 request ID 重提。
 - 明确 HTTP 5xx 且未消耗 credit 的 Serper 行记录为 coverage gap，继续其余独立查询，不自动重试失败项。
 - Serper 单条响应可用候选保留率不低于 90% 时，孤立畸形项记入 parser warnings 而不阻断 coverage；原始响应、`items/total` 差异和拒绝原因仍全部保留。低于 90% 为 `partial`，零条可用为失败。
-- `run-serper-plan` 仅在 `ready` 或可审计的 `partial` 时进入候选处置；`blocked` 必须留在当前阶段恢复，不能提前转入 `verifying_candidates`。
+- `run-serper-plan` 在 `ready`、可审计的 `partial` 或 `SERPER_SKIPPED_NO_KEY` 时进入候选处置；`SERPER_SKIPPED_NO_KEY` 时问一次，用户给出 Key 就注入当前会话并立刻重跑，用户明确没有则继续云端结果并保留公开网页缺口。`blocked` 必须留在当前阶段恢复。
 - 图片任务慢时等待轮询，不要因数分钟等待重复提交。
 - `no_result` 必须来自成功且结构有效的零候选响应；认证、配额、超时、畸形 JSON 和解析失败都不是 `no_result`。
 - 供应商原始响应与 `raw/` 证据不可由 Agent 修补。URL 和候选字段的可移植规范化由 CLI 完成；失败时复用原任务和稳定 operation 恢复，不改原始字节、不换 ID 重提。

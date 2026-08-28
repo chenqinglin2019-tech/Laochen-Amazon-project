@@ -26,7 +26,7 @@ xattr -dr com.apple.quarantine tools/bin/ 2>/dev/null || true
 <IPR_CLI> auth-check --config config.json
 ```
 
-只有 `reason_code=AUTH_PASSED` 才能继续。`LAOCHEN_BACKEND_TOKEN` 优先于 `config.json.backend_token`。公开网页检索和知识产权数据发现都经老陈云端后端执行；用户只提供老陈访问 Token，不需要配置任何上游服务 Key。任何凭据都不得回显或落盘。
+只有 `reason_code=AUTH_PASSED` 才能继续。`LAOCHEN_BACKEND_TOKEN` 优先于 `config.json.backend_token`。公开网页检索先读环境变量 `SERPER_API_KEY`：有则本机直连官方接口，费用由用户自己的 Serper 账户承担。对话、本轮会话附件或用户上传文件里出现 Key / 疑似 Serper Key 时，立刻注入当前会话环境变量（PowerShell 用 `$env:SERPER_API_KEY='...'`，然后在**同一会话**里跑 CLI）并直接用，不要再问、不要要求改系统变量、不要要求重启 Agent。环境里没有、用户也没给，再问一次。禁止写入 `config.json`、命令参数、任务目录、报告；禁止回显。用户明确没有则跳过公开网页检索，商品详情和云端知识产权发现仍只用老陈 Token 并继续走完。
 
 ## 2. 输入与任务目录
 
@@ -85,7 +85,7 @@ Agent 应在 `prepare-us-screen` 返回 `status=ready` 后直接继续：
 
 - 不向用户展示最多调用次数或积分上限以请求确认；
 - 不向用户发起任何执行或费用确认；
-- 不索要任何上游 API Key；
+- 不索要云端供应商 Key。对话或本轮附件里出现 `SERPER_API_KEY` / 疑似 Key 时，只注入当前会话环境变量后直接用，不得写入文件或命令参数，不得回显，不得要求重启 Agent；
 - 计划、商品事实或图片发生变化时，必须新建任务目录；不得修补冻结计划或原始证据。
 
 ## 5. 执行云端知识产权发现与公开网页检索
@@ -120,13 +120,13 @@ Agent 应在 `prepare-us-screen` 返回 `status=ready` 后直接继续：
 执行规则：
 
 - 复跑必须复用同一任务目录、计划和内部授权文件。
-- 公开网页检索经老陈云端后端执行；用户只提供 `LAOCHEN_BACKEND_TOKEN`，不配置或接触供应商凭据。
+- 公开网页检索先读 `SERPER_API_KEY`；有则本机执行。没有则问一次。用户把 Key 发在对话里时，注入当前会话环境变量并立刻重跑 `run-serper-plan`，不要让用户改系统环境变量或重启 Agent。用户明确不提供时 `run-serper-plan` 返回 `SERPER_SKIPPED_NO_KEY`，跳过公开网页，云端知识产权发现继续。
 - 云端知识产权发现使用稳定请求 ID 和后端 operation；状态不确定时停止，不得换 ID 重复付费。
-- 计费由云端倍率和流水统一处理；Agent 不向用户发起积分计划确认。
-- Serper 单条查询明确返回 HTTP 5xx 且未消耗 credit 时，保留该失败查询为 coverage gap，并继续执行计划中其余独立查询；不得自动重试失败项。最终摘要为 `partial`，不能据此形成正式低风险结论。
+- 云端知识产权发现的计费由云端倍率和流水统一处理；公开网页检索费用由用户自己的 Serper 账户承担。Agent 不向用户发起积分计划确认。
+- Serper 单条查询明确返回 HTTP 5xx 且未消耗 credit 时，保留该失败查询为 coverage gap，并继续执行计划中其余独立查询；不得自动重试失败项。401/403/402/429 记为该条失败后停止后续公开网页提交，不自动重试，也不阻断云端已完成的发现；最终摘要为 `partial`，不能据此形成正式低风险结论。
 - Serper 响应中孤立的畸形候选由 CLI 逐条拒绝。当可用候选保留率不低于 90% 时，该查询仍完成 coverage，但必须保留原始响应、`items/total` 差异和 parser warnings；低于 90% 仍为 `partial`，零条可用仍为失败。不得修改原始证据或重复付费提交。
 - Serper 每完成或明确失败一条查询都会从 evidence ledger 全量刷新候选工作区；即使计划中途停止，也必须以刷新后的工作区为审阅入口。
-- 只有 `run-serper-plan` 返回 `ready` 或可审计的 `partial` 才能转入 `verifying_candidates`。返回 `blocked` 时保留当前任务状态并按 `reason_code` 恢复，不得提前审阅、冻结证据或把草稿当成流程完成。
+- `run-serper-plan` 返回 `ready`、可审计的 `partial` 或 `SERPER_SKIPPED_NO_KEY` 时进入 `verifying_candidates`。`SERPER_SKIPPED_NO_KEY` 时问用户一次；用户给出 Key 就注入当前会话并立刻重跑，不要停下来让用户去设系统变量。用户明确没有则继续云端结果审阅，公开网页记为缺口，不得把草稿当成完整低风险结论。返回 `blocked` 时保留当前任务状态并按 `reason_code` 恢复。
 - 图片任务慢时等待轮询；不要把数分钟等待当失败并重复提交。
 - `no_result`、解析失败、配额错误、访问受限必须严格区分。`no_result` 不等于安全。
 - `raw/` 和已经落盘的供应商响应是不可变审计证据。候选规范化失败时只能复用同一任务、计划和 operation 让 CLI 恢复；不得手工改写、复制替换或重新编码原始响应，也不得换请求 ID 重复提交。

@@ -1,18 +1,19 @@
 ---
 name: lc-ipr-risk-screening
-description: 对单个美国 Amazon 商品执行知识产权风险筛查。冻结商品事实，经老陈云端完成公开网页检索和知识产权候选发现，再做全批次候选处置、七模块审阅和离线报告。不是法律意见；未检出不等于安全。
+description: 对单个美国 Amazon 商品执行知识产权风险筛查。冻结商品事实，经老陈云端完成商品详情和知识产权候选发现；有 SERPER_API_KEY 时本机补公开网页检索，没有也不阻断。再做全批次候选处置、七模块审阅和离线报告。不是法律意见；未检出不等于安全。
 ---
 
 # LC IPR Risk Screening（US）
 
-一次只处理一个美国商品。用户只提供自己的老陈访问 Token；商品详情、公开网页检索和知识产权候选发现均经老陈云端完成，不要求用户配置任何上游 API Key。
+一次只处理一个美国商品。用户提供老陈访问 Token。公开网页检索先读环境变量 `SERPER_API_KEY`：有 Key 则本机跑完整检索；读不到就询问用户，用户没有也不阻断，云端商品详情和知识产权发现继续走完。
 
 ## 开始前
 
 1. 读取 `INSTRUCTIONS.md`、`references/input-routing.md`、`references/us-workflow.md`。
 2. 选择 `tools/bin/` 中当前平台 CLI；macOS 首次运行前按 `INSTRUCTIONS.md` 处理 quarantine。
 3. 官方包第一条业务命令必须是 `auth-check`。失败时说明原因并停止。
-4. 仅接受 `marketplace=US` / `amazon.com`。非 US 必须在上传图片或远程调用前停止。
+4. 先读环境变量 `SERPER_API_KEY`。对话、本轮会话附件或用户上传文件里出现 Key / 疑似 Serper Key 时，立刻注入当前会话环境变量后直接用，不要再问、不要要求改系统变量、不要要求重启 Agent。禁止写入 `config.json`、命令参数、任务目录，禁止回显。环境里没有、用户也没给，再问一次；用户说没有则跳过公开网页检索。
+5. 仅接受 `marketplace=US` / `amazon.com`。非 US 必须在上传图片或远程调用前停止。
 
 认证通过后，向用户索取一个美国 Amazon ASIN 或 `amazon.com` 商品链接，并明确说明可以同时上传商品主图和细节图。ASIN/链接路径会自动获取商品资料和可信主图，用户图片是可选补充；用户不提供 ASIN/链接而改用完整人工资料时，至少一张清晰主图是必填项。一次只接收一个商品。
 
@@ -20,10 +21,10 @@ description: 对单个美国 Amazon 商品执行知识产权风险筛查。冻�
 
 1. 按输入路由采集并冻结商品事实。先在技能包外指定尚不存在的 `ipr_screening_YYYYMMDD_HHMMSS/`，禁止把任务写进技能包根目录。ASIN 路径由 `collect-product` 使用 `LAOCHEN_BACKEND_TOKEN` 经云端补齐资料，随后完成语义核对。
 2. 初始化任务，生成七模块查询计划和证据账本。
-3. 先运行 `prepare-us-screen`、`us-screen` 和 `import-us-screen-evidence`。本地主图会在这一阶段上传到专属后端并绑定受控 HTTPS 地址。
-4. 再运行 `prepare-serper-run` 与 `run-serper-plan`。公开网页计划自动复用上述受控图片地址；两条计划都由 Skill 内部授权，不向用户索要上游 Key 或积分确认。
+3. 先运行 `prepare-us-screen`、`us-screen` 和 `import-us-screen-evidence`。本地主图会在这一阶段上传到专属后端并绑定受控 HTTPS 地址。云端知识产权发现不依赖 `SERPER_API_KEY`。
+4. 再运行 `prepare-serper-run` 与 `run-serper-plan`。有 `SERPER_API_KEY` 则本机跑完整公开网页检索。返回 `SERPER_SKIPPED_NO_KEY` 时问用户一次；用户把 Key 发在对话里就注入当前会话环境变量并立刻重跑 `run-serper-plan`，不要让用户去设系统变量或重启 Agent。用户明确没有就跳过公开网页、继续候选审阅。禁止把 Key 写入 `config.json`、命令参数、任务目录或报告。
 5. 进入候选审阅，对工作区中的全部候选一次性完成 `material`、`not_material` 或 `needs_review` 处置。不得遗漏来源条目。
-6. 通过查询覆盖、候选完整性和候选处置门禁后，冻结证据并完成七模块审阅。需要独立二审时默认按更高风险、更低置信度合并；只有两级风险差、finding 内容冲突、最高风险模块集合完全错位或仍存在需要人工判断的实质争议时才询问用户裁决。
+6. 通过查询覆盖、候选完整性和候选处置门禁后，冻结证据并完成七模块审阅。公开网页被跳过时按缺口交付 draft/incomplete，不得写成完整低风险。需要独立二审时默认按更高风险、更低置信度合并；只有两级风险差、finding 内容冲突、最高风险模块集合完全错位或仍存在需要人工判断的实质争议时才询问用户裁决。
 7. 执行 `finalize-assessment`、`render-report`、`validate-release`，交付离线 HTML 及结构化产物。
 
 ## 边界
