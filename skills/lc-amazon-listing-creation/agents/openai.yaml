@@ -1,0 +1,4 @@
+interface:
+  display_name: "Lc Amazon Listing Creation"
+  short_description: "Create validated Amazon inventory upload workbooks"
+  default_prompt: "Use $lc-amazon-listing-creation to create and validate an Amazon inventory upload workbook from my product information."
