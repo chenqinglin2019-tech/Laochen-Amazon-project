@@ -41,7 +41,7 @@
 <IPR_CLI> validate-product-corroboration --task-dir <task-dir>
 ```
 
-`asin_lookup` 时 inspect 返回云端 `seller_lookup`（`provider=laochen_backend`，`action=product_detail`），不返回任何本机上游命令。用户只需 ASIN/`amazon.com` 链接和 `LAOCHEN_BACKEND_TOKEN`；上游凭据与执行工具只留在云端。`collect-product` 自动调用 `/ipr/product-detail`，分发 CLI 不接受本地上游结果文件。用户已给的非空字段优先，云端详情只补缺口。身份（ASIN / marketplace / title）缺失或冲突则阻断。
+`asin_lookup` 时 inspect 返回云端 `seller_lookup`（`provider=laochen_backend`，`action=product_detail`），不返回任何本机上游命令。用户需要 ASIN/`amazon.com` 链接和 `LAOCHEN_BACKEND_TOKEN`。公开网页检索先读 `SERPER_API_KEY`，没有就问一次；用户把 Key 发在对话里时注入当前会话继续，明确没有也不阻断采集和云端发现。卖家精灵等云端上游凭据不进入用户环境。`collect-product` 自动调用 `/ipr/product-detail`，分发 CLI 不接受本地上游结果文件。用户已给的非空字段优先，云端详情只补缺口。身份（ASIN / marketplace / title）缺失或冲突则阻断。
 
 `--output-dir` 必须指向技能包外面、尚不存在的正式任务目录，禁止 `.` 或 `SKILL.md` 所在目录。成功采集通过临时目录和原子重命名一次性创建该目录，并写入 `01_collection_result.json`、`02_product_facts.json`、`input-images/`。CLI、原始输入和临时文件可以放在独立工作目录，但不要再创建第二个任务目录。缺输入或图片问题不留下半成品任务目录。后续 `init-task` 只初始化这个已有目录。
 
