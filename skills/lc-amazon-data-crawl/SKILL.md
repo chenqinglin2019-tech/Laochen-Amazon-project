@@ -2,7 +2,7 @@
 name: lc-amazon-data-crawl
 description: Run and maintain a reusable Amazon data crawler for front-end product collection with SellerSprite-enriched fields. Use when the user needs to crawl Amazon keyword search result pages with selectable sort orders, Best Sellers/New Releases category ranking nodes, storefront product lists with selectable sort orders and up to 20 pages per store, or image-search similar competitor counts/details; also use when packaging this crawler for another Codex installation.
 metadata:
-  last_updated: 2026-08-18
+  last_updated: 2026-09-01
 ---
 
 # Lc amazon Data Crawl
@@ -114,6 +114,10 @@ operational rules are:
   Playwright Chromium/Chrome for Testing runtime used by automatic extension
   loading.
 - `browser_backend: "selenium"` remains available as an explicit fallback.
+- Never ask the user to sign in to an Amazon buyer account. Crawl only public
+  Amazon pages while signed out. If Amazon opens a sign-in page, stop without
+  waiting for the user to log in. SellerSprite extension login is separate and
+  may still be required when SellerSprite enrichment is enabled.
 - If using SellerSprite enrichment, set `extension_path: "auto"` to scan normal
   Chrome Profiles for the newest installed SellerSprite version and load it
   into the dedicated CDP Profile. This loads extension code only; it never
@@ -218,7 +222,9 @@ operational rules are:
 For real runs, monitor terminal output and the `outputs/<job_id>/state.json` file:
 
 - If no new records, state updates, or browser actions happen for more than 3 minutes, report the current reason to the user.
-- If Amazon or SellerSprite needs manual action, tell the user exactly which browser window/page is waiting.
+- If Amazon CAPTCHA/robot verification or SellerSprite needs manual action,
+  tell the user exactly which browser window/page is waiting. An Amazon
+  sign-in page is terminal instead: stop without asking the user to log in.
 - If delivery auto-selection fails, tell the user to set the requested location
   in the current visible Amazon page. After `manual_pause_timeout`, treat an
   unconfirmed location as `delivery_location_unconfirmed` and stop before
