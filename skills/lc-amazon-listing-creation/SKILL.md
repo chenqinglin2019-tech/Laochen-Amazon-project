@@ -1,9 +1,9 @@
 ---
 name: lc-amazon-listing-creation
-description: Create and validate Amazon category inventory upload workbooks (.xlsm/.xlsx) from completed product or Listing information. Use for node-aware template lookup, learning role-specific field patterns from user-verified samples, GTIN/SKU preflight, Mapping v2 validation, and structure-preserving workbook output. Do not use for competitor-ASIN research or Listing copy generation; use lc-amazon-listing-asin for that work.
+description: 基于 Amazon 空白类目模板和已完成的产品或 Listing 信息，生成并校验可上传的库存上架 Excel/XLSM。
 ---
 
-# Lc Amazon Listing Creation
+# 易逊-上架表格生成
 
 Create a new Amazon inventory upload workbook from product or finished Listing information. Always use an indexed blank Amazon template as the output base. A verified completed workbook may guide field selection, but it is never copied and its old product values are never exposed.
 

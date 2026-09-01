@@ -1,4 +1,4 @@
 interface:
-  display_name: "Lc Amazon Listing Creation"
-  short_description: "Create validated Amazon inventory upload workbooks"
+  display_name: "易逊-上架表格生成"
+  short_description: "基于 Amazon 空白类目模板和已完成的产品或 Listing 信息，生成并校验可上传的库存上架 Excel/XLSM。"
   default_prompt: "Use $lc-amazon-listing-creation to create and validate an Amazon inventory upload workbook from my product information."

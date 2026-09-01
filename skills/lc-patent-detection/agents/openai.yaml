@@ -1,3 +1,3 @@
-display_name: Lc Patent Detection
-short_description: 用智慧芽查询候选并写回飞书
+display_name: 易逊-智慧芽版知识产权排查
+short_description: 使用用户的智慧芽或 PatSnap 账号进行产品图片专利与外观候选检索，生成证据报告并可写回飞书多维表格。
 default_prompt: 先执行老陈云端鉴权；通过后，用我的智慧芽账号查询产品图的专利或外观候选，官方源查不到就跳过，然后把风险值和报告写回我的飞书表；鉴权失败则立即停止。

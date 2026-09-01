@@ -1,0 +1,3 @@
+interface:
+  display_name: "易逊-细分市场优选"
+  short_description: "批量输入飞鱼最新细分市场名称，拉取核心指标并按卖家类型评分排序，帮助筛选更容易切入的市场。"

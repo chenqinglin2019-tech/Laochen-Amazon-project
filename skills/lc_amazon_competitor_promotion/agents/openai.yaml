@@ -1,0 +1,3 @@
+interface:
+  display_name: "易逊-竞品推广手段拆解"
+  short_description: "读取西柚流量趋势 Excel，拆解竞品价格、促销、广告、评价、销量及站外推广动作，生成 HTML 报告。"

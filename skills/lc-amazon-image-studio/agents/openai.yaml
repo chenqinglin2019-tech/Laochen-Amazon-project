@@ -1,4 +1,4 @@
 interface:
-  display_name: "Lc Amazon Image Studio"
-  short_description: "Fast Amazon images with critical-detail locks"
+  display_name: "易逊-亚马逊套图生成"
+  short_description: "基于真实产品图和卖点规划、生成与质检 Amazon Listing 与 A+ 图片，严格保留产品比例、材质和关键细节。"
   default_prompt: "Use $lc-amazon-image-studio to build a fast, resumable Amazon image set from my real product photos with source-quality, geometry, material, scale, and critical-detail locks."

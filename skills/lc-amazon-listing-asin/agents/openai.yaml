@@ -1,0 +1,3 @@
+interface:
+  display_name: "易逊-Listing文案生成"
+  short_description: "输入目标站点、竞品 ASIN 与产品资料，扩展关键词并生成对应站点语言的 Amazon Listing，支持多个站点。"

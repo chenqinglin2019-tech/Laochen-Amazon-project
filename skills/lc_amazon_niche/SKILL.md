@@ -1,9 +1,9 @@
 ---
 name: lc_amazon_niche
-description: 输入细分市场（niche）名称列表（最多 100 个，可聊天输入或从 txt/csv/xlsx 读取名称），自动从数据库拉取 9 项指标并评分排序，帮助卖家找到最容易切入的细分市场。支持 4 种卖家 profile 个性化评分。
+description: 批量输入飞鱼最新细分市场名称，拉取核心指标并按卖家类型评分排序，帮助筛选更容易切入的市场。
 ---
 
-# Amazon Niche Choice v3
+# 易逊-细分市场优选
 
 细分市场评分工具。输入 niche 名称 → 后端拉指标 → CLI 本地评分 → Agent 解读。
 
