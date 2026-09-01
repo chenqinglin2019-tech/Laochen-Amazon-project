@@ -2208,8 +2208,11 @@ def wait_for_manual_clear(
     timeout: int,
     stop_event: Optional[threading.Event] = None,
 ) -> bool:
+    if reason == "amazon_sign_in":
+        print("检测到亚马逊登录页。本 Skill 不使用亚马逊买家账号，也不会要求用户登录，任务已停止。")
+        return False
     print(f"检测到需要人工处理：{reason}")
-    print("脚本已暂停并保留当前页面。请在 Chrome 中手动输入验证数字或完成登录。")
+    print("脚本已暂停并保留当前页面。请在 Chrome 中手动完成页面验证。")
     deadline = time.time() + max(int(timeout), 1)
     while True:
         remaining = deadline - time.time()

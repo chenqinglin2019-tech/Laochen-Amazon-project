@@ -620,6 +620,18 @@ class DeliveryLocationFlowTests(unittest.TestCase):
         with patch.object(category, "safe_find_text", return_value="Sign in"):
             self.assertIsNone(category.detect_block(driver))
 
+    def test_amazon_sign_in_never_waits_for_buyer_account_login(self) -> None:
+        driver = FakeDriver("https://www.amazon.com/ap/signin")
+        with (
+            patch.object(category, "wait_for_manual_continue") as wait,
+            patch("builtins.print") as print_mock,
+        ):
+            self.assertFalse(category.wait_for_manual_clear(driver, "amazon_sign_in", 900))
+        wait.assert_not_called()
+        output = "\n".join(str(call.args[0]) for call in print_mock.call_args_list)
+        self.assertIn("不使用亚马逊买家账号，也不会要求用户登录", output)
+        self.assertNotIn("完成登录", output)
+
     def test_manual_success_is_required_after_auto_failure(self) -> None:
         location = {"amazon.com": {"city": "New York", "postal_code": "10001", "strategy": "postal"}}
         runtime = runtime_for(location)
