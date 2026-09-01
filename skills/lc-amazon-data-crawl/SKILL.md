@@ -117,7 +117,9 @@ operational rules are:
 - Never ask the user to sign in to an Amazon buyer account. Crawl only public
   Amazon pages while signed out. If Amazon opens a sign-in page, stop without
   waiting for the user to log in. SellerSprite extension login is separate and
-  may still be required when SellerSprite enrichment is enabled.
+  may still be required when SellerSprite enrichment is enabled. Use this exact
+  response for an Amazon sign-in wall: `Amazon 弹出了登录页；本工具不使用也不需要
+  Amazon 买家账号，本条采集已停止。请稍后重试，不要登录买家账号。`
 - If using SellerSprite enrichment, set `extension_path: "auto"` to scan normal
   Chrome Profiles for the newest installed SellerSprite version and load it
   into the dedicated CDP Profile. This loads extension code only; it never

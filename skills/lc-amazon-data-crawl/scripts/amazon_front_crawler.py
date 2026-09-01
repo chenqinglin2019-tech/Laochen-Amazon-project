@@ -93,6 +93,7 @@ from amazon_category_rank_crawler import (
     run_crawl as run_category_crawl,
     save_debug_snapshot,
     safe_sellersprite_readiness,
+    verification_unconfirmed_message,
     select_fulfillment_evidence,
     slugify,
     start_driver,
@@ -1068,7 +1069,7 @@ def wait_for_page_or_manual_front(
             if runtime.save_debug_snapshots:
                 save_debug_snapshot(driver, debug_dir, block_reason)
             raise VerificationUnconfirmedError(
-                f"{block_reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+                verification_unconfirmed_message(block_reason)
             )
     if wait_for_product_cards(driver, runtime):
         return True
@@ -1971,7 +1972,7 @@ class FrontWorker:
                 self.manual.end(self.worker_id)
             if not cleared:
                 raise VerificationUnconfirmedError(
-                    f"{block_reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+                    verification_unconfirmed_message(block_reason)
                 )
         return wait_for_product_cards(
             driver,
