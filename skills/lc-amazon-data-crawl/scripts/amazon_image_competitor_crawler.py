@@ -86,6 +86,7 @@ from amazon_category_rank_crawler import (
     resolve_path,
     save_debug_snapshot,
     safe_sellersprite_readiness,
+    sellersprite_block_reason,
     set_sellersprite_readiness,
     sleep_between_pages,
     slugify,
@@ -95,6 +96,7 @@ from amazon_category_rank_crawler import (
     wait_for_manual_clear,
     wait_for_amazon_products,
     wait_for_sellersprite_data,
+    verification_unconfirmed_message,
     write_jsonl_atomic,
 )
 from amazon_front_crawler import pick_column, read_input_rows
@@ -1454,8 +1456,19 @@ def handle_image_verification(
         if state is not None:
             state.clear_manual_pause()
         return
-    raise VerificationUnconfirmedError(
-        f"{reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+    raise VerificationUnconfirmedError(verification_unconfirmed_message(reason))
+
+
+def handle_image_sellersprite_block(
+    driver: WebDriver,
+    runtime: ImageCompetitorRuntimeConfig,
+    state: Optional[ImageCompetitorStateStore],
+) -> None:
+    handle_image_verification(
+        driver,
+        runtime,
+        state,
+        sellersprite_block_reason(driver),
     )
 
 
@@ -3301,16 +3314,13 @@ def enrich_accepted_records(
                 pass
             plugin_status = wait_for_sellersprite_data(driver, runtime)  # type: ignore[arg-type]
             if plugin_status == "blocked":
-                handle_image_verification(
-                    driver,
-                    runtime,
-                    state,
-                    "sellersprite_verification",
-                )
+                handle_image_sellersprite_block(driver, runtime, state)
                 plugin_status = wait_for_sellersprite_data(driver, runtime)  # type: ignore[arg-type]
                 if plugin_status == "blocked":
                     raise VerificationUnconfirmedError(
-                        "sellersprite_verification_unconfirmed: 人工确认后页面仍被拦截。"
+                        verification_unconfirmed_message(
+                            sellersprite_block_reason(driver)
+                        )
                     )
             if runtime.sellersprite_required and plugin_status != "ok":
                 raise UserFacingError(
@@ -3962,12 +3972,7 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                     state.mark_sellersprite_readiness(getattr(driver, "_sellersprite_readiness", {}))
                     if plugin_status == "blocked":
                         try:
-                            handle_image_verification(
-                                driver,
-                                runtime,
-                                state,
-                                "sellersprite_verification",
-                            )
+                            handle_image_sellersprite_block(driver, runtime, state)
                         except VerificationUnconfirmedError:
                             if runtime.save_debug_snapshots:
                                 save_debug_snapshot(driver, debug_dir, "verification_timeout")
@@ -3978,7 +3983,9 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                         )
                         if plugin_status == "blocked":
                             raise VerificationUnconfirmedError(
-                                "sellersprite_verification_unconfirmed: 人工确认后页面仍被拦截。"
+                                verification_unconfirmed_message(
+                                    sellersprite_block_reason(driver)
+                                )
                             )
                     if runtime.sellersprite_required and plugin_status != "ok":
                         raise UserFacingError(

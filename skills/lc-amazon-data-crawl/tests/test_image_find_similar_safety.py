@@ -160,6 +160,23 @@ class FindSimilarResultSafetyTests(unittest.TestCase):
 
 
 class SellerSpriteClickSafetyTests(unittest.TestCase):
+    def test_image_sellersprite_block_preserves_amazon_sign_in_reason(self) -> None:
+        driver = SimpleNamespace(
+            current_url="https://www.amazon.com/ap/signin",
+            _sellersprite_readiness={"blocked_reason": "amazon_sign_in"},
+        )
+        runtime = SimpleNamespace(manual_pause_timeout=900)
+        with (
+            patch.object(image, "wait_for_manual_clear", return_value=False) as clear,
+            self.assertRaisesRegex(
+                image.VerificationUnconfirmedError,
+                "amazon_sign_in_terminal",
+            ) as caught,
+        ):
+            image.handle_image_sellersprite_block(driver, runtime, None)
+        clear.assert_called_once_with(driver, "amazon_sign_in", 900)
+        self.assertNotIn("人工处理超时", str(caught.exception))
+
     def test_click_script_is_scoped_to_sellersprite_and_exact_find_similar_text(self) -> None:
         captured_scripts: list[str] = []
 

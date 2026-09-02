@@ -1,11 +1,11 @@
 ---
 name: lc-amazon-data-crawl
-description: Run and maintain a reusable Amazon data crawler for front-end product collection with SellerSprite-enriched fields. Use when the user needs to crawl Amazon keyword search result pages with selectable sort orders, Best Sellers/New Releases category ranking nodes, storefront product lists with selectable sort orders and up to 20 pages per store, or image-search similar competitor counts/details; also use when packaging this crawler for another Codex installation.
+description: 采集 Amazon 关键词搜索、类目榜单、店铺和图片相似竞品数据，并可结合卖家精灵字段与筛选条件导出。
 metadata:
   last_updated: 2026-09-01
 ---
 
-# Lc amazon Data Crawl
+# 易逊-亚马逊数据采集
 
 Use this skill to create and operate a local Amazon crawler runner. The bundled scripts support:
 
@@ -117,7 +117,9 @@ operational rules are:
 - Never ask the user to sign in to an Amazon buyer account. Crawl only public
   Amazon pages while signed out. If Amazon opens a sign-in page, stop without
   waiting for the user to log in. SellerSprite extension login is separate and
-  may still be required when SellerSprite enrichment is enabled.
+  may still be required when SellerSprite enrichment is enabled. Use this exact
+  response for an Amazon sign-in wall: `Amazon 弹出了登录页；本工具不使用也不需要
+  Amazon 买家账号，本条采集已停止。请稍后重试，不要登录买家账号。`
 - If using SellerSprite enrichment, set `extension_path: "auto"` to scan normal
   Chrome Profiles for the newest installed SellerSprite version and load it
   into the dedicated CDP Profile. This loads extension code only; it never

@@ -1,9 +1,9 @@
 ---
 name: lc_amazon_market_opportunity
-description: 仅在当前对话已经有 lc_amazon_market_research 明确输出的 market_project_YYYYMMDD_HHmmss 项目根目录时，继续做 Amazon 商品机会深挖：拆解关键词词根、确认消费者决策维度、逐 Listing 打标，并生成特征分布、供需指数、正式机会组合和离线 HTML 看板。用户要求消费者声音、KANO、产品创意或产品开发时，按本地已采集语料的全历史口径处理全部硬身份唯一留言：发布日期只作描述、不作筛选；六类语义任一命中即可成为候选消费者表达；只合并同一底层留言，不做文本或语义去重；不输出置信度层级或“证据不足”KANO。上下文没有真实项目目录时必须停止，不询问路径、不扫描猜测、不重新读取原始 Excel。
+description: 接续市场调研项目，拆解词根、确认决策维度并逐 Listing 打标，输出供需机会组合和离线看板。
 ---
 
-# Amazon Market Opportunity
+# 易逊-细分市场机会深挖-产品开发
 
 > 最近更新：2026-08-05（UTC+8）
 

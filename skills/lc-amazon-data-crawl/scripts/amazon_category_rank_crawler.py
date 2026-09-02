@@ -88,6 +88,12 @@ FULFILLMENT_SEMANTICS = {
     "unknown_nonempty_is_missing": False,
 }
 
+AMAZON_SIGN_IN_STOP_MESSAGE = (
+    "检测到 Amazon 登录页。本工具只采集公开页面，不使用也不需要 Amazon 买家账号。"
+    "本条采集已停止且未写入当前页数据；请稍后重试，仍出现时可更换公开页面入口。"
+    "不要登录买家账号。"
+)
+
 
 OUTPUT_HEADERS = [
     "根类目URL",
@@ -2209,7 +2215,7 @@ def wait_for_manual_clear(
     stop_event: Optional[threading.Event] = None,
 ) -> bool:
     if reason == "amazon_sign_in":
-        print("检测到亚马逊登录页。本 Skill 不使用亚马逊买家账号，也不会要求用户登录，任务已停止。")
+        print(AMAZON_SIGN_IN_STOP_MESSAGE)
         return False
     print(f"检测到需要人工处理：{reason}")
     print("脚本已暂停并保留当前页面。请在 Chrome 中手动完成页面验证。")
@@ -2229,6 +2235,19 @@ def wait_for_manual_clear(
         if not detect_block(driver):
             return True
         print("页面仍显示验证或限制，请继续处理后再确认。")
+
+
+def verification_unconfirmed_message(reason: str) -> str:
+    if reason == "amazon_sign_in":
+        return f"amazon_sign_in_terminal: {AMAZON_SIGN_IN_STOP_MESSAGE}"
+    return f"{reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+
+
+def sellersprite_block_reason(driver: WebDriver) -> str:
+    readiness = get_sellersprite_readiness(driver)
+    return normalize_space(str(readiness.get("blocked_reason") or "")) or (
+        detect_block(driver) or "sellersprite_verification"
+    )
 
 
 def amazon_marketplace_domain(url: str, locations: Dict[str, Dict[str, str]]) -> str:
@@ -2868,9 +2887,7 @@ def handle_amazon_verification(
         else wait_for_manual_clear(driver, reason, timeout, stop_event=stop_event)
     )
     if not cleared:
-        raise VerificationUnconfirmedError(
-            f"{reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
-        )
+        raise VerificationUnconfirmedError(verification_unconfirmed_message(reason))
     if on_manual_resume:
         on_manual_resume()
 
@@ -3482,6 +3499,7 @@ def wait_for_user_plugin_action(
 ) -> bool:
     print(f"卖家精灵插件需要人工处理：{reason}")
     print("请在当前 Chrome 窗口安装/启用卖家精灵插件，并完成登录。")
+    print("这里仅指卖家精灵账号，不是 Amazon 买家账号；不要登录 Amazon 买家账号。")
     print("处理完成后回到这里按 Enter；如果是 Codex 正在运行，请告诉我“已登录插件，继续”。")
     wait_seconds = max(int(manual_pause_timeout), 1)
     continued = (
@@ -3527,24 +3545,27 @@ def wait_for_sellersprite_data_or_prompt(
             on_readiness(get_sellersprite_readiness(current_driver))
 
     def handle_block(current_driver: WebDriver) -> Optional[str]:
+        reason = sellersprite_block_reason(current_driver)
         if on_manual_pause:
-            on_manual_pause("sellersprite_or_amazon_verification", current_driver.current_url)
+            on_manual_pause(reason, current_driver.current_url)
         cleared = (
             wait_for_manual_clear(
                 current_driver,
-                "sellersprite_or_amazon_verification",
+                reason,
                 runtime.manual_pause_timeout,
             )
             if stop_event is None
             else wait_for_manual_clear(
                 current_driver,
-                "sellersprite_or_amazon_verification",
+                reason,
                 runtime.manual_pause_timeout,
                 stop_event=stop_event,
             )
         )
         if cleared and on_manual_resume:
             on_manual_resume()
+        if not cleared and reason == "amazon_sign_in":
+            raise VerificationUnconfirmedError(verification_unconfirmed_message(reason))
         return None if cleared else "blocked"
 
     def retry_with_refresh(current_driver: WebDriver, attempts: int, label: str) -> tuple[str, WebDriver]:
@@ -4689,7 +4710,7 @@ def _wait_for_page_without_worker_writes(
             manual_gate.resume()
         if not cleared:
             raise VerificationUnconfirmedError(
-                f"{block_reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+                verification_unconfirmed_message(block_reason)
             )
     wait_for_amazon_products(driver, runtime, stop_event=stop_event)
 
@@ -5463,7 +5484,7 @@ def wait_for_page_or_manual(
             if runtime.save_debug_snapshots:
                 save_debug_snapshot(driver, debug_dir, block_reason)
             raise VerificationUnconfirmedError(
-                f"{block_reason}_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+                verification_unconfirmed_message(block_reason)
             )
     wait_for_amazon_products(driver, runtime)
 

@@ -629,8 +629,24 @@ class DeliveryLocationFlowTests(unittest.TestCase):
             self.assertFalse(category.wait_for_manual_clear(driver, "amazon_sign_in", 900))
         wait.assert_not_called()
         output = "\n".join(str(call.args[0]) for call in print_mock.call_args_list)
-        self.assertIn("不使用亚马逊买家账号，也不会要求用户登录", output)
+        self.assertIn("不使用也不需要 Amazon 买家账号", output)
         self.assertNotIn("完成登录", output)
+
+    def test_initial_amazon_sign_in_uses_terminal_not_timeout_error(self) -> None:
+        driver = FakeDriver("https://www.amazon.com/ap/signin")
+        runtime = SimpleNamespace(manual_pause_timeout=900)
+        with (
+            patch.object(category, "detect_block", return_value="amazon_sign_in"),
+            patch.object(category, "wait_for_manual_continue") as wait,
+            self.assertRaisesRegex(
+                category.VerificationUnconfirmedError,
+                "amazon_sign_in_terminal",
+            ) as caught,
+        ):
+            category.handle_amazon_verification(driver, runtime)
+        wait.assert_not_called()
+        self.assertIn("不使用也不需要 Amazon 买家账号", str(caught.exception))
+        self.assertNotIn("人工处理超时", str(caught.exception))
 
     def test_manual_success_is_required_after_auto_failure(self) -> None:
         location = {"amazon.com": {"city": "New York", "postal_code": "10001", "strategy": "postal"}}

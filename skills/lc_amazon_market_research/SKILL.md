@@ -1,9 +1,9 @@
 ---
 name: lc_amazon_market_research
-description: 通过用户访问校验后，输入本地卖家精灵市场调研 Excel（近30天竞品表、近12个月竞品月表、头部ASIN关键词反查表、核心关键词转化率表），创建 market_project_<YYYYMMDD_HHmmss>/ 项目目录，在 market_research/ 下生成 Amazon 市场主报告、辅助分析 Excel、单文件 HTML 看板、运行日志和 project_manifest.json，并可在主报告后追加 Top10 品牌/卖家外部调研。用于用户已经准备好 Excel 文件、需要做市场规模、趋势、垄断度、广告压力、基础透视、规则结论、头部品牌/卖家公开信息推断分析的场景；不负责浏览器采集、商品维度打标或多维机会深挖。
+description: 读取卖家精灵市场 Excel，分析市场规模、趋势、垄断度和广告压力，输出主报告、辅助表及 HTML 看板。
 ---
 
-# Amazon Market Research
+# 易逊-亚马逊市场大盘调研
 
 > 最近更新：2026-07-30 23:42（UTC+8）
 

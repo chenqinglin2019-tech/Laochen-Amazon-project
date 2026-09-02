@@ -1,0 +1,3 @@
+interface:
+  display_name: "易逊-亚马逊市场大盘调研"
+  short_description: "读取卖家精灵市场 Excel，分析市场规模、趋势、垄断度和广告压力，输出主报告、辅助表及 HTML 看板。"

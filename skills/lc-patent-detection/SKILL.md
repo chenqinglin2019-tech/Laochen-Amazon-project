@@ -1,9 +1,9 @@
 ---
 name: Lc Patent Detection
-description: Run a Wisdom Bud / PatSnap image-search patent workflow and write results back to the user's own Feishu/Lark Bitable. Use when Codex needs to process product rows or product images by using the user's configured Wisdom Bud account, capture candidate patent/design evidence, optionally attempt official-source verification, skip official checks that cannot be found, generate a concise report, upload it to Feishu, and update configured Feishu fields. Requires the recipient user to provide their own Wisdom Bud access and Feishu credentials/table mapping.
+description: 使用用户的智慧芽或 PatSnap 账号进行产品图片专利与外观候选检索，生成证据报告并可写回飞书多维表格。
 ---
 
-# Lc Patent Detection
+# 易逊-智慧芽版知识产权排查
 
 Use this skill for one workflow only: use the user's own 智慧芽 / PatSnap account to search product-image patent/design candidates, generate evidence, and write the result back to the user's own Feishu/Lark Bitable.
 

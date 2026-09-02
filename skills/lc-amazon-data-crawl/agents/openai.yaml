@@ -1,4 +1,4 @@
 interface:
-  display_name: "Lc amazon Data Crawl"
-  short_description: "Amazon crawling with delivery and image matching"
+  display_name: "易逊-亚马逊数据采集"
+  short_description: "采集 Amazon 关键词搜索、类目榜单、店铺和图片相似竞品数据，并可结合卖家精灵字段与筛选条件导出。"
   default_prompt: "Use $lc-amazon-data-crawl to crawl Amazon search results, category ranks, storefronts, or image competitors. Start with the cloud auth gate; if it fails, stop immediately. Never ask the user to sign in to an Amazon buyer account; if Amazon opens a sign-in page, stop. Confirm the configured marketplace delivery location before extraction. For same-product counts, recommend cascade mode: doubao-embedding-vision-251215 prescreens up to 10 visual matches and doubao-seed-2-0-mini-260428 makes the final product decision; the 11th prescreen match stops processing and leaves the final count blank. Have the user bind their own Volcengine Ark API key only in the local config/doubao_embedding_vision.json and config/doubao_same_product_mini.json files, never in chat."

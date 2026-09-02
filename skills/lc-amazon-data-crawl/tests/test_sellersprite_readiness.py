@@ -96,6 +96,37 @@ class SellerSpriteReadinessTests(unittest.TestCase):
         self.assertNotIn("signature", safe)
         self.assertEqual(safe["status"], "ready")
 
+    def test_late_amazon_sign_in_keeps_real_block_reason_and_stops(self) -> None:
+        driver = SimpleNamespace(current_url="https://www.amazon.com/ap/signin")
+        runtime = SimpleNamespace(
+            sellersprite_required=True,
+            manual_pause_timeout=900,
+        )
+        pauses: list[tuple[str, str]] = []
+        with (
+            patch.object(category, "wait_for_sellersprite_data", return_value="blocked"),
+            patch.object(
+                category,
+                "get_sellersprite_readiness",
+                return_value={"blocked_reason": "amazon_sign_in"},
+            ),
+            patch.object(category, "wait_for_manual_continue") as wait,
+            self.assertRaisesRegex(
+                category.VerificationUnconfirmedError,
+                "amazon_sign_in_terminal",
+            ),
+        ):
+            category.wait_for_sellersprite_data_or_prompt(
+                driver,
+                runtime,
+                on_manual_pause=lambda reason, url: pauses.append((reason, url)),
+            )
+        wait.assert_not_called()
+        self.assertEqual(
+            pauses,
+            [("amazon_sign_in", "https://www.amazon.com/ap/signin")],
+        )
+
 
 class BrowserBackendTests(unittest.TestCase):
     def test_cdp_endpoint_normalization(self) -> None:

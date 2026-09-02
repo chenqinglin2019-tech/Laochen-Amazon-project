@@ -1,9 +1,9 @@
 ---
 name: lc-amazon-image-studio
-description: Build fast, resumable, non-copycat Amazon listing and A+ image systems from the user's real product photos, product facts, selling points, and either a user-provided image plan or competitor Amazon URL/ASIN. Use for Amazon product-image strategy, generation, editing, product-master creation, low-resolution source handling, physical proportion and material preservation, scene-scale control, and protection of tiny critical details such as USB ports, buttons, screws, cutouts, seams, labels, and connectors. Preserve product truth through source-quality gates, Geometry/Material/Scene Scale/Critical Detail locks, bounded generation waves, local postprocessing, and hard QA gates.
+description: 基于真实产品图和卖点规划、生成与质检 Amazon Listing 与 A+ 图片，严格保留产品比例、材质和关键细节。
 ---
 
-# Lc Amazon Image Studio
+# 易逊-亚马逊套图生成
 
 Build a sellable `7+1` Amazon image system without repainting or simplifying the real product unnecessarily.
 

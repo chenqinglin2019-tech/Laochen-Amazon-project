@@ -1,9 +1,9 @@
 ---
 name: lc-ipr-risk-screening-free
-description: Screen one Amazon product for patent, pending-application, design, word-mark, figurative-mark, trade-dress, copyright, character-IP, and enforcement risks using free-tier discovery APIs plus official registries. Use only when explicitly invoked for an ASIN or Amazon product URL and the user wants browser-collected Amazon facts, one current-variant main image, traceable JSON evidence, independent review, and Markdown/HTML reports without SellerSprite, Trohub, Feishu, batch queues, or automatic paid usage. This is an operational risk screen, not legal advice.
+description: 利用免费发现接口与官方登记库，对单个 Amazon 商品开展多类型知识产权排查，保留可追溯证据并生成报告。
 ---
 
-# LC IPR Risk Screening Free
+# 易逊-免费知识产权排查
 
 Run one traceable Amazon intellectual-property screen with free-tier sources. Keep discovery, official verification, and AI assessment separate. Never convert missing evidence into a low-risk conclusion.
 

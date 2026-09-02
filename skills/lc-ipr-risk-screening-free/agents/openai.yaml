@@ -1,6 +1,6 @@
 interface:
-  display_name: "LC IPR Risk Screening Free"
-  short_description: "免费数据源驱动的亚马逊知识产权风险排查"
+  display_name: "易逊-免费知识产权排查"
+  short_description: "利用免费发现接口与官方登记库，对单个 Amazon 商品开展多类型知识产权排查，保留可追溯证据并生成报告。"
   default_prompt: "Use $lc-ipr-risk-screening-free to screen this Amazon product with free-tier patent, trademark, design, copyright, and enforcement sources."
 policy:
   allow_implicit_invocation: false

@@ -1,9 +1,9 @@
 ---
 name: lc-amazon-listing-asin
-description: 输入目标站点 + 竞品 ASIN 列表（1-20 个，整组）+ 产品图片/描述，通过统一后端扩词并生成对应站点语言的 Amazon listing。支持 US/JP/UK/DE/FR/IT/ES/CA/IN；Rufus 问答仅 US。
+description: 输入目标站点、竞品 ASIN 与产品资料，扩展关键词并生成对应站点语言的 Amazon Listing，支持多个站点。
 ---
 
-# Amazon Listing ASIN Skill
+# 易逊-Listing文案生成
 
 完整指令在 `INSTRUCTIONS.md`，请先阅读它再开始工作。
 
