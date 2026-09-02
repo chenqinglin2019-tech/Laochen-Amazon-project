@@ -2,7 +2,7 @@
 name: lc-amazon-data-crawl
 description: 采集 Amazon 关键词搜索、类目榜单、店铺和图片相似竞品数据，并可结合卖家精灵字段与筛选条件导出。
 metadata:
-  last_updated: 2026-09-01
+  last_updated: 2026-09-02
 ---
 
 # 易逊-亚马逊数据采集
@@ -110,10 +110,13 @@ operational rules are:
   `chrome_binary: "auto"` and a dedicated `chrome_user_data_dir`. Real run and
   readiness commands automatically start a persistent Chrome for Testing when
   the configured CDP endpoint is not already running.
-- `./lc-amazon-data-crawl.sh install` installs the Python dependencies and the
-  Playwright Chromium/Chrome for Testing runtime used by automatic extension
-  loading.
-- `browser_backend: "selenium"` remains available as an explicit fallback.
+- `./lc-amazon-data-crawl.sh install` installs the Python dependencies and
+  verifies the Playwright CDP client. It does not download a separate
+  Playwright-managed Chromium; `CDP + reuse` attaches to the configured system
+  Chrome/Chrome for Testing profile.
+- The five production modes are fail-closed on `browser_backend: "cdp"`.
+  Selenium and AppleScript backend values are rejected because they cannot
+  provide the required verifiable tab-ownership guarantees.
 - Never ask the user to sign in to an Amazon buyer account. Crawl only public
   Amazon pages while signed out. If Amazon opens a sign-in page, stop without
   waiting for the user to log in. SellerSprite extension login is separate and
@@ -135,6 +138,11 @@ operational rules are:
   `1` are supported only by CDP with `browser_mode: "reuse"` or `"attach"`.
   Tabs process independent sources concurrently while pagination within one
   source remains serial.
+- Every crawler worker uses a crawler-owned working tab. Only result tabs and
+  popups whose ownership can be proven are closed; pre-existing or otherwise
+  unknown user tabs are always preserved. Owned result tabs are cleaned up
+  after each product, on retry or long-wait entry, and on exceptions or
+  interruption. See `references/configuration.md` for the ownership contract.
 - A fixed local extension folder remains supported in `extension_path`; leave
   it empty only when the dedicated Profile already has the extension.
 - Keep `activate_plugin: false` by default. SellerSprite content scripts inject
@@ -201,10 +209,13 @@ operational rules are:
   order. Commit each completed source to an atomic `source_results/` shard and
   materialize aggregate JSONL from those shards, so a crash cannot duplicate a
   paid model call or attach an old row's count to a different ASIN.
-- Image-competitor runs close every popup/result tab explicitly created while
-  processing a product as soon as that product is committed or abandoned.
-  Tabs that existed before the product started are preserved, and the crawler
-  restores its original working tab before continuing to the next product.
+- All five crawler templates use
+  `amazon_page_unavailable_retry_schedule_seconds` with the default
+  `[[180,300],[180,300],[1800,1800],[3600,3600]]`. Together with the initial
+  attempt this permits five attempts for retryable Amazon page failures. The
+  selected wait and checkpoint are resumable; this recovery policy is separate
+  from SellerSprite retries. See `references/configuration.md` before changing
+  the schedule.
 - Run `doctor` to see only whether each Doubao credential is `missing`,
   `unconfigured`, or `ready`. Run image-competitor dry-run before opening
   Chrome; missing, invalid, or empty required credential configuration must
@@ -216,8 +227,8 @@ operational rules are:
   the embedding threshold on a category-stratified set of at least 300 labeled
   image pairs, keep a frozen evaluation split, and report measured Mini
   precision from that frozen split.
-- Do not use legacy third-party browser-container workflows; this skill is only
-  for normal visible Chrome crawling through CDP, with Selenium as a fallback.
+- Do not use legacy third-party browser-container workflows; this skill uses
+  normal visible Chrome crawling through `CDP + reuse` only.
 
 ## Long-Running Crawl Supervision
 
@@ -227,6 +238,16 @@ For real runs, monitor terminal output and the `outputs/<job_id>/state.json` fil
 - If Amazon CAPTCHA/robot verification or SellerSprite needs manual action,
   tell the user exactly which browser window/page is waiting. An Amazon
   sign-in page is terminal instead: stop without asking the user to log in.
+- Amazon dog/error pages, rate limits, access-denied responses, navigation
+  failures, and missing expected DOM after timeout use the shared five-attempt
+  recovery schedule. Explicit empty-result pages are valid; ambiguous blank
+  pages are not recorded as zero. After the fifth failure the runner saves a
+  manual-resume checkpoint and stops. Re-running the same command begins a new
+  retry cycle for only that pending work item while retaining completed work.
+- A retry cooldown pauses new navigation to the same Amazon domain across
+  workers. Long waits emit terminal and state heartbeats at intervals of no
+  more than 60 seconds; already-loaded pages may finish local extraction and
+  atomic commit.
 - If delivery auto-selection fails, tell the user to set the requested location
   in the current visible Amazon page. After `manual_pause_timeout`, treat an
   unconfirmed location as `delivery_location_unconfirmed` and stop before

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Browser ownership integration fixture</title>
+  </head>
+  <body>
+    <button id="open-ordinary-popup" type="button">ordinary popup</button>
+    <button id="open-noopener-result" type="button">noopener result</button>
+    <button id="open-delayed-descendant" type="button">delayed descendant</button>
+
+    <script>
+      const childUrl = (role) => `child.html?role=${encodeURIComponent(role)}`;
+
+      document.querySelector("#open-ordinary-popup").addEventListener("click", () => {
+        window.open(childUrl("ordinary-popup"), "_blank");
+      });
+
+      document.querySelector("#open-noopener-result").addEventListener("click", () => {
+        window.open(childUrl("action-result"), "_blank", "noopener");
+      });
+
+      document.querySelector("#open-delayed-descendant").addEventListener("click", () => {
+        // The worker stays alive while close_owned_since performs its two-second
+        // stabilization pass. This popup therefore arrives after cleanup starts
+        // and is an opener-linked descendant of an owned page.
+        window.setTimeout(() => {
+          window.open(childUrl("delayed-descendant"), "_blank");
+        }, 700);
+      });
+    </script>
+  </body>
+</html>

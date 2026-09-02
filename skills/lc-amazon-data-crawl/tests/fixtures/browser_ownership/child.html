@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Browser ownership child fixture</title>
+  </head>
+  <body>
+    <main id="fixture-role"></main>
+    <script>
+      const role = new URLSearchParams(window.location.search).get("role") || "unknown";
+      document.querySelector("#fixture-role").textContent = role;
+      document.title = `Browser ownership: ${role}`;
+    </script>
+  </body>
+</html>

@@ -21,11 +21,14 @@ class SwitchDriver:
         urls_by_handle: dict[str, str],
         *,
         active_handle: str,
+        owned_handles: set[str] | None = None,
     ) -> None:
         self._urls_by_handle = dict(urls_by_handle)
         self._active_handle = active_handle
+        self._owned_handles = set(owned_handles or {active_handle})
         self.closed_handles: list[str] = []
         self.registered_handles: list[str] = []
+        self._action_candidates: dict[str, set[str]] = {}
         self.switch_to = SimpleNamespace(window=self._switch_window)
 
     @property
@@ -45,6 +48,57 @@ class SwitchDriver:
 
     def register_owned_window_handle(self, handle: str) -> None:
         self.registered_handles.append(handle)
+        self._owned_handles.add(handle)
+
+    def owned_handle_snapshot(self) -> frozenset[str]:
+        return frozenset(
+            handle for handle in self._owned_handles if handle in self._urls_by_handle
+        )
+
+    def emit_owned_popup(self, handle: str) -> None:
+        self._owned_handles.add(handle)
+
+    def begin_owned_page_action(self, label: str = "") -> str:
+        token = f"{label}:token"
+        self._action_candidates[token] = set()
+        return token
+
+    def emit_action_page(self, handle: str, url: str) -> None:
+        self._urls_by_handle[handle] = url
+        for candidates in self._action_candidates.values():
+            candidates.add(handle)
+
+    def claim_owned_action_pages(self, token: str, predicate: object) -> list[str]:
+        claimed = []
+        for handle in self._action_candidates.get(token, set()):
+            if predicate(self._urls_by_handle[handle]):  # type: ignore[operator]
+                self._owned_handles.add(handle)
+                claimed.append(handle)
+        return claimed
+
+    def end_owned_page_action(self, token: str) -> None:
+        self._action_candidates.pop(token, None)
+
+    def close_owned_since(self, snapshot: frozenset[str]) -> int:
+        targets = [
+            handle
+            for handle in self.window_handles
+            if handle in self._owned_handles and handle not in snapshot
+        ]
+        for handle in targets:
+            self._switch_window(handle)
+            self.close()
+        self.restore_worker_page()
+        return len(targets)
+
+    def restore_worker_page(self) -> str:
+        worker = next(
+            handle
+            for handle in self._owned_handles
+            if handle in self._urls_by_handle
+        )
+        self._switch_window(worker)
+        return worker
 
     def close(self) -> None:
         handle = self._active_handle
@@ -91,6 +145,7 @@ class FindSimilarResultSafetyTests(unittest.TestCase):
                         "new": product_url,
                     },
                     active_handle="source",
+                    owned_handles={"source", "new"},
                 )
 
                 with patch.object(
@@ -127,7 +182,11 @@ class FindSimilarResultSafetyTests(unittest.TestCase):
         )
         for urls, active_handle, before_handles in cases:
             with self.subTest(urls=urls):
-                driver = SwitchDriver(urls, active_handle=active_handle)
+                driver = SwitchDriver(
+                    urls,
+                    active_handle=active_handle,
+                    owned_handles=set(urls),
+                )
                 self.assertTrue(image.switch_to_find_similar_result(driver, before_handles))
 
     def test_claimed_result_tab_is_closed_and_original_tabs_are_preserved(self) -> None:
@@ -140,6 +199,7 @@ class FindSimilarResultSafetyTests(unittest.TestCase):
             active_handle="source",
         )
         claimed_before = image.claimed_crawler_window_handles(driver)
+        driver.emit_owned_popup("result")
 
         self.assertTrue(
             image.switch_to_find_similar_result(driver, {"source", "user"})
@@ -158,6 +218,58 @@ class FindSimilarResultSafetyTests(unittest.TestCase):
         self.assertEqual(set(driver.window_handles), {"source", "user"})
         self.assertEqual(driver.closed_handles, ["result"])
 
+    def test_concurrent_unknown_user_tab_is_never_claimed_or_closed(self) -> None:
+        driver = SwitchDriver(
+            {
+                "source": "https://www.amazon.com/dp/B000000001",
+                "result": "https://www.amazon.com/products?searchtype=flow",
+                "user": "https://example.com/opened-concurrently",
+            },
+            active_handle="source",
+            owned_handles={"source"},
+        )
+        claimed_before = image.claimed_crawler_window_handles(driver)
+        driver.emit_owned_popup("result")
+
+        self.assertTrue(image.switch_to_find_similar_result(driver, claimed_before))
+        image.close_claimed_crawler_windows(driver, claimed_before, ["source"])
+
+        self.assertEqual(set(driver.window_handles), {"source", "user"})
+        self.assertNotIn("user", driver.registered_handles)
+        self.assertNotIn("user", driver.closed_handles)
+
+    def test_production_switch_claims_action_scoped_noopener_only_on_marketplace(self) -> None:
+        driver = SwitchDriver(
+            {"source": "https://www.amazon.com/dp/B000000001"},
+            active_handle="source",
+        )
+        claimed_before = image.claimed_crawler_window_handles(driver)
+        token = image.begin_crawler_page_action(driver, "find-similar")
+        driver.emit_action_page(
+            "user",
+            "https://example.com/stylesnap/products?searchType=flow",
+        )
+        driver.emit_action_page(
+            "result",
+            "https://www.amazon.com/stylesnap/products?searchType=flow",
+        )
+
+        self.assertTrue(
+            image.switch_to_find_similar_result(
+                driver,
+                claimed_before,
+                driver._urls_by_handle["source"],
+                token,
+                "amazon.com",
+            )
+        )
+        image.end_crawler_page_action(driver, token)
+        image.close_claimed_crawler_windows(driver, claimed_before, ["source"])
+
+        self.assertNotIn("result", driver.window_handles)
+        self.assertIn("user", driver.window_handles)
+        self.assertNotIn("user", driver.closed_handles)
+
 
 class SellerSpriteClickSafetyTests(unittest.TestCase):
     def test_image_sellersprite_block_preserves_amazon_sign_in_reason(self) -> None:
@@ -174,7 +286,7 @@ class SellerSpriteClickSafetyTests(unittest.TestCase):
             ) as caught,
         ):
             image.handle_image_sellersprite_block(driver, runtime, None)
-        clear.assert_called_once_with(driver, "amazon_sign_in", 900)
+        clear.assert_not_called()
         self.assertNotIn("人工处理超时", str(caught.exception))
 
     def test_click_script_is_scoped_to_sellersprite_and_exact_find_similar_text(self) -> None:
@@ -246,6 +358,7 @@ class SellerSpriteClickSafetyTests(unittest.TestCase):
                     self._urls_by_handle["popup"] = (
                         "https://www.amazon.com/dp/B000000002?ref_=find_similar"
                     )
+                    self.emit_owned_popup("popup")
                 return True
 
         driver = Driver()
@@ -297,6 +410,7 @@ class SellerSpriteClickSafetyTests(unittest.TestCase):
                     self._urls_by_handle["popup"] = (
                         "https://www.amazon.com/dp/B000000002?ref_=find_similar"
                     )
+                    self.emit_owned_popup("popup")
                 return True
 
         driver = Driver()

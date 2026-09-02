@@ -901,7 +901,7 @@ class ConcurrentCategoryStateTests(unittest.TestCase):
             self.assertEqual(state.data["in_flight_categories"], {})
             self.assertEqual(state.data["processed_categories_count"], 2)
 
-    def test_webdriver_error_is_requeued_once_instead_of_completed(self) -> None:
+    def test_terminal_retry_exhaustion_is_requeued_without_legacy_quick_retry(self) -> None:
         node = {"url": "https://www.amazon.com/a", "name": "A", "path": ["A"]}
         runtime = SimpleNamespace(
             browser_tab_concurrency=2,
@@ -921,13 +921,17 @@ class ConcurrentCategoryStateTests(unittest.TestCase):
 
         def fake_worker(_runtime, _claim, current, *_args):
             attempts.append(dict(current))
-            if len(attempts) == 1:
-                return category.CategoryCrawlBatch(
-                    node=current,
-                    retryable_error_type="webdriver_error",
-                    retryable_error_message="tab lost",
-                )
-            return category.CategoryCrawlBatch(node=current)
+            return category.CategoryCrawlBatch(
+                node=current,
+                failures=[
+                    {
+                        "reason": "amazon_page_unavailable_retry_exhausted",
+                        "recovery_failure_key": "page-a|stage:category_page_work|cycle:1",
+                    }
+                ],
+                terminal_error_type="amazon_page_unavailable_retry_exhausted",
+                terminal_error_message="manual resume required",
+            )
 
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -935,19 +939,21 @@ class ConcurrentCategoryStateTests(unittest.TestCase):
             state.data = self.state_data([node])
             state.flush()
             with patch.object(category, "crawl_category_source", side_effect=fake_worker):
-                category.run_crawl_concurrent(
-                    runtime,
-                    state,
-                    root / "records.jsonl",
-                    root / "failures.jsonl",
-                    root / "debug",
-                )
-        self.assertEqual(len(attempts), 2)
-        self.assertEqual(attempts[1]["worker_retry_count"], 1)
-        self.assertEqual(state.data["processed_categories_count"], 1)
-        self.assertEqual(state.data["queue"], [])
+                with self.assertRaises(category.UserFacingError):
+                    category.run_crawl_concurrent(
+                        runtime,
+                        state,
+                        root / "records.jsonl",
+                        root / "failures.jsonl",
+                        root / "debug",
+                    )
+            failures = category.read_jsonl(root / "failures.jsonl")
+        self.assertEqual(len(attempts), 1)
+        self.assertNotIn("worker_retry_count", state.data["queue"][0])
+        self.assertEqual(state.data["processed_categories_count"], 0)
+        self.assertEqual(len(failures), 1)
 
-    def test_page_timeout_is_requeued_instead_of_completing_source(self) -> None:
+    def test_successful_worker_has_no_legacy_retry_metadata(self) -> None:
         node = {"url": "https://www.amazon.com/a", "name": "A", "path": ["A"]}
         runtime = SimpleNamespace(
             browser_tab_concurrency=2,
@@ -967,12 +973,6 @@ class ConcurrentCategoryStateTests(unittest.TestCase):
 
         def fake_worker(_runtime, _claim, current, *_args):
             attempts.append(dict(current))
-            if len(attempts) == 1:
-                return category.CategoryCrawlBatch(
-                    node=current,
-                    retryable_error_type="page_timeout",
-                    retryable_error_message="timed out",
-                )
             return category.CategoryCrawlBatch(node=current)
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -988,8 +988,8 @@ class ConcurrentCategoryStateTests(unittest.TestCase):
                     root / "failures.jsonl",
                     root / "debug",
                 )
-        self.assertEqual(len(attempts), 2)
-        self.assertEqual(attempts[1]["worker_retry_count"], 1)
+        self.assertEqual(len(attempts), 1)
+        self.assertNotIn("worker_retry_count", attempts[0])
         self.assertEqual(state.data["processed_categories_count"], 1)
         self.assertEqual(state.data["completed_sources"], state.data["done_categories"])
 
@@ -1129,6 +1129,15 @@ class ManualPromptCoordinationTests(unittest.TestCase):
                 category,
                 "get_sellersprite_readiness",
                 return_value={"status": "plugin_absent"},
+            ),
+            patch.object(
+                category,
+                "category_page_assessment",
+                return_value=category.PageHealthAssessment(
+                    status=category.PageHealthStatus.HEALTHY,
+                    reason="expected_content_present",
+                    page_kind="search_category",
+                ),
             ),
             patch.object(category, "wait_for_user_plugin_action"),
             patch.object(category, "wait_for_amazon_products"),

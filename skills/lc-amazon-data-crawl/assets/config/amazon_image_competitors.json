@@ -54,6 +54,12 @@
   "sellersprite_on_lens": false,
   "enrich_accepted_results": false,
   "manual_pause_timeout": 900,
+  "amazon_page_unavailable_retry_schedule_seconds": [
+    [180, 300],
+    [180, 300],
+    [1800, 1800],
+    [3600, 3600]
+  ],
   "delivery_location_enabled": true,
   "delivery_locations_file": "config/amazon_delivery_locations.json",
   "delivery_location_timeout": 20,

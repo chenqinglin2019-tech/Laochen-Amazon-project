@@ -27,7 +27,7 @@ import threading
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, quote_plus, urlencode, urlparse, urlunparse
 
 from selenium.common.exceptions import JavascriptException, TimeoutException, WebDriverException
@@ -66,6 +66,7 @@ from amazon_category_rank_crawler import (
     detect_block,
     discover_child_categories,
     dump_json,
+    ensure_amazon_delivery_location,
     ensure_dir,
     ensure_resume_delivery_fingerprint,
     extract_by_selectors,
@@ -102,6 +103,18 @@ from amazon_category_rank_crawler import (
     wait_for_manual_clear,
     wait_for_sellersprite_data,
     wait_for_sellersprite_data_or_prompt,
+)
+from amazon_page_recovery import (
+    AmazonPageRetryController,
+    AmazonPageRetryExhausted,
+    DomainCooldownRegistry,
+    PageHealthStatus,
+    PageSnapshot,
+    RetryCallbacks,
+    RetryConfigurationError,
+    TransientAmazonPageUnavailable,
+    classify_page_snapshot,
+    retry_schedule_from_config,
 )
 
 
@@ -224,6 +237,7 @@ class FrontRuntimeConfig:
     plugin_second_relaunch_retry_attempts: int
     plugin_second_relaunch_wait_seconds: float
     manual_pause_timeout: int
+    amazon_page_retry_schedule_seconds: Tuple[Tuple[float, float], ...]
     delivery_location_enabled: bool
     delivery_locations_file: Path
     delivery_location_timeout: int
@@ -249,7 +263,12 @@ class FrontRuntimeConfig:
 
 
 FRONT_STATE_SCHEMA_VERSION = 2
-FRONT_RETRYABLE_ERRORS = {"webdriver_error", "page_timeout", "no_product_cards"}
+FRONT_RETRYABLE_ERRORS = {
+    "webdriver_error",
+    "page_timeout",
+    "no_product_cards",
+    "amazon_page_unavailable",
+}
 FRONT_MAX_TASK_RETRIES = 2
 
 
@@ -541,7 +560,11 @@ class FrontStateStore:
         self.data["pending"] = pending
         return True
 
-    def lease_next(self, worker_id: str) -> Optional[Dict[str, Any]]:
+    def lease_next(
+        self,
+        worker_id: str,
+        preferred_work_key: str = "",
+    ) -> Optional[Dict[str, Any]]:
         pruned = self._prune_pending()
         pending = list(self.data.get("pending") or [])
         active_sources = {
@@ -552,6 +575,8 @@ class FrontStateStore:
         completed_sources = set(self.data.get("completed_sources") or [])
         selected_index: Optional[int] = None
         for index, task in enumerate(pending):
+            if preferred_work_key and front_task_identity(task) != preferred_work_key:
+                continue
             source_id = front_source_id(task)
             if source_id and source_id not in active_sources and source_id not in completed_sources:
                 selected_index = index
@@ -659,6 +684,18 @@ class FrontStateStore:
     def clear_manual_pause(self) -> None:
         self.set_manual_snapshot(None)
 
+    def amazon_page_retry_state(self) -> Optional[Dict[str, Any]]:
+        value = self.data.get("amazon_page_retry")
+        return copy.deepcopy(value) if isinstance(value, dict) else None
+
+    def write_amazon_page_retry(self, value: Dict[str, Any]) -> None:
+        self.data["amazon_page_retry"] = copy.deepcopy(value)
+        self.flush()
+
+    def clear_amazon_page_retry(self) -> None:
+        if self.data.pop("amazon_page_retry", None) is not None:
+            self.flush()
+
 
 def parse_sort_orders(raw_value: Any, field_name: str, subject_name: str) -> List[str]:
     if raw_value in ("", None):
@@ -759,11 +796,16 @@ def build_front_runtime_config(config: Dict[str, Any], no_resume: bool) -> Front
         raise UserFacingError(f"没有找到店铺 URL 表格：{store_urls_file}")
 
     browser_backend = config_text(config, "browser_backend", "cdp").lower()
-    if browser_backend not in {"cdp", "selenium"}:
-        raise UserFacingError("配置项 `browser_backend` 只支持 cdp 或 selenium。")
-    browser_mode = config_text(config, "browser_mode", "launch").lower()
-    if browser_mode not in {"launch", "attach", "reuse", "applescript"}:
-        raise UserFacingError("配置项 `browser_mode` 只支持 launch、attach、reuse 或 applescript。")
+    if browser_backend != "cdp":
+        raise UserFacingError(
+            "配置项 `browser_backend` 必须为 cdp；旧 Selenium 后端无法证明标签页归属，已停用。"
+        )
+    browser_mode = config_text(config, "browser_mode", "reuse").lower()
+    if browser_mode not in {"launch", "attach", "reuse"}:
+        raise UserFacingError(
+            "配置项 `browser_mode` 只支持 launch、attach 或 reuse；"
+            "AppleScript 无法证明标签页归属，已停用。"
+        )
     browser_tab_concurrency = config_int(config, "browser_tab_concurrency", 1)
     browser_tab_concurrency = 1 if browser_tab_concurrency is None else browser_tab_concurrency
     if browser_tab_concurrency < 1 or browser_tab_concurrency > 3:
@@ -820,6 +862,10 @@ def build_front_runtime_config(config: Dict[str, Any], no_resume: bool) -> Front
     page_scroll_wait_seconds = max(config_float(config, "page_scroll_wait_seconds", 1.0) or 0, 0)
     page_scroll_stable_rounds = max(config_int(config, "page_scroll_stable_rounds", 2) or 1, 1)
     delivery_config = build_delivery_location_config(config)
+    try:
+        amazon_page_retry_schedule = retry_schedule_from_config(config)
+    except RetryConfigurationError as exc:
+        raise UserFacingError(str(exc)) from exc
 
     raw_selectors = config.get("field_selectors") or {}
     field_selectors: Dict[str, List[str]] = {}
@@ -880,6 +926,7 @@ def build_front_runtime_config(config: Dict[str, Any], no_resume: bool) -> Front
         plugin_second_relaunch_retry_attempts=max(config_int(config, "plugin_second_relaunch_retry_attempts", 3) or 0, 0),
         plugin_second_relaunch_wait_seconds=max(config_float(config, "plugin_second_relaunch_wait_seconds", 600) or 0, 0),
         manual_pause_timeout=config_int(config, "manual_pause_timeout", 900) or 900,
+        amazon_page_retry_schedule_seconds=amazon_page_retry_schedule,
         **delivery_config,
         delay_seconds_min=min_delay,
         delay_seconds_max=max_delay,
@@ -1050,6 +1097,109 @@ def wait_for_product_cards(
         return False
 
 
+def front_page_snapshot(
+    driver: WebDriver,
+    *,
+    navigation_error: str = "",
+) -> PageSnapshot:
+    """Collect only strong DOM facts; ambiguous empty pages remain retryable."""
+
+    title = ""
+    url = ""
+    body_text = ""
+    expected_content_present = False
+    explicit_empty = False
+    try:
+        title = str(driver.title or "")
+    except WebDriverException:
+        pass
+    try:
+        url = str(driver.current_url or "")
+    except WebDriverException:
+        pass
+    try:
+        facts = driver.execute_script(
+            r"""
+const body = (document.body && (document.body.innerText || document.body.textContent)) || '';
+const productSelectors = [
+  '[data-component-type="s-search-result"][data-asin]:not([data-asin=""])',
+  'div.zg-grid-general-faceout',
+  'li.zg-item-immersion',
+  '[data-asin]:not([data-asin=""]) h2 a[href*="/dp/"]',
+  'a[href*="/dp/"] h2'
+];
+const expected = productSelectors.some((selector) => document.querySelector(selector));
+const normalized = body.replace(/\s+/g, ' ').trim().toLowerCase();
+const visible = (el) => {
+  if (!el || el.getAttribute('aria-hidden') === 'true') return false;
+  const style = getComputedStyle(el);
+  const rect = el.getBoundingClientRect();
+  return style.display !== 'none' && style.visibility !== 'hidden' &&
+    Number(style.opacity || 1) !== 0 && rect.width > 0 && rect.height > 0;
+};
+const explicitSelectors = [
+  '#noResultsTitle', '[data-component-type="s-no-results"]',
+  '.s-no-outline .a-color-state', '.no-results'
+];
+const explicitMarkers = [
+  'no results for', 'did not match any products', '0 results for',
+  'we couldn\'t find any results', '没有符合条件的商品', '未找到相关商品',
+  '没有搜索结果'
+];
+return {
+  body: body.slice(0, 20000),
+  expected,
+  explicitEmpty: !expected && (
+    explicitSelectors.some((selector) =>
+      [...document.querySelectorAll(selector)].some((el) => visible(el))) ||
+    explicitMarkers.some((marker) => normalized.includes(marker))
+  )
+};
+"""
+        )
+        if isinstance(facts, dict):
+            body_text = str(facts.get("body") or "")
+            expected_content_present = bool(facts.get("expected"))
+            explicit_empty = bool(facts.get("explicitEmpty"))
+    except (JavascriptException, WebDriverException):
+        pass
+    http_status = getattr(
+        driver,
+        "last_http_status",
+        getattr(driver, "_last_http_status", None),
+    )
+    if isinstance(http_status, bool) or not isinstance(http_status, int):
+        http_status = None
+    recorded_navigation_error = navigation_error or str(
+        getattr(
+            driver,
+            "last_navigation_error",
+            getattr(driver, "_last_navigation_error", ""),
+        )
+        or ""
+    )
+    return PageSnapshot(
+        page_kind="search_category",
+        url=url,
+        title=title,
+        body_text=body_text,
+        http_status=http_status,
+        navigation_error=recorded_navigation_error,
+        expected_content_present=expected_content_present,
+        explicit_empty=explicit_empty,
+    )
+
+
+def assess_front_page(
+    driver: WebDriver,
+    *,
+    navigation_error: str = "",
+):
+    return classify_page_snapshot(
+        front_page_snapshot(driver, navigation_error=navigation_error)
+    )
+
+
 def wait_for_page_or_manual_front(
     driver: WebDriver,
     runtime: FrontRuntimeConfig,
@@ -1112,6 +1262,7 @@ def prepare_storefront_page(
     on_manual_pause: Optional[Any] = None,
     on_manual_resume: Optional[Any] = None,
     stop_event: Optional[threading.Event] = None,
+    page_opener: Optional[Callable[[str], None]] = None,
 ) -> None:
     if current.get("prepared_storefront"):
         return
@@ -1124,6 +1275,26 @@ def prepare_storefront_page(
     ):
         sorted_url = apply_sort_to_url(driver.current_url, sort_order)
         if clean_url(sorted_url) != clean_url(driver.current_url):
+            if page_opener is not None:
+                page_opener(sorted_url)
+            else:
+                open_amazon_page(
+                    driver,
+                    sorted_url,
+                    runtime,
+                    on_manual_pause,
+                    on_manual_resume,
+                    stop_event=stop_event,
+                )
+        current["prepared_storefront"] = True
+        current["page_url"] = driver.current_url
+        return
+    products_url = find_store_products_url(driver)
+    if products_url and clean_url(products_url) != clean_url(driver.current_url):
+        sorted_url = apply_sort_to_url(products_url, sort_order)
+        if page_opener is not None:
+            page_opener(sorted_url)
+        else:
             open_amazon_page(
                 driver,
                 sorted_url,
@@ -1132,20 +1303,6 @@ def prepare_storefront_page(
                 on_manual_resume,
                 stop_event=stop_event,
             )
-        current["prepared_storefront"] = True
-        current["page_url"] = driver.current_url
-        return
-    products_url = find_store_products_url(driver)
-    if products_url and clean_url(products_url) != clean_url(driver.current_url):
-        sorted_url = apply_sort_to_url(products_url, sort_order)
-        open_amazon_page(
-            driver,
-            sorted_url,
-            runtime,
-            on_manual_pause,
-            on_manual_resume,
-            stop_event=stop_event,
-        )
         current["page_url"] = sorted_url
     current["prepared_storefront"] = True
 
@@ -1414,25 +1571,43 @@ def log_front_failure(
     reason: str,
     message: str,
     page_url: str,
-) -> None:
-    append_jsonl(
-        failures_path,
-        {
-            "time": now_iso(),
-            "source_type": current.get("source_type", ""),
-            "keyword": current.get("keyword", ""),
-            "search_sort_order": current.get("search_sort_order", ""),
-            "store_url": current.get("store_url", ""),
-            "store_name": current.get("store_name", ""),
-            "store_sort_order": current.get("store_sort_order", ""),
-            "category_path": current.get("category_path", ""),
-            "page_number": current.get("page_number", ""),
-            "page_url": page_url,
-            "reason": reason,
-            "message": message,
-        },
-    )
+    retry_state: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    record: Dict[str, Any] = {
+        "time": now_iso(),
+        "source_type": current.get("source_type", ""),
+        "keyword": current.get("keyword", ""),
+        "search_sort_order": current.get("search_sort_order", ""),
+        "store_url": current.get("store_url", ""),
+        "store_name": current.get("store_name", ""),
+        "store_sort_order": current.get("store_sort_order", ""),
+        "category_path": current.get("category_path", ""),
+        "page_number": current.get("page_number", ""),
+        "page_url": page_url,
+        "reason": reason,
+        "message": message,
+    }
+    if reason == AmazonPageRetryExhausted.failure_code:
+        retry = dict(retry_state or {})
+        work_key = str(retry.get("work_key") or front_task_identity(current))
+        stage = str(retry.get("stage") or "front_search_or_category_page")
+        cycle = max(int(retry.get("cycle") or 1), 1)
+        recovery_key = f"{work_key}|stage:{stage}|cycle:{cycle}"
+        record.update(
+            {
+                "recovery_failure_key": recovery_key,
+                "recovery_stage": stage,
+                "recovery_cycle": cycle,
+            }
+        )
+        if any(
+            str(existing.get("recovery_failure_key") or "") == recovery_key
+            for existing in read_jsonl(failures_path)
+        ):
+            return False
+    append_jsonl(failures_path, record)
     state.log_failure()
+    return True
 
 
 def should_stop_on_repeated_store_page(current: Dict[str, Any], records: Sequence[Dict[str, Any]]) -> bool:
@@ -1808,6 +1983,58 @@ def worker_debug_label(worker_id: str, task: Dict[str, Any], reason: str) -> str
     return f"{int(time.time() * 1000)}_{worker_id}_{task_digest}_{safe_reason}"
 
 
+class FrontRetryInterrupted(BaseException):
+    """Stop a worker wait without clearing its persisted retry deadline."""
+
+
+def _drain_front_retry_events(
+    events: "queue.Queue[Dict[str, Any]]",
+    state: FrontStateStore,
+) -> None:
+    """Keep FrontStateStore single-writer while workers run retry controllers."""
+
+    while True:
+        try:
+            event = events.get_nowait()
+        except queue.Empty:
+            return
+        done = event.get("done")
+        try:
+            event_type = str(event.get("type") or "")
+            if event_type == "load":
+                event["response"] = state.amazon_page_retry_state()
+            elif event_type == "write":
+                value = event.get("value")
+                if isinstance(value, dict):
+                    state.write_amazon_page_retry(value)
+            elif event_type == "clear":
+                expected_work_key = str(event.get("work_key") or "")
+                expected_stage = str(event.get("stage") or "")
+                current = state.amazon_page_retry_state() or {}
+                if (
+                    not current
+                    or (
+                        str(current.get("work_key") or "") == expected_work_key
+                        and str(current.get("stage") or "") == expected_stage
+                    )
+                ):
+                    state.clear_amazon_page_retry()
+        except BaseException as exc:
+            event["error"] = exc
+        finally:
+            if isinstance(done, threading.Event):
+                done.set()
+
+
+def _retry_state_blocks_dispatch(state: FrontStateStore) -> bool:
+    retry_state = state.amazon_page_retry_state() or {}
+    return str(retry_state.get("status") or "") in {
+        "waiting",
+        "attempting",
+        "manual_resume_required",
+    }
+
+
 class FrontWorker:
     """A dedicated thread with a private Playwright connection and owned tab."""
 
@@ -1820,6 +2047,10 @@ class FrontWorker:
         throttle: NavigationThrottle,
         delivery_locks: DeliveryDomainLocks,
         debug_dir: Path,
+        retry_events: Optional["queue.Queue[Dict[str, Any]]"] = None,
+        domain_cooldowns: Optional[DomainCooldownRegistry] = None,
+        recovery_lock: Optional[threading.Lock] = None,
+        recovery_halted: Optional[threading.Event] = None,
     ) -> None:
         self.worker_id = worker_id
         self.runtime = runtime
@@ -1828,6 +2059,10 @@ class FrontWorker:
         self.throttle = throttle
         self.delivery_locks = delivery_locks
         self.debug_dir = debug_dir
+        self.retry_events = retry_events
+        self.domain_cooldowns = domain_cooldowns or DomainCooldownRegistry()
+        self.recovery_lock = recovery_lock or threading.Lock()
+        self.recovery_halted = recovery_halted or threading.Event()
         self.tasks: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue(maxsize=1)
         self.thread = threading.Thread(target=self._run, name=f"amazon-{worker_id}", daemon=True)
         self.stop_event = threading.Event()
@@ -1835,6 +2070,8 @@ class FrontWorker:
         self._confirmed_domains: set[str] = set()
         self._active_task: Dict[str, Any] = {}
         self._readiness: Dict[str, Any] = {}
+        self._attempt_scope: Optional[Tuple[Any, Any]] = None
+        self._local_retry_state: Optional[Dict[str, Any]] = None
 
     def start(self) -> None:
         self.thread.start()
@@ -1892,32 +2129,151 @@ class FrontWorker:
     def _publish_readiness(self, report: Dict[str, Any]) -> None:
         self._readiness = safe_sellersprite_readiness(report)
 
-    def _before_navigation(self) -> None:
+    def _retry_request(
+        self,
+        event_type: str,
+        *,
+        value: Optional[Dict[str, Any]] = None,
+        work_key: str = "",
+        stage: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        if self.retry_events is None:
+            if event_type == "load":
+                return copy.deepcopy(self._local_retry_state)
+            if event_type == "write":
+                self._local_retry_state = copy.deepcopy(value)
+            elif event_type == "clear":
+                self._local_retry_state = None
+            return None
+        done = threading.Event()
+        event: Dict[str, Any] = {
+            "type": event_type,
+            "value": copy.deepcopy(value),
+            "work_key": work_key,
+            "stage": stage,
+            "done": done,
+        }
+        self.retry_events.put(event)
+        while not done.wait(0.1):
+            if self.stop_event.is_set():
+                raise FrontRetryInterrupted()
+        error = event.get("error")
+        if isinstance(error, BaseException):
+            raise error
+        response = event.get("response")
+        return copy.deepcopy(response) if isinstance(response, dict) else None
+
+    def _retry_waiter(self, seconds: float) -> None:
+        if self.stop_event.wait(max(float(seconds), 0.0)):
+            raise FrontRetryInterrupted()
+
+    def _begin_attempt_scope(self) -> None:
+        driver = self._ensure_driver()
+        ensure_worker = getattr(driver, "ensure_worker_page", None)
+        if callable(ensure_worker):
+            ensure_worker()
+        snapshotter = getattr(driver, "owned_handle_snapshot", None)
+        snapshot = snapshotter() if callable(snapshotter) else None
+        self._attempt_scope = (driver, snapshot)
+
+    def _cleanup_attempt_scope(self) -> None:
+        scoped = self._attempt_scope
+        self._attempt_scope = None
+        if scoped is None:
+            return
+        driver, snapshot = scoped
+        try:
+            close_since = getattr(driver, "close_owned_since", None)
+            if snapshot is not None and callable(close_since):
+                close_since(snapshot)
+            else:
+                restore = getattr(driver, "restore_worker_page", None)
+                if callable(restore):
+                    restore()
+        except Exception as exc:
+            print(
+                f"[{self.worker_id}] owned 标签页清理失败，将重建专属工作页："
+                f"{type(exc).__name__}: {exc}",
+                flush=True,
+            )
+            if self.driver is driver:
+                self._close_driver()
+
+    def _retry_callbacks(self, work_key: str, stage: str) -> RetryCallbacks:
+        def load_state() -> Optional[Dict[str, Any]]:
+            return self._retry_request("load", work_key=work_key, stage=stage)
+
+        def write_state(value: Any) -> None:
+            payload = dict(value)
+            self._retry_request(
+                "write",
+                value=payload,
+                work_key=work_key,
+                stage=stage,
+            )
+            if str(payload.get("status") or "") == "waiting":
+                remaining = max(
+                    float(payload.get("remaining_wait_seconds") or 0),
+                    0.0,
+                )
+                print(
+                    f"[{self.worker_id}] Amazon 页面不可用，已保存断点；"
+                    f"等待约 {int(remaining + 0.999)} 秒后尝试 "
+                    f"{int(payload.get('next_attempt') or 1)}/5。",
+                    flush=True,
+                )
+
+        def clear_state() -> None:
+            self._retry_request("clear", work_key=work_key, stage=stage)
+
+        def heartbeat(value: Any) -> None:
+            remaining = max(float(dict(value).get("remaining_wait_seconds") or 0), 0.0)
+            next_attempt = int(dict(value).get("next_attempt") or 1)
+            print(
+                f"[{self.worker_id}] Amazon 页面恢复倒计时：还需约 "
+                f"{int(remaining + 0.999)} 秒，随后尝试 {next_attempt}/5。",
+                flush=True,
+            )
+
+        return RetryCallbacks(
+            load_state=load_state,
+            write_state=write_state,
+            clear_state=clear_state,
+            cleanup=self._cleanup_attempt_scope,
+            begin_domain_cooldown=self.domain_cooldowns.extend,
+            end_domain_cooldown=self.domain_cooldowns.release,
+            heartbeat=heartbeat,
+        )
+
+    def _before_navigation(self, url: str = "") -> None:
         self._raise_if_stopping()
         self.manual.wait_if_paused(self.worker_id, self.stop_event)
+        target_url = url
+        if not target_url and self.driver is not None:
+            try:
+                target_url = str(self.driver.current_url or "")
+            except WebDriverException:
+                target_url = ""
+        domain = (urlparse(target_url).hostname or "").lower()
+        while domain:
+            remaining = self.domain_cooldowns.remaining(domain)
+            if remaining <= 0:
+                break
+            if self.stop_event.wait(min(remaining, 1.0)):
+                raise ConcurrentWorkerCancelled(
+                    "并发任务正在停止，已取消 Amazon 域冷却等待。"
+                )
         self.throttle.wait(self.stop_event)
 
     def _open_page(self, url: str) -> None:
-        self._before_navigation()
+        """Navigate without touching delivery settings.
+
+        Page health is deliberately checked by ``_process_attempt`` before
+        delivery setup. Otherwise a dog/error/blank page can be mistaken for a
+        delivery-location failure and bypass the shared five-attempt policy.
+        """
+        self._before_navigation(url)
         driver = self._ensure_driver()
-        domain = (urlparse(url).hostname or "unknown").lower()
-        if domain not in self._confirmed_domains:
-            domain_lock = self.delivery_locks.for_url(url)
-            while not domain_lock.acquire(timeout=0.25):
-                self._raise_if_stopping()
-            try:
-                open_amazon_page(
-                    driver,
-                    url,
-                    self.runtime,
-                    on_manual_pause=self._manual_pause,
-                    on_manual_resume=self._manual_resume,
-                    stop_event=self.stop_event,
-                )
-            finally:
-                domain_lock.release()
-            self._confirmed_domains.add(domain)
-            return
         open_amazon_page(
             driver,
             url,
@@ -1925,10 +2281,40 @@ class FrontWorker:
             on_manual_pause=self._manual_pause,
             on_manual_resume=self._manual_resume,
             stop_event=self.stop_event,
+            defer_delivery=True,
         )
+
+    def _ensure_delivery_after_healthy_page(self, url: str) -> None:
+        """Serialize first delivery setup only after the page passed health."""
+        if not bool(getattr(self.runtime, "delivery_location_enabled", False)):
+            return
+        driver = self._ensure_driver()
+        domain = (urlparse(url).hostname or "unknown").lower()
+        if domain in self._confirmed_domains:
+            return
+        domain_lock = self.delivery_locks.for_url(url)
+        while not domain_lock.acquire(timeout=0.25):
+            self._raise_if_stopping()
+        try:
+            ensure_amazon_delivery_location(
+                driver,
+                self.runtime,
+                original_url=url,
+                on_manual_pause=self._manual_pause,
+                on_manual_resume=self._manual_resume,
+                stop_event=self.stop_event,
+                before_navigation=lambda: self._before_navigation(url),
+                page_health_validator=lambda: self._wait_for_page_or_manual(
+                    self._active_task or {}
+                ),
+            )
+        finally:
+            domain_lock.release()
+        self._confirmed_domains.add(domain)
 
     def _restart_plugin_driver(self, current_driver: WebDriver, page_url: str, wait_seconds: float) -> WebDriver:
         if self.driver is current_driver:
+            self._cleanup_attempt_scope()
             self._close_driver()
         else:
             try:
@@ -1938,6 +2324,7 @@ class FrontWorker:
         if wait_seconds > 0 and self.stop_event.wait(wait_seconds):
             raise ConcurrentWorkerCancelled("并发任务正在停止，已取消插件重启等待。")
         self._raise_if_stopping()
+        self._begin_attempt_scope()
         driver = self._ensure_driver()
         self._open_page(page_url)
         try:
@@ -1950,7 +2337,24 @@ class FrontWorker:
             pass
         return driver
 
-    def _wait_for_page_or_manual(self, current: Dict[str, Any]) -> bool:
+    def _recover_plugin_amazon_page(
+        self,
+        current_driver: WebDriver,
+        _page_url: str,
+    ) -> WebDriver:
+        """Classify a plugin-refreshed Amazon page inside the outer page retry."""
+        health = self._wait_for_page_or_manual(self._active_task or {})
+        if health is PageHealthStatus.VERIFIED_EMPTY:
+            # Restart the full page attempt so the normal explicit-empty branch
+            # can commit the empty page without entering SellerSprite handling.
+            raise TransientAmazonPageUnavailable(
+                "页面刷新后变为明确空结果，重新执行完整页面门禁。",
+                reason="explicit_empty_after_plugin_refresh",
+                url=str(getattr(current_driver, "current_url", "") or ""),
+            )
+        return current_driver
+
+    def _wait_for_page_or_manual(self, current: Dict[str, Any]) -> PageHealthStatus:
         driver = self._ensure_driver()
         block_reason = detect_block(driver)
         if block_reason:
@@ -1974,10 +2378,58 @@ class FrontWorker:
                 raise VerificationUnconfirmedError(
                     verification_unconfirmed_message(block_reason)
                 )
-        return wait_for_product_cards(
+        if wait_for_product_cards(
             driver,
             self.runtime,
             stop_event=self.stop_event,
+        ):
+            return PageHealthStatus.HEALTHY
+        assessment = assess_front_page(driver)
+        if assessment.status is PageHealthStatus.AMAZON_SIGN_IN:
+            raise UserFacingError(
+                "amazon_sign_in_terminal: 检测到 Amazon 登录页；本工具仅采集公开页面，"
+                "当前任务已停止且未写入页面数据。"
+            )
+        if assessment.status is PageHealthStatus.INTERACTIVE_VERIFICATION:
+            reason = "amazon_robot_check"
+            self.manual.begin(
+                self.worker_id,
+                current,
+                reason,
+                str(getattr(driver, "current_url", "") or ""),
+                stop_event=self.stop_event,
+            )
+            try:
+                cleared = wait_for_manual_clear(
+                    driver,
+                    reason,
+                    self.runtime.manual_pause_timeout,
+                    stop_event=self.stop_event,
+                )
+            finally:
+                self.manual.end(self.worker_id)
+            if not cleared:
+                raise VerificationUnconfirmedError(
+                    verification_unconfirmed_message(reason)
+                )
+            if wait_for_product_cards(
+                driver,
+                self.runtime,
+                stop_event=self.stop_event,
+            ):
+                return PageHealthStatus.HEALTHY
+            assessment = assess_front_page(driver)
+        if assessment.status is PageHealthStatus.VERIFIED_EMPTY:
+            return PageHealthStatus.VERIFIED_EMPTY
+        if assessment.status is PageHealthStatus.TRANSIENT_UNAVAILABLE:
+            raise TransientAmazonPageUnavailable.from_assessment(
+                assessment,
+                url=str(getattr(driver, "current_url", "") or ""),
+            )
+        raise TransientAmazonPageUnavailable(
+            "expected_content_missing",
+            reason="expected_content_missing",
+            url=str(getattr(driver, "current_url", "") or ""),
         )
 
     def _save_debug(self, task: Dict[str, Any], reason: str) -> None:
@@ -1989,12 +2441,13 @@ class FrontWorker:
             worker_debug_label(self.worker_id, task, reason),
         )
 
-    def _process(self, task: Dict[str, Any]) -> FrontPageResult:
-        leased_task = copy.deepcopy(task)
-        current = copy.deepcopy(task)
-        self._active_task = leased_task
-        self._readiness = {}
+    def _process_attempt(
+        self,
+        leased_task: Dict[str, Any],
+    ) -> FrontPageResult:
+        current = copy.deepcopy(leased_task)
         page_url = str(current.get("page_url") or "")
+        self._begin_attempt_scope()
         try:
             self._open_page(page_url)
             driver = self._ensure_driver()
@@ -2006,18 +2459,31 @@ class FrontWorker:
                     on_manual_pause=self._manual_pause,
                     on_manual_resume=self._manual_resume,
                     stop_event=self.stop_event,
+                    page_opener=self._open_page,
                 )
             self.manual.wait_if_paused(self.worker_id, self.stop_event)
-            if not self._wait_for_page_or_manual(current):
-                self._save_debug(current, "no_product_cards")
-                self._close_driver()
+            page_health = self._wait_for_page_or_manual(current)
+            driver = self._ensure_driver()
+            healthy_url = str(driver.current_url or page_url)
+            self._ensure_delivery_after_healthy_page(healthy_url)
+            # Delivery selection may reload the page. Never extract or commit
+            # until the reloaded page passes the same classifier again.
+            page_health = self._wait_for_page_or_manual(current)
+            driver = self._ensure_driver()
+            actual_url = str(driver.current_url or page_url)
+            if page_health is PageHealthStatus.VERIFIED_EMPTY:
                 return FrontPageResult(
                     worker_id=self.worker_id,
-                    task=leased_task,
-                    page_url=str(getattr(driver, "current_url", "") or page_url),
-                    error_reason="no_product_cards",
-                    error_message="页面未检测到商品卡片",
-                    finish_reason="page_wait_failed",
+                    task=copy.deepcopy(leased_task),
+                    page_key=front_page_key(current, actual_url),
+                    page_url=actual_url,
+                    raw_records=[],
+                    accepted_records=[],
+                    rejection_counts={},
+                    plugin_status="not_required",
+                    next_task=None,
+                    finish_reason="explicit_no_results",
+                    readiness=self._readiness,
                 )
 
             plugin_status = wait_for_sellersprite_data_or_prompt(
@@ -2028,6 +2494,7 @@ class FrontWorker:
                 restart_driver=self._restart_plugin_driver,
                 on_readiness=self._publish_readiness,
                 before_navigation=self._before_navigation,
+                recover_amazon_page=self._recover_plugin_amazon_page,
                 stop_event=self.stop_event,
             )
             self.manual.wait_if_paused(self.worker_id, self.stop_event)
@@ -2038,12 +2505,27 @@ class FrontWorker:
                     "sellersprite_verification_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
                 )
 
+            # The page can turn into a dog/rate-limit/blank page while the
+            # extension is loading. Revalidate immediately before extraction;
+            # a newly explicit empty page restarts the complete page attempt
+            # instead of committing an unverified zero.
+            post_plugin_health = self._wait_for_page_or_manual(current)
+            if post_plugin_health is PageHealthStatus.VERIFIED_EMPTY:
+                raise TransientAmazonPageUnavailable(
+                    "页面在插件等待期间变为明确空结果；重新执行完整页面事务。",
+                    reason="explicit_empty_after_plugin_wait",
+                    url=str(self._ensure_driver().current_url or page_url),
+                )
+            driver = self._ensure_driver()
+
             actual_url = str(driver.current_url or page_url)
             page_key = front_page_key(current, actual_url)
             raw_records = merge_front_product_data(driver, self.runtime, current, plugin_status)
             if not raw_records:
-                raise WebDriverException(
-                    "页面已检测到商品卡片，但提取结果为空；为避免静默漏页，保留断点并重试。"
+                raise TransientAmazonPageUnavailable(
+                    "页面已检测到商品卡片但提取结果为空",
+                    reason="empty_extraction_after_expected_content",
+                    url=actual_url,
                 )
             eligible_records = (
                 raw_records
@@ -2067,7 +2549,7 @@ class FrontWorker:
                 self._save_debug(current, f"plugin_{plugin_status}")
             return FrontPageResult(
                 worker_id=self.worker_id,
-                task=leased_task,
+                task=copy.deepcopy(leased_task),
                 page_key=page_key,
                 page_url=actual_url,
                 raw_records=raw_records,
@@ -2078,8 +2560,85 @@ class FrontWorker:
                 finish_reason=finish_reason,
                 readiness=self._readiness,
             )
+        except TimeoutException as exc:
+            self._save_debug(current, "page_timeout")
+            raise TransientAmazonPageUnavailable(
+                str(exc) or "页面导航或加载超时",
+                reason="page_timeout",
+                url=str(getattr(self.driver, "current_url", "") or page_url),
+            ) from exc
+        except WebDriverException as exc:
+            self._save_debug(current, "webdriver_error")
+            raise TransientAmazonPageUnavailable(
+                str(exc) or "浏览器导航失败",
+                reason="navigation_error",
+                url=str(getattr(self.driver, "current_url", "") or page_url),
+            ) from exc
+
+    def _process(self, task: Dict[str, Any]) -> FrontPageResult:
+        leased_task = copy.deepcopy(task)
+        self._active_task = leased_task
+        self._readiness = {}
+        page_url = str(leased_task.get("page_url") or "")
+        work_key = front_task_identity(leased_task)
+        stage = "front_search_or_category_page"
+        domain = (urlparse(page_url).hostname or "unknown").lower()
+        callbacks = self._retry_callbacks(work_key, stage)
+        controller = AmazonPageRetryController(
+            domain=domain,
+            work_key=work_key,
+            stage=stage,
+            url=page_url,
+            schedule=getattr(
+                self.runtime,
+                "amazon_page_retry_schedule_seconds",
+                retry_schedule_from_config({}),
+            ),
+            callbacks=callbacks,
+            waiter=self._retry_waiter,
+        )
+
+        def operation(_attempt: Any) -> FrontPageResult:
+            return self._process_attempt(leased_task)
+
+        try:
+            saved = callbacks.load_state() or {}
+            matching_saved = bool(
+                str(saved.get("domain") or "").lower() == domain
+                and str(saved.get("work_key") or "") == work_key
+                and str(saved.get("stage") or "") == stage
+            )
+            if matching_saved:
+                with self.recovery_lock:
+                    if self.recovery_halted.is_set():
+                        raise FrontRetryInterrupted()
+                    return controller.run(operation)
+            try:
+                result = operation(None)
+            except TransientAmazonPageUnavailable as first_failure:
+                with self.recovery_lock:
+                    if self.recovery_halted.is_set():
+                        raise FrontRetryInterrupted()
+                    return controller.run(
+                        operation,
+                        initial_failure=first_failure,
+                    )
+            self._cleanup_attempt_scope()
+            return result
+        except AmazonPageRetryExhausted as exc:
+            self.recovery_halted.set()
+            self._save_debug(leased_task, exc.failure_code)
+            return FrontPageResult(
+                worker_id=self.worker_id,
+                task=leased_task,
+                page_url=str(getattr(self.driver, "current_url", "") or page_url),
+                error_reason=exc.failure_code,
+                error_message=str(exc),
+                fatal=True,
+                readiness=self._readiness,
+            )
         except VerificationUnconfirmedError as exc:
-            self._save_debug(current, "verification_timeout")
+            self._save_debug(leased_task, "verification_timeout")
             return FrontPageResult(
                 worker_id=self.worker_id,
                 task=leased_task,
@@ -2089,32 +2648,8 @@ class FrontWorker:
                 fatal=True,
                 readiness=self._readiness,
             )
-        except TimeoutException as exc:
-            self._save_debug(current, "page_timeout")
-            self._close_driver()
-            return FrontPageResult(
-                worker_id=self.worker_id,
-                task=leased_task,
-                page_url=str(getattr(self.driver, "current_url", "") or page_url),
-                error_reason="page_timeout",
-                error_message=str(exc),
-                finish_reason="page_timeout",
-                readiness=self._readiness,
-            )
-        except WebDriverException as exc:
-            self._save_debug(current, "webdriver_error")
-            self._close_driver()
-            return FrontPageResult(
-                worker_id=self.worker_id,
-                task=leased_task,
-                page_url=page_url,
-                error_reason="webdriver_error",
-                error_message=str(exc)[:500],
-                finish_reason="webdriver_error",
-                readiness=self._readiness,
-            )
         except UserFacingError as exc:
-            self._save_debug(current, "user_facing_error")
+            self._save_debug(leased_task, "user_facing_error")
             return FrontPageResult(
                 worker_id=self.worker_id,
                 task=leased_task,
@@ -2125,7 +2660,7 @@ class FrontWorker:
                 readiness=self._readiness,
             )
         except Exception as exc:
-            self._save_debug(current, "unexpected_error")
+            self._save_debug(leased_task, "unexpected_error")
             return FrontPageResult(
                 worker_id=self.worker_id,
                 task=leased_task,
@@ -2136,6 +2671,7 @@ class FrontWorker:
                 readiness=self._readiness,
             )
         finally:
+            self._cleanup_attempt_scope()
             self.manual.release_all(self.worker_id)
 
     def _run(self) -> None:
@@ -2162,41 +2698,6 @@ class FrontWorker:
         finally:
             self.manual.release_all(self.worker_id)
             self._close_driver()
-
-
-def preflight_front_delivery(
-    runtime: FrontRuntimeConfig,
-    initial_queue: Sequence[Dict[str, Any]],
-    state: FrontStateStore,
-) -> None:
-    if runtime.browser_tab_concurrency <= 1 or not runtime.delivery_location_enabled:
-        return
-    first_url_by_domain: Dict[str, str] = {}
-    for task in initial_queue:
-        url = str(task.get("page_url") or "")
-        domain = (urlparse(url).hostname or "").lower()
-        if domain and domain not in first_url_by_domain:
-            first_url_by_domain[domain] = url
-    if not first_url_by_domain:
-        return
-
-    print(f"并发预检：串行确认 {len(first_url_by_domain)} 个 Amazon 域名的配送地址。")
-    driver = start_driver(runtime)  # type: ignore[arg-type]
-    try:
-        for domain, url in first_url_by_domain.items():
-            open_amazon_page(
-                driver,
-                url,
-                runtime,
-                on_manual_pause=lambda reason, page_url: state.mark_manual_pause(reason, page_url),
-                on_manual_resume=state.clear_manual_pause,
-            )
-            print(f"配送地址已确认：{domain}")
-    finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
 
 
 def run_bsr_category_mode(raw_config: Dict[str, Any], runtime: FrontRuntimeConfig, dry_run: bool, no_resume: bool) -> int:
@@ -2253,16 +2754,14 @@ def _run_front_modes_unlocked(
     state = FrontStateStore(state_path, runtime, initial_queue)
     state.load_or_create()
     materialize_front_records(state, records_path)
-    preflight_front_delivery(
-        runtime,
-        [item for item in state.data.get("pending") or [] if isinstance(item, dict)],
-        state,
-    )
-
     result_queue: "queue.Queue[FrontPageResult]" = queue.Queue()
+    retry_event_queue: "queue.Queue[Dict[str, Any]]" = queue.Queue()
     manual = ManualActionCoordinator()
     throttle = NavigationThrottle(runtime.delay_seconds_min, runtime.delay_seconds_max)
     delivery_locks = DeliveryDomainLocks()
+    domain_cooldowns = DomainCooldownRegistry()
+    recovery_lock = threading.Lock()
+    recovery_halted = threading.Event()
     workers = [
         FrontWorker(
             worker_id=f"tab-{index}",
@@ -2272,6 +2771,10 @@ def _run_front_modes_unlocked(
             throttle=throttle,
             delivery_locks=delivery_locks,
             debug_dir=debug_dir,
+            retry_events=retry_event_queue,
+            domain_cooldowns=domain_cooldowns,
+            recovery_lock=recovery_lock,
+            recovery_halted=recovery_halted,
         )
         for index in range(1, runtime.browser_tab_concurrency + 1)
     ]
@@ -2285,9 +2788,20 @@ def _run_front_modes_unlocked(
     fatal_message = ""
     try:
         while True:
+            _drain_front_retry_events(retry_event_queue, state)
             state.set_manual_snapshot(manual.snapshot())
             if not fatal_message and not manual.is_paused():
-                for worker_id in sorted(list(idle_workers)):
+                retry_state = state.amazon_page_retry_state() or {}
+                retry_status = str(retry_state.get("status") or "")
+                retry_active = retry_status in {
+                    "waiting",
+                    "attempting",
+                    "manual_resume_required",
+                }
+                dispatch_ids = sorted(list(idle_workers))
+                if retry_active:
+                    dispatch_ids = dispatch_ids[:1] if not busy_workers else []
+                for worker_id in dispatch_ids:
                     if not worker_by_id[worker_id].is_alive():
                         idle_workers.discard(worker_id)
                         fatal_message = (
@@ -2295,8 +2809,18 @@ def _run_front_modes_unlocked(
                             or f"{worker_id} 已意外退出；未派发任务仍保留在断点中。"
                         )
                         continue
-                    task = state.lease_next(worker_id)
+                    preferred_work_key = (
+                        str(retry_state.get("work_key") or "")
+                        if retry_active
+                        else ""
+                    )
+                    task = state.lease_next(worker_id, preferred_work_key)
                     if task is None:
+                        if retry_active and not busy_workers:
+                            fatal_message = (
+                                "Amazon 页面恢复断点引用的当前任务已不在 pending 中；"
+                                "为避免错误覆盖断点，任务已停止。"
+                            )
                         break
                     label = (
                         task.get("keyword")
@@ -2308,6 +2832,8 @@ def _run_front_modes_unlocked(
                     worker_by_id[worker_id].submit(task)
                     idle_workers.remove(worker_id)
                     busy_workers.add(worker_id)
+                    if retry_active:
+                        break
 
             if fatal_message and not busy_workers:
                 break
@@ -2317,6 +2843,7 @@ def _run_front_modes_unlocked(
             try:
                 result = result_queue.get(timeout=0.25)
             except queue.Empty:
+                _drain_front_retry_events(retry_event_queue, state)
                 for worker_id in sorted(list(busy_workers)):
                     if worker_by_id[worker_id].is_alive():
                         continue
@@ -2331,6 +2858,7 @@ def _run_front_modes_unlocked(
                     )
                 continue
 
+            _drain_front_retry_events(retry_event_queue, state)
             worker_id = result.worker_id
             busy_workers.discard(worker_id)
             idle_workers.add(worker_id)
@@ -2338,6 +2866,23 @@ def _run_front_modes_unlocked(
                 state.mark_sellersprite_readiness(result.readiness, worker_id)
 
             if result.error_reason:
+                if result.error_reason == AmazonPageRetryExhausted.failure_code:
+                    log_front_failure(
+                        failures_path,
+                        state,
+                        result.task,
+                        result.error_reason,
+                        result.error_message,
+                        result.page_url or str(result.task.get("page_url") or ""),
+                        retry_state=state.amazon_page_retry_state(),
+                    )
+                    state.requeue_task(worker_id, result.task)
+                    fatal_message = fatal_message or (
+                        "Amazon 页面五次尝试仍不可用；当前任务及其余 pending 已原子保存，"
+                        "请稍后重新运行原命令继续。"
+                    )
+                    print(f"[{worker_id}] 页面恢复已耗尽，已保存手动继续断点。")
+                    continue
                 log_front_failure(
                     failures_path,
                     state,
@@ -2347,23 +2892,12 @@ def _run_front_modes_unlocked(
                     result.page_url or str(result.task.get("page_url") or ""),
                 )
                 if result.error_reason in FRONT_RETRYABLE_ERRORS:
-                    retry_task, should_retry, retry_number = prepare_front_retry_task(
-                        result.task
-                    )
-                    state.requeue_task(worker_id, retry_task)
-                    if should_retry:
-                        print(
-                            f"[{worker_id}] 页面暂时失败（{result.error_reason}），"
-                            f"保留断点并重试当前任务（{retry_number}/"
-                            f"{FRONT_MAX_TASK_RETRIES}）。"
-                        )
-                        continue
+                    state.requeue_task(worker_id, result.task)
                     fatal_message = fatal_message or (
-                        f"页面连续 {FRONT_MAX_TASK_RETRIES + 1} 次失败"
-                        f"（{result.error_reason}），当前任务已保留在断点中："
+                        "页面恢复控制器异常退出，当前任务已保留在断点中："
                         f"{result.error_message}"
                     )
-                    print(f"[{worker_id}] 页面重试仍失败，任务保留在断点中。")
+                    print(f"[{worker_id}] 页面恢复异常，任务保留在断点中。")
                     continue
                 if result.fatal:
                     state.requeue_task(worker_id, result.task)
@@ -2392,6 +2926,7 @@ def _run_front_modes_unlocked(
     finally:
         for worker in workers:
             worker.stop()
+        _drain_front_retry_events(retry_event_queue, state)
         stuck_workers: List[str] = []
         for worker in workers:
             if not worker.join(timeout=5.0):
@@ -2404,6 +2939,7 @@ def _run_front_modes_unlocked(
             )
         else:
             state.set_manual_snapshot(None)
+        _drain_front_retry_events(retry_event_queue, state)
 
     materialize_front_records(state, records_path)
     write_front_workbook(records_path, failures_path, output_xlsx)

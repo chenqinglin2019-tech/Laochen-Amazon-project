@@ -263,11 +263,12 @@ class ConfigCompatibilityTests(unittest.TestCase):
             self.assertEqual(raw["extension_path"], "auto", config_path.name)
             self.assertFalse(raw["activate_plugin"], config_path.name)
 
-    def test_setup_runner_installs_and_auto_starts_chrome_for_testing(self) -> None:
+    def test_setup_runner_uses_cdp_runtime_and_auto_starts_reuse_chrome(self) -> None:
         setup_text = (SKILL_ROOT / "scripts" / "setup_runner.sh").read_text(
             encoding="utf-8"
         )
-        self.assertIn("-m playwright install chromium", setup_text)
+        self.assertNotIn("-m playwright install chromium", setup_text)
+        self.assertIn("from playwright.sync_api import sync_playwright", setup_text)
         self.assertIn("auto_start_reuse_browser", setup_text)
 
     def test_count_only_image_mode_does_not_require_sellersprite(self) -> None:
