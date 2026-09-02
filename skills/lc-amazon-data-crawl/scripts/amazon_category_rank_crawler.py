@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import copy
 import datetime as dt
 import hashlib
 import json
@@ -28,7 +29,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, FrozenSet, Iterable, List, Mapping, Optional, Sequence, Tuple
 from urllib.parse import parse_qs, urljoin, urlparse, urlunparse
 from urllib.request import urlopen
 
@@ -46,6 +47,21 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from browser_runtime import CdpWebDriver
+from amazon_page_recovery import (
+    AmazonPageRetryController,
+    AmazonPageRetryExhausted,
+    DEFAULT_RETRY_SCHEDULE_SECONDS,
+    DomainCooldownRegistry,
+    PageHealthAssessment,
+    PageHealthStatus,
+    PageSnapshot,
+    RetryCallbacks,
+    RetryConfigurationError,
+    RetrySchedule,
+    TransientAmazonPageUnavailable,
+    classify_page_snapshot,
+    retry_schedule_from_config,
+)
 
 try:  # POSIX process lock
     import fcntl as _fcntl
@@ -75,7 +91,6 @@ FULFILLMENT_METHODS = {"FBA", "FBM", "AMZ"}
 RECORD_SCHEMA_VERSION = 2
 CATEGORY_STATE_SCHEMA_VERSION = 2
 CRAWL_PLAN_SCHEMA_VERSION = 1
-CATEGORY_MAX_TASK_RETRIES = 2
 SUBCATEGORY_BSR_SEMANTICS = {
     "single_row_is_child": True,
     "multiple_rows_skip_first": True,
@@ -1009,6 +1024,7 @@ class RuntimeConfig:
     resume: bool
     activate_plugin: bool
     page_timeout: int
+    amazon_page_retry_schedule: RetrySchedule
     plugin_timeout: int
     plugin_retry_attempts: int
     plugin_retry_wait_seconds: float
@@ -1065,8 +1081,17 @@ class CategoryCrawlBatch:
     failures: List[Dict[str, Any]] = field(default_factory=list)
     terminal_error_type: str = ""
     terminal_error_message: str = ""
-    retryable_error_type: str = ""
-    retryable_error_message: str = ""
+
+
+@dataclass
+class CategoryPageWorkResult:
+    """Uncommitted result of one fully validated category page attempt."""
+
+    node: Dict[str, Any]
+    next_url: str = ""
+    page: Optional[CategoryPageBatch] = None
+    children: List[Dict[str, Any]] = field(default_factory=list)
+    skipped_intermediate: bool = False
 
 
 MANUAL_INTERACTION_LOCK = threading.Lock()
@@ -1081,11 +1106,16 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
     job_id = config_text(config, "job_id") or f"category-rank-{now_ts()}"
     outputs_root = resolve_path(config_text(config, "outputs_root", "outputs"))
     browser_backend = config_text(config, "browser_backend", "cdp").lower()
-    if browser_backend not in {"cdp", "selenium"}:
-        raise UserFacingError("配置项 `browser_backend` 只支持 cdp 或 selenium。")
-    browser_mode = config_text(config, "browser_mode", "launch").lower()
-    if browser_mode not in {"launch", "attach", "reuse", "applescript"}:
-        raise UserFacingError("配置项 `browser_mode` 只支持 launch、attach、reuse 或 applescript。")
+    if browser_backend != "cdp":
+        raise UserFacingError(
+            "配置项 `browser_backend` 必须为 cdp；旧 Selenium 后端无法证明标签页归属，已停用。"
+        )
+    browser_mode = config_text(config, "browser_mode", "reuse").lower()
+    if browser_mode not in {"launch", "attach", "reuse"}:
+        raise UserFacingError(
+            "配置项 `browser_mode` 只支持 launch、attach 或 reuse；"
+            "AppleScript 无法证明标签页归属，已停用。"
+        )
     browser_tab_concurrency = config_int(config, "browser_tab_concurrency", 1)
     browser_tab_concurrency = 1 if browser_tab_concurrency is None else browser_tab_concurrency
     if browser_tab_concurrency < 1 or browser_tab_concurrency > 3:
@@ -1097,6 +1127,11 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
             "browser_tab_concurrency 大于 1 时只支持 browser_backend=cdp，"
             "且 browser_mode 必须是 attach 或 reuse。"
         )
+
+    try:
+        amazon_page_retry_schedule = retry_schedule_from_config(config)
+    except RetryConfigurationError as exc:
+        raise UserFacingError(str(exc)) from exc
 
     chrome_binary = config_text(config, "chrome_binary")
     chrome_user_data_dir = resolve_path(config_text(config, "chrome_user_data_dir", "chrome_profiles/category-rank-sellersprite"))
@@ -1178,6 +1213,7 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         resume=False if no_resume else config_bool(config, "resume", True),
         activate_plugin=config_bool(config, "activate_plugin", True),
         page_timeout=config_int(config, "page_timeout", 90) or 90,
+        amazon_page_retry_schedule=amazon_page_retry_schedule,
         plugin_timeout=config_int(config, "plugin_timeout", 120) or 120,
         plugin_retry_attempts=max(config_int(config, "plugin_retry_attempts", 5) or 0, 0),
         plugin_retry_wait_seconds=plugin_retry_wait_min,
@@ -1693,6 +1729,86 @@ class StateStore:
         if self.data.pop("manual_pause", None) is not None:
             self.flush()
 
+    @staticmethod
+    def amazon_page_retry_entry_key(retry_state: Mapping[str, Any]) -> str:
+        work_key = str(retry_state.get("work_key") or "")
+        stage = str(retry_state.get("stage") or "")
+        return f"{work_key}|stage:{stage}"
+
+    def _amazon_page_retry_entries(self) -> Dict[str, Dict[str, Any]]:
+        current = self.data.get("amazon_page_retry")
+        entries: Dict[str, Dict[str, Any]] = {}
+        if not isinstance(current, dict):
+            return entries
+        raw_entries = current.get("entries")
+        if isinstance(raw_entries, dict):
+            for key, value in raw_entries.items():
+                if isinstance(value, dict):
+                    entries[str(key)] = copy.deepcopy(value)
+        elif current.get("work_key") and current.get("stage"):
+            key = self.amazon_page_retry_entry_key(current)
+            entries[key] = copy.deepcopy(current)
+        return entries
+
+    @staticmethod
+    def _representative_amazon_page_retry(
+        entries: Mapping[str, Mapping[str, Any]],
+    ) -> Dict[str, Any]:
+        priorities = {
+            "manual_resume_required": 3,
+            "waiting": 2,
+            "attempting": 1,
+        }
+        def updated_at(item: Tuple[str, Mapping[str, Any]]) -> float:
+            try:
+                return float(item[1].get("updated_at") or 0)
+            except (TypeError, ValueError, OverflowError):
+                return 0.0
+
+        _key, representative = max(
+            entries.items(),
+            key=lambda item: (
+                priorities.get(str(item[1].get("status") or ""), 0),
+                updated_at(item),
+                str(item[0]),
+            ),
+        )
+        payload = copy.deepcopy(dict(representative))
+        payload["entries"] = {
+            str(key): copy.deepcopy(dict(value))
+            for key, value in entries.items()
+        }
+        return payload
+
+    def load_amazon_page_retry(self, retry_key: str) -> Optional[Dict[str, Any]]:
+        value = self._amazon_page_retry_entries().get(str(retry_key))
+        return copy.deepcopy(value) if value is not None else None
+
+    def write_amazon_page_retry(
+        self,
+        retry_key: str,
+        retry_state: Mapping[str, Any],
+    ) -> None:
+        state_value = copy.deepcopy(dict(retry_state))
+        entries = self._amazon_page_retry_entries()
+        entries[str(retry_key)] = state_value
+        self.data["amazon_page_retry"] = self._representative_amazon_page_retry(
+            entries
+        )
+        self.flush()
+
+    def clear_amazon_page_retry(self, retry_key: str) -> None:
+        entries = self._amazon_page_retry_entries()
+        if entries.pop(str(retry_key), None) is None:
+            return
+        if entries:
+            self.data["amazon_page_retry"] = self._representative_amazon_page_retry(
+                entries
+            )
+        else:
+            self.data.pop("amazon_page_retry", None)
+        self.flush()
+
 
 def write_jsonl_atomic(path: Path, records: Sequence[Dict[str, Any]]) -> None:
     ensure_dir(path.parent)
@@ -2114,7 +2230,7 @@ class DeliveryDomainLocks:
 def safe_find_text(driver: WebDriver) -> str:
     try:
         return normalize_space(driver.find_element(By.TAG_NAME, "body").text)
-    except WebDriverException:
+    except (WebDriverException, AttributeError):
         return ""
 
 
@@ -2143,8 +2259,6 @@ def detect_block(driver: WebDriver) -> Optional[str]:
     checks = [
         ("amazon_robot_check", ["robot check", "enter the characters you see", "validatecaptcha", "captcha", "机器人检测", "我不是机器人"]),
         ("amazon_sign_in", ["sign in", "authentication required", "enter your password", "请先登录亚马逊", "登录亚马逊"]),
-        ("amazon_rate_limit", ["sorry", "unusual traffic", "request has been blocked", "异常流量", "请求被阻止"]),
-        ("access_denied", ["access denied", "not authorized", "permission", "拒绝访问", "无权访问"]),
     ]
     for reason, markers in checks:
         if any(marker in haystack for marker in markers):
@@ -2878,6 +2992,11 @@ def handle_amazon_verification(
     reason = detect_block(driver)
     if not reason:
         return
+    if reason in {"amazon_rate_limit", "access_denied"}:
+        # These are transient page-health failures. The shared recovery
+        # controller applies the configured long backoff; they are not manual
+        # CAPTCHA tasks.
+        return
     if on_manual_pause:
         on_manual_pause(reason, str(getattr(driver, "current_url", "") or ""))
     timeout = int(getattr(runtime, "manual_pause_timeout", 900) or 900)
@@ -2960,6 +3079,8 @@ def _reopen_amazon_target(
     on_manual_resume: Optional[Any],
     clear_transient_city_input: bool = False,
     stop_event: Optional[threading.Event] = None,
+    before_navigation: Optional[Callable[[], None]] = None,
+    page_health_validator: Optional[Callable[[], Any]] = None,
 ) -> bool:
     city_input_reset = (
         _clear_transient_delivery_city_input(driver)
@@ -2970,16 +3091,32 @@ def _reopen_amazon_target(
     for attempt in range(3):
         _raise_if_stop_requested(stop_event)
         try:
+            if before_navigation is not None:
+                before_navigation()
             driver.get(target_url)
             last_error = None
             break
         except WebDriverException as exc:
             if "ERR_ABORTED" not in str(exc).upper():
-                raise
+                assessment = category_page_assessment(
+                    driver,
+                    navigation_error=str(exc),
+                )
+                raise TransientAmazonPageUnavailable.from_assessment(
+                    assessment,
+                    url=safe_driver_current_url(driver, target_url),
+                ) from exc
             last_error = exc
             _sleep_with_stop(0.75 * (attempt + 1), stop_event)
     if last_error is not None:
-        raise last_error
+        assessment = category_page_assessment(
+            driver,
+            navigation_error=str(last_error),
+        )
+        raise TransientAmazonPageUnavailable.from_assessment(
+            assessment,
+            url=safe_driver_current_url(driver, target_url),
+        ) from last_error
     try:
         delattr(driver, "_lc_delivery_trigger_opened")
     except (AttributeError, TypeError):
@@ -2991,6 +3128,18 @@ def _reopen_amazon_target(
         on_manual_resume,
         stop_event=stop_event,
     )
+    if page_health_validator is not None:
+        page_health_validator()
+    else:
+        assessment = category_page_assessment(driver)
+        if (
+            assessment.status is PageHealthStatus.TRANSIENT_UNAVAILABLE
+            and assessment.reason != "expected_content_missing"
+        ):
+            raise TransientAmazonPageUnavailable.from_assessment(
+                assessment,
+                url=safe_driver_current_url(driver, target_url),
+            )
     return city_input_reset
 
 
@@ -3001,12 +3150,14 @@ def ensure_amazon_delivery_location(
     on_manual_pause: Optional[Any] = None,
     on_manual_resume: Optional[Any] = None,
     stop_event: Optional[threading.Event] = None,
+    before_navigation: Optional[Callable[[], None]] = None,
+    page_health_validator: Optional[Callable[[], Any]] = None,
 ) -> None:
     _raise_if_stop_requested(stop_event)
     if not bool(getattr(runtime, "delivery_location_enabled", True)):
         return
     locations = _runtime_delivery_locations(runtime)
-    current_url = str(getattr(driver, "current_url", "") or original_url)
+    current_url = safe_driver_current_url(driver, original_url)
     domain = amazon_marketplace_domain(current_url or original_url, locations)
     if not domain:
         raise DeliveryLocationUnconfirmedError(
@@ -3066,6 +3217,8 @@ def ensure_amazon_delivery_location(
                 on_manual_pause,
                 on_manual_resume,
                 clear_transient_city_input=clear_transient_city_input,
+                before_navigation=before_navigation,
+                page_health_validator=page_health_validator,
             )
         return _reopen_amazon_target(
             driver,
@@ -3075,7 +3228,23 @@ def ensure_amazon_delivery_location(
             on_manual_resume,
             clear_transient_city_input=clear_transient_city_input,
             stop_event=stop_event,
+            before_navigation=before_navigation,
+            page_health_validator=page_health_validator,
         )
+
+    def validate_page_before_manual_delivery() -> None:
+        if page_health_validator is not None:
+            page_health_validator()
+            return
+        assessment = category_page_assessment(driver)
+        if (
+            assessment.status is PageHealthStatus.TRANSIENT_UNAVAILABLE
+            and assessment.reason != "expected_content_missing"
+        ):
+            raise TransientAmazonPageUnavailable.from_assessment(
+                assessment,
+                url=safe_driver_current_url(driver, target_url),
+            )
 
     for postal_code in delivery_postal_candidates(location["postal_code"]):
         deadline = time.time() + timeout
@@ -3130,9 +3299,10 @@ def ensure_amazon_delivery_location(
                 cache.add(cache_key)
                 return
 
+    validate_page_before_manual_delivery()
     reason = "delivery_location_unconfirmed"
     if on_manual_pause:
-        on_manual_pause(reason, str(getattr(driver, "current_url", "") or target_url))
+        on_manual_pause(reason, safe_driver_current_url(driver, target_url))
     print(
         f"自动设置配送地址失败。请在当前 Chrome 页面手动设置 {domain} 配送地址为 "
         f"{location['city']} / {location['postal_code']}。"
@@ -3165,6 +3335,7 @@ def ensure_amazon_delivery_location(
                     on_manual_resume()
                 cache.add(cache_key)
                 return
+        validate_page_before_manual_delivery()
         print("配送地址仍未确认，请继续在当前 Chrome 页面处理。")
     raise DeliveryLocationUnconfirmedError(
         "delivery_location_unconfirmed: 配送地址人工确认超时，任务已停止且未提取当前页数据。"
@@ -3178,6 +3349,7 @@ def open_amazon_page(
     on_manual_pause: Optional[Any] = None,
     on_manual_resume: Optional[Any] = None,
     stop_event: Optional[threading.Event] = None,
+    defer_delivery: bool = False,
 ) -> None:
     _raise_if_stop_requested(stop_event)
     driver.get(url)
@@ -3188,6 +3360,8 @@ def open_amazon_page(
         on_manual_resume,
         stop_event=stop_event,
     )
+    if defer_delivery:
+        return
     ensure_amazon_delivery_location(
         driver,
         runtime,
@@ -3226,6 +3400,545 @@ def wait_for_amazon_products(
             pass
         _sleep_with_stop(0.25, stop_event)
     raise TimeoutException("等待 Amazon 商品卡片超时。")
+
+
+CATEGORY_PRODUCT_SELECTORS = (
+    "#gridItemRoot",
+    ".zg-grid-general-faceout",
+    "[data-asin]:not([data-asin=''])",
+    ".s-result-item[data-asin]:not([data-asin=''])",
+)
+
+CATEGORY_EXPLICIT_EMPTY_MARKERS = (
+    "there are no products available in this category",
+    "there are no products in this category",
+    "no results for",
+    "did not match any products",
+    "we couldn't find any results",
+    "we couldn’t find any results",
+    "currently no listings available",
+    "此分类中没有可用的商品",
+    "没有找到任何商品",
+    "没有符合条件的商品",
+)
+
+
+def category_expected_content_present(driver: WebDriver) -> bool:
+    try:
+        driver.find_element(By.CSS_SELECTOR, ",".join(CATEGORY_PRODUCT_SELECTORS))
+        return True
+    except (NoSuchElementException, WebDriverException, AttributeError):
+        return False
+
+
+def category_explicit_empty_present(driver: WebDriver) -> bool:
+    text = safe_find_text(driver).lower()
+    return any(marker in text for marker in CATEGORY_EXPLICIT_EMPTY_MARKERS)
+
+
+def _category_http_status(driver: WebDriver, title: str, body_text: str) -> Optional[int]:
+    for attribute in ("last_http_status", "_last_http_status", "http_status"):
+        try:
+            value = getattr(driver, attribute)
+        except (AttributeError, WebDriverException):
+            continue
+        if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+            return value
+    haystack = normalize_space(f"{title} {body_text}").lower()
+    if "too many requests" in haystack:
+        return 429
+    status_markers = {
+        500: ("internal server error", "500 server error"),
+        502: ("bad gateway",),
+        503: ("service unavailable",),
+        504: ("gateway timeout",),
+    }
+    for status, markers in status_markers.items():
+        if any(marker in haystack for marker in markers):
+            return status
+    return None
+
+
+def category_page_assessment(
+    driver: WebDriver,
+    *,
+    navigation_error: str = "",
+) -> PageHealthAssessment:
+    """Capture and classify a category page without mutating browser state."""
+
+    try:
+        current_url = str(getattr(driver, "current_url", "") or "")
+    except WebDriverException:
+        current_url = ""
+    try:
+        title = str(getattr(driver, "title", "") or "")
+    except WebDriverException:
+        title = ""
+    body_text = safe_find_text(driver)
+    expected_content_present = category_expected_content_present(driver)
+    explicit_empty = (
+        False
+        if expected_content_present
+        else category_explicit_empty_present(driver)
+    )
+    return classify_page_snapshot(
+        PageSnapshot(
+            page_kind="search_category",
+            url=current_url,
+            title=title,
+            body_text=body_text,
+            http_status=(
+                None
+                if expected_content_present
+                else _category_http_status(driver, title, body_text)
+            ),
+            navigation_error=navigation_error,
+            expected_content_present=expected_content_present,
+            explicit_empty=explicit_empty,
+        )
+    )
+
+
+def safe_driver_current_url(driver: WebDriver, fallback: str = "") -> str:
+    """Read a remote browser URL without masking the exception being handled."""
+
+    try:
+        return str(getattr(driver, "current_url", "") or fallback)
+    except Exception:
+        return str(fallback or "")
+
+
+def _handle_assessment_interaction(
+    driver: WebDriver,
+    runtime: RuntimeConfig,
+    assessment: PageHealthAssessment,
+    on_manual_pause: Optional[Any],
+    on_manual_resume: Optional[Any],
+    stop_event: Optional[threading.Event],
+) -> None:
+    if assessment.status is PageHealthStatus.AMAZON_SIGN_IN:
+        raise VerificationUnconfirmedError(
+            verification_unconfirmed_message("amazon_sign_in")
+        )
+    if assessment.status is not PageHealthStatus.INTERACTIVE_VERIFICATION:
+        return
+    handle_amazon_verification(
+        driver,
+        runtime,
+        on_manual_pause,
+        on_manual_resume,
+        stop_event=stop_event,
+    )
+
+
+def wait_for_category_page_health(
+    driver: WebDriver,
+    runtime: RuntimeConfig,
+    on_manual_pause: Optional[Any] = None,
+    on_manual_resume: Optional[Any] = None,
+    stop_event: Optional[threading.Event] = None,
+) -> PageHealthAssessment:
+    """Wait for a product DOM or an explicit empty marker, then classify."""
+
+    assessment = category_page_assessment(driver)
+    _handle_assessment_interaction(
+        driver,
+        runtime,
+        assessment,
+        on_manual_pause,
+        on_manual_resume,
+        stop_event,
+    )
+    if assessment.status is PageHealthStatus.INTERACTIVE_VERIFICATION:
+        assessment = category_page_assessment(driver)
+    if assessment.status in {
+        PageHealthStatus.HEALTHY,
+        PageHealthStatus.VERIFIED_EMPTY,
+    }:
+        return assessment
+    # Strong dog/error/rate-limit/access-denied signatures should back off
+    # immediately. A blank or still-building DOM gets the configured timeout.
+    if assessment.reason not in {"blank_page", "expected_content_missing"}:
+        raise TransientAmazonPageUnavailable.from_assessment(
+            assessment,
+            url=safe_driver_current_url(driver),
+        )
+    try:
+        wait_for_amazon_products(driver, runtime, stop_event=stop_event)
+    except TimeoutException:
+        pass
+    assessment = category_page_assessment(driver)
+    _handle_assessment_interaction(
+        driver,
+        runtime,
+        assessment,
+        on_manual_pause,
+        on_manual_resume,
+        stop_event,
+    )
+    if assessment.status is PageHealthStatus.INTERACTIVE_VERIFICATION:
+        assessment = category_page_assessment(driver)
+    if assessment.status in {
+        PageHealthStatus.HEALTHY,
+        PageHealthStatus.VERIFIED_EMPTY,
+    }:
+        return assessment
+    raise TransientAmazonPageUnavailable.from_assessment(
+        assessment,
+        url=safe_driver_current_url(driver),
+    )
+
+
+def category_owned_handle_snapshot(driver: WebDriver) -> Optional[FrozenSet[str]]:
+    snapshot = getattr(driver, "owned_handle_snapshot", None)
+    if not callable(snapshot):
+        return None
+    try:
+        return frozenset(str(handle) for handle in snapshot())
+    except WebDriverException:
+        return None
+
+
+def close_category_owned_since(
+    driver: WebDriver,
+    snapshot: Optional[FrozenSet[str]],
+) -> None:
+    """Close only event-owned popups and always restore the dedicated worker."""
+
+    if snapshot is None:
+        restore_worker = getattr(driver, "restore_worker_page", None)
+        if callable(restore_worker):
+            try:
+                restore_worker()
+            except WebDriverException as exc:
+                print(f"恢复类目 worker 标签页失败：{exc}", file=sys.stderr)
+        return
+    close_owned = getattr(driver, "close_owned_since", None)
+    restore_worker = getattr(driver, "restore_worker_page", None)
+    try:
+        if callable(close_owned):
+            close_owned(snapshot)
+    except WebDriverException as exc:
+        print(f"清理 crawler-owned 弹窗失败，已保留诊断记录：{exc}", file=sys.stderr)
+    finally:
+        if callable(restore_worker):
+            try:
+                restore_worker()
+            except WebDriverException as exc:
+                print(f"恢复类目 worker 标签页失败：{exc}", file=sys.stderr)
+
+
+def _runtime_recovery_clock(runtime: Any) -> Callable[[], float]:
+    value = getattr(runtime, "_amazon_page_retry_clock", None)
+    return value if callable(value) else time.time
+
+
+def _runtime_recovery_rng(runtime: Any) -> Any:
+    return getattr(runtime, "_amazon_page_retry_rng", None)
+
+
+def _runtime_recovery_waiter(
+    runtime: Any,
+    stop_event: Optional[threading.Event],
+) -> Callable[[float], Any]:
+    value = getattr(runtime, "_amazon_page_retry_waiter", None)
+    if callable(value):
+        return value
+    return lambda seconds: _sleep_with_stop(seconds, stop_event)
+
+
+def _retry_entry_key(work_key: str, stage: str) -> str:
+    return f"{work_key}|stage:{stage}"
+
+
+def state_retry_callbacks(
+    state: StateStore,
+    retry_key: str,
+) -> RetryCallbacks:
+    return RetryCallbacks(
+        load_state=lambda: state.load_amazon_page_retry(retry_key),
+        write_state=lambda value: state.write_amazon_page_retry(retry_key, value),
+        clear_state=lambda: state.clear_amazon_page_retry(retry_key),
+    )
+
+
+def run_category_page_work_with_recovery(
+    runtime: RuntimeConfig,
+    page_url: str,
+    work_key: str,
+    *,
+    retry_callbacks: RetryCallbacks,
+    driver_provider: Callable[[], WebDriver],
+    operation: Callable[[Any], CategoryPageWorkResult],
+    stop_event: Optional[threading.Event] = None,
+    domain_cooldowns: Optional[DomainCooldownRegistry] = None,
+    stage: str = "category_page_work",
+) -> CategoryPageWorkResult:
+    """Retry navigation, plugin inspection, extraction and pagination as one stage.
+
+    The operation must not commit state or output files. Its result is committed
+    by the caller only after this controller succeeds, so a retry can never
+    duplicate a page shard.
+    """
+
+    domain = (urlparse(page_url).hostname or "unknown").lower()
+    attempt_snapshot: List[Optional[FrozenSet[str]]] = [None]
+    base_callbacks = retry_callbacks
+
+    def cleanup() -> None:
+        try:
+            current_driver = driver_provider()
+        except BaseException:
+            current_driver = None
+        if current_driver is not None:
+            close_category_owned_since(current_driver, attempt_snapshot[0])
+        attempt_snapshot[0] = None
+        base_callbacks.cleanup()
+
+    def begin_domain_cooldown(current_domain: str, deadline: float) -> None:
+        if domain_cooldowns is not None:
+            domain_cooldowns.extend(current_domain, deadline)
+        base_callbacks.begin_domain_cooldown(current_domain, deadline)
+
+    def end_domain_cooldown(current_domain: str, deadline: float) -> None:
+        if domain_cooldowns is not None:
+            domain_cooldowns.release(current_domain, deadline)
+        base_callbacks.end_domain_cooldown(current_domain, deadline)
+
+    def heartbeat(value: Mapping[str, Any]) -> None:
+        base_callbacks.heartbeat(value)
+        remaining = max(float(value.get("remaining_wait_seconds") or 0), 0.0)
+        print(
+            f"Amazon 页面处理暂不可用；{work_key} 将在约 {remaining:.0f} 秒后重试。",
+            flush=True,
+        )
+
+    callbacks = RetryCallbacks(
+        load_state=base_callbacks.load_state,
+        write_state=base_callbacks.write_state,
+        clear_state=base_callbacks.clear_state,
+        cleanup=cleanup,
+        begin_domain_cooldown=begin_domain_cooldown,
+        end_domain_cooldown=end_domain_cooldown,
+        heartbeat=heartbeat,
+    )
+
+    def guarded(attempt: Any) -> CategoryPageWorkResult:
+        _raise_if_stop_requested(stop_event)
+        current_driver = driver_provider()
+        attempt_snapshot[0] = category_owned_handle_snapshot(current_driver)
+        try:
+            return operation(attempt)
+        except TransientAmazonPageUnavailable:
+            raise
+        except (TimeoutException, WebDriverException) as exc:
+            reason = (
+                "page_timeout"
+                if isinstance(exc, TimeoutException)
+                else "webdriver_error"
+            )
+            raise TransientAmazonPageUnavailable(
+                str(exc) or reason,
+                reason=reason,
+                url=safe_driver_current_url(current_driver, page_url),
+            ) from exc
+
+    controller = AmazonPageRetryController(
+        domain=domain,
+        work_key=work_key,
+        stage=stage,
+        url=page_url,
+        schedule=getattr(
+            runtime,
+            "amazon_page_retry_schedule",
+            DEFAULT_RETRY_SCHEDULE_SECONDS,
+        ),
+        callbacks=callbacks,
+        clock=_runtime_recovery_clock(runtime),
+        rng=_runtime_recovery_rng(runtime),
+        waiter=_runtime_recovery_waiter(runtime, stop_event),
+    )
+    return controller.run(guarded)
+
+
+def load_category_page_attempt(
+    driver: WebDriver,
+    page_url: str,
+    runtime: RuntimeConfig,
+    *,
+    on_manual_pause: Optional[Any] = None,
+    on_manual_resume: Optional[Any] = None,
+    stop_event: Optional[threading.Event] = None,
+    before_navigation: Optional[Callable[[], None]] = None,
+    delivery_lock: Optional[threading.Lock] = None,
+    domain_cooldowns: Optional[DomainCooldownRegistry] = None,
+) -> PageHealthAssessment:
+    """Perform one uncommitted category navigation/health/delivery attempt."""
+
+    domain = (urlparse(page_url).hostname or "unknown").lower()
+    if domain_cooldowns is not None:
+        domain_cooldowns.wait(domain)
+    _raise_if_stop_requested(stop_event)
+    if before_navigation is not None:
+        before_navigation()
+
+    def before_delivery_navigation() -> None:
+        if domain_cooldowns is not None:
+            domain_cooldowns.wait(domain)
+        _raise_if_stop_requested(stop_event)
+        if before_navigation is not None:
+            before_navigation()
+
+    def navigate_with_delivery() -> PageHealthAssessment:
+        try:
+            driver.get(page_url)
+        except (TimeoutException, WebDriverException) as exc:
+            assessment = category_page_assessment(
+                driver,
+                navigation_error=str(exc),
+            )
+            _handle_assessment_interaction(
+                driver,
+                runtime,
+                assessment,
+                on_manual_pause,
+                on_manual_resume,
+                stop_event,
+            )
+            if assessment.status is PageHealthStatus.INTERACTIVE_VERIFICATION:
+                assessment = category_page_assessment(
+                    driver,
+                    navigation_error=str(exc),
+                )
+            raise TransientAmazonPageUnavailable.from_assessment(
+                assessment,
+                url=safe_driver_current_url(driver, page_url),
+            ) from exc
+
+        handle_amazon_verification(
+            driver,
+            runtime,
+            on_manual_pause,
+            on_manual_resume,
+            stop_event=stop_event,
+        )
+
+        def validate_category_page() -> PageHealthAssessment:
+            return wait_for_category_page_health(
+                driver,
+                runtime,
+                on_manual_pause,
+                on_manual_resume,
+                stop_event,
+            )
+
+        assessment = validate_category_page()
+        ensure_amazon_delivery_location(
+            driver,
+            runtime,
+            original_url=page_url,
+            on_manual_pause=on_manual_pause,
+            on_manual_resume=on_manual_resume,
+            stop_event=stop_event,
+            before_navigation=before_delivery_navigation,
+            page_health_validator=validate_category_page,
+        )
+        # Delivery selection can reload the target. Revalidate before any
+        # discovery, plugin wait, extraction, or empty-page commit.
+        return validate_category_page()
+
+    if delivery_lock is None:
+        return navigate_with_delivery()
+    with delivery_lock:
+        return navigate_with_delivery()
+
+
+def load_category_page_with_recovery(
+    driver: WebDriver,
+    page_url: str,
+    runtime: RuntimeConfig,
+    work_key: str,
+    *,
+    retry_callbacks: RetryCallbacks,
+    stage: str = "category_page",
+    on_manual_pause: Optional[Any] = None,
+    on_manual_resume: Optional[Any] = None,
+    stop_event: Optional[threading.Event] = None,
+    before_navigation: Optional[Callable[[], None]] = None,
+    delivery_lock: Optional[threading.Lock] = None,
+    domain_cooldowns: Optional[DomainCooldownRegistry] = None,
+) -> PageHealthAssessment:
+    """Navigate and validate one category page with the shared five-attempt policy."""
+
+    domain = (urlparse(page_url).hostname or "unknown").lower()
+    attempt_snapshot: List[Optional[FrozenSet[str]]] = [None]
+    base_callbacks = retry_callbacks
+
+    def cleanup() -> None:
+        close_category_owned_since(driver, attempt_snapshot[0])
+        attempt_snapshot[0] = None
+        base_callbacks.cleanup()
+
+    def begin_domain_cooldown(current_domain: str, deadline: float) -> None:
+        if domain_cooldowns is not None:
+            domain_cooldowns.extend(current_domain, deadline)
+        base_callbacks.begin_domain_cooldown(current_domain, deadline)
+
+    def end_domain_cooldown(current_domain: str, deadline: float) -> None:
+        if domain_cooldowns is not None:
+            domain_cooldowns.release(current_domain, deadline)
+        base_callbacks.end_domain_cooldown(current_domain, deadline)
+
+    def heartbeat(value: Mapping[str, Any]) -> None:
+        base_callbacks.heartbeat(value)
+        remaining = max(float(value.get("remaining_wait_seconds") or 0), 0.0)
+        print(
+            f"Amazon 页面暂不可用；{work_key} 将在约 {remaining:.0f} 秒后重试。",
+            flush=True,
+        )
+
+    callbacks = RetryCallbacks(
+        load_state=base_callbacks.load_state,
+        write_state=base_callbacks.write_state,
+        clear_state=base_callbacks.clear_state,
+        cleanup=cleanup,
+        begin_domain_cooldown=begin_domain_cooldown,
+        end_domain_cooldown=end_domain_cooldown,
+        heartbeat=heartbeat,
+    )
+
+    def navigate_and_validate(_attempt: Any) -> PageHealthAssessment:
+        _raise_if_stop_requested(stop_event)
+        attempt_snapshot[0] = category_owned_handle_snapshot(driver)
+        return load_category_page_attempt(
+            driver,
+            page_url,
+            runtime,
+            on_manual_pause=on_manual_pause,
+            on_manual_resume=on_manual_resume,
+            stop_event=stop_event,
+            before_navigation=before_navigation,
+            delivery_lock=delivery_lock,
+            domain_cooldowns=domain_cooldowns,
+        )
+
+    schedule = getattr(
+        runtime,
+        "amazon_page_retry_schedule",
+        DEFAULT_RETRY_SCHEDULE_SECONDS,
+    )
+    controller = AmazonPageRetryController(
+        domain=domain,
+        work_key=work_key,
+        stage=stage,
+        url=page_url,
+        schedule=schedule,
+        callbacks=callbacks,
+        clock=_runtime_recovery_clock(runtime),
+        rng=_runtime_recovery_rng(runtime),
+        waiter=_runtime_recovery_waiter(runtime, stop_event),
+    )
+    return controller.run(navigate_and_validate)
 
 
 def try_activate_plugin(driver: WebDriver) -> bool:
@@ -3471,7 +4184,7 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
     report: Dict[str, Any] = {
         "status": "data_loading",
         "checked_at": now_iso(),
-        "page_url": str(getattr(driver, "current_url", "") or ""),
+        "page_url": safe_driver_current_url(driver),
         "plugin_nodes": plugin_node_count(driver),
         "login_required": sellersprite_login_required(driver),
         "product_count": len(product_asins),
@@ -3526,6 +4239,7 @@ def wait_for_sellersprite_data_or_prompt(
     restart_driver: Optional[Any] = None,
     on_readiness: Optional[Any] = None,
     before_navigation: Optional[Any] = None,
+    recover_amazon_page: Optional[Any] = None,
     stop_event: Optional[threading.Event] = None,
 ) -> str:
     _raise_if_stop_requested(stop_event)
@@ -3533,7 +4247,7 @@ def wait_for_sellersprite_data_or_prompt(
         report = {
             "status": "not_required",
             "checked_at": now_iso(),
-            "page_url": str(getattr(driver, "current_url", "") or ""),
+            "page_url": safe_driver_current_url(driver),
         }
         set_sellersprite_readiness(driver, report)
         if on_readiness:
@@ -3544,10 +4258,71 @@ def wait_for_sellersprite_data_or_prompt(
         if on_readiness:
             on_readiness(get_sellersprite_readiness(current_driver))
 
+    def ensure_page_health(current_driver: WebDriver) -> WebDriver:
+        for _check in range(2):
+            assessment = category_page_assessment(current_driver)
+            if assessment.status is PageHealthStatus.AMAZON_SIGN_IN:
+                if on_manual_pause:
+                    on_manual_pause(
+                        "amazon_sign_in",
+                        safe_driver_current_url(current_driver),
+                    )
+                raise VerificationUnconfirmedError(
+                    verification_unconfirmed_message("amazon_sign_in")
+                )
+            if assessment.status is PageHealthStatus.INTERACTIVE_VERIFICATION:
+                handle_amazon_verification(
+                    current_driver,
+                    runtime,
+                    on_manual_pause,
+                    on_manual_resume,
+                    stop_event=stop_event,
+                )
+                continue
+            if assessment.status is PageHealthStatus.TRANSIENT_UNAVAILABLE:
+                if recover_amazon_page is None:
+                    raise TransientAmazonPageUnavailable.from_assessment(
+                        assessment,
+                        url=safe_driver_current_url(current_driver),
+                    )
+                recovered = recover_amazon_page(
+                    current_driver,
+                    safe_driver_current_url(current_driver),
+                )
+                if recovered is not None:
+                    current_driver = recovered
+                continue
+            return current_driver
+        assessment = category_page_assessment(current_driver)
+        if assessment.status is PageHealthStatus.AMAZON_SIGN_IN:
+            if on_manual_pause:
+                on_manual_pause(
+                    "amazon_sign_in",
+                    safe_driver_current_url(current_driver),
+                )
+            raise VerificationUnconfirmedError(
+                verification_unconfirmed_message("amazon_sign_in")
+            )
+        if assessment.status is PageHealthStatus.INTERACTIVE_VERIFICATION:
+            handle_amazon_verification(
+                current_driver,
+                runtime,
+                on_manual_pause,
+                on_manual_resume,
+                stop_event=stop_event,
+            )
+            return current_driver
+        if assessment.status is PageHealthStatus.TRANSIENT_UNAVAILABLE:
+            raise TransientAmazonPageUnavailable.from_assessment(
+                assessment,
+                url=safe_driver_current_url(current_driver),
+            )
+        return current_driver
+
     def handle_block(current_driver: WebDriver) -> Optional[str]:
         reason = sellersprite_block_reason(current_driver)
         if on_manual_pause:
-            on_manual_pause(reason, current_driver.current_url)
+            on_manual_pause(reason, safe_driver_current_url(current_driver))
         cleared = (
             wait_for_manual_clear(
                 current_driver,
@@ -3582,6 +4357,7 @@ def wait_for_sellersprite_data_or_prompt(
                 current_driver.refresh()
             except WebDriverException:
                 pass
+            current_driver = ensure_page_health(current_driver)
             try:
                 wait_for_amazon_products(
                     current_driver,
@@ -3607,6 +4383,7 @@ def wait_for_sellersprite_data_or_prompt(
 
     while True:
         _raise_if_stop_requested(stop_event)
+        driver = ensure_page_health(driver)
         status = wait_for_sellersprite_data(driver, runtime, stop_event=stop_event)
         publish(driver)
         if status == "ok":
@@ -4518,6 +5295,64 @@ def build_failure_record(
     }
 
 
+def build_amazon_retry_exhausted_failure_record(
+    runtime: RuntimeConfig,
+    node: Dict[str, Any],
+    page_number: int,
+    url: str,
+    exhausted: AmazonPageRetryExhausted,
+) -> Dict[str, Any]:
+    retry_state = exhausted.state
+    work_key = str(retry_state.get("work_key") or page_key(node, page_number, url))
+    stage = str(retry_state.get("stage") or "category_page_work")
+    cycle = max(int(retry_state.get("cycle") or 1), 1)
+    record = build_failure_record(
+        runtime,
+        node,
+        page_number,
+        url,
+        AmazonPageRetryExhausted.failure_code,
+        str(exhausted),
+    )
+    record["recovery_failure_key"] = f"{work_key}|stage:{stage}|cycle:{cycle}"
+    record["recovery_stage"] = stage
+    record["recovery_cycle"] = cycle
+    return record
+
+
+def append_failure_record_once(path: Path, record: Dict[str, Any]) -> bool:
+    identity = str(record.get("recovery_failure_key") or "")
+    if identity and any(
+        str(existing.get("recovery_failure_key") or "") == identity
+        for existing in read_jsonl(path)
+    ):
+        return False
+    append_jsonl(path, record)
+    return True
+
+
+def log_amazon_retry_exhausted_once(
+    failures_path: Path,
+    state: StateStore,
+    runtime: RuntimeConfig,
+    node: Dict[str, Any],
+    page_number: int,
+    url: str,
+    exhausted: AmazonPageRetryExhausted,
+) -> bool:
+    record = build_amazon_retry_exhausted_failure_record(
+        runtime,
+        node,
+        page_number,
+        url,
+        exhausted,
+    )
+    if not append_failure_record_once(failures_path, record):
+        return False
+    state.log_failure()
+    return True
+
+
 def log_failure(
     failures_path: Path,
     state: StateStore,
@@ -4666,6 +5501,66 @@ class WorkerManualGate:
         self.resume()
 
 
+def _worker_retry_state_request(
+    events: "queue.Queue[Dict[str, Any]]",
+    stop_event: threading.Event,
+    event_type: str,
+    retry_key: str,
+    retry_state: Optional[Mapping[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    acknowledgment = threading.Event()
+    event: Dict[str, Any] = {
+        "type": event_type,
+        "retry_key": retry_key,
+        "acknowledgment": acknowledgment,
+    }
+    if retry_state is not None:
+        event["retry_state"] = copy.deepcopy(dict(retry_state))
+    events.put(event)
+    while not acknowledgment.wait(0.25):
+        if stop_event.is_set():
+            if event_type == "amazon_page_retry_load":
+                raise ConcurrentWorkerCancelled(
+                    "并发任务正在停止，已取消读取 Amazon 页面恢复断点。"
+                )
+            # The main-thread shutdown path drains queued writes/clears after
+            # workers exit. Never deadlock executor shutdown waiting for ack.
+            return None
+    error = event.get("error")
+    if isinstance(error, BaseException):
+        raise error
+    result = event.get("result")
+    return copy.deepcopy(result) if isinstance(result, dict) else None
+
+
+def worker_retry_callbacks(
+    events: "queue.Queue[Dict[str, Any]]",
+    stop_event: threading.Event,
+    retry_key: str,
+) -> RetryCallbacks:
+    return RetryCallbacks(
+        load_state=lambda: _worker_retry_state_request(
+            events,
+            stop_event,
+            "amazon_page_retry_load",
+            retry_key,
+        ),
+        write_state=lambda value: _worker_retry_state_request(
+            events,
+            stop_event,
+            "amazon_page_retry_write",
+            retry_key,
+            value,
+        ),
+        clear_state=lambda: _worker_retry_state_request(
+            events,
+            stop_event,
+            "amazon_page_retry_clear",
+            retry_key,
+        ),
+    )
+
+
 def _drain_worker_events(
     events: "queue.Queue[Dict[str, Any]]",
     state: StateStore,
@@ -4677,18 +5572,41 @@ def _drain_worker_events(
             return
         event_type = str(event.get("type") or "")
         claim_key = str(event.get("claim_key") or "")
-        if event_type == "manual_pause":
-            state.mark_manual_pause(
-                str(event.get("reason") or "manual_action"),
-                str(event.get("page_url") or ""),
-                claim_key,
-            )
-        elif event_type == "manual_resume":
-            state.clear_manual_pause(claim_key)
-        elif event_type == "readiness":
-            report = event.get("report")
-            if isinstance(report, dict):
-                state.mark_sellersprite_readiness(report)
+        acknowledgment = event.get("acknowledgment")
+        try:
+            if event_type == "manual_pause":
+                state.mark_manual_pause(
+                    str(event.get("reason") or "manual_action"),
+                    str(event.get("page_url") or ""),
+                    claim_key,
+                )
+            elif event_type == "manual_resume":
+                state.clear_manual_pause(claim_key)
+            elif event_type == "readiness":
+                report = event.get("report")
+                if isinstance(report, dict):
+                    state.mark_sellersprite_readiness(report)
+            elif event_type == "amazon_page_retry_load":
+                event["result"] = state.load_amazon_page_retry(
+                    str(event.get("retry_key") or "")
+                )
+            elif event_type == "amazon_page_retry_write":
+                retry_state = event.get("retry_state")
+                if not isinstance(retry_state, dict):
+                    raise UserFacingError("Amazon 页面恢复状态不是 JSON 对象。")
+                state.write_amazon_page_retry(
+                    str(event.get("retry_key") or ""),
+                    retry_state,
+                )
+            elif event_type == "amazon_page_retry_clear":
+                state.clear_amazon_page_retry(
+                    str(event.get("retry_key") or "")
+                )
+        except BaseException as exc:
+            event["error"] = exc
+        finally:
+            if isinstance(acknowledgment, threading.Event):
+                acknowledgment.set()
 
 
 def _wait_for_page_without_worker_writes(
@@ -4736,34 +5654,44 @@ def crawl_category_source(
     confirmed_domains: set[str] = set()
     page_number = 1
     page_url = str(node.get("url") or "")
+    domain_cooldowns = getattr(runtime, "_amazon_domain_cooldowns", None)
+    if not isinstance(domain_cooldowns, DomainCooldownRegistry):
+        domain_cooldowns = DomainCooldownRegistry(
+            clock=_runtime_recovery_clock(runtime),
+            waiter=_runtime_recovery_waiter(runtime, stop_event),
+        )
+        setattr(runtime, "_amazon_domain_cooldowns", domain_cooldowns)
 
-    def open_worker_page(current_driver: WebDriver, target_url: str) -> None:
-        if stop_event.is_set():
-            raise ConcurrentWorkerCancelled("并发任务正在停止，已取消页面导航。")
-        navigation_throttle.wait()
+    def open_worker_page(
+        current_driver: WebDriver,
+        target_url: str,
+        current_page_number: int,
+        stage: str = "category_page",
+    ) -> PageHealthAssessment:
         if stop_event.is_set():
             raise ConcurrentWorkerCancelled("并发任务正在停止，已取消页面导航。")
         domain = (urlparse(target_url).hostname or "unknown").lower()
-        if domain not in confirmed_domains:
-            with delivery_locks.for_url(target_url):
-                open_amazon_page(
-                    current_driver,
-                    target_url,
-                    runtime,
-                    on_manual_pause=manual_gate.pause,
-                    on_manual_resume=manual_gate.resume,
-                    stop_event=stop_event,
-                )
-            confirmed_domains.add(domain)
-            return
-        open_amazon_page(
+        def before_navigation() -> None:
+            navigation_throttle.wait()
+            _raise_if_stop_requested(stop_event)
+
+        assessment = load_category_page_attempt(
             current_driver,
             target_url,
             runtime,
             on_manual_pause=manual_gate.pause,
             on_manual_resume=manual_gate.resume,
             stop_event=stop_event,
+            before_navigation=before_navigation,
+            delivery_lock=(
+                delivery_locks.for_url(target_url)
+                if domain not in confirmed_domains
+                else None
+            ),
+            domain_cooldowns=domain_cooldowns,
         )
+        confirmed_domains.add(domain)
+        return assessment
 
     def restart_plugin_driver(
         current_driver: WebDriver,
@@ -4781,12 +5709,31 @@ def crawl_category_source(
             raise ConcurrentWorkerCancelled("并发任务正在停止，已取消浏览器重启。")
         driver = start_driver(runtime)
         confirmed_domains.clear()
-        open_worker_page(driver, target_url)
-        try:
-            wait_for_amazon_products(driver, runtime, stop_event=stop_event)
-        except TimeoutException:
-            pass
+        open_worker_page(
+            driver,
+            target_url,
+            page_number,
+            stage="category_plugin_restart",
+        )
         return driver
+
+    def recover_plugin_page(
+        current_driver: WebDriver,
+        target_url: str,
+    ) -> WebDriver:
+        assessment = open_worker_page(
+            current_driver,
+            target_url or page_url,
+            page_number,
+            stage="category_plugin_refresh",
+        )
+        if assessment.status is PageHealthStatus.VERIFIED_EMPTY:
+            raise TransientAmazonPageUnavailable(
+                "页面在插件刷新期间变为明确空结果；重新执行整页事务。",
+                reason="verified_empty_during_plugin_refresh",
+                url=safe_driver_current_url(current_driver, target_url or page_url),
+            )
+        return current_driver
 
     try:
         driver = start_driver(runtime)
@@ -4796,95 +5743,135 @@ def crawl_category_source(
                 flush=True,
             )
             try:
-                open_worker_page(driver, page_url)
-                _wait_for_page_without_worker_writes(
-                    driver,
-                    runtime,
-                    manual_gate,
-                    stop_event,
-                )
+                work_key = page_key(node, page_number, page_url)
+                retry_key = _retry_entry_key(work_key, "category_page_work")
 
-                page_path = extract_current_category_path(driver)
-                if page_path:
-                    node["path"] = page_path
-                    node["name"] = page_path[-1]
-                    node["node_id"] = node.get("node_id") or extract_node_id(
-                        str(getattr(driver, "current_url", "") or page_url)
-                    )
-                    result.node = node
+                def current_driver() -> WebDriver:
+                    if driver is None:
+                        raise WebDriverException("类目 worker 浏览器尚未启动。")
+                    return driver
 
-                children: List[Dict[str, Any]] = []
-                if page_number == 1:
-                    children = discover_child_categories(driver, node, strict=True)
-                    if should_descend(runtime, node, children):
-                        result.children = children
-                        if not runtime.include_root:
-                            result.skipped_intermediate = True
-                            return result
+                def process_page_attempt(attempt: Any) -> CategoryPageWorkResult:
+                    nonlocal driver
+                    if attempt.attempt_number > 1:
+                        try:
+                            current_driver().quit()
+                        except Exception:
+                            pass
+                        driver = start_driver(runtime)
+                        confirmed_domains.clear()
 
-                key = page_key(node, page_number, page_url)
-                if key in completed_page_keys:
-                    print(f"断点已完成，跳过并发页写入：{key}", flush=True)
-                else:
-                    plugin_status = wait_for_sellersprite_data_or_prompt(
-                        driver,
-                        runtime,
-                        on_manual_pause=manual_gate.pause,
-                        on_manual_resume=manual_gate.resume,
-                        restart_driver=restart_plugin_driver,
-                        on_readiness=lambda report: events.put(
-                            {
-                                "type": "readiness",
-                                "claim_key": claim_key,
-                                "report": dict(report),
-                            }
-                        ),
-                        before_navigation=navigation_throttle.wait,
-                        stop_event=stop_event,
-                    )
-                    if plugin_status == "blocked":
-                        result.failures.append(
-                            build_failure_record(
-                                runtime,
-                                node,
-                                page_number,
-                                page_url,
-                                "verification_timeout",
-                                "人工处理超时",
-                            )
-                        )
-                        if runtime.save_debug_snapshots:
-                            save_debug_snapshot(
-                                driver,
-                                debug_dir,
-                                f"verification_timeout_{slugify(claim_key)}_{page_number}",
-                            )
-                        result.terminal_error_type = "verification_unconfirmed"
-                        result.terminal_error_message = (
-                            "sellersprite_verification_unconfirmed: "
-                            "人工处理超时，任务已停止且未提取当前页数据。"
-                        )
-                        stop_event.set()
-                        return result
-
-                    extracted_records = merge_product_data(
-                        driver,
-                        runtime,
-                        node,
+                    active_driver = current_driver()
+                    page_assessment = open_worker_page(
+                        active_driver,
+                        page_url,
                         page_number,
-                        plugin_status,
                     )
-                    if not extracted_records:
-                        raise WebDriverException(
-                            "页面已检测到商品卡片，但提取结果为空；"
-                            "为避免静默漏页，保留断点并重试。"
+                    attempt_node = copy.deepcopy(node)
+                    page_path = extract_current_category_path(active_driver)
+                    if page_path:
+                        attempt_node["path"] = page_path
+                        attempt_node["name"] = page_path[-1]
+                        attempt_node["node_id"] = (
+                            attempt_node.get("node_id")
+                            or extract_node_id(
+                                safe_driver_current_url(active_driver, page_url)
+                            )
                         )
-                    accepted_records, rejection_counts = filter_product_records(
-                        extracted_records,
-                        runtime.product_filters,
-                    )
-                    result.pages.append(
-                        CategoryPageBatch(
+
+                    children: List[Dict[str, Any]] = []
+                    if page_number == 1:
+                        children = discover_child_categories(
+                            active_driver,
+                            attempt_node,
+                            strict=True,
+                        )
+                        if (
+                            should_descend(runtime, attempt_node, children)
+                            and not runtime.include_root
+                        ):
+                            return CategoryPageWorkResult(
+                                node=attempt_node,
+                                children=children,
+                                skipped_intermediate=True,
+                            )
+
+                    key = page_key(attempt_node, page_number, page_url)
+                    page_batch: Optional[CategoryPageBatch] = None
+                    if key in completed_page_keys:
+                        print(f"断点已完成，跳过并发页写入：{key}", flush=True)
+                    elif page_assessment.status is PageHealthStatus.VERIFIED_EMPTY:
+                        page_batch = CategoryPageBatch(
+                            key=key,
+                            page_number=page_number,
+                            page_url=page_url,
+                            plugin_status="verified_empty",
+                            extracted_count=0,
+                            records=[],
+                            rejection_counts={},
+                        )
+                    else:
+                        plugin_status = wait_for_sellersprite_data_or_prompt(
+                            active_driver,
+                            runtime,
+                            on_manual_pause=manual_gate.pause,
+                            on_manual_resume=manual_gate.resume,
+                            restart_driver=restart_plugin_driver,
+                            on_readiness=lambda report: events.put(
+                                {
+                                    "type": "readiness",
+                                    "claim_key": claim_key,
+                                    "report": dict(report),
+                                }
+                            ),
+                            before_navigation=lambda: (
+                                domain_cooldowns.wait(
+                                    (urlparse(page_url).hostname or "unknown").lower()
+                                ),
+                                navigation_throttle.wait(),
+                                _raise_if_stop_requested(stop_event),
+                            ),
+                            recover_amazon_page=recover_plugin_page,
+                            stop_event=stop_event,
+                        )
+                        if plugin_status == "blocked":
+                            raise VerificationUnconfirmedError(
+                                "sellersprite_verification_unconfirmed: "
+                                "人工处理超时，任务已停止且未提取当前页数据。"
+                            )
+                        active_driver = current_driver()
+                        post_plugin_health = wait_for_category_page_health(
+                            active_driver,
+                            runtime,
+                            manual_gate.pause,
+                            manual_gate.resume,
+                            stop_event,
+                        )
+                        if post_plugin_health.status is PageHealthStatus.VERIFIED_EMPTY:
+                            raise TransientAmazonPageUnavailable(
+                                "页面在插件等待期间变为明确空结果；重新执行整页事务。",
+                                reason="verified_empty_after_plugin_wait",
+                                url=safe_driver_current_url(active_driver, page_url),
+                            )
+                        extracted_records = merge_product_data(
+                            active_driver,
+                            runtime,
+                            attempt_node,
+                            page_number,
+                            plugin_status,
+                        )
+                        if not extracted_records:
+                            raise TransientAmazonPageUnavailable(
+                                "页面已检测到商品卡片，但提取结果为空；"
+                                "为避免静默漏页，保留断点并重试。",
+                                reason="empty_extraction_after_expected_content",
+                                url=safe_driver_current_url(active_driver, page_url),
+                            )
+                        accepted_records, rejection_counts = filter_product_records(
+                            extracted_records,
+                            runtime.product_filters,
+                        )
+                        page_batch = CategoryPageBatch(
                             key=key,
                             page_number=page_number,
                             page_url=page_url,
@@ -4893,22 +5880,71 @@ def crawl_category_source(
                             records=accepted_records,
                             rejection_counts=rejection_counts,
                         )
-                    )
-                    node.pop("worker_retry_count", None)
-                    result.node = node
-                    if plugin_status != "ok" and runtime.save_debug_snapshots:
-                        save_debug_snapshot(
-                            driver,
-                            debug_dir,
-                            f"plugin_{plugin_status}_{slugify(claim_key)}_{page_number}",
-                        )
+                        if plugin_status != "ok" and runtime.save_debug_snapshots:
+                            save_debug_snapshot(
+                                active_driver,
+                                debug_dir,
+                                f"plugin_{plugin_status}_{slugify(claim_key)}_{page_number}",
+                            )
 
-                next_url = find_next_page_url(driver, strict=True)
+                    active_driver = current_driver()
+                    return CategoryPageWorkResult(
+                        node=attempt_node,
+                        next_url=find_next_page_url(active_driver, strict=True),
+                        page=page_batch,
+                        children=children,
+                    )
+
+                page_result = run_category_page_work_with_recovery(
+                    runtime,
+                    page_url,
+                    work_key,
+                    retry_callbacks=worker_retry_callbacks(
+                        events,
+                        stop_event,
+                        retry_key,
+                    ),
+                    driver_provider=current_driver,
+                    operation=process_page_attempt,
+                    stop_event=stop_event,
+                    domain_cooldowns=domain_cooldowns,
+                )
+                node = page_result.node
+                result.node = node
+                if page_result.children:
+                    result.children = page_result.children
+                if page_result.skipped_intermediate:
+                    result.skipped_intermediate = True
+                    return result
+                if page_result.page is not None:
+                    result.pages.append(page_result.page)
+
+                next_url = page_result.next_url
                 page_limit = runtime.max_pages_per_category
                 if not next_url or (page_limit is not None and page_number >= page_limit):
                     return result
                 page_number += 1
                 page_url = next_url
+            except AmazonPageRetryExhausted as exc:
+                result.failures.append(
+                    build_amazon_retry_exhausted_failure_record(
+                        runtime,
+                        node,
+                        page_number,
+                        page_url,
+                        exc,
+                    )
+                )
+                if runtime.save_debug_snapshots:
+                    save_debug_snapshot(
+                        driver,
+                        debug_dir,
+                        f"amazon_page_retry_exhausted_{slugify(claim_key)}_{page_number}",
+                    )
+                result.terminal_error_type = AmazonPageRetryExhausted.failure_code
+                result.terminal_error_message = str(exc)
+                stop_event.set()
+                return result
             except DeliveryLocationUnconfirmedError as exc:
                 result.failures.append(
                     build_failure_record(
@@ -4944,46 +5980,6 @@ def crawl_category_source(
                 result.terminal_error_type = "verification_unconfirmed"
                 result.terminal_error_message = str(exc)
                 stop_event.set()
-                return result
-            except TimeoutException as exc:
-                result.failures.append(
-                    build_failure_record(
-                        runtime,
-                        node,
-                        page_number,
-                        page_url,
-                        "page_timeout",
-                        str(exc),
-                    )
-                )
-                if runtime.save_debug_snapshots:
-                    save_debug_snapshot(
-                        driver,
-                        debug_dir,
-                        f"page_timeout_{slugify(claim_key)}_{page_number}",
-                    )
-                result.retryable_error_type = "page_timeout"
-                result.retryable_error_message = str(exc)[:500]
-                return result
-            except WebDriverException as exc:
-                result.failures.append(
-                    build_failure_record(
-                        runtime,
-                        node,
-                        page_number,
-                        page_url,
-                        "webdriver_error",
-                        str(exc)[:500],
-                    )
-                )
-                if runtime.save_debug_snapshots:
-                    save_debug_snapshot(
-                        driver,
-                        debug_dir,
-                        f"webdriver_error_{slugify(claim_key)}_{page_number}",
-                    )
-                result.retryable_error_type = "webdriver_error"
-                result.retryable_error_message = str(exc)[:500]
                 return result
         raise ConcurrentWorkerCancelled(
             "并发任务已收到停止信号，当前类目保留在断点中。"
@@ -5025,10 +6021,12 @@ def _commit_category_batch(
             f"过滤 {filtered_out_count} 条，插件状态：{page.plugin_status}"
         )
 
+    committed_failures = 0
     for failure in batch.failures:
-        append_jsonl(failures_path, failure)
-    if batch.failures:
-        state.log_failure(len(batch.failures))
+        if append_failure_record_once(failures_path, failure):
+            committed_failures += 1
+    if committed_failures:
+        state.log_failure(committed_failures)
 
     if batch.children:
         added = state.enqueue_children(batch.children)
@@ -5038,7 +6036,7 @@ def _commit_category_batch(
             print(f"当前节点已抓取，同时新增下级类目 {added} 个。")
 
     state.clear_manual_pause(claim_key)
-    if not batch.terminal_error_type and not batch.retryable_error_type:
+    if not batch.terminal_error_type:
         state.complete_claimed_category(claim_key, batch.node)
     return committed_pages
 
@@ -5052,7 +6050,12 @@ def _raise_concurrent_terminal(batch: CategoryCrawlBatch) -> None:
         raise UserFacingError(batch.terminal_error_message or batch.terminal_error_type)
 
 
-def preflight_category_delivery(runtime: RuntimeConfig, state: StateStore) -> None:
+def preflight_category_delivery(
+    runtime: RuntimeConfig,
+    state: StateStore,
+    failures_path: Optional[Path] = None,
+    domain_cooldowns: Optional[DomainCooldownRegistry] = None,
+) -> None:
     if runtime.browser_tab_concurrency <= 1 or not runtime.delivery_location_enabled:
         return
     first_url_by_domain: Dict[str, str] = {}
@@ -5070,16 +6073,55 @@ def preflight_category_delivery(runtime: RuntimeConfig, state: StateStore) -> No
     driver = start_driver(runtime)
     try:
         for domain, url in first_url_by_domain.items():
-            open_amazon_page(
-                driver,
-                url,
-                runtime,
-                on_manual_pause=lambda reason, page_url: state.mark_manual_pause(
-                    reason,
-                    page_url,
-                ),
-                on_manual_resume=state.clear_manual_pause,
-            )
+            if hasattr(runtime, "amazon_page_retry_schedule"):
+                work_key = f"category-preflight:{domain}|{clean_url(url)}"
+                retry_key = _retry_entry_key(work_key, "category_preflight")
+                try:
+                    load_category_page_with_recovery(
+                        driver,
+                        url,
+                        runtime,
+                        work_key,
+                        retry_callbacks=state_retry_callbacks(state, retry_key),
+                        stage="category_preflight",
+                        on_manual_pause=lambda reason, page_url: state.mark_manual_pause(
+                            reason,
+                            page_url,
+                        ),
+                        on_manual_resume=state.clear_manual_pause,
+                        domain_cooldowns=domain_cooldowns,
+                    )
+                except AmazonPageRetryExhausted as exc:
+                    if failures_path is not None:
+                        preflight_node = {
+                            "url": url,
+                            "name": infer_category_name_from_url(url),
+                            "path": [infer_category_name_from_url(url)],
+                            "node_id": extract_node_id(url),
+                        }
+                        log_amazon_retry_exhausted_once(
+                            failures_path,
+                            state,
+                            runtime,
+                            preflight_node,
+                            1,
+                            url,
+                            exc,
+                        )
+                    raise UserFacingError(str(exc)) from exc
+            else:
+                # Compatibility for lightweight callers/tests that provide a
+                # pre-recovery runtime object rather than RuntimeConfig.
+                open_amazon_page(
+                    driver,
+                    url,
+                    runtime,
+                    on_manual_pause=lambda reason, page_url: state.mark_manual_pause(
+                        reason,
+                        page_url,
+                    ),
+                    on_manual_resume=state.clear_manual_pause,
+                )
             print(f"配送地址已确认：{domain}")
     finally:
         try:
@@ -5098,9 +6140,19 @@ def run_crawl_concurrent(
     """Run independent category sources concurrently with main-thread persistence."""
 
     state.prepare_concurrent_resume()
-    preflight_category_delivery(runtime, state)
     events: "queue.Queue[Dict[str, Any]]" = queue.Queue()
     stop_event = threading.Event()
+    domain_cooldowns = DomainCooldownRegistry(
+        clock=_runtime_recovery_clock(runtime),
+        waiter=_runtime_recovery_waiter(runtime, stop_event),
+    )
+    setattr(runtime, "_amazon_domain_cooldowns", domain_cooldowns)
+    preflight_category_delivery(
+        runtime,
+        state,
+        failures_path,
+        domain_cooldowns,
+    )
     batch_pause = BatchPauseScheduler(runtime)
     navigation_throttle = NavigationThrottle(
         runtime.delay_seconds_min,
@@ -5190,23 +6242,6 @@ def run_crawl_concurrent(
                 )
                 for _index in range(committed_pages):
                     batch_pause.after_completed_page()
-                if batch.retryable_error_type:
-                    retry_node = dict(batch.node)
-                    retry_count = int(retry_node.get("worker_retry_count") or 0)
-                    retry_node["worker_retry_count"] = min(
-                        retry_count + 1, CATEGORY_MAX_TASK_RETRIES
-                    )
-                    state.requeue_claimed_category(claim_key, retry_node)
-                    if retry_count < CATEGORY_MAX_TASK_RETRIES:
-                        print(
-                            f"页面暂时失败（{batch.retryable_error_type}），"
-                            "已保留断点并重新排队当前类目。"
-                        )
-                        continue
-                    raise UserFacingError(
-                        batch.retryable_error_message
-                        or "页面重试仍失败，当前类目已保留在断点中。"
-                    )
                 _raise_concurrent_terminal(batch)
     except BaseException:
         stop_event.set()
@@ -5270,28 +6305,50 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
     state.recover_stale_in_flight()
     driver = start_driver(runtime)
     batch_pause = BatchPauseScheduler(runtime)
+    domain_cooldowns = DomainCooldownRegistry(
+        clock=_runtime_recovery_clock(runtime),
+        waiter=_runtime_recovery_waiter(runtime, None),
+    )
+    setattr(runtime, "_amazon_domain_cooldowns", domain_cooldowns)
 
     def restart_plugin_driver(current_driver: WebDriver, page_url: str, wait_seconds: float) -> WebDriver:
         nonlocal driver
         try:
             current_driver.quit()
-        except WebDriverException:
+        except Exception:
             pass
         if wait_seconds > 0:
             time.sleep(wait_seconds)
         driver = start_driver(runtime)
-        open_amazon_page(
+        load_category_page_attempt(
             driver,
             page_url,
             runtime,
             on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
             on_manual_resume=state.clear_manual_pause,
+            domain_cooldowns=domain_cooldowns,
         )
-        try:
-            wait_for_amazon_products(driver, runtime)
-        except TimeoutException:
-            pass
         return driver
+
+    def recover_plugin_page(
+        current_driver: WebDriver,
+        target_url: str,
+    ) -> WebDriver:
+        assessment = load_category_page_attempt(
+            current_driver,
+            target_url,
+            runtime,
+            on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
+            on_manual_resume=state.clear_manual_pause,
+            domain_cooldowns=domain_cooldowns,
+        )
+        if assessment.status is PageHealthStatus.VERIFIED_EMPTY:
+            raise TransientAmazonPageUnavailable(
+                "页面在插件刷新期间变为明确空结果；重新执行整页事务。",
+                reason="verified_empty_during_plugin_refresh",
+                url=safe_driver_current_url(current_driver, target_url),
+            )
+        return current_driver
 
     try:
         processed_in_this_run = 0
@@ -5310,72 +6367,134 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
             print(f"处理类目：{' > '.join(node.get('path') or [])} / 第 {page_number} 页")
 
             try:
-                open_amazon_page(
-                    driver,
-                    page_url,
-                    runtime,
-                    on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
-                    on_manual_resume=state.clear_manual_pause,
-                )
-                wait_for_page_or_manual(driver, runtime, state, failures_path, debug_dir, node, page_number, page_url)
-                page_path = extract_current_category_path(driver)
-                if page_path:
-                    node["path"] = page_path
-                    node["name"] = page_path[-1]
-                    node["node_id"] = node.get("node_id") or extract_node_id(driver.current_url)
-                    current["node"] = node
-                    state.set_current(current)
-                children = []
-                if page_number == 1 and not current.get("children_enqueued"):
-                    children = discover_child_categories(driver, node, strict=True)
-                    current["children"] = children
-                    current["children_enqueued"] = True
-                    state.set_current(current)
+                work_key = page_key(node, page_number, page_url)
+                retry_key = _retry_entry_key(work_key, "category_page_work")
 
-                descend = should_descend(runtime, node, children)
-                if descend and not runtime.include_root:
-                    added = state.enqueue_children(children)
-                    print(f"发现下级类目 {len(children)} 个，新增 {added} 个；跳过当前中间节点。")
-                    state.finish_current_category()
-                    processed_in_this_run += 1
-                    sleep_between_pages(runtime)
-                    continue
+                def current_driver() -> WebDriver:
+                    if driver is None:
+                        raise WebDriverException("类目浏览器尚未启动。")
+                    return driver
 
-                plugin_status = wait_for_sellersprite_data_or_prompt(
-                    driver,
-                    runtime,
-                    on_manual_pause=lambda reason, url: state.mark_manual_pause(reason, url),
-                    on_manual_resume=state.clear_manual_pause,
-                    restart_driver=restart_plugin_driver,
-                    on_readiness=state.mark_sellersprite_readiness,
-                )
-                if plugin_status == "blocked":
-                    log_failure(failures_path, state, runtime, node, page_number, page_url, "verification_timeout", "人工处理超时")
-                    save_debug_snapshot(driver, debug_dir, "verification_timeout")
-                    raise VerificationUnconfirmedError(
-                        "sellersprite_verification_unconfirmed: 人工处理超时，任务已停止且未提取当前页数据。"
+                def process_page_attempt(attempt: Any) -> CategoryPageWorkResult:
+                    nonlocal driver
+                    if attempt.attempt_number > 1:
+                        try:
+                            current_driver().quit()
+                        except Exception:
+                            pass
+                        driver = start_driver(runtime)
+
+                    active_driver = current_driver()
+                    page_assessment = load_category_page_attempt(
+                        active_driver,
+                        page_url,
+                        runtime,
+                        on_manual_pause=lambda reason, url: state.mark_manual_pause(
+                            reason,
+                            url,
+                        ),
+                        on_manual_resume=state.clear_manual_pause,
+                        domain_cooldowns=domain_cooldowns,
                     )
-
-                key = page_key(node, page_number, page_url)
-                records: List[Dict[str, Any]] = []
-                if state.is_page_completed(key):
-                    print("当前页已在断点中标记完成，跳过写入。")
-                else:
-                    extracted_records = merge_product_data(
-                        driver, runtime, node, page_number, plugin_status
-                    )
-                    if not extracted_records:
-                        raise WebDriverException(
-                            "页面已检测到商品卡片，但提取结果为空；"
-                            "为避免静默漏页，保留断点并重试。"
+                    attempt_node = copy.deepcopy(node)
+                    page_path = extract_current_category_path(active_driver)
+                    if page_path:
+                        attempt_node["path"] = page_path
+                        attempt_node["name"] = page_path[-1]
+                        attempt_node["node_id"] = (
+                            attempt_node.get("node_id")
+                            or extract_node_id(
+                                safe_driver_current_url(active_driver, page_url)
+                            )
                         )
-                    records, rejection_counts = filter_product_records(
-                        extracted_records,
-                        runtime.product_filters,
-                    )
-                    filtered_out_count = len(extracted_records) - len(records)
-                    state.commit_page_batch(
-                        CategoryPageBatch(
+
+                    children: List[Dict[str, Any]] = []
+                    if page_number == 1:
+                        if current.get("children_enqueued"):
+                            children = copy.deepcopy(current.get("children") or [])
+                        else:
+                            children = discover_child_categories(
+                                active_driver,
+                                attempt_node,
+                                strict=True,
+                            )
+                        if (
+                            should_descend(runtime, attempt_node, children)
+                            and not runtime.include_root
+                        ):
+                            return CategoryPageWorkResult(
+                                node=attempt_node,
+                                children=children,
+                                skipped_intermediate=True,
+                            )
+
+                    key = page_key(attempt_node, page_number, page_url)
+                    page_batch: Optional[CategoryPageBatch] = None
+                    if state.is_page_completed(key):
+                        print("当前页已在断点中标记完成，跳过写入。")
+                    elif page_assessment.status is PageHealthStatus.VERIFIED_EMPTY:
+                        page_batch = CategoryPageBatch(
+                            key=key,
+                            page_number=page_number,
+                            page_url=page_url,
+                            plugin_status="verified_empty",
+                            extracted_count=0,
+                            records=[],
+                            rejection_counts={},
+                        )
+                    else:
+                        plugin_status = wait_for_sellersprite_data_or_prompt(
+                            active_driver,
+                            runtime,
+                            on_manual_pause=lambda reason, url: state.mark_manual_pause(
+                                reason,
+                                url,
+                            ),
+                            on_manual_resume=state.clear_manual_pause,
+                            restart_driver=restart_plugin_driver,
+                            on_readiness=state.mark_sellersprite_readiness,
+                            before_navigation=lambda: domain_cooldowns.wait(
+                                (urlparse(page_url).hostname or "unknown").lower()
+                            ),
+                            recover_amazon_page=recover_plugin_page,
+                        )
+                        if plugin_status == "blocked":
+                            raise VerificationUnconfirmedError(
+                                "sellersprite_verification_unconfirmed: "
+                                "人工处理超时，任务已停止且未提取当前页数据。"
+                            )
+                        active_driver = current_driver()
+                        post_plugin_health = wait_for_category_page_health(
+                            active_driver,
+                            runtime,
+                            lambda reason, url: state.mark_manual_pause(reason, url),
+                            state.clear_manual_pause,
+                        )
+                        if post_plugin_health.status is PageHealthStatus.VERIFIED_EMPTY:
+                            raise TransientAmazonPageUnavailable(
+                                "页面在插件等待期间变为明确空结果；重新执行整页事务。",
+                                reason="verified_empty_after_plugin_wait",
+                                url=safe_driver_current_url(active_driver, page_url),
+                            )
+                        extracted_records = merge_product_data(
+                            active_driver,
+                            runtime,
+                            attempt_node,
+                            page_number,
+                            plugin_status,
+                        )
+                        if not extracted_records:
+                            raise TransientAmazonPageUnavailable(
+                                "页面已检测到商品卡片，但提取结果为空；"
+                                "为避免静默漏页，保留断点并重试。",
+                                reason="empty_extraction_after_expected_content",
+                                url=safe_driver_current_url(active_driver, page_url),
+                            )
+                        records, rejection_counts = filter_product_records(
+                            extracted_records,
+                            runtime.product_filters,
+                        )
+                        page_batch = CategoryPageBatch(
                             key=key,
                             page_number=page_number,
                             page_url=page_url,
@@ -5384,22 +6503,69 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
                             records=records,
                             rejection_counts=rejection_counts,
                         )
+                        if plugin_status != "ok" and runtime.save_debug_snapshots:
+                            save_debug_snapshot(
+                                active_driver,
+                                debug_dir,
+                                f"plugin_{plugin_status}_{extract_node_id(page_url)}_{page_number}",
+                            )
+
+                    active_driver = current_driver()
+                    return CategoryPageWorkResult(
+                        node=attempt_node,
+                        next_url=find_next_page_url(active_driver, strict=True),
+                        page=page_batch,
+                        children=children,
                     )
+
+                page_result = run_category_page_work_with_recovery(
+                    runtime,
+                    page_url,
+                    work_key,
+                    retry_callbacks=state_retry_callbacks(state, retry_key),
+                    driver_provider=current_driver,
+                    operation=process_page_attempt,
+                    domain_cooldowns=domain_cooldowns,
+                )
+
+                node = page_result.node
+                current["node"] = node
+                children = page_result.children
+                if page_number == 1 and not current.get("children_enqueued"):
+                    current["children"] = children
+                    current["children_enqueued"] = True
+                    state.set_current(current)
+
+                if page_result.skipped_intermediate:
+                    added = state.enqueue_children(children)
+                    print(f"发现下级类目 {len(children)} 个，新增 {added} 个；跳过当前中间节点。")
+                    state.finish_current_category()
+                    processed_in_this_run += 1
+                    sleep_between_pages(runtime)
+                    continue
+
+                if page_result.page is not None:
+                    state.commit_page_batch(page_result.page)
                     materialize_category_records(state, records_path)
-                    print(
-                        f"提取商品 {len(extracted_records)} 条，写入 {len(records)} 条，"
-                        f"过滤 {filtered_out_count} 条，插件状态：{plugin_status}"
-                    )
+                    if page_result.page.plugin_status == "verified_empty":
+                        print("页面明确显示无商品，已合法提交空页断点。")
+                    else:
+                        written_count = len(page_result.page.records)
+                        filtered_out_count = (
+                            page_result.page.extracted_count - written_count
+                        )
+                        print(
+                            f"提取商品 {page_result.page.extracted_count} 条，"
+                            f"写入 {written_count} 条，过滤 {filtered_out_count} 条，"
+                            f"插件状态：{page_result.page.plugin_status}"
+                        )
                     batch_pause.after_completed_page()
-                    if plugin_status != "ok" and runtime.save_debug_snapshots:
-                        save_debug_snapshot(driver, debug_dir, f"plugin_{plugin_status}_{extract_node_id(page_url)}_{page_number}")
 
                 if page_number == 1 and children and runtime.include_root:
                     added = state.enqueue_children(children)
                     print(f"当前节点已抓取，同时新增下级类目 {added} 个。")
 
-                next_url = find_next_page_url(driver, strict=True)
-                current.pop("worker_retry_count", None)
+                next_url = page_result.next_url
                 page_limit = runtime.max_pages_per_category
                 if next_url and (page_limit is None or page_number < page_limit):
                     current["page_number"] = page_number + 1
@@ -5409,10 +6575,24 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
                     state.finish_current_category()
                     processed_in_this_run += 1
                 sleep_between_pages(runtime)
-            except (TimeoutException, WebDriverException) as exc:
-                reason = (
-                    "page_timeout" if isinstance(exc, TimeoutException) else "webdriver_error"
+            except AmazonPageRetryExhausted as exc:
+                log_amazon_retry_exhausted_once(
+                    failures_path,
+                    state,
+                    runtime,
+                    node,
+                    page_number,
+                    page_url,
+                    exc,
                 )
+                if runtime.save_debug_snapshots:
+                    save_debug_snapshot(
+                        driver,
+                        debug_dir,
+                        f"amazon_page_retry_exhausted_{extract_node_id(page_url)}_{page_number}",
+                    )
+                raise UserFacingError(str(exc)) from exc
+            except DeliveryLocationUnconfirmedError as exc:
                 log_failure(
                     failures_path,
                     state,
@@ -5420,30 +6600,24 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
                     node,
                     page_number,
                     page_url,
-                    reason,
-                    str(exc)[:500],
+                    "delivery_location_unconfirmed",
+                    str(exc),
+                )
+                raise
+            except VerificationUnconfirmedError as exc:
+                log_failure(
+                    failures_path,
+                    state,
+                    runtime,
+                    node,
+                    page_number,
+                    page_url,
+                    "verification_timeout",
+                    str(exc),
                 )
                 if runtime.save_debug_snapshots:
-                    save_debug_snapshot(driver, debug_dir, reason)
-                retry_count = int(current.get("worker_retry_count") or 0)
-                current["worker_retry_count"] = min(
-                    retry_count + 1, CATEGORY_MAX_TASK_RETRIES
-                )
-                state.set_current(current)
-                if retry_count >= CATEGORY_MAX_TASK_RETRIES:
-                    raise UserFacingError(
-                        f"页面连续 {CATEGORY_MAX_TASK_RETRIES + 1} 次失败"
-                        f"（{reason}），当前类目已保留在断点中。"
-                    ) from exc
-                print(
-                    f"页面暂时失败（{reason}），"
-                    "保留当前类目断点并重启标签页后重试。"
-                )
-                try:
-                    driver.quit()
-                except WebDriverException:
-                    pass
-                driver = start_driver(runtime)
+                    save_debug_snapshot(driver, debug_dir, "verification_timeout")
+                raise
     finally:
         try:
             driver.quit()

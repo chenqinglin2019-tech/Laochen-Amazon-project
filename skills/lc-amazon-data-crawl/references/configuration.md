@@ -26,15 +26,18 @@ supported, and never overwrites either one.
 
 ## Browser Modes
 
-- `browser_backend: "cdp"`: default; connect Playwright to visible Chrome
+- `browser_backend: "cdp"`: required; connect Playwright to visible Chrome
   through `debugger_address` without invoking ChromeDriver.
-- `browser_backend: "selenium"`: explicit compatibility fallback.
 - `launch`: start a dedicated Chrome owned by the crawler; it closes when the crawler exits.
 - `attach`: connect to an already running Chrome debugging port.
 - `reuse`: keep a user-owned CDP browser open across commands. The runner shell
   automatically starts it before real runs and `sellersprite-check` when the
   endpoint is not already available.
-- `applescript`: only supported by front/category crawlers, for manual Chrome control fallback.
+
+The five production modes reject Selenium and AppleScript backend values during
+dry-run validation. Those backends cannot prove popup ownership strongly enough
+for the crawler's cleanup contract. `reuse` is the default mode for a newly
+created runner.
 
 `browser_backend` selects the automation implementation. `browser_mode`
 selects who starts and owns the Chrome process. In CDP `attach`/`reuse` mode the
@@ -45,9 +48,9 @@ browser.
 
 - Default `1`; accepted range `1` to `3`, with `2` recommended for parallel
   front/category work.
-- A value above `1` requires `browser_backend: "cdp"` and `browser_mode` set to
-  `reuse` or `attach`. Selenium, AppleScript, and launch mode reject that
-  combination during config validation instead of silently downgrading it.
+- A value above `1` requires `browser_mode` set to `reuse` or `attach`; launch
+  mode rejects that combination during config validation instead of silently
+  downgrading it.
 - Only independent queued sources run concurrently, such as different
   keyword/sort pairs, store/sort pairs, or independently queued category
   nodes. Pages within one source remain serial so pagination, repeated-page
@@ -94,6 +97,120 @@ Chrome Profile verification is mandatory for CDP. The Profile Path shown by
 `chrome://version` must equal `chrome_user_data_dir/chrome_profile_directory`.
 This prevents attaching to a different Chrome profile that does not contain the
 expected SellerSprite installation and login session.
+
+### Crawler-owned tab lifecycle
+
+Each worker has one dedicated crawler-owned working tab. The crawler may also
+own result tabs or popups opened from that working tab. Ownership must be
+positive and traceable; a tab is not crawler-owned merely because it appeared
+after a list of handles was sampled.
+
+- In CDP mode, track crawler-created pages from the working page's popup/opener
+  events and propagate ownership to descendant popups. Use crawler ownership
+  markers to recognize the worker page and any recoverable leftovers.
+- No Selenium handle-difference cleanup is used. Production configs fail closed
+  unless the CDP ownership tracker is active.
+- Preserve every tab that existed before the operation and every unknown tab
+  the user may have opened concurrently. Never navigate an arbitrary surviving
+  user tab when a crawler working tab is lost; create a new crawler-owned
+  working tab instead.
+- Close owned result tabs and descendant popups after each product is committed
+  or abandoned, before a retry or long wait, and during exception, `Ctrl-C`, or
+  normal-exit cleanup. Re-scan every 500 milliseconds for up to 2 seconds so
+  delayed popups are included; retry an individual close once and log failures.
+- On startup, close only leftovers that carry a verifiable crawler ownership
+  marker. Unknown pages and pages owned by the user remain untouched.
+
+Cleanup always restores the worker's dedicated working tab, or replaces that
+tab with a newly marked crawler-owned working tab if it no longer exists. The
+ownership baseline must be initialized before an operation can register or
+close child tabs; an exception before initialization must never cause all
+existing browser tabs to be treated as crawler-created.
+
+## Amazon Page Availability And Retry
+
+All five crawler templates share this optional field and default:
+
+```json
+"amazon_page_unavailable_retry_schedule_seconds": [
+  [180, 300],
+  [180, 300],
+  [1800, 1800],
+  [3600, 3600]
+]
+```
+
+The initial navigation is attempt 1. Each of the four entries controls the wait
+before attempts 2 through 5, so there are exactly five attempts in one retry
+cycle. A pair is an inclusive random `[minimum, maximum]` range in seconds.
+Config validation requires exactly four pairs of finite, non-negative numbers
+with `minimum <= maximum`; invalid values fail dry-run before Chrome opens.
+Omitting the field uses the same default. The retry schedule is operational
+policy and is not added to crawl-plan or provider fingerprints, so changing it
+alone does not invalidate an existing checkpoint.
+
+The shared page-health classifier is stage-aware. Product pages, search and
+category pages, Amazon Lens upload pages, and Lens result pages each require
+their expected content DOM after the configured timeout. These conditions are
+retryable page-unavailable failures:
+
+- Amazon dog/error pages, rate-limit pages, Access Denied, and HTTP 429 or 5xx;
+- network, DNS, connection, or navigation failures;
+- an empty/blank response, or a page that still lacks the stage's expected DOM
+  after timeout.
+
+Text such as `sorry` inside an otherwise healthy product page does not by
+itself make the page unavailable. Only a stage-specific, explicit Amazon or
+Lens no-results state is a valid empty result; an ambiguous blank or partial
+page must never be committed as a zero count. CAPTCHA/Robot Check remains a
+manual-action pause and does not turn into a zero result. An Amazon buyer
+sign-in wall is terminal and uses the documented sign-in message instead of
+this retry schedule. SellerSprite data stalls continue to use the independent
+plugin retry and relaunch settings under **Stall Handling**.
+
+Before every long wait, the crawler closes owned result/popup tabs, chooses the
+actual wait once, and atomically persists it. `state.json` may include:
+
+```json
+"amazon_page_retry": {
+  "status": "waiting",
+  "domain": "www.amazon.com",
+  "work_key": "source-or-page-key",
+  "stage": "product",
+  "cycle": 1,
+  "attempts_completed": 1,
+  "next_attempt": 2,
+  "selected_wait_seconds": 247,
+  "remaining_wait_seconds": 247,
+  "next_retry_at": 1788336247.0,
+  "url": "https://www.amazon.com/...",
+  "error": "redacted retryable summary"
+}
+```
+
+`next_retry_at` is a Unix timestamp in seconds. The URL and error fields must
+not contain secrets, credentials, cookie values, or authorization data. Waits
+are split into chunks of no more than 60 seconds;
+each chunk updates `state.json` and prints a countdown/heartbeat. If the process
+is interrupted while waiting, the next invocation uses the persisted
+`next_retry_at` and waits only the remaining duration rather than drawing a new
+delay.
+
+Cooldown applies by exact Amazon domain. While any worker is waiting on a
+retryable unavailable page, other workers must not begin a new navigation to
+that domain. A worker whose page had already loaded may complete local
+extraction and its single atomic commit. Navigation to a different domain is
+not blocked.
+
+If attempt 5 still fails, the crawler closes tabs owned by that work item,
+leaves that item and all other unfinished work pending, writes no page/product
+record, count, completion shard, or inferred zero, and appends one deduplicated
+`amazon_page_unavailable_retry_exhausted` event to `failures.jsonl`. It then
+sets the checkpoint to `manual_resume_required` and exits. Re-running the same
+runner command is the manual continuation action: completed work remains
+committed, while only the current pending work item starts a new five-attempt
+cycle. If the previous process was merely interrupted during a scheduled wait,
+the remaining persisted wait takes precedence and the current cycle continues.
 
 ## Amazon Delivery Location
 

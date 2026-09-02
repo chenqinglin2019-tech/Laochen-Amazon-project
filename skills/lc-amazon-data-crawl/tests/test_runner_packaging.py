@@ -135,6 +135,7 @@ class RunnerPackagingTests(unittest.TestCase):
             embedding_example = runner / "config" / "doubao_embedding_vision.example.json"
             mini_example = runner / "config" / "doubao_same_product_mini.example.json"
             task_config = runner / "config" / "amazon_front_keyword_search.json"
+            auth_config = runner / "config.json"
             self.assertTrue(embedding_credential.is_file())
             self.assertTrue(mini_credential.is_file())
             self.assertFalse(embedding_example.exists())
@@ -152,6 +153,7 @@ class RunnerPackagingTests(unittest.TestCase):
                     stat.S_IMODE(embedding_credential.stat().st_mode), 0o600
                 )
                 self.assertEqual(stat.S_IMODE(mini_credential.stat().st_mode), 0o600)
+                self.assertEqual(stat.S_IMODE(auth_config.stat().st_mode), 0o600)
             self.assertIn(
                 "doubao_embedding_vision: unconfigured",
                 self.run_doctor(runner).stdout,
@@ -221,6 +223,7 @@ class RunnerPackagingTests(unittest.TestCase):
             self.assertEqual(
                 ignore_lines.count("config/doubao_same_product_mini.json"), 1
             )
+            self.assertEqual(ignore_lines.count("config.json"), 1)
 
             doctor = self.run_doctor(runner)
             self.assertIn("doubao_embedding_vision: ready", doctor.stdout)

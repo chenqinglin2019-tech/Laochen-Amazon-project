@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
+import time
+import uuid
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from selenium.common.exceptions import (
     JavascriptException,
@@ -14,6 +17,11 @@ from selenium.common.exceptions import (
     WebDriverException,
 )
 from selenium.webdriver.common.by import By
+
+
+CRAWLER_WINDOW_NAME_PREFIX = "__lc_amazon_data_crawl_owned__:"
+_CRAWLER_WINDOW_MARKER_VERSION = "v1"
+_ACTIVE_CDP_OWNER_IDS: Set[str] = set()
 
 
 def cdp_endpoint(debugger_address: str) -> str:
@@ -104,6 +112,8 @@ class CdpWebDriver:
     """
 
     is_cdp_driver = True
+    owned_page_close_interval_seconds = 0.5
+    owned_page_close_stabilize_seconds = 2.0
 
     def __init__(
         self,
@@ -137,6 +147,18 @@ class CdpWebDriver:
         self._page = None
         self._browser_cdp_session = None
         self._owned_pages: Dict[int, Any] = {}
+        self._owned_page_roles: Dict[int, str] = {}
+        self._owned_page_listener_ids: Set[int] = set()
+        self._worker_page = None
+        self._owner_id = uuid.uuid4().hex
+        self._owner_pid = os.getpid()
+        self._context_page_listener_installed = False
+        self._action_page_captures: Dict[str, Dict[int, Any]] = {}
+        self._ownership_close_failures: List[str] = []
+        self._last_http_status: Optional[int] = None
+        self._last_navigation_error = ""
+        self._sleep_fn: Callable[[float], None] = time.sleep
+        self._monotonic_fn: Callable[[], float] = time.monotonic
         self.switch_to = CdpSwitchTo(self)
 
         try:
@@ -151,10 +173,10 @@ class CdpWebDriver:
             self._browser_cdp_session = self._browser.new_browser_cdp_session()
             self._context = self._browser.contexts[0]
             self._verify_profile(expected_user_data_dir, profile_directory)
-            self._page = self._context.new_page()
-            self._remember_owned_page(self._page)
-            self._page.set_default_timeout(self._page_timeout * 1000)
-            self._page.set_default_navigation_timeout(self._page_timeout * 1000)
+            _ACTIVE_CDP_OWNER_IDS.add(self._owner_id)
+            self._install_context_page_listener()
+            self._cleanup_stale_crawler_pages()
+            self.restore_worker_page()
         except WebDriverException:
             self._disconnect_only()
             raise
@@ -191,9 +213,230 @@ class CdpWebDriver:
                 except Exception:
                     pass
 
+    def _ensure_ownership_state(self) -> None:
+        """Initialize ownership fields for normal and lightweight test instances."""
+        if not hasattr(self, "_owned_pages"):
+            self._owned_pages = {}
+        if not hasattr(self, "_owned_page_roles"):
+            self._owned_page_roles = {}
+        if not hasattr(self, "_owned_page_listener_ids"):
+            self._owned_page_listener_ids = set()
+        if not hasattr(self, "_worker_page"):
+            self._worker_page = None
+        if not hasattr(self, "_owner_id"):
+            self._owner_id = uuid.uuid4().hex
+        if not hasattr(self, "_owner_pid"):
+            self._owner_pid = os.getpid()
+        if not hasattr(self, "_context_page_listener_installed"):
+            self._context_page_listener_installed = False
+        if not hasattr(self, "_action_page_captures"):
+            self._action_page_captures = {}
+        if not hasattr(self, "_ownership_close_failures"):
+            self._ownership_close_failures = []
+        if not hasattr(self, "_last_http_status"):
+            self._last_http_status = None
+        if not hasattr(self, "_last_navigation_error"):
+            self._last_navigation_error = ""
+        if not hasattr(self, "_sleep_fn"):
+            self._sleep_fn = time.sleep
+        if not hasattr(self, "_monotonic_fn"):
+            self._monotonic_fn = time.monotonic
+        _ACTIVE_CDP_OWNER_IDS.add(self._owner_id)
+
+    def _window_marker(self, role: str) -> str:
+        normalized_role = "worker" if role == "worker" else "popup"
+        return (
+            f"{CRAWLER_WINDOW_NAME_PREFIX}{_CRAWLER_WINDOW_MARKER_VERSION}:"
+            f"{self._owner_pid}:{self._owner_id}:{normalized_role}"
+        )
+
+    @staticmethod
+    def _read_window_name(page: Any) -> str:
+        try:
+            return str(page.evaluate("() => window.name || ''") or "")
+        except Exception:
+            return ""
+
+    def _mark_owned_page(self, page: Any, role: str) -> bool:
+        marker = self._window_marker(role)
+        try:
+            if page.is_closed():
+                return False
+            actual = page.evaluate(
+                "marker => { window.name = marker; return window.name; }",
+                marker,
+            )
+            return str(actual or "") == marker
+        except Exception:
+            return False
+
+    @staticmethod
+    def _parse_window_marker(marker: str) -> Optional[Tuple[int, str, str]]:
+        if not marker.startswith(CRAWLER_WINDOW_NAME_PREFIX):
+            return None
+        payload = marker[len(CRAWLER_WINDOW_NAME_PREFIX) :]
+        parts = payload.split(":", 3)
+        if len(parts) != 4 or parts[0] != _CRAWLER_WINDOW_MARKER_VERSION:
+            # A malformed or future-version marker is not ownership proof.
+            return None
+        try:
+            owner_pid = int(parts[1])
+        except (TypeError, ValueError):
+            return None
+        if owner_pid <= 0 or not parts[2] or parts[3] not in {"worker", "popup"}:
+            return None
+        return owner_pid, parts[2], parts[3]
+
+    @staticmethod
+    def _pid_is_running(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        if pid == os.getpid():
+            return True
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        except OSError:
+            return False
+        return True
+
+    def _marker_is_stale(self, marker: str) -> bool:
+        parsed = self._parse_window_marker(marker)
+        if parsed is None:
+            return False
+        owner_pid, owner_id, _role = parsed
+        if owner_id == self._owner_id:
+            return False
+        if owner_pid == os.getpid():
+            return owner_id not in _ACTIVE_CDP_OWNER_IDS
+        return not self._pid_is_running(owner_pid)
+
+    def _marker_is_owned_by_self(self, marker: str) -> bool:
+        parsed = self._parse_window_marker(marker)
+        return bool(
+            parsed is not None
+            and parsed[0] == self._owner_pid
+            and parsed[1] == self._owner_id
+        )
+
+    def _install_context_page_listener(self) -> None:
+        self._ensure_ownership_state()
+        if self._context is None or self._context_page_listener_installed:
+            return
+        try:
+            self._context.on("page", self._on_context_page)
+        except Exception:
+            return
+        self._context_page_listener_installed = True
+
+    def _on_context_page(self, page: Any) -> None:
+        """Track page events; claim immediately only with an owned opener."""
+        self._ensure_ownership_state()
+        for candidates in self._action_page_captures.values():
+            candidates[id(page)] = page
+        try:
+            opener = page.opener()
+        except Exception:
+            opener = None
+        if opener is not None and id(opener) in self._owned_pages:
+            self._remember_owned_page(page, role="popup")
+
+    def _on_owned_popup(self, popup: Any) -> None:
+        self._remember_owned_page(popup, role="popup")
+
+    def _remember_owned_page(self, page: Any, role: str = "popup") -> None:
+        """Register one crawler-created page and recursively observe its popups."""
+        if page is None:
+            return
+        self._ensure_ownership_state()
+        page_id = id(page)
+        normalized_role = "worker" if role == "worker" else "popup"
+        self._owned_pages[page_id] = page
+        self._owned_page_roles[page_id] = normalized_role
+        if page_id not in self._owned_page_listener_ids:
+            try:
+                page.on("popup", self._on_owned_popup)
+                self._owned_page_listener_ids.add(page_id)
+            except Exception:
+                pass
+        self._mark_owned_page(page, normalized_role)
+
+    def _discover_owned_opener_descendants(self) -> None:
+        """Recover opener-linked events missed while Playwright was dispatching."""
+        if self._context is None:
+            return
+        changed = True
+        while changed:
+            changed = False
+            for page in list(self._context.pages):
+                page_id = id(page)
+                if page_id in self._owned_pages:
+                    marker = self._read_window_name(page)
+                    if not self._marker_is_owned_by_self(marker):
+                        self._mark_owned_page(
+                            page,
+                            self._owned_page_roles.get(page_id, "popup"),
+                        )
+                    continue
+                try:
+                    opener = page.opener()
+                except Exception:
+                    continue
+                if opener is not None and id(opener) in self._owned_pages:
+                    self._remember_owned_page(page, role="popup")
+                    changed = True
+
+    def _configure_worker_page(self, page: Any) -> None:
+        try:
+            page.set_default_timeout(self._page_timeout * 1000)
+            page.set_default_navigation_timeout(self._page_timeout * 1000)
+        except Exception as exc:
+            raise WebDriverException(f"无法配置 CDP 抓取标签页：{exc}") from exc
+
+    def ensure_worker_page(self) -> str:
+        """Return this driver's dedicated worker handle, recreating it if lost."""
+        self._ensure_ownership_state()
+        if self._closed or self._context is None:
+            raise WebDriverException("CDP 浏览器连接已经关闭。")
+        worker = self._worker_page
+        if worker is None or worker.is_closed():
+            try:
+                worker = self._context.new_page()
+            except Exception as exc:
+                raise self._translate(exc) from exc
+            self._worker_page = worker
+            self._remember_owned_page(worker, role="worker")
+            self._configure_worker_page(worker)
+        else:
+            self._remember_owned_page(worker, role="worker")
+        handle = self._handle_for_page(worker)
+        if not handle:
+            raise WebDriverException("无法取得 CDP 抓取标签页句柄。")
+        return handle
+
+    def restore_worker_page(self) -> str:
+        """Make the dedicated worker current without selecting an unrelated tab."""
+        handle = self.ensure_worker_page()
+        worker = self._worker_page
+        self._page = worker
+        try:
+            worker.bring_to_front()
+        except Exception as exc:
+            raise self._translate(exc) from exc
+        return handle
+
+    def _handle_for_page(self, wanted_page: Any) -> str:
+        for handle, page in self._page_map().items():
+            if page is wanted_page:
+                return handle
+        return ""
+
     def _require_page(self) -> Any:
         if self._page is None or self._page.is_closed():
-            raise WebDriverException("CDP 抓取标签页已经关闭。")
+            self.restore_worker_page()
         return self._page
 
     def _translate(self, exc: Exception, javascript: bool = False) -> WebDriverException:
@@ -238,19 +481,37 @@ class CdpWebDriver:
                 return handle
         raise WebDriverException("当前 CDP 标签页不存在。")
 
+    @property
+    def last_http_status(self) -> Optional[int]:
+        self._ensure_ownership_state()
+        return self._last_http_status
+
+    @property
+    def last_navigation_error(self) -> str:
+        self._ensure_ownership_state()
+        return self._last_navigation_error
+
     def set_page_load_timeout(self, timeout: int) -> None:
         self._page_timeout = max(int(timeout), 1)
         if self._page is not None:
             self._page.set_default_navigation_timeout(self._page_timeout * 1000)
 
     def get(self, url: str) -> None:
+        self._ensure_ownership_state()
+        self._last_http_status = None
+        self._last_navigation_error = ""
         try:
-            self._require_page().goto(
+            response = self._require_page().goto(
                 url,
                 wait_until="domcontentloaded",
                 timeout=self._page_timeout * 1000,
             )
+            raw_status = getattr(response, "status", None)
+            self._last_http_status = (
+                int(raw_status) if raw_status is not None else None
+            )
         except Exception as exc:
+            self._last_navigation_error = str(exc)
             raise self._translate(exc) from exc
 
     def refresh(self) -> None:
@@ -300,12 +561,6 @@ class CdpWebDriver:
         except Exception as exc:
             raise self._translate(exc) from exc
 
-    def _remember_owned_page(self, page: Any) -> None:
-        """Record a page explicitly created by this driver connection."""
-        if page is None:
-            return
-        self._owned_pages[id(page)] = page
-
     def register_owned_window_handle(self, handle: str) -> None:
         """Claim a popup created by an explicit crawler action.
 
@@ -316,60 +571,236 @@ class CdpWebDriver:
         page = self._page_map().get(handle)
         if page is None:
             raise WebDriverException(f"没有找到要登记的 CDP 标签页：{handle}")
-        self._remember_owned_page(page)
+        self._remember_owned_page(page, role="popup")
+
+    def begin_owned_page_action(self, label: str = "") -> str:
+        """Begin a crawler action that may create a true ``noopener`` page.
+
+        Only context ``page`` events emitted while the token is active are
+        candidates. They remain unowned until a caller proves their purpose
+        with a stage-specific URL predicate.
+        """
+
+        self._ensure_ownership_state()
+        token = f"{str(label or 'action')}:{uuid.uuid4().hex}"
+        self._action_page_captures[token] = {}
+        return token
+
+    def claim_owned_action_pages(
+        self,
+        token: str,
+        url_predicate: Callable[[str], bool],
+    ) -> List[str]:
+        """Claim only matching pages observed during one explicit action."""
+
+        self._ensure_ownership_state()
+        if not callable(url_predicate):
+            raise TypeError("url_predicate 必须可调用。")
+        candidates = self._action_page_captures.get(str(token), {})
+        claimed: List[str] = []
+        for page in list(candidates.values()):
+            try:
+                if page.is_closed():
+                    continue
+                url = str(page.url or "")
+            except Exception:
+                continue
+            try:
+                matches = bool(url_predicate(url))
+            except Exception:
+                matches = False
+            if not matches:
+                continue
+            self._remember_owned_page(page, role="popup")
+            handle = self._handle_for_page(page)
+            if handle:
+                claimed.append(handle)
+        return claimed
+
+    def end_owned_page_action(self, token: str) -> None:
+        """End a capture and leave every unmatched/user page untouched."""
+
+        self._ensure_ownership_state()
+        self._action_page_captures.pop(str(token), None)
+
+    @property
+    def owned_window_handles(self) -> List[str]:
+        """Open handles proven to belong to this driver, in context order."""
+        self._ensure_ownership_state()
+        self._discover_owned_opener_descendants()
+        return [
+            handle
+            for handle, page in self._page_map().items()
+            if id(page) in self._owned_pages
+        ]
+
+    def owned_handle_snapshot(self) -> FrozenSet[str]:
+        """Capture the owned set before one crawler work item starts."""
+        return frozenset(self.owned_window_handles)
+
+    @property
+    def ownership_close_failures(self) -> Tuple[str, ...]:
+        """Recorded close errors, including the first error before a retry."""
+        self._ensure_ownership_state()
+        return tuple(self._ownership_close_failures)
+
+    def _record_close_failure(self, page: Any, attempt: int, exc: Exception) -> None:
+        handle = self._handle_for_page(page) or f"closed-cdp-{id(page)}"
+        self._ownership_close_failures.append(
+            f"handle={handle} attempt={attempt} error={type(exc).__name__}: {exc}"
+        )
+
+    def _close_page_with_retry(self, page: Any) -> bool:
+        for attempt in (1, 2):
+            try:
+                if page.is_closed():
+                    return True
+                page.close()
+                return True
+            except Exception as exc:
+                self._record_close_failure(page, attempt, exc)
+        return False
+
+    @staticmethod
+    def _page_opener_depth(page: Any, candidates: Dict[int, Any]) -> int:
+        depth = 0
+        seen: Set[int] = set()
+        current = page
+        while id(current) not in seen:
+            seen.add(id(current))
+            try:
+                opener = current.opener()
+            except Exception:
+                break
+            if opener is None or id(opener) not in candidates:
+                break
+            depth += 1
+            current = opener
+        return depth
+
+    def _owned_pages_with_descendants(self) -> List[Any]:
+        """Return event-owned pages children-first without claiming unknown tabs."""
+        self._ensure_ownership_state()
+        self._discover_owned_opener_descendants()
+        owned = dict(self._owned_pages)
+        return sorted(
+            owned.values(),
+            key=lambda page: (
+                self._page_opener_depth(page, owned),
+                self._owned_page_roles.get(id(page), "popup") != "worker",
+            ),
+            reverse=True,
+        )
+
+    def _prune_closed_owned_pages(self) -> None:
+        for page_id, page in list(self._owned_pages.items()):
+            try:
+                closed = page.is_closed()
+            except Exception:
+                closed = True
+            if not closed:
+                continue
+            self._owned_pages.pop(page_id, None)
+            self._owned_page_roles.pop(page_id, None)
+            self._owned_page_listener_ids.discard(page_id)
+
+    def _close_owned_pages_stably(
+        self,
+        should_close: Callable[[str, Any], bool],
+    ) -> int:
+        """Close selected owned pages while allowing delayed popup events to arrive."""
+        self._ensure_ownership_state()
+        deadline = self._monotonic_fn() + self.owned_page_close_stabilize_seconds
+        closed_page_ids: Set[int] = set()
+        attempted_page_ids: Set[int] = set()
+        while True:
+            self._discover_owned_opener_descendants()
+            page_map = self._page_map()
+            handles_by_id = {id(page): handle for handle, page in page_map.items()}
+            for page in self._owned_pages_with_descendants():
+                page_id = id(page)
+                handle = handles_by_id.get(page_id, "")
+                if (
+                    page_id in attempted_page_ids
+                    or not handle
+                    or not should_close(handle, page)
+                ):
+                    continue
+                attempted_page_ids.add(page_id)
+                if self._close_page_with_retry(page):
+                    closed_page_ids.add(page_id)
+
+            now = self._monotonic_fn()
+            if now >= deadline:
+                break
+            self._sleep_fn(
+                min(self.owned_page_close_interval_seconds, max(deadline - now, 0.0))
+            )
+
+        self._prune_closed_owned_pages()
+        return len(closed_page_ids)
+
+    def close_owned_since(self, snapshot: FrozenSet[str] | Set[str]) -> int:
+        """Close only crawler-owned popup pages created after ``snapshot``.
+
+        The worker page is never closed here. After a two-second stabilization
+        window, the worker is restored (or recreated if it disappeared).
+        """
+        before = {str(handle) for handle in snapshot}
+        worker_id = id(self._worker_page) if self._worker_page is not None else None
+        closed = self._close_owned_pages_stably(
+            lambda handle, page: handle not in before and id(page) != worker_id
+        )
+        self.restore_worker_page()
+        return closed
 
     def close(self) -> None:
         page = self._require_page()
         page_id = id(page)
-        try:
-            page.close()
-        except Exception as exc:
-            raise self._translate(exc) from exc
+        self._discover_owned_opener_descendants()
+        if page_id not in self._owned_pages:
+            self.restore_worker_page()
+            raise WebDriverException("拒绝关闭未被爬虫标记为 owned 的 CDP 标签页。")
+        if not self._close_page_with_retry(page):
+            raise WebDriverException("关闭 crawler-owned CDP 标签页失败，已重试一次。")
         self._owned_pages.pop(page_id, None)
-        remaining = self._page_map()
-        self._page = next(iter(remaining.values()), None)
-
-    def _owned_pages_with_descendants(self) -> List[Any]:
-        """Return owned pages and their popup descendants, children first.
-
-        Every CDP connection sees all pages in the shared browser context, so
-        creation time does not establish ownership. Another worker or the user
-        may create a tab after this driver connects. Ownership starts only from
-        pages explicitly created by this instance and expands through
-        Playwright's opener relationship.
-        """
-        owned = dict(self._owned_pages)
-        if self._context is None:
-            return list(reversed(list(owned.values())))
-
-        changed = True
-        while changed:
-            changed = False
-            for page in list(self._context.pages):
-                page_id = id(page)
-                if page_id in owned:
-                    continue
-                try:
-                    opener = page.opener()
-                except Exception:
-                    continue
-                if opener is not None and id(opener) in owned:
-                    owned[page_id] = page
-                    changed = True
-
-        return list(reversed(list(owned.values())))
+        self._owned_page_roles.pop(page_id, None)
+        self._owned_page_listener_ids.discard(page_id)
+        if page is self._worker_page:
+            self._worker_page = None
+        self.restore_worker_page()
 
     def _close_owned_pages(self) -> None:
-        for page in self._owned_pages_with_descendants():
-            try:
-                if page.is_closed():
-                    continue
-                page.close()
-            except Exception:
-                pass
+        self._close_owned_pages_stably(lambda _handle, _page: True)
         self._owned_pages.clear()
+        self._owned_page_roles.clear()
+        self._owned_page_listener_ids.clear()
+        self._worker_page = None
+
+    def _cleanup_stale_crawler_pages(self) -> int:
+        """Close only pages carrying a marker whose owning process is gone."""
+        self._ensure_ownership_state()
+        if self._context is None:
+            return 0
+        stale: Dict[int, Any] = {}
+        for page in list(self._context.pages):
+            marker = self._read_window_name(page)
+            if marker and self._marker_is_stale(marker):
+                stale[id(page)] = page
+        closed = 0
+        for page in sorted(
+            stale.values(),
+            key=lambda candidate: self._page_opener_depth(candidate, stale),
+            reverse=True,
+        ):
+            if self._close_page_with_retry(page):
+                closed += 1
+        return closed
 
     def _disconnect_only(self) -> None:
+        owner_id = getattr(self, "_owner_id", "")
+        if owner_id:
+            _ACTIVE_CDP_OWNER_IDS.discard(owner_id)
         if self._playwright is not None:
             try:
                 self._playwright.stop()
@@ -381,6 +812,11 @@ class CdpWebDriver:
         self._context = None
         self._page = None
         self._owned_pages = {}
+        self._owned_page_roles = {}
+        self._owned_page_listener_ids = set()
+        self._worker_page = None
+        self._context_page_listener_installed = False
+        self._action_page_captures = {}
         self._owned_process = None
 
     def quit(self) -> None:

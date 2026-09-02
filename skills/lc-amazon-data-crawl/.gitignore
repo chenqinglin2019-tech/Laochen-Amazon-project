@@ -1,0 +1,8 @@
+# Local credentials only; the tracked config.json remains an empty public template.
+config.json
+config.local.json
+.env
+.env.*
+outputs/
+chrome_profiles/
+_archive/

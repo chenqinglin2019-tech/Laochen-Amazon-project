@@ -85,8 +85,17 @@ fi
 if ! grep -Fqx 'config/doubao_same_product_mini.json' "$RUNNER_GITIGNORE"; then
   printf 'config/doubao_same_product_mini.json\n' >> "$RUNNER_GITIGNORE"
 fi
+for ignored_path in 'outputs/' 'chrome_profiles/' '_archive/'; do
+  if ! grep -Fqx "$ignored_path" "$RUNNER_GITIGNORE"; then
+    printf '%s\n' "$ignored_path" >> "$RUNNER_GITIGNORE"
+  fi
+done
 if [[ ! -f "$TARGET_DIR/config.json" ]]; then
   cp "$SKILL_DIR/config.json" "$TARGET_DIR/config.json"
+fi
+chmod 600 "$TARGET_DIR/config.json" 2>/dev/null || true
+if ! grep -Fqx 'config.json' "$RUNNER_GITIGNORE"; then
+  printf 'config.json\n' >> "$RUNNER_GITIGNORE"
 fi
 if [[ -d "$SKILL_DIR/tools/bin" ]]; then
   cp "$SKILL_DIR"/tools/bin/* "$TARGET_DIR/tools/bin/"
@@ -188,7 +197,10 @@ install_runner() {
   fi
   "$PYTHON_BIN" -m pip install --upgrade pip
   "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
-  "$PYTHON_BIN" -m playwright install chromium
+  # CDP/reuse attaches Playwright to the configured system Chrome. Downloading
+  # a second Playwright-managed Chromium is unnecessary and can make install
+  # fail on restricted or slow CDN connections.
+  "$PYTHON_BIN" -c "from playwright.sync_api import sync_playwright; print('playwright CDP runtime: ok')"
 }
 
 doctor() {
