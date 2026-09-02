@@ -69,7 +69,7 @@
 `external_upload_allowed` 只保留调用者意图。采集阶段不创建、不推断 provider 上传授权。
 
 公网图传输见 `us-workflow.md`：Amazon HTTPS 主图直接使用；本地主图在
-`us-screen` 阶段经专属后端上传。七模块查询计划先以冻结图片 ID 和 SHA-256 绑定这两条反向图搜，`us-screen` 成功后再由 `prepare-serper-run` 把受控 HTTPS 地址写入执行请求。采集阶段本身不上传，也禁止自建图床。
+`us-screen` 阶段经专属后端上传。legacy 七条发现链先以冻结图片 ID 和 SHA-256 绑定这两条反向图搜；v2 正式审阅再将共享的图形商标/商业外观发现链拆成八个模块。`us-screen` 成功后由 `prepare-serper-run` 把受控 HTTPS 地址写入执行请求。采集阶段本身不上传，也禁止自建图床。
 
 ## 未知与来源
 

@@ -1,0 +1,64 @@
+{
+  "schema_version": "2.0",
+  "task_id": "fixture_htwo_ballerina_planter",
+  "expected": {
+    "overall": {
+      "discovery_status": "review_required",
+      "legal_risk": "medium",
+      "risk_confidence": "low",
+      "coverage_confidence": "high",
+      "operational_action": "hold_for_evidence"
+    },
+    "modules": [
+      {
+        "module": "appearance_design",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "utility_patent",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "pending_patent",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "word_mark",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "figurative_mark",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "trade_dress",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "copyright_creative_ip",
+        "legal_risk": "medium",
+        "risk_confidence": "low"
+      },
+      {
+        "module": "enforcement_public_signals",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      }
+    ]
+  },
+  "assertions": {
+    "must_include_trace_codes": [
+      "COPYRIGHT_PROVENANCE_UNRESOLVED"
+    ],
+    "must_not_include_trace_codes": [
+      "ACTIVE_RIGHT_AUTOMATIC_HIGH",
+      "CANDIDATE_COUNT_ESCALATION"
+    ]
+  }
+}

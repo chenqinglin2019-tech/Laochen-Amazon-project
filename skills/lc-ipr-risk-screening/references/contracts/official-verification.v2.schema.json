@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:official-verification:2.0",
+  "title": "Official Verification Event v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "verification_id",
+    "task_id",
+    "candidate_id",
+    "authority_tier",
+    "official_record_verified",
+    "official_status",
+    "authorization_status",
+    "right_identity",
+    "evidence_refs",
+    "source_locator",
+    "verified_by",
+    "verified_at",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "verification_id": {"type": "string", "pattern": "^V-[A-Za-z0-9_-]{4,100}$"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "candidate_id": {"type": "string", "pattern": "^C-[A-Za-z0-9_-]{4,100}$"},
+    "authority_tier": {"enum": ["official", "authoritative", "primary"]},
+    "official_record_verified": {"const": true},
+    "official_status": {"enum": ["active", "pending", "expired", "cancelled", "abandoned", "rejected", "disputed", "not_found"]},
+    "authorization_status": {"enum": ["authorized", "unlicensed", "unknown", "not_applicable"]},
+    "right_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "jurisdiction", "record_number"],
+      "properties": {
+        "module": {"enum": ["appearance_design", "utility_patent", "pending_patent", "word_mark", "figurative_mark", "trade_dress", "copyright_creative_ip", "enforcement_public_signals"]},
+        "jurisdiction": {"const": "US"},
+        "record_number": {
+          "description": "For enforcement_public_signals this is the case or complaint identifier and must equal enforcement_identity.case_or_complaint_id; equality is enforced by the runtime release gate.",
+          "oneOf": [{"type": "null"}, {"$ref": "#/$defs/non_blank_string_200"}]
+        }
+      }
+    },
+    "enforcement_identity": {"$ref": "#/$defs/enforcement_identity"},
+    "evidence_refs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^E-[A-Za-z0-9_-]{4,100}$"}
+    },
+    "source_locator": {"type": "string", "pattern": "\\S", "maxLength": 2000},
+    "verified_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "session_id"],
+      "properties": {
+        "type": {"enum": ["agent", "human", "backend", "reviewer"]},
+        "id": {"type": "string", "pattern": "\\S", "maxLength": 128},
+        "session_id": {"type": "string", "pattern": "\\S", "maxLength": 128}
+      }
+    },
+    "verified_at": {"type": "string", "format": "date-time"},
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "right_identity": {
+            "properties": {"module": {"const": "enforcement_public_signals"}},
+            "required": ["module"]
+          }
+        },
+        "required": ["right_identity"]
+      },
+      "then": {
+        "required": ["enforcement_identity"],
+        "properties": {
+          "right_identity": {
+            "properties": {"record_number": {"$ref": "#/$defs/non_blank_string_200"}}
+          }
+        }
+      },
+      "else": {"not": {"required": ["enforcement_identity"]}}
+    }
+  ],
+  "$defs": {
+    "non_blank_string_200": {"type": "string", "pattern": "\\S", "maxLength": 200},
+    "non_blank_string_1000": {"type": "string", "pattern": "\\S", "maxLength": 1000},
+    "enforcement_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claimant", "case_or_complaint_id", "procedure_status", "target_product_digest", "underlying_candidate_ids"],
+      "properties": {
+        "claimant": {"$ref": "#/$defs/non_blank_string_1000"},
+        "case_or_complaint_id": {
+          "description": "Must equal right_identity.record_number; equality is enforced by the runtime release gate.",
+          "$ref": "#/$defs/non_blank_string_200"
+        },
+        "procedure_status": {"enum": ["active_tro", "active_injunction", "active_litigation", "active_complaint", "platform_enforcement", "closed", "dismissed"]},
+        "target_product_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "underlying_candidate_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{3,127}$"}
+        }
+      }
+    }
+  }
+}

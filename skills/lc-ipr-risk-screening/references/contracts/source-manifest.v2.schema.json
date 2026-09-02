@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:source-manifest:2.0",
+  "title": "Frozen Source Manifest v2",
+  "description": "Immutable inventory of the task-local source graph used for a formal v2 assessment. Digest, path-set completeness and file bytes are rechecked by the runtime release gate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ruleset_version",
+    "task_id",
+    "revision",
+    "parent_digest",
+    "sealed_at",
+    "artifacts",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "ruleset_version": {"const": "2.0"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "revision": {"type": "integer", "minimum": 1},
+    "parent_digest": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/digest"}
+      ]
+    },
+    "sealed_at": {"type": "string", "format": "date-time"},
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/artifact"}
+    },
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "artifact_path": {
+      "type": "string",
+      "description": "Task-relative path. Absolute paths and parent-directory traversal are forbidden.",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?=.*\\S).+$",
+      "maxLength": 5000
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/artifact_path"},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "bytes": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:candidate-disposition-input:2.0",
+  "title": "Candidate Disposition Input v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ruleset_version", "task_id", "candidate", "rationale", "decided_by"],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "ruleset_version": {"const": "2.0"},
+    "task_id": {"type": "string", "pattern": "^(?:ipr|fixture)_[A-Za-z0-9_-]{8,100}$"},
+    "candidate": {"$ref": "urn:lc-ipr-risk-screening:candidate:2.0"},
+    "rationale": {"type": "string", "minLength": 1, "maxLength": 10000},
+    "decided_by": {"$ref": "#/$defs/actor"},
+    "decided_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "session_id"],
+      "properties": {
+        "type": {"enum": ["agent", "human", "backend", "reviewer"]},
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    }
+  }
+}

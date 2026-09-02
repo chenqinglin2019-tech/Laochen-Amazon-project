@@ -1,0 +1,118 @@
+{
+  "schema_version": "2.0",
+  "ruleset_version": "2.0",
+  "task_id": "fixture_active_design_strong_overlap",
+  "assessment_status": "final",
+  "coverage": {
+    "confidence": "high",
+    "complete": true,
+    "gaps": []
+  },
+  "candidates": [
+    {
+      "candidate_id": "C-active_design_strong_overlap",
+      "module": "appearance_design",
+      "record_kind": "right_record",
+      "legal_materiality": "risk_bearing",
+      "risk_driver_eligible": true,
+      "authority_tier": "official",
+      "evidence_role": "risk_driver",
+      "target_jurisdiction": "US",
+      "right_jurisdiction": "US",
+      "record_number": "D1234567",
+      "title": "Verified planter design",
+      "owner": "Fixture Rights LLC",
+      "evidence_refs": [
+        "E-design-active-strong-overlap"
+      ],
+      "verification_refs": [
+        "V-design-active-strong-overlap",
+        "V-design-authorization-unlicensed"
+      ],
+      "evidence_cluster_id": "right_design_active_strong_overlap",
+      "independence_group": "right_design_active_strong_overlap",
+      "factors": {
+        "right_status": "active",
+        "official_record_verified": true,
+        "same_product_category": true,
+        "complete_official_images": true,
+        "claimed_portions": ["完整花盆主体及装饰轮廓"],
+        "dominant_shared_features": ["整体轮廓与比例高度一致"],
+        "dominant_differences": [],
+        "difference_effect": "none",
+        "overall_visual_impression": "high",
+        "authorization_status": "unlicensed"
+      }
+    }
+  ],
+  "modules": [
+    {
+      "module": "appearance_design",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [
+        "C-active_design_strong_overlap"
+      ],
+      "reasoning": "有效外观权已经官方核验，同类商品的完整视图呈现高度相似的整体视觉印象。"
+    },
+    {
+      "module": "utility_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "pending_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "word_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "figurative_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "trade_dress",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "copyright_creative_ip",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "enforcement_public_signals",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    }
+  ],
+  "review": {
+    "fact_conflicts": []
+  }
+}

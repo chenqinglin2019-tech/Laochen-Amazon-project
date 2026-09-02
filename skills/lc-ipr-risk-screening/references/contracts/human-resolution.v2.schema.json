@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:human-resolution:2.0",
+  "title": "Immutable Fact Resolution v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ruleset_version", "resolution_id", "task_id", "context_digest", "evidence_digest", "resolver", "resolved_facts", "reason", "lawyer_override", "resolved_at", "digest"],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "ruleset_version": {"const": "2.0"},
+    "resolution_id": {"type": "string", "pattern": "^RES-[a-f0-9]{24}$"},
+    "task_id": {"type": "string", "pattern": "^(?:ipr|fixture)_[A-Za-z0-9_-]{8,100}$"},
+    "context_digest": {"$ref": "#/$defs/digest"},
+    "evidence_digest": {"$ref": "#/$defs/digest"},
+    "resolver": {"$ref": "#/$defs/actor"},
+    "resolved_facts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/resolved_fact"}},
+    "reason": {"type": "string", "minLength": 1, "maxLength": 20000},
+    "lawyer_override": {"type": "boolean"},
+    "resolved_at": {"type": "string", "format": "date-time"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "module": {"enum": ["appearance_design", "utility_patent", "pending_patent", "word_mark", "figurative_mark", "trade_dress", "copyright_creative_ip", "enforcement_public_signals"]},
+    "json_value": {"oneOf": [{"type": "string"}, {"type": "number"}, {"type": "boolean"}, {"type": "null"}, {"type": "array"}, {"type": "object"}]},
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "id", "session_id"],
+      "properties": {
+        "type": {"enum": ["human", "reviewer", "lawyer"]},
+        "id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "session_id": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "resolved_fact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conflict_id", "module", "candidate_id", "fact_path", "resolved_value", "evidence_refs"],
+      "properties": {
+        "conflict_id": {"type": "string", "minLength": 1, "maxLength": 200},
+        "module": {"$ref": "#/$defs/module"},
+        "candidate_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{3,127}$"},
+        "fact_path": {"type": "string", "minLength": 1, "maxLength": 500},
+        "resolved_value": {"$ref": "#/$defs/json_value"},
+        "evidence_refs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 2000}}
+      }
+    }
+  }
+}

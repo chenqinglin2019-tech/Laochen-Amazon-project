@@ -1,0 +1,200 @@
+{
+  "schema_version": "2.0",
+  "ruleset_version": "2.0",
+  "task_id": "fixture_htwo_ballerina_planter",
+  "assessment_status": "final",
+  "coverage": {
+    "confidence": "high",
+    "complete": true,
+    "gaps": []
+  },
+  "candidates": [
+    {
+      "candidate_id": "appearance_usd698103",
+      "module": "appearance_design",
+      "record_kind": "right_record",
+      "legal_materiality": "comparison_only",
+      "risk_driver_eligible": false,
+      "authority_tier": "official",
+      "evidence_role": "context",
+      "evidence_refs": [
+        "evidence://uspto/USD698103S1"
+      ],
+      "verification_refs": [
+        "verification://official/USD698103S1"
+      ],
+      "evidence_cluster_id": "right_USD698103S1",
+      "independence_group": "right_USD698103S1",
+      "factors": {
+        "right_status": "active",
+        "official_record_verified": true,
+        "same_product_category": false,
+        "complete_official_images": true,
+        "claimed_portions": ["官方图组所示容器外观"],
+        "dominant_shared_features": ["悬挂容器这一抽象类别"],
+        "dominant_differences": ["缺少芭蕾舞者、人体、舞腿及裙摆花盆组合"],
+        "difference_effect": "decisive",
+        "overall_visual_impression": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "appearance_usd1110623",
+      "module": "appearance_design",
+      "record_kind": "right_record",
+      "legal_materiality": "comparison_only",
+      "risk_driver_eligible": false,
+      "authority_tier": "official",
+      "evidence_role": "context",
+      "evidence_refs": [
+        "evidence://uspto/USD1110623S1"
+      ],
+      "verification_refs": [
+        "verification://official/USD1110623S1"
+      ],
+      "evidence_cluster_id": "right_USD1110623S1",
+      "independence_group": "right_USD1110623S1",
+      "factors": {
+        "right_status": "active",
+        "official_record_verified": true,
+        "same_product_category": false,
+        "complete_official_images": true,
+        "claimed_portions": ["官方图组所示容器外观"],
+        "dominant_shared_features": ["悬挂容器及波浪边缘这一抽象类别"],
+        "dominant_differences": ["缺少人物、舞姿、腿部及裙摆即花盆的核心组合"],
+        "difference_effect": "decisive",
+        "overall_visual_impression": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "word_mark_htwo_energy",
+      "module": "word_mark",
+      "record_kind": "right_record",
+      "legal_materiality": "comparison_only",
+      "risk_driver_eligible": false,
+      "authority_tier": "official",
+      "evidence_role": "context",
+      "evidence_refs": [
+        "evidence://uspto/HTWO-energy"
+      ],
+      "verification_refs": [
+        "verification://official/HTWO-energy"
+      ],
+      "evidence_cluster_id": "mark_HTWO_energy",
+      "independence_group": "mark_HTWO_energy",
+      "factors": {
+        "right_status": "active",
+        "official_record_verified": true,
+        "mark_similarity": "exact",
+        "goods_services_relatedness": "none",
+        "channels_overlap": false,
+        "consumer_overlap": false,
+        "mark_strength": "strong",
+        "confusion_likelihood": "none",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "copyright_sculpture_source_unknown",
+      "module": "copyright_creative_ip",
+      "record_kind": "creative_source",
+      "legal_materiality": "risk_bearing",
+      "risk_driver_eligible": true,
+      "authority_tier": "commercial",
+      "evidence_role": "risk_driver",
+      "target_jurisdiction": "US",
+      "right_jurisdiction": "US",
+      "evidence_refs": [
+        "evidence://marketplace/ballet-planter-source-cluster"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_ballet_planter_sculpture",
+      "independence_group": "work_ballet_planter_sculpture",
+      "factors": {
+        "asset_scope": "product_sculpture",
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "high",
+        "creator_or_earliest_source": null,
+        "ownership_reliability": "low",
+        "authorization_status": "unknown",
+        "commercial_use_covered": "unknown"
+      }
+    }
+  ],
+  "modules": [
+    {
+      "module": "appearance_design",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [
+        "appearance_usd698103",
+        "appearance_usd1110623"
+      ],
+      "reasoning": "检索候选是鸟食器防蚁挂件，与完整芭蕾舞者裙摆花盆的整体视觉印象明显不同。"
+    },
+    {
+      "module": "utility_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "pending_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "word_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [
+        "word_mark_htwo_energy"
+      ],
+      "reasoning": "HTWO 字样相同，但登记商品服务与花盆家居用品不相关。"
+    },
+    {
+      "module": "figurative_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "trade_dress",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "copyright_creative_ip",
+      "assessability": "partially_assessable",
+      "confidence": "low",
+      "candidate_ids": [
+        "copyright_sculpture_source_unknown"
+      ],
+      "provenance_complete": false,
+      "reasoning": "芭蕾舞者雕塑属于可能受保护的表达，同款来源与商业授权链尚未闭合。"
+    },
+    {
+      "module": "enforcement_public_signals",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    }
+  ],
+  "review": {
+    "fact_conflicts": []
+  }
+}

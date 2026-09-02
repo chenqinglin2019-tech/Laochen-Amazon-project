@@ -1,0 +1,2383 @@
+{
+  "schema_version": "2.0",
+  "ruleset_version": "2.0",
+  "task_id": "fixture_duplicate_marketplace_pages_100",
+  "assessment_status": "final",
+  "coverage": {
+    "confidence": "high",
+    "complete": true,
+    "gaps": []
+  },
+  "candidates": [
+    {
+      "candidate_id": "marketplace_page_001",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-001"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_002",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-002"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_003",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-003"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_004",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-004"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_005",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-005"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_006",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-006"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_007",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-007"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_008",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-008"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_009",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-009"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_010",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-010"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_011",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-011"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_012",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-012"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_013",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-013"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_014",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-014"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_015",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-015"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_016",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-016"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_017",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-017"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_018",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-018"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_019",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-019"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_020",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-020"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_021",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-021"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_022",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-022"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_023",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-023"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_024",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-024"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_025",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-025"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_026",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-026"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_027",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-027"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_028",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-028"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_029",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-029"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_030",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-030"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_031",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-031"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_032",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-032"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_033",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-033"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_034",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-034"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_035",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-035"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_036",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-036"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_037",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-037"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_038",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-038"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_039",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-039"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_040",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-040"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_041",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-041"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_042",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-042"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_043",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-043"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_044",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-044"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_045",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-045"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_046",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-046"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_047",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-047"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_048",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-048"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_049",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-049"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_050",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-050"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_051",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-051"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_052",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-052"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_053",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-053"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_054",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-054"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_055",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-055"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_056",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-056"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_057",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-057"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_058",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-058"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_059",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-059"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_060",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-060"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_061",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-061"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_062",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-062"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_063",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-063"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_064",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-064"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_065",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-065"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_066",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-066"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_067",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-067"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_068",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-068"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_069",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-069"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_070",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-070"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_071",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-071"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_072",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-072"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_073",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-073"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_074",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-074"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_075",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-075"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_076",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-076"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_077",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-077"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_078",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-078"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_079",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-079"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_080",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-080"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_081",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-081"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_082",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-082"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_083",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-083"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_084",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-084"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_085",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-085"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_086",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-086"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_087",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-087"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_088",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-088"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_089",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-089"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_090",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-090"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_091",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-091"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_092",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-092"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_093",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-093"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_094",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-094"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_095",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-095"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_096",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-096"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_097",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-097"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_098",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-098"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_099",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-099"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    },
+    {
+      "candidate_id": "marketplace_page_100",
+      "module": "copyright_creative_ip",
+      "record_kind": "marketplace_page",
+      "legal_materiality": "provenance_lead",
+      "risk_driver_eligible": false,
+      "authority_tier": "commercial",
+      "evidence_role": "provenance",
+      "evidence_refs": [
+        "evidence://marketplace/page-100"
+      ],
+      "verification_refs": [],
+      "evidence_cluster_id": "asset_same_listing_image",
+      "independence_group": "source_unknown_same_asset",
+      "factors": {
+        "protectable_expression": "likely",
+        "asset_match": "exact",
+        "expression_similarity": "unknown",
+        "ownership_reliability": "low",
+        "authorization_status": "unknown"
+      }
+    }
+  ],
+  "modules": [
+    {
+      "module": "appearance_design",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "utility_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "pending_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "word_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "figurative_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "trade_dress",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "copyright_creative_ip",
+      "assessability": "partially_assessable",
+      "confidence": "low",
+      "candidate_ids": [
+        "marketplace_page_001",
+        "marketplace_page_002",
+        "marketplace_page_003",
+        "marketplace_page_004",
+        "marketplace_page_005",
+        "marketplace_page_006",
+        "marketplace_page_007",
+        "marketplace_page_008",
+        "marketplace_page_009",
+        "marketplace_page_010",
+        "marketplace_page_011",
+        "marketplace_page_012",
+        "marketplace_page_013",
+        "marketplace_page_014",
+        "marketplace_page_015",
+        "marketplace_page_016",
+        "marketplace_page_017",
+        "marketplace_page_018",
+        "marketplace_page_019",
+        "marketplace_page_020",
+        "marketplace_page_021",
+        "marketplace_page_022",
+        "marketplace_page_023",
+        "marketplace_page_024",
+        "marketplace_page_025",
+        "marketplace_page_026",
+        "marketplace_page_027",
+        "marketplace_page_028",
+        "marketplace_page_029",
+        "marketplace_page_030",
+        "marketplace_page_031",
+        "marketplace_page_032",
+        "marketplace_page_033",
+        "marketplace_page_034",
+        "marketplace_page_035",
+        "marketplace_page_036",
+        "marketplace_page_037",
+        "marketplace_page_038",
+        "marketplace_page_039",
+        "marketplace_page_040",
+        "marketplace_page_041",
+        "marketplace_page_042",
+        "marketplace_page_043",
+        "marketplace_page_044",
+        "marketplace_page_045",
+        "marketplace_page_046",
+        "marketplace_page_047",
+        "marketplace_page_048",
+        "marketplace_page_049",
+        "marketplace_page_050",
+        "marketplace_page_051",
+        "marketplace_page_052",
+        "marketplace_page_053",
+        "marketplace_page_054",
+        "marketplace_page_055",
+        "marketplace_page_056",
+        "marketplace_page_057",
+        "marketplace_page_058",
+        "marketplace_page_059",
+        "marketplace_page_060",
+        "marketplace_page_061",
+        "marketplace_page_062",
+        "marketplace_page_063",
+        "marketplace_page_064",
+        "marketplace_page_065",
+        "marketplace_page_066",
+        "marketplace_page_067",
+        "marketplace_page_068",
+        "marketplace_page_069",
+        "marketplace_page_070",
+        "marketplace_page_071",
+        "marketplace_page_072",
+        "marketplace_page_073",
+        "marketplace_page_074",
+        "marketplace_page_075",
+        "marketplace_page_076",
+        "marketplace_page_077",
+        "marketplace_page_078",
+        "marketplace_page_079",
+        "marketplace_page_080",
+        "marketplace_page_081",
+        "marketplace_page_082",
+        "marketplace_page_083",
+        "marketplace_page_084",
+        "marketplace_page_085",
+        "marketplace_page_086",
+        "marketplace_page_087",
+        "marketplace_page_088",
+        "marketplace_page_089",
+        "marketplace_page_090",
+        "marketplace_page_091",
+        "marketplace_page_092",
+        "marketplace_page_093",
+        "marketplace_page_094",
+        "marketplace_page_095",
+        "marketplace_page_096",
+        "marketplace_page_097",
+        "marketplace_page_098",
+        "marketplace_page_099",
+        "marketplace_page_100"
+      ],
+      "provenance_complete": false,
+      "reasoning": "100 个商城页面重复使用同一商品图，均未提供可信作者、权利人或授权证明。"
+    },
+    {
+      "module": "enforcement_public_signals",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    }
+  ],
+  "review": {
+    "fact_conflicts": []
+  }
+}
