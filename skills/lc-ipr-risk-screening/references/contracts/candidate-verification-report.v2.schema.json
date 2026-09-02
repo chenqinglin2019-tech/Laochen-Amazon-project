@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:candidate-verification-report:2.0",
+  "title": "Candidate Verification Report v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ruleset_version",
+    "task_id",
+    "query_plan_digest",
+    "evidence_digest",
+    "coverage_digest",
+    "status",
+    "coverage_ready",
+    "inventory_ready",
+    "disposition_ready",
+    "verification_ready",
+    "assessment_ready",
+    "raw_candidate_count",
+    "unique_evidence_cluster_count",
+    "independent_evidence_group_count",
+    "risk_driver_count",
+    "candidate_rows",
+    "gaps",
+    "evaluated_at",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "ruleset_version": {"const": "2.0"},
+    "task_id": {"type": "string", "pattern": "^(?:ipr|fixture)_[A-Za-z0-9_-]{8,100}$"},
+    "query_plan_digest": {"$ref": "#/$defs/digest"},
+    "evidence_digest": {"$ref": "#/$defs/digest"},
+    "coverage_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+    "status": {"enum": ["complete", "incomplete"]},
+    "coverage_ready": {"type": "boolean"},
+    "inventory_ready": {"type": "boolean"},
+    "disposition_ready": {"type": "boolean"},
+    "verification_ready": {"type": "boolean"},
+    "assessment_ready": {"type": "boolean"},
+    "raw_candidate_count": {"type": "integer", "minimum": 0},
+    "unique_evidence_cluster_count": {"type": "integer", "minimum": 0},
+    "independent_evidence_group_count": {"type": "integer", "minimum": 0},
+    "risk_driver_count": {"type": "integer", "minimum": 0},
+    "candidate_rows": {"type": "array", "items": {"$ref": "#/$defs/candidate_row"}},
+    "gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}},
+    "evaluated_at": {"type": "string", "format": "date-time"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "module": {"enum": ["appearance_design", "utility_patent", "pending_patent", "word_mark", "figurative_mark", "trade_dress", "copyright_creative_ip", "enforcement_public_signals"]},
+    "candidate_row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "module", "record_kind", "legal_materiality", "risk_driver_eligible", "authority_tier", "evidence_role", "evidence_cluster_id", "independence_group", "verification_status", "reason_code"],
+      "properties": {
+        "candidate_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{3,127}$"},
+        "module": {"$ref": "#/$defs/module"},
+        "legacy_disposition": {"type": ["string", "null"], "enum": ["material", "needs_review", "not_material", null]},
+        "legacy_reassessed": {"type": "boolean"},
+        "record_kind": {"enum": ["right_record", "application", "enforcement_event", "marketplace_page", "creative_source", "comparison_material", "non_right_page"]},
+        "legal_materiality": {"enum": ["risk_bearing", "provenance_lead", "comparison_only", "mitigating", "not_material", "unresolved"]},
+        "risk_driver_eligible": {"type": "boolean"},
+        "authority_tier": {"enum": ["official", "authoritative", "primary", "commercial", "unknown"]},
+        "evidence_role": {"enum": ["risk_driver", "provenance", "context", "mitigating"]},
+        "target_jurisdiction": {"const": "US"},
+        "source_jurisdiction": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+        "right_jurisdiction": {"type": ["string", "null"], "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+        "evidence_cluster_id": {"type": "string", "minLength": 1, "maxLength": 200},
+        "duplicate_of": {"type": ["string", "null"], "maxLength": 128},
+        "independence_group": {"type": "string", "minLength": 1, "maxLength": 200},
+        "verification_status": {"enum": ["complete", "partial", "not_required", "incomplete"]},
+        "reason_code": {"type": "string", "minLength": 1, "maxLength": 160}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"legal_materiality": {"const": "risk_bearing"}}, "required": ["legal_materiality"]},
+          "then": {
+            "required": ["target_jurisdiction", "right_jurisdiction"],
+            "properties": {"target_jurisdiction": {"const": "US"}, "right_jurisdiction": {"const": "US"}}
+          }
+        }
+      ]
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "scope_type", "scope_id", "message", "effect"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 160},
+        "scope_type": {"enum": ["task", "module", "provider_run", "candidate"]},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "effect": {"enum": ["confidence_cap", "formal_block", "operational_hold", "none"]}
+      }
+    }
+  }
+}

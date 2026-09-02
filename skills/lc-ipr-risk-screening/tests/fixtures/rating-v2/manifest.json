@@ -1,0 +1,57 @@
+{
+  "fixture_format_version": "1.0",
+  "suite_id": "lc-ipr-risk-rating-v2",
+  "ruleset_version": "2.0",
+  "cases": [
+    {
+      "id": "htwo-ballerina-planter",
+      "input": "htwo-ballerina-planter.input.json",
+      "expected": "htwo-ballerina-planter.expected.json"
+    },
+    {
+      "id": "duplicate-marketplace-pages-100",
+      "input": "duplicate-marketplace-pages-100.input.json",
+      "expected": "duplicate-marketplace-pages-100.expected.json"
+    },
+    {
+      "id": "visual-search-90-overall-different",
+      "input": "visual-search-90-overall-different.input.json",
+      "expected": "visual-search-90-overall-different.expected.json"
+    },
+    {
+      "id": "exact-mark-unrelated-goods",
+      "input": "exact-mark-unrelated-goods.input.json",
+      "expected": "exact-mark-unrelated-goods.expected.json"
+    },
+    {
+      "id": "active-design-strong-overlap",
+      "input": "active-design-strong-overlap.input.json",
+      "expected": "active-design-strong-overlap.expected.json"
+    },
+    {
+      "id": "unlicensed-copyright-copy",
+      "input": "unlicensed-copyright-copy.input.json",
+      "expected": "unlicensed-copyright-copy.expected.json"
+    },
+    {
+      "id": "verified-tro-target-match",
+      "input": "verified-tro-target-match.input.json",
+      "expected": "verified-tro-target-match.expected.json"
+    },
+    {
+      "id": "evidence-gap-does-not-raise-risk",
+      "input": "evidence-gap-does-not-raise-risk.input.json",
+      "expected": "evidence-gap-does-not-raise-risk.expected.json"
+    },
+    {
+      "id": "draft-assessment-not-finalized",
+      "input": "draft-assessment-not-finalized.input.json",
+      "expected": "draft-assessment-not-finalized.expected.json"
+    },
+    {
+      "id": "second-review-fact-conflict",
+      "input": "second-review-fact-conflict.input.json",
+      "expected": "second-review-fact-conflict.expected.json"
+    }
+  ]
+}

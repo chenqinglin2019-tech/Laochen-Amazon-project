@@ -1,0 +1,461 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:candidate:2.0",
+  "title": "Risk Candidate v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "candidate_id",
+    "module",
+    "record_kind",
+    "legal_materiality",
+    "risk_driver_eligible",
+    "authority_tier",
+    "evidence_role",
+    "evidence_refs",
+    "verification_refs",
+    "evidence_cluster_id",
+    "independence_group",
+    "factors"
+  ],
+  "properties": {
+    "candidate_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{3,127}$"},
+    "module": {"$ref": "#/$defs/module"},
+    "legacy_module": {"type": ["string", "null"], "enum": ["appearance_design", "utility_patent", "pending_patent", "word_mark", "figurative_trade_dress", "copyright_creative_ip", "enforcement_public_signals", null]},
+    "record_kind": {"$ref": "#/$defs/record_kind"},
+    "legal_materiality": {"$ref": "#/$defs/legal_materiality"},
+    "risk_driver_eligible": {"type": "boolean"},
+    "authority_tier": {"$ref": "#/$defs/authority_tier"},
+    "evidence_role": {"$ref": "#/$defs/evidence_role"},
+    "target_jurisdiction": {"const": "US"},
+    "source_jurisdiction": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/jurisdiction"}]},
+    "right_jurisdiction": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/jurisdiction"}]},
+    "record_number": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/non_blank_string_200"}]},
+    "title": {"type": ["string", "null"], "maxLength": 1000},
+    "owner": {"type": ["string", "null"], "maxLength": 1000},
+    "source_locator": {"type": ["string", "null"], "maxLength": 5000},
+    "published_at": {"type": ["string", "null"], "format": "date-time"},
+    "first_seen_at": {"type": ["string", "null"], "format": "date-time"},
+    "evidence_refs": {"$ref": "#/$defs/ref_list"},
+    "verification_refs": {"$ref": "#/$defs/ref_list_empty_ok"},
+    "evidence_cluster_id": {"type": "string", "pattern": "\\S", "maxLength": 200},
+    "duplicate_of": {"type": ["string", "null"], "maxLength": 128},
+    "independence_group": {"type": "string", "pattern": "\\S", "maxLength": 200},
+    "legacy_disposition": {
+      "type": ["string", "null"],
+      "enum": ["material", "needs_review", "not_material", null]
+    },
+    "legacy_reassessed": {"type": "boolean"},
+    "factors": {"type": "object"}
+  },
+  "dependentRequired": {
+    "legacy_disposition": ["legacy_reassessed"],
+    "legacy_reassessed": ["legacy_disposition"]
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"risk_driver_eligible": {"const": true}}, "required": ["risk_driver_eligible"]},
+      "then": {
+        "properties": {
+          "legal_materiality": {"const": "risk_bearing"},
+          "evidence_role": {"const": "risk_driver"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"evidence_role": {"const": "risk_driver"}}, "required": ["evidence_role"]},
+      "then": {
+        "properties": {
+          "legal_materiality": {"const": "risk_bearing"},
+          "risk_driver_eligible": {"const": true}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"legal_materiality": {"const": "risk_bearing"}}, "required": ["legal_materiality"]},
+      "then": {
+        "required": ["target_jurisdiction", "right_jurisdiction"],
+        "properties": {
+          "risk_driver_eligible": {"const": true},
+          "target_jurisdiction": {"const": "US"},
+          "right_jurisdiction": {"const": "US"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "legacy_disposition": {"enum": ["material", "needs_review"]},
+          "legacy_reassessed": {"const": false}
+        },
+        "required": ["legacy_disposition", "legacy_reassessed"]
+      },
+      "then": {
+        "properties": {
+          "legal_materiality": {"const": "unresolved"},
+          "risk_driver_eligible": {"const": false}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "legacy_disposition": {"const": "not_material"},
+          "legacy_reassessed": {"const": false}
+        },
+        "required": ["legacy_disposition", "legacy_reassessed"]
+      },
+      "then": {
+        "properties": {
+          "legal_materiality": {"const": "not_material"},
+          "risk_driver_eligible": {"const": false}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"record_kind": {"enum": ["marketplace_page", "non_right_page"]}}, "required": ["record_kind"]},
+      "then": {
+        "properties": {
+          "risk_driver_eligible": {"const": false},
+          "legal_materiality": {"enum": ["provenance_lead", "comparison_only", "mitigating", "not_material", "unresolved"]}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"module": {"const": "appearance_design"}}, "required": ["module"]},
+      "then": {"properties": {"record_kind": {"enum": ["right_record", "marketplace_page", "comparison_material", "non_right_page"]}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "utility_patent"}}, "required": ["module"]},
+      "then": {"properties": {"record_kind": {"enum": ["right_record", "marketplace_page", "comparison_material", "non_right_page"]}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "pending_patent"}}, "required": ["module"]},
+      "then": {"properties": {"record_kind": {"enum": ["application", "marketplace_page", "comparison_material", "non_right_page"]}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "word_mark"}}, "required": ["module"]},
+      "then": {"properties": {"record_kind": {"enum": ["right_record", "marketplace_page", "comparison_material", "non_right_page"]}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "figurative_mark"}}, "required": ["module"]},
+      "then": {"properties": {"record_kind": {"enum": ["right_record", "marketplace_page", "comparison_material", "non_right_page"]}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "trade_dress"}}, "required": ["module"]},
+      "then": {"properties": {"record_kind": {"enum": ["right_record", "creative_source", "marketplace_page", "comparison_material", "non_right_page"]}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "copyright_creative_ip"}}, "required": ["module"]},
+      "then": {"properties": {"record_kind": {"enum": ["right_record", "creative_source", "marketplace_page", "comparison_material", "non_right_page"]}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "enforcement_public_signals"}}, "required": ["module"]},
+      "then": {"properties": {"record_kind": {"enum": ["enforcement_event", "marketplace_page", "comparison_material", "non_right_page"]}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "appearance_design"}, "legal_materiality": {"const": "risk_bearing"}}, "required": ["module", "legal_materiality"]},
+      "then": {"properties": {"record_kind": {"const": "right_record"}, "factors": {"$ref": "#/$defs/appearance_factors"}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "utility_patent"}, "legal_materiality": {"const": "risk_bearing"}}, "required": ["module", "legal_materiality"]},
+      "then": {"properties": {"record_kind": {"const": "right_record"}, "factors": {"$ref": "#/$defs/patent_claim_factors"}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "pending_patent"}, "legal_materiality": {"const": "risk_bearing"}}, "required": ["module", "legal_materiality"]},
+      "then": {"properties": {"record_kind": {"const": "application"}, "factors": {"$ref": "#/$defs/pending_patent_factors"}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "word_mark"}, "legal_materiality": {"const": "risk_bearing"}}, "required": ["module", "legal_materiality"]},
+      "then": {"properties": {"record_kind": {"const": "right_record"}, "factors": {"$ref": "#/$defs/word_mark_factors"}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "figurative_mark"}, "legal_materiality": {"const": "risk_bearing"}}, "required": ["module", "legal_materiality"]},
+      "then": {"properties": {"record_kind": {"const": "right_record"}, "factors": {"$ref": "#/$defs/figurative_mark_factors"}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "trade_dress"}, "legal_materiality": {"const": "risk_bearing"}}, "required": ["module", "legal_materiality"]},
+      "then": {"properties": {"record_kind": {"enum": ["right_record", "creative_source"]}, "factors": {"$ref": "#/$defs/trade_dress_factors"}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "copyright_creative_ip"}, "legal_materiality": {"const": "risk_bearing"}}, "required": ["module", "legal_materiality"]},
+      "then": {"properties": {"record_kind": {"enum": ["right_record", "creative_source"]}, "factors": {"$ref": "#/$defs/copyright_factors"}}}
+    },
+    {
+      "if": {"properties": {"module": {"const": "enforcement_public_signals"}, "legal_materiality": {"const": "risk_bearing"}}, "required": ["module", "legal_materiality"]},
+      "then": {
+        "required": ["record_number"],
+        "properties": {"record_kind": {"const": "enforcement_event"}, "record_number": {"$ref": "#/$defs/non_blank_string_200"}, "factors": {"$ref": "#/$defs/enforcement_factors"}}
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "module": {"const": "appearance_design"},
+          "record_kind": {"const": "right_record"},
+          "legal_materiality": {"enum": ["comparison_only", "not_material", "mitigating", "provenance_lead"]}
+        },
+        "required": ["module", "record_kind", "legal_materiality"]
+      },
+      "then": {"properties": {"factors": {"$ref": "#/$defs/appearance_factors"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "module": {"const": "utility_patent"},
+          "record_kind": {"const": "right_record"},
+          "legal_materiality": {"enum": ["comparison_only", "not_material", "mitigating", "provenance_lead"]}
+        },
+        "required": ["module", "record_kind", "legal_materiality"]
+      },
+      "then": {"properties": {"factors": {"$ref": "#/$defs/patent_claim_factors"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "module": {"const": "pending_patent"},
+          "record_kind": {"const": "application"},
+          "legal_materiality": {"enum": ["comparison_only", "not_material", "mitigating", "provenance_lead"]}
+        },
+        "required": ["module", "record_kind", "legal_materiality"]
+      },
+      "then": {"properties": {"factors": {"$ref": "#/$defs/pending_patent_factors"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "module": {"const": "word_mark"},
+          "record_kind": {"const": "right_record"},
+          "legal_materiality": {"enum": ["comparison_only", "not_material", "mitigating", "provenance_lead"]}
+        },
+        "required": ["module", "record_kind", "legal_materiality"]
+      },
+      "then": {"properties": {"factors": {"$ref": "#/$defs/word_mark_factors"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "module": {"const": "figurative_mark"},
+          "record_kind": {"const": "right_record"},
+          "legal_materiality": {"enum": ["comparison_only", "not_material", "mitigating", "provenance_lead"]}
+        },
+        "required": ["module", "record_kind", "legal_materiality"]
+      },
+      "then": {"properties": {"factors": {"$ref": "#/$defs/figurative_mark_factors"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "module": {"const": "trade_dress"},
+          "record_kind": {"enum": ["right_record", "creative_source"]},
+          "legal_materiality": {"enum": ["comparison_only", "not_material", "mitigating", "provenance_lead"]}
+        },
+        "required": ["module", "record_kind", "legal_materiality"]
+      },
+      "then": {"properties": {"factors": {"$ref": "#/$defs/trade_dress_factors"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "module": {"const": "copyright_creative_ip"},
+          "record_kind": {"enum": ["right_record", "creative_source"]},
+          "legal_materiality": {"enum": ["comparison_only", "not_material", "mitigating", "provenance_lead"]}
+        },
+        "required": ["module", "record_kind", "legal_materiality"]
+      },
+      "then": {"properties": {"factors": {"$ref": "#/$defs/copyright_factors"}}}
+    },
+    {
+      "if": {
+        "properties": {
+          "module": {"const": "enforcement_public_signals"},
+          "record_kind": {"const": "enforcement_event"},
+          "legal_materiality": {"enum": ["comparison_only", "not_material", "mitigating", "provenance_lead"]}
+        },
+        "required": ["module", "record_kind", "legal_materiality"]
+      },
+      "then": {
+        "required": ["record_number"],
+        "properties": {"record_number": {"$ref": "#/$defs/non_blank_string_200"}, "factors": {"$ref": "#/$defs/enforcement_factors"}}
+      }
+    }
+  ],
+  "$defs": {
+    "module": {
+      "enum": [
+        "appearance_design",
+        "utility_patent",
+        "pending_patent",
+        "word_mark",
+        "figurative_mark",
+        "trade_dress",
+        "copyright_creative_ip",
+        "enforcement_public_signals"
+      ]
+    },
+    "record_kind": {
+      "enum": ["right_record", "application", "enforcement_event", "marketplace_page", "creative_source", "comparison_material", "non_right_page"]
+    },
+    "legal_materiality": {
+      "enum": ["risk_bearing", "provenance_lead", "comparison_only", "mitigating", "not_material", "unresolved"]
+    },
+    "authority_tier": {"enum": ["official", "authoritative", "primary", "commercial", "unknown"]},
+    "evidence_role": {"enum": ["risk_driver", "provenance", "context", "mitigating"]},
+    "jurisdiction": {"type": "string", "pattern": "^[A-Z][A-Z0-9-]{1,15}$"},
+    "non_blank_string_200": {"type": "string", "pattern": "\\S", "maxLength": 200},
+    "non_blank_string_1000": {"type": "string", "pattern": "\\S", "maxLength": 1000},
+    "ref_list": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "\\S", "maxLength": 2000}
+    },
+    "ref_list_empty_ok": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "\\S", "maxLength": 2000}
+    },
+    "non_blank_ref_list": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "\\S", "maxLength": 2000}
+    },
+    "non_blank_ref_list_empty_ok": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "\\S", "maxLength": 2000}
+    },
+    "right_status": {"enum": ["active", "pending", "expired", "cancelled", "abandoned", "rejected", "disputed", "unknown", "not_found", "not_applicable"]},
+    "authorization_status": {"enum": ["authorized", "unlicensed", "unknown", "not_applicable"]},
+    "graded_similarity": {"enum": ["exact", "near_exact", "high", "medium", "low", "none", "different", "unknown"]},
+    "boolean_or_unknown": {"oneOf": [{"type": "boolean"}, {"const": "unknown"}]},
+    "appearance_factors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["right_status", "official_record_verified", "same_product_category", "complete_official_images", "claimed_portions", "dominant_shared_features", "dominant_differences", "difference_effect", "overall_visual_impression", "authorization_status"],
+      "properties": {
+        "right_status": {"$ref": "#/$defs/right_status"},
+        "official_record_verified": {"type": "boolean"},
+        "same_product_category": {"$ref": "#/$defs/boolean_or_unknown"},
+        "complete_official_images": {"type": "boolean"},
+        "retrieval_similarity_score": {"type": "number", "minimum": 0, "maximum": 1},
+        "claimed_portions": {"$ref": "#/$defs/non_blank_ref_list"},
+        "dominant_shared_features": {"$ref": "#/$defs/non_blank_ref_list"},
+        "dominant_differences": {"$ref": "#/$defs/non_blank_ref_list_empty_ok"},
+        "difference_effect": {"enum": ["none", "non_decisive", "decisive", "unknown"]},
+        "overall_visual_impression": {"enum": ["exact", "high", "medium", "low", "none", "different", "unknown"]},
+        "authorization_status": {"$ref": "#/$defs/authorization_status"}
+      }
+    },
+    "claim_mapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_id", "required_elements", "mapped_elements", "missing_elements", "mapping_status"],
+      "properties": {
+        "claim_id": {"type": "string", "pattern": "\\S", "maxLength": 100},
+        "required_elements": {"$ref": "#/$defs/non_blank_ref_list"},
+        "mapped_elements": {"$ref": "#/$defs/non_blank_ref_list_empty_ok"},
+        "missing_elements": {"$ref": "#/$defs/non_blank_ref_list_empty_ok"},
+        "mapping_status": {"enum": ["complete", "partial", "unmapped", "unknown"]}
+      }
+    },
+    "patent_claim_factors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["right_status", "official_record_verified", "independent_claim_mappings", "claim_scope_conclusion", "authorization_status"],
+      "properties": {
+        "right_status": {"$ref": "#/$defs/right_status"},
+        "official_record_verified": {"type": "boolean"},
+        "independent_claim_mappings": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/claim_mapping"}},
+        "claim_scope_conclusion": {"enum": ["all_elements_mapped", "missing_elements", "uncertain", "not_reviewed"]},
+        "claim_change_uncertainty": {"enum": ["low", "medium", "high", "not_applicable", "unknown"]},
+        "monitoring_trigger": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/non_blank_string_1000"}]},
+        "authorization_status": {"$ref": "#/$defs/authorization_status"}
+      }
+    },
+    "pending_patent_factors": {
+      "allOf": [
+        {"$ref": "#/$defs/patent_claim_factors"},
+        {"type": "object", "required": ["claim_change_uncertainty", "monitoring_trigger"]}
+      ]
+    },
+    "word_mark_factors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["right_status", "official_record_verified", "mark_similarity", "goods_services_relatedness", "channels_overlap", "consumer_overlap", "mark_strength", "confusion_likelihood", "authorization_status"],
+      "properties": {
+        "right_status": {"$ref": "#/$defs/right_status"},
+        "official_record_verified": {"type": "boolean"},
+        "mark_similarity": {"$ref": "#/$defs/graded_similarity"},
+        "goods_services_relatedness": {"enum": ["high", "medium", "low", "none", "unknown"]},
+        "channels_overlap": {"$ref": "#/$defs/boolean_or_unknown"},
+        "consumer_overlap": {"$ref": "#/$defs/boolean_or_unknown"},
+        "mark_strength": {"enum": ["strong", "medium", "weak", "unknown"]},
+        "confusion_likelihood": {"enum": ["high", "medium", "low", "none", "unknown"]},
+        "authorization_status": {"$ref": "#/$defs/authorization_status"}
+      }
+    },
+    "figurative_mark_factors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["right_status", "official_record_verified", "figurative_similarity", "goods_services_relatedness", "channels_overlap", "consumer_overlap", "mark_strength", "confusion_likelihood", "authorization_status"],
+      "properties": {
+        "right_status": {"$ref": "#/$defs/right_status"},
+        "official_record_verified": {"type": "boolean"},
+        "figurative_similarity": {"$ref": "#/$defs/graded_similarity"},
+        "goods_services_relatedness": {"enum": ["high", "medium", "low", "none", "unknown"]},
+        "channels_overlap": {"$ref": "#/$defs/boolean_or_unknown"},
+        "consumer_overlap": {"$ref": "#/$defs/boolean_or_unknown"},
+        "mark_strength": {"enum": ["strong", "medium", "weak", "unknown"]},
+        "confusion_likelihood": {"enum": ["high", "medium", "low", "none", "unknown"]},
+        "authorization_status": {"$ref": "#/$defs/authorization_status"}
+      }
+    },
+    "trade_dress_factors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identified_trade_dress_claim", "nonfunctionality", "distinctiveness", "source_identification", "confusion_likelihood", "authorization_status"],
+      "properties": {
+        "identified_trade_dress_claim": {
+          "type": "string",
+          "pattern": "^(?!\\s*(?:[Uu][Nn][Kk][Nn][Oo][Ww][Nn]|未知|待确认)\\s*$)\\s*\\S(?:.{6,}\\S)\\s*$",
+          "maxLength": 3000
+        },
+        "nonfunctionality": {"enum": ["established", "supported", "not_established", "unknown"]},
+        "distinctiveness": {"enum": ["established", "supported", "not_established", "unknown"]},
+        "source_identification": {"enum": ["established", "supported", "not_established", "unknown"]},
+        "confusion_likelihood": {"enum": ["high", "medium", "low", "none", "unknown"]},
+        "authorization_status": {"$ref": "#/$defs/authorization_status"}
+      }
+    },
+    "copyright_factors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_scope", "protectable_expression", "asset_match", "expression_similarity", "creator_or_earliest_source", "ownership_reliability", "authorization_status", "commercial_use_covered"],
+      "properties": {
+        "asset_scope": {"enum": ["product_sculpture", "listing_image", "packaging", "other", "unknown"]},
+        "protectable_expression": {"enum": ["established", "likely", "weak", "none", "unknown"]},
+        "asset_match": {"$ref": "#/$defs/graded_similarity"},
+        "expression_similarity": {"$ref": "#/$defs/graded_similarity"},
+        "creator_or_earliest_source": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/non_blank_string_1000"}]},
+        "ownership_reliability": {"enum": ["high", "medium", "low", "unknown"]},
+        "authorization_status": {"$ref": "#/$defs/authorization_status"},
+        "commercial_use_covered": {"$ref": "#/$defs/boolean_or_unknown"}
+      }
+    },
+    "enforcement_factors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_verified", "claimant", "case_or_complaint_id", "subject_match", "procedure_status", "underlying_risk_driver_ids"],
+      "properties": {
+        "event_verified": {"type": "boolean"},
+        "claimant": {"$ref": "#/$defs/non_blank_string_1000"},
+        "case_or_complaint_id": {"$ref": "#/$defs/non_blank_string_200"},
+        "subject_match": {"enum": ["exact", "strong", "partial", "none", "unknown"]},
+        "procedure_status": {"enum": ["active_tro", "active_injunction", "active_litigation", "active_complaint", "platform_enforcement", "closed", "dismissed", "unknown"]},
+        "underlying_risk_driver_ids": {"$ref": "#/$defs/non_blank_ref_list"}
+      }
+    }
+  }
+}

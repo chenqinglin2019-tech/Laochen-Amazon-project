@@ -1,0 +1,73 @@
+{
+  "schema_version": "2.0",
+  "task_id": "fixture_draft_assessment_not_finalized",
+  "expected": {
+    "overall": {
+      "discovery_status": "review_required",
+      "legal_risk": "not_assessable",
+      "risk_confidence": "low",
+      "coverage_confidence": "high",
+      "operational_action": "hold_for_evidence"
+    },
+    "constraints": {
+      "formal_conclusion_allowed": false
+    },
+    "report": {
+      "report_mode": "draft",
+      "legal_risk_label": "评估尚未完成",
+      "legacy_risk_seal_visible": false
+    },
+    "modules": [
+      {
+        "module": "appearance_design",
+        "legal_risk": "not_assessable",
+        "risk_confidence": "low"
+      },
+      {
+        "module": "utility_patent",
+        "legal_risk": "not_assessable",
+        "risk_confidence": "low"
+      },
+      {
+        "module": "pending_patent",
+        "legal_risk": "not_assessable",
+        "risk_confidence": "low"
+      },
+      {
+        "module": "word_mark",
+        "legal_risk": "not_assessable",
+        "risk_confidence": "low"
+      },
+      {
+        "module": "figurative_mark",
+        "legal_risk": "not_assessable",
+        "risk_confidence": "low"
+      },
+      {
+        "module": "trade_dress",
+        "legal_risk": "not_assessable",
+        "risk_confidence": "low"
+      },
+      {
+        "module": "copyright_creative_ip",
+        "legal_risk": "not_assessable",
+        "risk_confidence": "low"
+      },
+      {
+        "module": "enforcement_public_signals",
+        "legal_risk": "not_assessable",
+        "risk_confidence": "low"
+      }
+    ]
+  },
+  "assertions": {
+    "must_include_trace_codes": [
+      "ASSESSMENT_NOT_FINALIZED",
+      "FORMAL_CONCLUSION_BLOCKED"
+    ],
+    "must_not_include_trace_codes": [
+      "DRAFT_MATERIAL_AUTOMATIC_HIGH",
+      "FORMAL_HIGH_RISK_LABEL"
+    ]
+  }
+}

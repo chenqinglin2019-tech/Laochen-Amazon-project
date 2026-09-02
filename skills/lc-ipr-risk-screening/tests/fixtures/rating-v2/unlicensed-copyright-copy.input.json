@@ -1,0 +1,113 @@
+{
+  "schema_version": "2.0",
+  "ruleset_version": "2.0",
+  "task_id": "fixture_unlicensed_copyright_copy",
+  "assessment_status": "final",
+  "coverage": {
+    "confidence": "high",
+    "complete": true,
+    "gaps": []
+  },
+  "candidates": [
+    {
+      "candidate_id": "copyright_near_exact_unlicensed",
+      "module": "copyright_creative_ip",
+      "record_kind": "creative_source",
+      "legal_materiality": "risk_bearing",
+      "risk_driver_eligible": true,
+      "authority_tier": "primary",
+      "evidence_role": "risk_driver",
+      "target_jurisdiction": "US",
+      "right_jurisdiction": "US",
+      "evidence_refs": [
+        "evidence://creator/original-work"
+      ],
+      "verification_refs": [
+        "verification://provenance/creator-and-owner"
+      ],
+      "evidence_cluster_id": "work_original_sculpture_001",
+      "independence_group": "work_original_sculpture_001",
+      "factors": {
+        "asset_scope": "product_sculpture",
+        "protectable_expression": "established",
+        "asset_match": "exact",
+        "expression_similarity": "near_exact",
+        "creator_or_earliest_source": "verified://creator/original-sculpture",
+        "ownership_reliability": "high",
+        "authorization_status": "unlicensed",
+        "commercial_use_covered": false
+      }
+    }
+  ],
+  "modules": [
+    {
+      "module": "appearance_design",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "utility_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "pending_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "word_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "figurative_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "trade_dress",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "copyright_creative_ip",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [
+        "copyright_near_exact_unlicensed"
+      ],
+      "provenance_complete": true,
+      "reasoning": "具体受保护表达近乎完全复制，作者和权利人来源可靠，拟议商业用途没有授权。"
+    },
+    {
+      "module": "enforcement_public_signals",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    }
+  ],
+  "review": {
+    "fact_conflicts": []
+  }
+}

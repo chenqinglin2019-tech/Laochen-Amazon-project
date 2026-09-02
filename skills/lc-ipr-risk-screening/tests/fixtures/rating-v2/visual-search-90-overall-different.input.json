@@ -1,0 +1,115 @@
+{
+  "schema_version": "2.0",
+  "ruleset_version": "2.0",
+  "task_id": "fixture_visual_search_90_overall_different",
+  "assessment_status": "final",
+  "coverage": {
+    "confidence": "high",
+    "complete": true,
+    "gaps": []
+  },
+  "candidates": [
+    {
+      "candidate_id": "design_high_retrieval_low_legal_similarity",
+      "module": "appearance_design",
+      "record_kind": "right_record",
+      "legal_materiality": "risk_bearing",
+      "risk_driver_eligible": true,
+      "authority_tier": "official",
+      "evidence_role": "risk_driver",
+      "target_jurisdiction": "US",
+      "right_jurisdiction": "US",
+      "evidence_refs": [
+        "evidence://image-search/result-001"
+      ],
+      "verification_refs": [
+        "verification://official/design-001"
+      ],
+      "evidence_cluster_id": "right_design_001",
+      "independence_group": "right_design_001",
+      "factors": {
+        "right_status": "active",
+        "official_record_verified": true,
+        "same_product_category": true,
+        "complete_official_images": true,
+        "retrieval_similarity_score": 0.9,
+        "claimed_portions": ["完整主张外观"],
+        "dominant_shared_features": ["均为悬挂容器"],
+        "dominant_differences": ["主导人物造型、比例与轮廓明显不同"],
+        "difference_effect": "decisive",
+        "overall_visual_impression": "low",
+        "authorization_status": "unknown"
+      }
+    }
+  ],
+  "modules": [
+    {
+      "module": "appearance_design",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [
+        "design_high_retrieval_low_legal_similarity"
+      ],
+      "reasoning": "图搜召回分数高，但完整官方视图中的主导轮廓、比例和装饰结构明显不同。"
+    },
+    {
+      "module": "utility_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "pending_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "word_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "figurative_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "trade_dress",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "copyright_creative_ip",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "enforcement_public_signals",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    }
+  ],
+  "review": {
+    "fact_conflicts": []
+  }
+}

@@ -1,0 +1,125 @@
+{
+  "schema_version": "2.0",
+  "ruleset_version": "2.0",
+  "task_id": "fixture_second_review_fact_conflict",
+  "assessment_status": "final",
+  "coverage": {
+    "confidence": "high",
+    "complete": true,
+    "gaps": []
+  },
+  "candidates": [
+    {
+      "candidate_id": "design_with_conflicting_visual_fact",
+      "module": "appearance_design",
+      "record_kind": "right_record",
+      "legal_materiality": "risk_bearing",
+      "risk_driver_eligible": true,
+      "authority_tier": "official",
+      "evidence_role": "risk_driver",
+      "target_jurisdiction": "US",
+      "right_jurisdiction": "US",
+      "evidence_refs": [
+        "evidence://uspto/design-conflict"
+      ],
+      "verification_refs": [
+        "verification://official/design-conflict"
+      ],
+      "evidence_cluster_id": "right_design_conflict",
+      "independence_group": "right_design_conflict",
+      "factors": {
+        "right_status": "active",
+        "official_record_verified": true,
+        "same_product_category": true,
+        "complete_official_images": true,
+        "claimed_portions": ["完整商品外观"],
+        "dominant_shared_features": ["主导轮廓存在争议"],
+        "dominant_differences": ["审阅者对差异权重意见不一致"],
+        "difference_effect": "unknown",
+        "overall_visual_impression": "unknown",
+        "authorization_status": "unknown"
+      }
+    }
+  ],
+  "modules": [
+    {
+      "module": "appearance_design",
+      "assessability": "assessable",
+      "confidence": "medium",
+      "candidate_ids": [
+        "design_with_conflicting_visual_fact"
+      ],
+      "reasoning": "两名审阅者对决定评级的整体视觉印象事实存在未解决冲突。"
+    },
+    {
+      "module": "utility_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "pending_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "word_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "figurative_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "trade_dress",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "copyright_creative_ip",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "enforcement_public_signals",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    }
+  ],
+  "review": {
+    "fact_conflicts": [
+      {
+        "conflict_id": "conflict_overall_visual_impression_001",
+        "module": "appearance_design",
+        "candidate_id": "design_with_conflicting_visual_fact",
+        "fact_path": "factors.overall_visual_impression",
+        "first_review_value": "high",
+        "second_review_value": "low",
+        "rating_material": true,
+        "status": "unresolved"
+      }
+    ]
+  }
+}

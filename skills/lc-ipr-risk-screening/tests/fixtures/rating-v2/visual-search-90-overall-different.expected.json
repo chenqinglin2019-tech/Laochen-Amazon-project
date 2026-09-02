@@ -1,0 +1,64 @@
+{
+  "schema_version": "2.0",
+  "task_id": "fixture_visual_search_90_overall_different",
+  "expected": {
+    "overall": {
+      "discovery_status": "review_required",
+      "legal_risk": "low",
+      "risk_confidence": "high",
+      "coverage_confidence": "high",
+      "operational_action": "proceed_with_conditions"
+    },
+    "modules": [
+      {
+        "module": "appearance_design",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "utility_patent",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "pending_patent",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "word_mark",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "figurative_mark",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "trade_dress",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "copyright_creative_ip",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      },
+      {
+        "module": "enforcement_public_signals",
+        "legal_risk": "low",
+        "risk_confidence": "high"
+      }
+    ]
+  },
+  "assertions": {
+    "must_include_trace_codes": [
+      "DECISIVE_DESIGN_DIFFERENCES"
+    ],
+    "must_not_include_trace_codes": [
+      "RETRIEVAL_SCORE_RISK_FLOOR",
+      "ACTIVE_RIGHT_AUTOMATIC_HIGH"
+    ]
+  }
+}

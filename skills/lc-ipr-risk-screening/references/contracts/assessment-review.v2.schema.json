@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:assessment-review:2.0",
+  "title": "Immutable Assessment Fact Review v2",
+  "allOf": [
+    {"$ref": "urn:lc-ipr-risk-screening:assessment-review-input:2.0"},
+    {"required": ["review_id", "digest"]}
+  ]
+}

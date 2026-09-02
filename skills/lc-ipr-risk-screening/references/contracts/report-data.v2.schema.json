@@ -1,0 +1,312 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:report-data:2.0",
+  "title": "IPR Screening Report View Model v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ruleset_version",
+    "task_id",
+    "report_mode",
+    "product",
+    "overview",
+    "discovery_summary",
+    "coverage",
+    "gaps",
+    "modules",
+    "candidates",
+    "constraints",
+    "trace",
+    "generated_at",
+    "digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "ruleset_version": {"const": "2.0"},
+    "task_id": {"type": "string", "pattern": "^(?:ipr|fixture)_[A-Za-z0-9_-]{8,100}$"},
+    "report_mode": {"enum": ["formal", "draft", "legacy"]},
+    "product": {"type": "object", "minProperties": 1},
+    "overview": {"$ref": "#/$defs/overview"},
+    "discovery_summary": {"$ref": "#/$defs/discovery_summary"},
+    "coverage": {"$ref": "#/$defs/coverage"},
+    "gaps": {"type": "array", "items": {"$ref": "#/$defs/gap"}},
+    "modules": {"$ref": "#/$defs/eight_modules"},
+    "candidates": {"type": "array", "items": {"$ref": "#/$defs/candidate"}},
+    "visual_evidence": {"type": "array", "maxItems": 20, "items": {"$ref": "#/$defs/visual_evidence"}},
+    "constraints": {"$ref": "#/$defs/constraints"},
+    "trace": {"$ref": "#/$defs/trace"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"report_mode": {"const": "draft"}}, "required": ["report_mode"]},
+      "then": {
+        "properties": {
+          "overview": {
+            "properties": {
+              "legal_risk": {"const": "not_assessable"},
+              "formal_conclusion_allowed": {"const": false},
+              "legal_risk_label": {"const": "评估尚未完成"},
+              "legacy_risk_seal_visible": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"properties": {"report_mode": {"const": "legacy"}}, "required": ["report_mode"]},
+      "then": {
+        "properties": {
+          "overview": {
+            "properties": {
+              "status": {"const": "legacy discovery report"},
+              "legal_risk": {"const": "not_assessable"},
+              "formal_conclusion_allowed": {"const": false},
+              "legacy_risk_seal_visible": {"const": false}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {"type": "object", "properties": {"overview": {"type": "object", "properties": {"legal_risk": {"const": "high"}}, "required": ["legal_risk"]}}, "required": ["overview"]},
+      "then": {
+        "properties": {
+          "modules": {
+            "contains": {"type": "object", "properties": {"legal_risk": {"const": "high"}}, "required": ["legal_risk"]},
+            "minContains": 1
+          }
+        }
+      }
+    },
+    {
+      "if": {"type": "object", "properties": {"overview": {"type": "object", "properties": {"legal_risk": {"const": "critical"}}, "required": ["legal_risk"]}}, "required": ["overview"]},
+      "then": {
+        "properties": {
+          "modules": {
+            "allOf": [
+              {"contains": {"type": "object", "properties": {"module": {"const": "enforcement_public_signals"}, "legal_risk": {"const": "critical"}}, "required": ["module", "legal_risk"]}, "minContains": 1},
+              {"contains": {"type": "object", "properties": {"module": {"not": {"const": "enforcement_public_signals"}}, "legal_risk": {"const": "high"}}, "required": ["module", "legal_risk"]}, "minContains": 1}
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "module": {"enum": ["appearance_design", "utility_patent", "pending_patent", "word_mark", "figurative_mark", "trade_dress", "copyright_creative_ip", "enforcement_public_signals"]},
+    "legal_risk": {"enum": ["not_assessable", "very_low", "low", "medium", "high", "critical"]},
+    "confidence": {"enum": ["low", "medium", "high"]},
+    "discovery_status": {"enum": ["no_lead", "leads_found", "review_required", "blocked"]},
+    "operational_action": {"enum": ["proceed", "proceed_with_conditions", "hold_for_evidence", "escalate_legal"]},
+    "ref_list": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "\\S", "maxLength": 5000}},
+    "ref_list_empty_ok": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "\\S", "maxLength": 5000}},
+    "overview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "discovery_status", "legal_risk", "risk_confidence", "coverage_confidence", "operational_action", "formal_conclusion_allowed", "legal_risk_label", "legacy_risk_seal_visible", "summary", "legal_boundary"],
+      "properties": {
+        "status": {"type": "string", "pattern": "\\S", "maxLength": 200},
+        "discovery_status": {"$ref": "#/$defs/discovery_status"},
+        "legal_risk": {"$ref": "#/$defs/legal_risk"},
+        "risk_confidence": {"$ref": "#/$defs/confidence"},
+        "coverage_confidence": {"$ref": "#/$defs/confidence"},
+        "operational_action": {"$ref": "#/$defs/operational_action"},
+        "formal_conclusion_allowed": {"type": "boolean"},
+        "legal_risk_label": {"type": "string", "pattern": "\\S", "maxLength": 100},
+        "legacy_risk_seal_visible": {"type": "boolean"},
+        "summary": {"type": "string", "pattern": "\\S", "maxLength": 10000},
+        "legal_boundary": {"type": "string", "pattern": "\\S", "maxLength": 5000}
+      }
+    },
+    "discovery_summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "raw_candidate_count", "unique_evidence_cluster_count", "independent_evidence_group_count", "risk_driver_count", "contextual_lead_count", "unresolved_count"],
+      "properties": {
+        "status": {"$ref": "#/$defs/discovery_status"},
+        "raw_candidate_count": {"type": "integer", "minimum": 0},
+        "unique_evidence_cluster_count": {"type": "integer", "minimum": 0},
+        "independent_evidence_group_count": {"type": "integer", "minimum": 0},
+        "risk_driver_count": {"type": "integer", "minimum": 0},
+        "contextual_lead_count": {"type": "integer", "minimum": 0},
+        "unresolved_count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_total", "completed_total", "gap_total", "confidence", "complete"],
+      "properties": {
+        "required_total": {"type": "integer", "minimum": 8},
+        "completed_total": {"type": "integer", "minimum": 0},
+        "gap_total": {"type": "integer", "minimum": 0},
+        "confidence": {"$ref": "#/$defs/confidence"},
+        "complete": {"type": "boolean"}
+      }
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "scope_type", "scope_id", "message", "blocking", "effect"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 160},
+        "scope_type": {"enum": ["task", "module", "provider_run", "candidate"]},
+        "scope_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "message": {"type": "string", "minLength": 1, "maxLength": 1000},
+        "blocking": {"type": "boolean"},
+        "effect": {"enum": ["confidence_cap", "formal_block", "operational_hold", "none"]}
+      }
+    },
+    "module_view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "assessability", "legal_risk", "risk_confidence", "summary", "risk_driver_ids", "evidence_refs", "recommended_actions"],
+      "properties": {
+        "module": {"$ref": "#/$defs/module"},
+        "assessability": {"enum": ["assessable", "partially_assessable", "not_assessable"]},
+        "legal_risk": {"$ref": "#/$defs/legal_risk"},
+        "risk_confidence": {"$ref": "#/$defs/confidence"},
+        "summary": {"type": "string", "pattern": "\\S", "maxLength": 10000},
+        "risk_driver_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "\\S", "maxLength": 128}},
+        "evidence_refs": {"$ref": "#/$defs/ref_list_empty_ok"},
+        "recommended_actions": {"type": "array", "items": {"type": "string", "pattern": "\\S", "maxLength": 2000}}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"legal_risk": {"enum": ["high", "critical"]}}, "required": ["legal_risk"]},
+          "then": {"properties": {"risk_driver_ids": {"minItems": 1}, "evidence_refs": {"minItems": 1}}}
+        },
+        {
+          "if": {"properties": {"legal_risk": {"const": "critical"}}, "required": ["legal_risk"]},
+          "then": {"properties": {"module": {"const": "enforcement_public_signals"}}}
+        }
+      ]
+    },
+    "eight_modules": {
+      "type": "array",
+      "prefixItems": [
+        {"allOf": [{"$ref": "#/$defs/module_view"}, {"properties": {"module": {"const": "appearance_design"}}}]},
+        {"allOf": [{"$ref": "#/$defs/module_view"}, {"properties": {"module": {"const": "utility_patent"}}}]},
+        {"allOf": [{"$ref": "#/$defs/module_view"}, {"properties": {"module": {"const": "pending_patent"}}}]},
+        {"allOf": [{"$ref": "#/$defs/module_view"}, {"properties": {"module": {"const": "word_mark"}}}]},
+        {"allOf": [{"$ref": "#/$defs/module_view"}, {"properties": {"module": {"const": "figurative_mark"}}}]},
+        {"allOf": [{"$ref": "#/$defs/module_view"}, {"properties": {"module": {"const": "trade_dress"}}}]},
+        {"allOf": [{"$ref": "#/$defs/module_view"}, {"properties": {"module": {"const": "copyright_creative_ip"}}}]},
+        {"allOf": [{"$ref": "#/$defs/module_view"}, {"properties": {"module": {"const": "enforcement_public_signals"}}}]}
+      ],
+      "minItems": 8,
+      "maxItems": 8
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "module", "record_kind", "legal_materiality", "risk_driver_eligible", "authority_tier", "evidence_role", "evidence_cluster_id", "independence_group", "title", "owner", "right_status", "source_locator", "published_at", "first_seen_at", "evidence_refs", "verification_refs", "summary"],
+      "properties": {
+        "candidate_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "module": {"$ref": "#/$defs/module"},
+        "legacy_disposition": {"type": ["string", "null"], "enum": ["material", "needs_review", "not_material", null]},
+        "legacy_reassessed": {"type": "boolean"},
+        "record_kind": {"enum": ["right_record", "application", "enforcement_event", "marketplace_page", "creative_source", "comparison_material", "non_right_page"]},
+        "legal_materiality": {"enum": ["risk_bearing", "provenance_lead", "comparison_only", "mitigating", "not_material", "unresolved"]},
+        "risk_driver_eligible": {"type": "boolean"},
+        "authority_tier": {"enum": ["official", "authoritative", "primary", "commercial", "unknown"]},
+        "evidence_role": {"enum": ["risk_driver", "provenance", "context", "mitigating"]},
+        "evidence_cluster_id": {"type": "string", "pattern": "\\S", "maxLength": 200},
+        "duplicate_of": {"type": ["string", "null"], "maxLength": 128},
+        "independence_group": {"type": "string", "pattern": "\\S", "maxLength": 200},
+        "record_number": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "\\S", "maxLength": 200}]},
+        "title": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "\\S", "maxLength": 1000}]},
+        "owner": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "\\S", "maxLength": 1000}]},
+        "right_status": {"enum": ["active", "pending", "expired", "cancelled", "abandoned", "rejected", "disputed", "unknown", "not_found", "not_applicable"]},
+        "target_jurisdiction": {"const": "US"},
+        "source_jurisdiction": {"type": ["string", "null"], "maxLength": 20},
+        "right_jurisdiction": {"type": ["string", "null"], "maxLength": 20},
+        "source_locator": {"oneOf": [{"type": "null"}, {"type": "string", "pattern": "\\S", "maxLength": 5000}]},
+        "published_at": {"type": ["string", "null"], "format": "date-time"},
+        "first_seen_at": {"type": ["string", "null"], "format": "date-time"},
+        "evidence_refs": {"$ref": "#/$defs/ref_list"},
+        "verification_refs": {"$ref": "#/$defs/ref_list_empty_ok"},
+        "summary": {"type": "string", "pattern": "\\S", "maxLength": 10000}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"legal_materiality": {"const": "risk_bearing"}}, "required": ["legal_materiality"]},
+          "then": {
+            "required": ["target_jurisdiction", "right_jurisdiction"],
+            "properties": {"target_jurisdiction": {"const": "US"}, "right_jurisdiction": {"const": "US"}}
+          }
+        }
+      ]
+    },
+    "visual_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["candidate_id", "module", "record_number", "title", "owner", "retrieval_similarity_score", "overall_visual_impression", "comparison_reason", "image_path", "image_sha256"],
+      "properties": {
+        "candidate_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "module": {"enum": ["appearance_design", "figurative_mark", "trade_dress", "copyright_creative_ip"]},
+        "record_number": {"type": ["string", "null"], "maxLength": 200},
+        "title": {"type": ["string", "null"], "maxLength": 1000},
+        "owner": {"type": ["string", "null"], "maxLength": 1000},
+        "retrieval_similarity_score": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "overall_visual_impression": {"enum": ["high", "medium", "low", "different", "unknown", "not_applicable"]},
+        "comparison_reason": {"type": "string", "minLength": 1, "maxLength": 5000},
+        "image_path": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "image_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "constraint_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "kind", "effect", "reason"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 160},
+        "kind": {"enum": ["verified_risk_floor", "confidence_cap", "formal_conclusion_blocked", "evidence_gate", "operational_hold"]},
+        "effect": {"type": "string", "minLength": 1, "maxLength": 500},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 2000}
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["formal_conclusion_allowed", "second_review_required", "human_resolution_required", "applied"],
+      "properties": {
+        "formal_conclusion_allowed": {"type": "boolean"},
+        "second_review_required": {"type": "boolean"},
+        "human_resolution_required": {"type": "boolean"},
+        "applied": {"type": "array", "items": {"$ref": "#/$defs/constraint_event"}}
+      }
+    },
+    "trace_event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "rule_ids", "candidate_ids", "evidence_refs"],
+      "properties": {
+        "code": {"type": "string", "minLength": 1, "maxLength": 160},
+        "message": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "rule_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 100}},
+        "candidate_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 128}},
+        "evidence_refs": {"$ref": "#/$defs/ref_list_empty_ok"}
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ruleset_version", "product_facts_digest", "query_plan_digest", "evidence_digest", "source_manifest_digest", "assessment_digest", "evidence_revision", "decision_trace"],
+      "properties": {
+        "ruleset_version": {"const": "2.0"},
+        "product_facts_digest": {"$ref": "#/$defs/digest"},
+        "query_plan_digest": {"$ref": "#/$defs/digest"},
+        "evidence_digest": {"$ref": "#/$defs/digest"},
+        "source_manifest_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+        "assessment_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+        "evidence_revision": {"type": "integer", "minimum": 1},
+        "decision_trace": {"type": "array", "items": {"$ref": "#/$defs/trace_event"}}
+      }
+    }
+  }
+}

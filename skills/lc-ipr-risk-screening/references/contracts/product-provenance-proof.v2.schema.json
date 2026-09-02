@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:product-provenance-proof:2.0",
+  "title": "Product Creative Provenance Proof v2",
+  "description": "Structured ownership and authorization proof for one frozen product asset. The runtime additionally binds every value to the matching product provenance declaration and source manifest entry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "asset_ref",
+    "asset_sha256",
+    "creator",
+    "rights_owner",
+    "rights_basis",
+    "commercial_use_allowed",
+    "amazon_use_allowed",
+    "territory_includes_us",
+    "term_valid"
+  ],
+  "properties": {
+    "schema_version": {"const": "2.0"},
+    "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
+    "asset_ref": {
+      "type": "string",
+      "description": "Task-relative path of the covered product asset.",
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?=.*\\S).+$",
+      "maxLength": 5000
+    },
+    "asset_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "creator": {"$ref": "#/$defs/non_blank_string"},
+    "rights_owner": {"$ref": "#/$defs/non_blank_string"},
+    "rights_basis": {
+      "enum": ["original", "license", "assignment", "employment", "commissioned", "public_domain"]
+    },
+    "commercial_use_allowed": {"const": true},
+    "amazon_use_allowed": {"const": true},
+    "territory_includes_us": {"const": true},
+    "term_valid": {"const": true}
+  },
+  "$defs": {
+    "non_blank_string": {"type": "string", "pattern": "\\S", "maxLength": 1000}
+  }
+}

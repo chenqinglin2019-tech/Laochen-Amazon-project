@@ -1,0 +1,265 @@
+{
+  "schema_version": "2.0",
+  "ruleset_version": "2.0",
+  "risk_order": ["very_low", "low", "medium", "high", "critical"],
+  "modules": [
+    {
+      "id": "appearance_design",
+      "label": "外观设计专利",
+      "required_factors": ["right_status", "official_record_verified", "same_product_category", "complete_official_images", "claimed_portions", "dominant_shared_features", "dominant_differences", "difference_effect", "overall_visual_impression", "authorization_status"],
+      "factor_constraints": ["绑定法律记录时 record_kind 必须为 right_record。", "claimed_portions 与 dominant_shared_features 必须各含至少一项非空白引用；dominant_differences 可以为空数组，但存在的元素不得只含空白。", "difference_effect=decisive 时必须评为 low；difference_effect=unknown 时不得形成正式风险结论。", "overall_visual_impression=exact 或 high 才可支持强重合；none、low 或 different 必须形成 low。"],
+      "high_risk_conditions": ["已核实有效权利，官方完整图组与目标商品的受保护整体视觉印象高度近似，且不存在已确认授权或决定性差异。"]
+    },
+    {
+      "id": "utility_patent",
+      "label": "实用专利",
+      "required_factors": ["right_status", "official_record_verified", "independent_claim_mappings", "claim_scope_conclusion", "authorization_status"],
+      "factor_constraints": ["绑定法律记录时 record_kind 必须为 right_record。", "independent_claim_mappings 必须至少包含一项独立权利要求的逐元素映射；claim_id 与所有要素字符串不得只含空白。"],
+      "high_risk_conditions": ["至少一项已核实有效独立权利要求的每一必要要素均有目标商品证据映射，且没有缺失要素或已确认授权。"]
+    },
+    {
+      "id": "pending_patent",
+      "label": "申请中专利",
+      "required_factors": ["right_status", "official_record_verified", "independent_claim_mappings", "claim_scope_conclusion", "claim_change_uncertainty", "monitoring_trigger", "authorization_status"],
+      "factor_constraints": ["绑定法律记录时 record_kind 必须为 application。", "independent_claim_mappings 必须至少包含一项申请中独立权利要求的逐元素映射；claim_id 与所有要素字符串不得只含空白。", "monitoring_trigger 可以为 null 或非空白字符串；只有 claim_change_uncertainty 为 low/medium 且 monitoring_trigger 为非空白字符串时，才视为已定义监控条件。"],
+      "high_risk_conditions": ["申请中状态本身不得形成高风险；只有相关权利已经授权并转入有效权利评估后，才能按实用或外观专利规则评为高风险。"]
+    },
+    {
+      "id": "word_mark",
+      "label": "文字商标",
+      "required_factors": ["right_status", "official_record_verified", "mark_similarity", "goods_services_relatedness", "channels_overlap", "consumer_overlap", "mark_strength", "confusion_likelihood", "authorization_status"],
+      "factor_constraints": ["绑定法律记录时 record_kind 必须为 right_record。"],
+      "high_risk_conditions": ["已核实有效标识同时具有高度标识近似、相关商品或服务、重叠渠道与消费者，并支持较高混淆可能。"]
+    },
+    {
+      "id": "figurative_mark",
+      "label": "图形商标",
+      "discovery_aliases": ["figurative_trade_dress"],
+      "required_factors": ["right_status", "official_record_verified", "figurative_similarity", "goods_services_relatedness", "channels_overlap", "consumer_overlap", "mark_strength", "confusion_likelihood", "authorization_status"],
+      "factor_constraints": ["绑定法律记录时 record_kind 必须为 right_record。"],
+      "high_risk_conditions": ["已核实有效图形标识的主导视觉要素高度近似，且商品服务、渠道与消费者关系共同支持较高混淆可能。"]
+    },
+    {
+      "id": "trade_dress",
+      "label": "商业外观",
+      "discovery_aliases": ["figurative_trade_dress"],
+      "required_factors": ["identified_trade_dress_claim", "nonfunctionality", "distinctiveness", "source_identification", "confusion_likelihood", "authorization_status"],
+      "factor_constraints": ["绑定法律记录时 record_kind 仅允许 right_record 或 creative_source。", "identified_trade_dress_claim 去除首尾空白后必须至少 8 个字符，不得使用 unknown、未知或待确认等占位值。"],
+      "high_risk_conditions": ["存在可识别且有证据支持的商业外观主张，非功能性与显著性成立，目标商品高度近似并支持较高混淆可能。"]
+    },
+    {
+      "id": "copyright_creative_ip",
+      "label": "版权与创意资产",
+      "required_factors": ["asset_scope", "protectable_expression", "asset_match", "expression_similarity", "creator_or_earliest_source", "ownership_reliability", "authorization_status", "commercial_use_covered"],
+      "factor_constraints": ["绑定法律记录时 record_kind 仅允许 right_record 或 creative_source。", "creator_or_earliest_source 可以为 null，表示作者或最早来源尚未确认；若填写字符串则不得只含空白。该未知事实用于置信度和补证决策，不应被契约伪装为已核实来源。"],
+      "high_risk_conditions": ["具体可保护表达被高度复制，权属来源可信，且已核实拟议商业用途没有授权或许可覆盖。"]
+    },
+    {
+      "id": "enforcement_public_signals",
+      "label": "维权与公开执法信号",
+      "required_factors": ["event_verified", "claimant", "case_or_complaint_id", "subject_match", "procedure_status", "underlying_risk_driver_ids"],
+      "factor_constraints": ["绑定法律记录时 record_kind 必须为 enforcement_event。", "claimant 与 case_or_complaint_id 必须是非空白字符串；candidate.record_number 必须存在并与 case_or_complaint_id 完全相同。", "underlying_risk_driver_ids 必须至少关联一项实体权利风险驱动候选，且元素不得只含空白。"],
+      "high_risk_conditions": ["权威材料显示针对同一或实质相同商品的现行投诉、案件、平台执法或禁令程序；只有同时存在至少一个非维权模块的实体 high，才可评为 critical。"]
+    }
+  ],
+  "risk_definitions": {
+    "not_assessable": {
+      "summary": "证据、覆盖或事实冲突不足以形成正式法律风险结论。",
+      "conditions": ["Assessment 未完成、关键覆盖不足，或评级驱动事实存在未解决冲突。"]
+    },
+    "very_low": {
+      "summary": "覆盖充分、来源链完整，且没有有效风险驱动候选。",
+      "conditions": ["所有适用模块均完成结构化评估，没有 risk_bearing 候选，且覆盖置信度为高。"]
+    },
+    "low": {
+      "summary": "存在候选，但保护范围、整体印象、商品服务或表达明显不同。",
+      "conditions": ["候选已完成必要比对且不满足适用模块的实质风险条件。"]
+    },
+    "medium": {
+      "summary": "存在具体且有意义的重合或来源链问题，但关键权利、范围或授权事实尚未确认。",
+      "conditions": ["至少一条独立证据线索支持现实问题，但仍有会改变结论的关键事实待核实。"]
+    },
+    "high": {
+      "summary": "可信权利与目标商品受保护范围高度重合，且没有有效授权或抗辩证据。",
+      "conditions": ["至少一个 risk_bearing 候选完成模块结构化法律测试，并关联权威证据与命中的 high 规则。"]
+    },
+    "critical": {
+      "summary": "高实体风险同时伴随针对同一或实质相同商品的现实紧迫执法事件。",
+      "conditions": ["至少一个非 enforcement_public_signals 模块已形成 high；同时维权候选为 risk_bearing，主体匹配达到 exact 或 strong，程序仍有效，且官方或权威证据及核验引用完整。"]
+    }
+  },
+  "confidence_definitions": {
+    "low": {
+      "summary": "一个或多个关键结论依赖未核实或低权威来源。",
+      "conditions": ["关键权利、范围、权属、授权、图片或权利要求存在会改变结论的缺口。"]
+    },
+    "medium": {
+      "summary": "核心事实有支持，但仍存在有限且已明确的缺口。",
+      "conditions": ["主要风险结论至少由可信来源支持，未决事实不会使结论跨越两个等级。"]
+    },
+    "high": {
+      "summary": "核心事实由完整、权威且相互一致的证据支持。",
+      "conditions": ["权利身份、状态、范围、目标比对和授权事实均完成核实。"]
+    }
+  },
+  "discovery_statuses": {
+    "no_lead": {
+      "summary": "当前发现流程未返回需进一步处理的线索。",
+      "conditions": ["该状态不等同于低风险或可销售。"]
+    },
+    "leads_found": {
+      "summary": "已发现相关候选，但尚未证明其可驱动法律风险。",
+      "conditions": ["至少存在 provenance_lead 或 comparison_only 候选，且不存在会阻断正式评估的 unresolved 候选或关键补证门禁。"]
+    },
+    "review_required": {
+      "summary": "候选具备进入结构化法律测试的基础。",
+      "conditions": ["至少存在 unresolved 或 risk_bearing 候选，或关键来源链问题需要补证。"]
+    },
+    "blocked": {
+      "summary": "关键覆盖、证据或处理门禁未满足。",
+      "conditions": ["不能据此展示正式法律风险等级。"]
+    }
+  },
+  "operational_actions": {
+    "proceed": {
+      "summary": "现有筛查未识别需要阻断的风险。",
+      "conditions": ["法律风险很低或低、正式结论允许，且不存在关键补证门禁。"]
+    },
+    "proceed_with_conditions": {
+      "summary": "可在明确条件和监控措施下推进。",
+      "conditions": ["风险可控，但需保留授权、修改特征或持续监控。"]
+    },
+    "hold_for_evidence": {
+      "summary": "在补齐关键证据前暂缓上线或发布。",
+      "conditions": ["法律风险可能为中等或不可评估，且关键权属、授权、范围或覆盖事实缺失。"]
+    },
+    "escalate_legal": {
+      "summary": "升级美国知识产权律师处理。",
+      "conditions": ["法律风险为高或 critical，或存在现实执法紧迫性。"]
+    }
+  },
+  "candidate_policy": {
+    "rules": [
+      {
+        "id": "candidate.materiality-not-risk",
+        "description": "候选相关性、候选数量和检索相似度只能用于召回与排序，不得直接改变 legal_risk。"
+      },
+      {
+        "id": "candidate.risk-driver-gate",
+        "description": "只有 legal_materiality=risk_bearing、risk_driver_eligible=true 且完成适用模块结构化分析的候选可以驱动正式风险。"
+      },
+      {
+        "id": "candidate.deduplicate",
+        "description": "同一图片、商品、权利或来源链的转载记录必须按 evidence_cluster_id 去重，并共享 independence_group；重复数量不得形成复合升级。"
+      },
+      {
+        "id": "candidate.uncertainty-neutral",
+        "description": "状态、权属或来源未知应产生 confidence cap、formal block 或补证动作，不得单独产生实体风险 floor。"
+      },
+      {
+        "id": "candidate.us-risk-driver-jurisdiction",
+        "description": "risk_bearing 候选必须同时满足 target_jurisdiction=US 与 right_jurisdiction=US；source_jurisdiction 仅记录来源所在地，可与 US 不同。"
+      },
+      {
+        "id": "candidate.risk-driver-evidence-refs",
+        "description": "每个候选的 evidence_refs 必须是至少含一项非空且互不重复引用的数组；risk_bearing 候选不得以空证据列表驱动评级。"
+      },
+      {
+        "id": "candidate.legal-record-exclusion-test",
+        "description": "comparison_only、not_material、mitigating 或 provenance_lead 若绑定该模块允许的 right_record、application、enforcement_event 或 creative_source，必须填写与 risk_bearing 相同的完整结构化 factors；只有规则重算结果为 low 时才可保留排除分类。"
+      },
+      {
+        "id": "candidate.module-record-kind-compatibility",
+        "description": "任何 legal record（包括 unresolved 与非风险驱动候选）都必须满足模块 record_kind 映射：外观/实用/文字/图形为 right_record，申请中专利为 application，维权为 enforcement_event，版权与商业外观为 right_record 或 creative_source；非权利发现记录不受此映射误伤。"
+      },
+      {
+        "id": "candidate.nonblank-rating-strings",
+        "description": "所有用于 high/critical 或正式排除判断的自由字符串、证据引用、去重键及字符串数组元素必须包含至少一个非空白字符；空白占位不得满足完整 factors 或权威核验门禁。"
+      },
+      {
+        "id": "candidate.legacy-reassessment-gate",
+        "description": "legacy_disposition 与 legacy_reassessed 必须同时出现；material/needs_review 在 legacy_reassessed=false 时只能迁移为 unresolved，not_material 只能保持 not_material，且均不得成为风险驱动；只有显式 v2 复核后才能重新分类。"
+      }
+    ]
+  },
+  "aggregation_policy": {
+    "rules": [
+      {
+        "id": "aggregate.strongest-substantiated-module",
+        "description": "总体法律风险取最高的、已有结构化风险事实支持的模块；不可评估模块不等同于高风险。"
+      },
+      {
+        "id": "aggregate.driver-confidence",
+        "description": "总体 risk_confidence 取最高风险驱动模块的置信度，coverage_confidence 独立表示整体覆盖。"
+      },
+      {
+        "id": "aggregate.no-compound-escalation",
+        "description": "禁止按候选数量、模块数量或重复页面自动升一级；独立信号只可改变运营动作或触发复核。"
+      },
+      {
+        "id": "aggregate.critical-enforcement-gate",
+        "description": "critical 必须同时存在至少一个非维权模块 high，以及 enforcement_public_signals=critical；后者须满足同一商品主体匹配、有效程序和完整权威证据门禁。"
+      }
+    ]
+  },
+  "review_resolution_policy": {
+    "rules": [
+      {
+        "id": "review.merge-facts-not-labels",
+        "description": "二审应合并结构化事实并按同一规则重新计算，不得简单采用较高风险或较低置信度标签。"
+      },
+      {
+        "id": "review.unresolved-driver-conflict",
+        "description": "评级驱动事实存在未解决冲突时，结果必须为 not_assessable，并进入人工裁决。"
+      },
+      {
+        "id": "review.authoritative-facts-prevail",
+        "description": "冲突解决按证据权威性、完整性与直接性判断，不按审阅轮次或标签高低判断。"
+      }
+    ]
+  },
+  "formal_release_policy": {
+    "rules": [
+      {
+        "id": "release.frozen-source-manifest",
+        "description": "任何正式结论都必须绑定符合 source-manifest.v2.schema.json 的当前来源清单；清单须完整覆盖商品事实、查询计划、Evidence Ledger、coverage checkpoint、商品图片、来源证明、provider 原始/标准化结果和核验事件，并由 Release Gate 逐项复核路径集合、字节数、文件摘要及清单摘要，来源替换、遗漏或篡改均阻断发布。"
+      },
+      {
+        "id": "release.frozen-source-ledger",
+        "description": "任何正式结论（包括 very_low、low 与 medium）必须绑定冻结的商品事实、查询计划、Evidence Ledger 与来源文件；risk_bearing 以及经过法律测试的排除候选都必须能回溯至同一冻结候选、权利身份和非悬空 evidence_refs。"
+      },
+      {
+        "id": "release.complete-discovery-coverage",
+        "description": "正式结论必须绑定 assessment_ready=true 的冻结 coverage checkpoint；所有必需查询都须与 Query Plan 一致，由 success/no_result 的完成 provider run 覆盖，并完整覆盖七个发现模块及美国目标/提供方法域。"
+      },
+      {
+        "id": "release.high-official-verification",
+        "description": "high/critical 驱动候选除权威来源外，必须绑定不可变的官方核验事件；非版权事件须符合 official-verification.v2.schema.json、核验美国权利身份与 active 状态，版权事件须绑定完整版权来源、权属及无许可证明。维权事件还必须提供完整 enforcement_identity，且 right_identity.record_number、enforcement_identity.case_or_complaint_id 与候选 case_or_complaint_id 完全相同，并绑定目标商品摘要和底层风险驱动候选。"
+      },
+      {
+        "id": "release.complete-product-provenance",
+        "description": "copyright very_low、总体 very_low 或 operational_action=proceed 时，每个冻结商品图片必须由且仅由一条完整 provenance declaration 覆盖，并绑定 raw/copyright-provenance/ 下符合 product-provenance-proof.v2.schema.json 的结构化证明；证明须与图片摘要、作者、权利人和权利基础一致，且商业使用、Amazon 使用、美国地域与有效期限均为肯定值。发现候选页面不得替代该证明。"
+      },
+      {
+        "id": "release.review-resolution-binding",
+        "description": "二审与人工裁决产生的补充证据只能通过已冻结且摘要匹配的 review_refs/resolution_ref 纳入；Release Gate 必须核验任务、上下文、证据摘要、独立审阅者及不可变文件摘要。"
+      },
+      {
+        "id": "release.recalculation-and-render-binding",
+        "description": "发布前必须从冻结 Assessment Input 按当前规则重新计算，并核验 Assessment、Decision Trace、Coverage、Report Data、Manifest 与最终 HTML/Markdown 的摘要和渲染绑定。"
+      }
+    ]
+  },
+  "legacy_migration": {
+    "source_schema_versions": ["0.1"],
+    "disposition_mapping": {
+      "material": "unresolved",
+      "needs_review": "unresolved",
+      "not_material": "not_material"
+    },
+    "reassessment_required_for": ["material", "needs_review"],
+    "reassessed_flag": "legacy_reassessed",
+    "legacy_report_label": "legacy discovery report",
+    "risk_driver_eligible": false
+  }
+}

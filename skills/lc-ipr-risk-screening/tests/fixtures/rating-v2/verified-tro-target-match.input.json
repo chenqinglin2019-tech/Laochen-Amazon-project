@@ -1,0 +1,147 @@
+{
+  "schema_version": "2.0",
+  "ruleset_version": "2.0",
+  "task_id": "fixture_verified_tro_target_match",
+  "assessment_status": "final",
+  "coverage": {
+    "confidence": "high",
+    "complete": true,
+    "gaps": []
+  },
+  "candidates": [
+    {
+      "candidate_id": "underlying_active_design_right",
+      "module": "appearance_design",
+      "record_kind": "right_record",
+      "legal_materiality": "risk_bearing",
+      "risk_driver_eligible": true,
+      "authority_tier": "official",
+      "evidence_role": "risk_driver",
+      "target_jurisdiction": "US",
+      "right_jurisdiction": "US",
+      "evidence_refs": [
+        "evidence://uspto/design-in-suit"
+      ],
+      "verification_refs": [
+        "verification://official/design-in-suit",
+        "verification://authorization/unlicensed"
+      ],
+      "evidence_cluster_id": "right_design_in_suit",
+      "independence_group": "matter_tro_001",
+      "factors": {
+        "right_status": "active",
+        "official_record_verified": true,
+        "same_product_category": true,
+        "complete_official_images": true,
+        "claimed_portions": ["涉案外观的完整主张部分"],
+        "dominant_shared_features": ["涉案商品整体视觉印象高度一致"],
+        "dominant_differences": [],
+        "difference_effect": "none",
+        "overall_visual_impression": "high",
+        "authorization_status": "unlicensed"
+      }
+    },
+    {
+      "candidate_id": "active_tro_same_product",
+      "module": "enforcement_public_signals",
+      "record_kind": "enforcement_event",
+      "legal_materiality": "risk_bearing",
+      "risk_driver_eligible": true,
+      "authority_tier": "official",
+      "evidence_role": "risk_driver",
+      "target_jurisdiction": "US",
+      "right_jurisdiction": "US",
+      "record_number": "TRO-001",
+      "owner": "Verified Rights Owner LLC",
+      "evidence_refs": [
+        "evidence://court/docket/TRO-001"
+      ],
+      "verification_refs": [
+        "verification://court/order/TRO-001"
+      ],
+      "evidence_cluster_id": "event_tro_001",
+      "independence_group": "matter_tro_001",
+      "factors": {
+        "event_verified": true,
+        "claimant": "Verified Rights Owner LLC",
+        "case_or_complaint_id": "TRO-001",
+        "subject_match": "exact",
+        "procedure_status": "active_tro",
+        "underlying_risk_driver_ids": [
+          "underlying_active_design_right"
+        ]
+      }
+    }
+  ],
+  "modules": [
+    {
+      "module": "appearance_design",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [
+        "underlying_active_design_right"
+      ],
+      "reasoning": "有效外观权与目标商品整体视觉印象高度重合。"
+    },
+    {
+      "module": "utility_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "pending_patent",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "word_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "figurative_mark",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "trade_dress",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "copyright_creative_ip",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [],
+      "provenance_complete": false,
+      "reasoning": "本验收场景未提供该模块的独立风险驱动候选。"
+    },
+    {
+      "module": "enforcement_public_signals",
+      "assessability": "assessable",
+      "confidence": "high",
+      "candidate_ids": [
+        "active_tro_same_product"
+      ],
+      "reasoning": "官方法院材料确认针对同一商品的临时限制令仍有效。"
+    }
+  ],
+  "review": {
+    "fact_conflicts": []
+  }
+}
