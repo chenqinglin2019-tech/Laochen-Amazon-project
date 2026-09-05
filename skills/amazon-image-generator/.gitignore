@@ -1,0 +1,7 @@
+# Runtime state created by the optional Codex Harness installation.
+assets/codex-harness-app/data/
+assets/codex-harness-app/backend/vendor/
+
+# Python bytecode generated while using or testing the skill.
+__pycache__/
+*.py[cod]

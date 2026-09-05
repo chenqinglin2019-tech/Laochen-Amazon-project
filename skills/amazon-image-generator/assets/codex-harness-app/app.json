@@ -1,0 +1,7 @@
+{
+  "manifest": 1,
+  "name": "飞鱼神图",
+  "entry": "index.html",
+  "visibility": "root",
+  "order": 40
+}

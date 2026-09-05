@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F4F5FA">
+<title>飞鱼神图 · 亚马逊图片生成</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css?v=20260826-history-tooltip">
+<script src="app.js?v=20260826-history-tooltip" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#main">跳到主要内容</a>
+
+
+<a class="skip" href="#main">跳到主要内容</a>
+
+<header class="top">
+  <div class="top-in">
+    <a class="back-link" href="/" aria-label="返回 Codex Harness 工作台">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+      <span>工作台</span>
+    </a>
+    <a class="logo" href="#/" aria-label="飞鱼神图 首页">
+      <span class="logo-m" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3 12c3.6-4.6 7.2-6.9 10.8-6.9 3.2 0 5.6 1.6 7.2 4.8-1.6 3.2-4 4.8-7.2 4.8C10.2 14.7 6.6 14 3 12Z"/><path d="m14 15.6 5 3.4-1.4-4.6"/><circle cx="16.4" cy="10.6" r="1.05" fill="currentColor" stroke="none"/></svg>
+      </span>
+      <b>飞鱼神图</b>
+    </a>
+
+    <nav class="tabs" aria-label="主导航">
+      <a class="tab" id="tab-gen" href="#/" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.5 4.6L18 9l-4.5 1.4L12 15l-1.5-4.6L6 9l4.5-1.4L12 3Z"/><path d="m18.5 15.5.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></svg>
+        <span>图片生成</span>
+      </a>
+      <a class="tab" id="tab-his" href="#/history">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v5h5"/><path d="M12 8v4.5l3 1.8"/></svg>
+        <span>生图历史</span>
+      </a>
+    </nav>
+
+    <span class="top-sp"></span>
+
+    <button class="pill" id="token-btn" type="button" aria-haspopup="dialog">
+      <span class="dot" id="token-dot" aria-hidden="true"></span>
+      <span class="lbl">Token</span>
+      <span class="st" id="token-state">未配置</span>
+    </button>
+  </div>
+</header>
+
+<main id="main" class="wrap" tabindex="-1">
+
+  <!-- ══════════════════ VIEW A · 生成 ══════════════════ -->
+  <section class="view" id="view-gen" aria-label="图片生成">
+    <form class="bench" id="gen-form" novalidate>
+
+      <!-- ───────── 左栏 ───────── -->
+      <div class="col-l">
+
+        <!-- 商品图 -->
+        <section class="card rz d1" aria-labelledby="h-img">
+          <div class="card-h">
+            <span class="ic" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="8.6" cy="10" r="1.6"/><path d="m4 17 4.6-4.4 3 2.8 3.4-3.4L20 17"/></svg>
+            </span>
+            <span class="card-t">
+              <h2 id="h-img">商品图 <span class="req" aria-hidden="true">*</span></h2>
+              <p>上传清晰的商品图片，本地文件与图片链接二选一</p>
+            </span>
+            <span class="count" id="img-count">0/6</span>
+          </div>
+          <div class="card-b">
+            <div class="seg" id="src-seg" data-i="0" role="tablist" aria-label="商品图来源">
+              <button class="seg-b" type="button" role="tab" id="seg-up" aria-selected="true" aria-controls="pane-up">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5V4.5"/><path d="m8 8.5 4-4 4 4"/><path d="M4.5 15v3.5a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+                本地上传
+              </button>
+              <button class="seg-b" type="button" role="tab" id="seg-link" aria-selected="false" aria-controls="pane-link" tabindex="-1">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 13.5a3.6 3.6 0 0 0 5.2.3l2.4-2.4a3.6 3.6 0 0 0-5.1-5.1l-1.4 1.3"/><path d="M13.5 10.5a3.6 3.6 0 0 0-5.2-.3l-2.4 2.4a3.6 3.6 0 0 0 5.1 5.1l1.3-1.3"/></svg>
+                图片链接
+              </button>
+              <span class="seg-ind" aria-hidden="true"></span>
+            </div>
+
+            <div id="pane-up" role="tabpanel" aria-labelledby="seg-up">
+              <label class="dz" id="dz" for="file-input">
+                <span class="dz-i" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 15.5V4.5"/><path d="m8 8.5 4-4 4 4"/><path d="M4.5 15v3.5a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+                </span>
+                <b>点击或拖拽上传</b>
+                <small>JPG · PNG · WEBP　单张 ≤ 12MB</small>
+              </label>
+              <input class="vh" id="file-input" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+            </div>
+
+            <div id="pane-link" role="tabpanel" aria-labelledby="seg-link" hidden>
+              <div class="fld">
+                <label class="lab" for="url-input">公网图片链接</label>
+                <div class="url-row">
+                  <input class="in" id="url-input" type="url" placeholder="https://…/product.jpg" autocomplete="off">
+                  <button class="btn" type="button" id="url-add">加入</button>
+                </div>
+                <p class="tip">填写可公开访问的图片地址，回车即可加入。</p>
+              </div>
+            </div>
+
+            <div class="thumbs" id="thumbs" aria-live="polite"></div>
+            <p class="werr" id="e-img" style="margin-top:8px"></p>
+
+            <div class="note">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+              <span>多图上传时建议仅上传必要的视角或 SKU 图，图片不是越多越好。</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 商品信息 -->
+        <section class="card rz d2" aria-labelledby="h-info">
+          <div class="card-h">
+            <span class="ic" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M5 4.5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z"/><path d="M8 9h8M8 12.5h8M8 16h4.5"/></svg>
+            </span>
+            <span class="card-t">
+              <h2 id="h-info">商品信息 <span class="req" aria-hidden="true">*</span></h2>
+              <p>描述商品类型、材质、颜色、尺寸与核心用途</p>
+            </span>
+          </div>
+          <div class="card-b">
+            <div class="fld">
+              <label for="p-title">商品标题 <span class="req" aria-hidden="true">*</span></label>
+              <input class="in" id="p-title" type="text" maxlength="200" autocomplete="off"
+                     placeholder="例如：32 oz Stainless Steel Insulated Water Bottle">
+              <p class="werr" id="e-title"></p>
+            </div>
+
+            <div class="fld">
+              <label for="p-desc">商品描述 <span class="req" aria-hidden="true">*</span></label>
+              <textarea class="in" id="p-desc" maxlength="3000"
+                        placeholder="建议写清：容量、尺寸、材质、配件、兼容性、目标人群与使用场景。&#10;例如：BPA-free 双层真空不锈钢保温瓶，32 oz，防漏盖，冷饮保冷 24 小时，适合健身、通勤与户外。"></textarea>
+              <div class="meta-row">
+                <span class="tip">不要写未经证实的认证、功效、保修或品牌声明。</span>
+                <span class="c" id="desc-count">0/3000</span>
+              </div>
+              <p class="werr" id="e-desc"></p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 生成设置 -->
+        <section class="card rz d3" aria-labelledby="h-set">
+          <div class="card-h">
+            <span class="ic" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg>
+            </span>
+            <span class="card-t">
+              <h2 id="h-set">生成设置</h2>
+              <p>模型、风格与生成数量</p>
+            </span>
+          </div>
+          <div class="card-b">
+            <div class="fld">
+              <span class="lab" id="l-model">使用模型 <span class="req" aria-hidden="true">*</span></span>
+              <div id="model-host"></div>
+              <p class="tip" id="model-tip">建议使用 1|nano-banana-2。</p>
+              <p class="werr" id="e-model"></p>
+            </div>
+
+            <div id="model-set" class="fld" style="gap:0"></div>
+            <div id="fixed-set" class="fld" style="gap:0"></div>
+
+            <div class="fld">
+              <span class="lab" id="l-total">生成数量 <span class="req" aria-hidden="true">*</span></span>
+              <div id="total-host"></div>
+              <p class="werr" id="e-total"></p>
+            </div>
+
+            <div class="est">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9M9.6 9.8h3.6a1.7 1.7 0 0 1 0 3.4H9.6h3.9"/></svg>
+              <span>预计消耗</span>
+              <b id="est-pts">—</b>
+            </div>
+          </div>
+        </section>
+
+        <div class="cta-wrap">
+          <button class="cta" type="submit" id="go" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true" id="go-ic"><path d="m13 2-8 11h6l-1 9 8-11h-6l1-9Z"/></svg>
+            <span id="go-label">开始生成</span>
+          </button>
+          <p class="cta-hint" id="go-hint">请先配置 Token。</p>
+        </div>
+      </div>
+
+      <!-- ───────── 右栏 ───────── -->
+      <div class="col-r rz d4">
+        <section class="card res" aria-labelledby="h-res">
+          <div class="res-h">
+            <span class="ic" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M9.5 3v5.6L4.8 17a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3l-4.7-8.4V3"/><path d="M8 3h8M8.2 13h7.6"/></svg>
+            </span>
+            <span class="card-t">
+              <h2 id="h-res">生成结果</h2>
+              <p id="res-sub">上传商品图并点击开始生成</p>
+            </span>
+            <span class="res-tools" id="res-tools"></span>
+          </div>
+          <div class="res-b" id="res-body" aria-live="polite">
+            <div class="empty" id="res-empty">
+              <span class="empty-i" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M9.5 3v5.6L4.8 17a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3l-4.7-8.4V3"/><path d="M8 3h8M8.2 13h7.6"/><circle cx="10" cy="16" r=".9"/><circle cx="13.6" cy="17.4" r=".7"/></svg>
+              </span>
+              <p>上传商品图并填写要求后<br>点击「开始生成」开始</p>
+            </div>
+            <div class="tasks" id="tasks"></div>
+            <div class="gal" id="gal"></div>
+          </div>
+        </section>
+      </div>
+    </form>
+  </section>
+
+  <!-- ══════════════════ VIEW B · 生图历史 ══════════════════ -->
+  <section class="view" id="view-his" hidden aria-label="生图历史">
+    <div class="hd">
+      <h1>
+        <span class="ic" aria-hidden="true" style="width:34px;height:34px;border-radius:10px">
+          <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v5h5"/><path d="M12 8v4.5l3 1.8"/></svg>
+        </span>
+        生图历史
+      </h1>
+      <p id="his-sub">按时间倒序展示每一次生成任务</p>
+    </div>
+
+    <div class="card">
+      <div class="filt">
+        <div class="dt">
+          <label class="vh" for="dt-start">开始日期</label>
+          <input class="in" id="dt-start" type="date">
+          <span class="sep" aria-hidden="true">—</span>
+          <label class="vh" for="dt-end">结束日期</label>
+          <input class="in" id="dt-end" type="date">
+        </div>
+        <div class="chips" id="range-chips" role="group" aria-label="快捷时间范围">
+          <button class="chip" type="button" data-range="all"  aria-pressed="true">全部</button>
+          <button class="chip" type="button" data-range="0"    aria-pressed="false">今天</button>
+          <button class="chip" type="button" data-range="1"    aria-pressed="false">昨天</button>
+          <button class="chip" type="button" data-range="3"    aria-pressed="false">近3天</button>
+          <button class="chip" type="button" data-range="7"    aria-pressed="false">近7天</button>
+        </div>
+        <button class="btn ac go" type="button" id="his-query">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+          查询
+        </button>
+      </div>
+    </div>
+
+    <div class="hlist" id="hlist" aria-live="polite"></div>
+
+    <div class="card pg" id="pager" hidden>
+      <span class="pg-info">共 <b id="pg-total">0</b> 条　第 <b id="pg-cur">1</b> / <b id="pg-max">1</b> 页</span>
+      <span class="pg-size">
+        <span class="lab" id="l-pgsize" style="font-weight:400;color:var(--ink-4)">每页</span>
+        <div id="pgsize-host" style="width:96px"></div>
+      </span>
+      <span class="pg-nav" id="pg-nav"></span>
+    </div>
+  </section>
+</main>
+
+<!-- ══════════════════ TOKEN ══════════════════ -->
+<dialog id="tk-dlg" aria-labelledby="tk-h">
+  <div class="sheet">
+    <div class="sheet-h">
+      <h2 id="tk-h">配置 Token</h2>
+      <p>Token 保存在本栏目的服务端配置文件中，页面不会回显、不会缓存，也不会写入浏览器存储。</p>
+    </div>
+    <div class="sheet-b">
+      <div class="fld">
+        <label for="tk-in">飞鱼神图 Token <span class="req" aria-hidden="true">*</span></label>
+        <input class="in" id="tk-in" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 Token">
+        <p class="werr" id="e-token"></p>
+      </div>
+      <div class="note acc">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 5.5 6.3v5c0 4.2 2.8 7.1 6.5 8.6 3.7-1.5 6.5-4.4 6.5-8.6v-5L12 3.5Z"/><path d="m9.4 11.9 1.8 1.8 3.4-3.4"/></svg>
+        <span>保存后立即验证并加载模型与风格。替换 Token 时直接填入新值即可。</span>
+      </div>
+      <label class="tk-ack" id="tk-ack" hidden>
+        <input type="checkbox" id="tk-ack-box">
+        <span>当前通过 HTTP 访问，保存 Token 时会明文传输。确认风险后继续。</span>
+      </label>
+    </div>
+    <div class="sheet-f">
+      <button class="btn" type="button" id="tk-cancel">取消</button>
+      <button class="btn ac" type="button" id="tk-save"><span id="tk-save-l">保存并验证</span></button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ══════════════════ LIGHTBOX ══════════════════ -->
+<dialog id="lb" aria-label="图片预览">
+  <div class="lbx" id="lb-box" tabindex="-1" data-zoom="1">
+
+    <div class="lbx-tb" role="group" aria-label="预览工具">
+      <button type="button" id="lb-out" aria-label="缩小">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M7.6 10.5h5.8"/><path d="m15.4 15.4 4.4 4.4"/></svg>
+      </button>
+      <button type="button" id="lb-in" aria-label="放大">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M7.6 10.5h5.8M10.5 7.6v5.8"/><path d="m15.4 15.4 4.4 4.4"/></svg>
+      </button>
+      <button type="button" id="lb-reset" aria-label="恢复图片大小" aria-keyshortcuts="0" title="恢复图片大小">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/><path d="m4 9 5-5M20 9l-5-5M4 15l5 5M20 15l-5 5"/></svg>
+      </button>
+      <button type="button" id="lb-rot" aria-label="旋转">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="9" width="11" height="11" rx="1.6"/><path d="M11.5 5.5h4.6a3.4 3.4 0 0 1 3.4 3.4v1.6"/><path d="m13.6 3.4-2.1 2.1 2.1 2.1"/></svg>
+      </button>
+      <button type="button" id="lb-dl" aria-label="下载这张图片">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6v10.6"/><path d="m7.9 10.2 4.1 4.1 4.1-4.1"/><path d="M6.6 17.2v2.6h10.8v-2.6"/></svg>
+      </button>
+      <span class="bar" aria-hidden="true"></span>
+      <button type="button" id="lb-close" aria-label="关闭预览">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8"/></svg>
+      </button>
+    </div>
+
+    <button class="lbx-nav pv" type="button" id="lb-prev" aria-label="上一张">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.4 5.4-7 6.6 7 6.6"/></svg>
+    </button>
+
+    <figure class="lbx-fig" id="lb-fig">
+      <img id="lb-img" alt="">
+    </figure>
+
+    <button class="lbx-nav nx" type="button" id="lb-next" aria-label="下一张">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.6 5.4 7 6.6-7 6.6"/></svg>
+    </button>
+  </div>
+</dialog>
+
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
+<div class="his-tip" id="his-tip" role="tooltip" hidden></div>
+</body>
+</html>

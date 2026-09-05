@@ -1,0 +1,4 @@
+interface:
+  display_name: "飞鱼神图"
+  short_description: "生成亚马逊商品图片，或安全安装、更新、移除 Harness 飞鱼神图模块"
+  default_prompt: "Use $amazon-image-generator（飞鱼神图）to generate Amazon product images or safely install, update, or remove the tested Codex Harness website module."

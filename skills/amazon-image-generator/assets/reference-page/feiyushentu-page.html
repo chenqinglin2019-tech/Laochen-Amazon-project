@@ -1,0 +1,2531 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F4F5FA">
+<title>飞鱼神图 · 亚马逊图片生成</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* ==========================================================
+   飞鱼神图 · 亚马逊图片生成
+   浅色精工工作台 / Refined light workbench
+   ========================================================== */
+*,*::before,*::after{box-sizing:border-box}
+
+:root{
+  /* ---- surface ---- */
+  --bg:#F4F5FA;
+  --bg-sunk:#EFF0F7;
+  --card:#FFFFFF;
+  --tint:#F7F7FC;
+  --tint-2:#F1F1F8;
+
+  /* ---- line ---- */
+  --line:#EBECF4;
+  --line-2:#E1E2EE;
+  --line-3:#D5D7E6;
+
+  /* ---- ink ---- */
+  --ink:#171826;
+  --ink-2:#454864;
+  --ink-3:#6E7190;
+  --ink-4:#9A9DB6;
+  --ink-5:#B9BBCE;
+
+  /* ---- accent ---- */
+  --ac:#5A4BE8;
+  --ac-2:#7C6DF2;
+  --ac-ink:#4438C9;
+  --ac-tint:#EFEDFE;
+  --ac-tint-2:#E4E1FD;
+  --ac-line:#D3CEFB;
+
+  /* ---- semantic ---- */
+  --ok:#0FA968;      --ok-tint:#E6F7EF;
+  --warn:#E8890B;    --warn-tint:#FDF2E1;
+  --bad:#E14B52;     --bad-tint:#FDECEC;
+  --info-tint:#EAF2FE; --info:#2E6BE6;
+
+  /* ---- shadow ---- */
+  --sh-1:0 1px 2px rgba(23,24,38,.05);
+  --sh-2:0 1px 2px rgba(23,24,38,.05),0 10px 26px -16px rgba(23,24,38,.22);
+  --sh-3:0 2px 6px rgba(23,24,38,.06),0 22px 48px -24px rgba(23,24,38,.30);
+  --sh-pop:0 32px 70px -28px rgba(23,24,38,.42);
+  --sh-ac:0 10px 22px -10px rgba(90,75,232,.55);
+
+  /* ---- radius ---- */
+  --r-s:8px; --r-m:11px; --r-l:16px; --r-xl:20px;
+
+  --fs:'Manrope','Noto Sans SC',system-ui,-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;
+  --fm:'DM Mono',ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+
+  --topbar-h:62px;
+}
+
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;min-height:100vh;background:var(--bg);color:var(--ink);
+  font-family:var(--fs);font-size:14px;line-height:1.6;font-weight:400;
+  -webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;
+}
+img{max-width:100%;display:block}
+button,input,select,textarea{font:inherit;color:inherit}
+
+/* ---------- a11y ---------- */
+.skip{position:absolute;left:-9999px;top:0;z-index:200;background:var(--ac);color:#fff;padding:11px 18px;border-radius:0 0 var(--r-s) 0;font-size:13px;font-weight:600}
+.skip:focus{left:0}
+.vh{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px;border-radius:4px}
+::selection{background:var(--ac-tint-2);color:var(--ac-ink)}
+
+.mono{font-family:var(--fm);font-feature-settings:"tnum"}
+
+/* ==========================================================
+   TOPBAR
+   ========================================================== */
+.top{
+  position:sticky;top:0;z-index:60;height:var(--topbar-h);
+  background:rgba(255,255,255,.86);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--line);
+}
+.top-in{max-width:1560px;margin:0 auto;height:100%;padding:0 clamp(16px,2.4vw,28px);display:flex;align-items:center;gap:14px}
+
+.logo{display:flex;align-items:center;gap:10px;flex:none;text-decoration:none;color:inherit;min-height:44px}
+.logo-m{
+  width:32px;height:32px;border-radius:9px;flex:none;display:grid;place-items:center;
+  background:linear-gradient(140deg,var(--ac),var(--ac-2));box-shadow:var(--sh-ac);
+}
+.logo-m svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.logo b{font-size:15px;font-weight:700;letter-spacing:.01em;white-space:nowrap}
+
+.tabs{display:flex;gap:2px;padding:3px;background:var(--tint-2);border-radius:10px;margin-left:6px}
+.tab{
+  display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 14px;border-radius:8px;
+  font-size:13.5px;font-weight:600;color:var(--ink-3);text-decoration:none;white-space:nowrap;
+  transition:color .16s,background .16s,box-shadow .16s;
+}
+.tab svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tab:hover{color:var(--ink)}
+.tab[aria-current="page"]{background:var(--card);color:var(--ac);box-shadow:var(--sh-1)}
+
+.top-sp{flex:1}
+
+.pill{
+  display:inline-flex;align-items:center;gap:7px;height:38px;padding:0 13px;
+  border:1px solid var(--line-2);border-radius:10px;background:var(--card);
+  font-size:13px;font-weight:600;color:var(--ink-2);cursor:pointer;white-space:nowrap;
+  transition:border-color .16s,background .16s,color .16s,box-shadow .16s;
+}
+.pill:hover{border-color:var(--line-3);box-shadow:var(--sh-1)}
+.pill[data-on="1"]{border-color:var(--ac-line);background:var(--ac-tint);color:var(--ac-ink)}
+.pill .st{font-weight:500;color:var(--ink-4);font-size:12.5px}
+.pill[data-on="1"] .st{color:var(--ac)}
+
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ink-5);flex:none}
+.dot.ok{background:var(--ok);box-shadow:0 0 0 3px var(--ok-tint)}
+.dot.ac{background:var(--ac);box-shadow:0 0 0 3px var(--ac-tint-2)}
+.dot.run{background:var(--warn);box-shadow:0 0 0 3px var(--warn-tint);animation:blink 1.6s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ==========================================================
+   SHELL / VIEWS
+   ========================================================== */
+.wrap{max-width:1560px;margin:0 auto;padding:20px clamp(16px,2.4vw,28px) 60px}
+.view[hidden]{display:none}
+
+/* ==========================================================
+   WORKBENCH GRID
+   ========================================================== */
+.bench{display:grid;gap:18px;align-items:start}
+@media(min-width:1080px){.bench{grid-template-columns:452px minmax(0,1fr)}}
+@media(min-width:1400px){.bench{grid-template-columns:496px minmax(0,1fr);gap:22px}}
+
+.col-l{display:flex;flex-direction:column;gap:14px;min-width:0}
+
+/* ---------- card ---------- */
+.card{
+  background:var(--card);border:1px solid var(--line);border-radius:var(--r-l);
+  box-shadow:var(--sh-2);
+}
+.card-h{display:flex;align-items:flex-start;gap:11px;padding:17px 18px 0}
+.ic{
+  width:32px;height:32px;flex:none;border-radius:9px;display:grid;place-items:center;
+  background:var(--ac-tint);
+}
+.ic svg{width:16px;height:16px;stroke:var(--ac);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.card-t{min-width:0;flex:1}
+.card-t h2{margin:0;font-size:15.5px;font-weight:700;letter-spacing:.01em;display:flex;align-items:center;gap:6px;line-height:1.4}
+.card-t p{margin:2px 0 0;font-size:12.5px;color:var(--ink-4);line-height:1.55}
+.req{color:var(--bad);font-size:14px;line-height:1;font-weight:700}
+.count{
+  flex:none;font-family:var(--fm);font-size:11.5px;color:var(--ink-3);
+  background:var(--tint-2);border-radius:99px;padding:4px 10px;line-height:1.4;
+}
+.card-b{padding:15px 18px 18px}
+
+/* ---------- field ---------- */
+.fld{display:flex;flex-direction:column;gap:7px}
+.fld + .fld{margin-top:15px}
+.fld > label,.fld .lab{
+  font-size:12.5px;font-weight:600;color:var(--ink-2);display:flex;align-items:center;gap:5px;line-height:1.4;
+}
+.fld .lab .req{font-size:13px}
+.tip{margin:0;font-size:12px;color:var(--ink-4);line-height:1.6}
+.werr{margin:0;font-size:12px;color:var(--bad);font-weight:500;display:none;line-height:1.5}
+.werr.on{display:block}
+
+.in,textarea.in,select.in{
+  width:100%;min-height:44px;padding:10px 13px;
+  background:var(--card);border:1px solid var(--line-2);border-radius:var(--r-m);
+  font-size:14px;line-height:1.55;color:var(--ink);
+  transition:border-color .16s,box-shadow .16s,background .16s;
+}
+.in::placeholder{color:var(--ink-5)}
+.in:hover:not(:disabled){border-color:var(--line-3)}
+.in:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 3.5px var(--ac-tint)}
+.in[aria-invalid="true"]{border-color:var(--bad)}
+.in[aria-invalid="true"]:focus{box-shadow:0 0 0 3.5px var(--bad-tint)}
+.in:disabled{background:var(--tint);color:var(--ink-5);cursor:not-allowed}
+textarea.in{min-height:120px;resize:vertical;line-height:1.7}
+
+select.in{
+  appearance:none;cursor:pointer;padding-right:38px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236E7190' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 12px center;background-size:15px;
+}
+select.in:disabled{background-color:var(--tint)}
+
+/* ---------- 分段切换（上传 / 链接） ---------- */
+.seg{
+  position:relative;display:grid;grid-auto-flow:column;grid-auto-columns:1fr;gap:0;
+  padding:3px;background:var(--tint-2);border-radius:11px;margin-bottom:13px;
+}
+.seg-b{
+  position:relative;z-index:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  height:38px;border:0;background:none;border-radius:8px;cursor:pointer;
+  font-size:13px;font-weight:600;color:var(--ink-3);transition:color .18s;
+}
+.seg-b svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.seg-b:hover{color:var(--ink-2)}
+.seg-b[aria-selected="true"]{color:var(--ac-ink)}
+.seg-ind{
+  position:absolute;z-index:0;top:3px;bottom:3px;left:3px;
+  width:calc(50% - 3px);border-radius:8px;background:var(--card);box-shadow:var(--sh-1);
+  transition:transform .24s cubic-bezier(.32,.72,.35,1);
+}
+.seg[data-i="1"] .seg-ind{transform:translateX(100%)}
+
+/* ---------- 自定义下拉 ---------- */
+.sel{position:relative;width:100%}
+.sel-btn{
+  width:100%;min-height:44px;padding:10px 38px 10px 13px;text-align:left;
+  background:var(--card);border:1px solid var(--line-2);border-radius:var(--r-m);
+  font-size:14px;line-height:1.55;color:var(--ink);cursor:pointer;position:relative;
+  display:flex;align-items:center;gap:8px;
+  transition:border-color .16s,box-shadow .16s,background .16s;
+}
+.sel-btn:hover:not([disabled]){border-color:var(--line-3)}
+.sel-btn[aria-expanded="true"]{border-color:var(--ac);box-shadow:0 0 0 3.5px var(--ac-tint)}
+.sel-btn[disabled]{background:var(--tint);color:var(--ink-5);cursor:not-allowed}
+.sel-val{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sel-val.ph{color:var(--ink-5)}
+.sel-tag{
+  flex:none;font-family:var(--fm);font-size:10.5px;font-weight:500;line-height:1;
+  padding:4px 7px;border-radius:5px;background:var(--ac-tint);color:var(--ac-ink);
+}
+.sel-chev{
+  position:absolute;right:12px;top:50%;width:15px;height:15px;margin-top:-7.5px;
+  stroke:var(--ink-3);fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round;
+  transition:transform .2s cubic-bezier(.32,.72,.35,1),stroke .16s;pointer-events:none;
+}
+.sel-btn[aria-expanded="true"] .sel-chev{transform:rotate(180deg);stroke:var(--ac)}
+
+.sel-pop{
+  position:fixed;z-index:900;overflow:auto;overscroll-behavior:contain;
+  background:var(--card);border:1px solid var(--line-2);border-radius:var(--r-m);
+  box-shadow:0 4px 10px rgba(23,24,38,.06),0 24px 48px -18px rgba(23,24,38,.32);
+  padding:5px;
+  animation:popIn .16s cubic-bezier(.32,.72,.35,1);
+}
+.sel-pop[hidden]{display:none}
+.sel-pop[data-dir="up"]{transform-origin:bottom center}
+@keyframes popIn{from{opacity:0;transform:translateY(-4px) scale(.985)}to{opacity:1;transform:none}}
+.sel-opt{
+  display:flex;align-items:center;gap:9px;min-height:40px;padding:8px 10px;
+  border-radius:8px;font-size:13.5px;color:var(--ink-2);cursor:pointer;user-select:none;
+}
+.sel-opt .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sel-opt .b{
+  flex:none;font-family:var(--fm);font-size:10.5px;line-height:1;padding:4px 7px;border-radius:5px;
+  background:var(--tint-2);color:var(--ink-3);
+}
+.sel-opt .ck{width:16px;height:16px;flex:none;stroke:var(--ac);fill:none;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;opacity:0}
+.sel-opt.on{color:var(--ink);font-weight:600}
+.sel-opt.on .ck{opacity:1}
+.sel-opt.on .b{background:var(--ac-tint);color:var(--ac-ink)}
+.sel-opt.hi{background:var(--ac-tint)}
+.sel-opt.hi .b{background:var(--ac-tint-2)}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:13px}
+.gset{display:grid;grid-template-columns:1fr 1fr;gap:13px;margin-top:15px}
+.gset > .fld{margin-top:0}
+.gset > .fld.wide{grid-column:1/-1}
+.gset > .fld:last-child:nth-child(odd){grid-column:1/-1}
+@media(max-width:420px){.gset{grid-template-columns:1fr}}
+@media(max-width:400px){.grid2{grid-template-columns:1fr}}
+
+.meta-row{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-top:6px}
+.meta-row .c{font-family:var(--fm);font-size:11.5px;color:var(--ink-4);white-space:nowrap;margin-left:auto}
+
+/* ---------- note strip ---------- */
+.note{
+  display:flex;gap:9px;align-items:flex-start;margin-top:12px;padding:10px 12px;
+  background:var(--tint);border:1px solid var(--line);border-radius:var(--r-m);
+  font-size:12.5px;color:var(--ink-3);line-height:1.6;
+}
+.note svg{width:15px;height:15px;flex:none;margin-top:2px;stroke:var(--ink-4);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.note.acc{background:var(--ac-tint);border-color:var(--ac-line);color:var(--ac-ink)}
+.note.acc svg{stroke:var(--ac)}
+
+/* ---------- dropzone ---------- */
+.dz{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
+  width:100%;min-height:132px;padding:20px;cursor:pointer;text-align:center;
+  border:1.5px dashed var(--line-3);border-radius:var(--r-m);background:var(--tint);
+  transition:border-color .18s,background .18s;
+}
+.dz:hover,.dz.hot{border-color:var(--ac);background:var(--ac-tint)}
+.dz-i{width:42px;height:42px;border-radius:12px;background:var(--card);border:1px solid var(--line-2);display:grid;place-items:center;transition:border-color .18s}
+.dz:hover .dz-i,.dz.hot .dz-i{border-color:var(--ac-line)}
+.dz-i svg{width:19px;height:19px;stroke:var(--ink-3);fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;transition:stroke .18s}
+.dz:hover .dz-i svg,.dz.hot .dz-i svg{stroke:var(--ac)}
+.dz b{font-size:13.5px;font-weight:600;color:var(--ink-2)}
+.dz small{font-size:11.5px;color:var(--ink-4);font-family:var(--fm)}
+
+/* ---------- ref thumbs ---------- */
+.thumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:9px;margin-top:12px}
+.thumbs:empty{display:none}
+.th{
+  position:relative;aspect-ratio:1;border-radius:var(--r-m);overflow:hidden;
+  border:1px solid var(--line-2);background:var(--tint-2);
+}
+.th img{width:100%;height:100%;object-fit:cover;transition:transform .3s cubic-bezier(.24,.86,.32,1)}
+.th:hover img{transform:scale(1.05)}
+.th-open{
+  position:absolute;inset:0;z-index:1;border:0;padding:0;cursor:zoom-in;
+  background:linear-gradient(to top,rgba(23,24,38,.3),rgba(23,24,38,0) 55%);
+  opacity:0;transition:opacity .18s;
+}
+.th:hover .th-open,.th-open:focus-visible{opacity:1}
+.th-open:focus-visible{outline:2px solid var(--ac);outline-offset:-2px}
+.th-x{
+  position:absolute;z-index:2;top:5px;right:5px;width:24px;height:24px;display:grid;place-items:center;
+  border:0;border-radius:7px;background:rgba(23,24,38,.62);color:#fff;cursor:pointer;
+  opacity:0;transition:opacity .16s,background .16s;backdrop-filter:blur(3px);
+}
+.th-x::before{content:"";position:absolute;top:50%;left:50%;width:44px;height:44px;transform:translate(-50%,-50%)}
+.th:hover .th-x,.th-x:focus-visible{opacity:1}
+.th-x:hover{background:var(--bad)}
+.th-x svg{width:12px;height:12px;stroke:currentColor;fill:none;stroke-width:2.2;stroke-linecap:round}
+@media (hover:none){.th-x{opacity:1}}
+.th-tag{
+  position:absolute;z-index:2;pointer-events:none;left:0;right:0;bottom:0;padding:3px 6px;
+  font-family:var(--fm);font-size:9.5px;letter-spacing:.04em;color:#fff;
+  background:linear-gradient(to top,rgba(23,24,38,.78),transparent);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.th-tag.up{color:#FFD9A8}
+.th-tag.bad{color:#FFB4B7}
+
+.url-row{display:flex;gap:8px}
+.url-row .in{flex:1;min-width:0}
+
+/* ---------- buttons ---------- */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
+  height:40px;padding:0 15px;border-radius:10px;
+  border:1px solid var(--line-2);background:var(--card);color:var(--ink-2);
+  font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;text-decoration:none;
+  transition:border-color .16s,background .16s,color .16s,box-shadow .16s,transform .1s;
+}
+.btn:hover:not(:disabled){border-color:var(--line-3);background:var(--tint);color:var(--ink)}
+.btn:active:not(:disabled){transform:translateY(.5px)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.btn.sm{height:34px;padding:0 11px;font-size:12.5px;border-radius:9px}
+.btn.sm svg{width:14px;height:14px}
+.btn.ac{border-color:transparent;background:var(--ac);color:#fff;box-shadow:var(--sh-ac)}
+.btn.ac:hover:not(:disabled){background:var(--ac-ink);border-color:transparent;color:#fff}
+.btn.gh{border-color:transparent;background:var(--tint-2)}
+.btn.gh:hover:not(:disabled){background:var(--line)}
+
+.cta-wrap{position:sticky;bottom:0;z-index:5;padding:16px 0 6px;background:linear-gradient(to bottom,rgba(244,245,250,0) 0%,var(--bg) 34%,var(--bg) 100%)}
+.cta{
+  position:relative;overflow:hidden;width:100%;height:54px;border:0;border-radius:14px;
+  background:linear-gradient(135deg,var(--ac) 0%,var(--ac-2) 100%);color:#fff;
+  font-size:15px;font-weight:700;letter-spacing:.02em;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;gap:9px;
+  box-shadow:0 10px 26px -10px rgba(90,75,232,.65);
+  transition:filter .16s,box-shadow .16s,transform .1s;
+}
+.cta:hover:not(:disabled){filter:brightness(1.06);box-shadow:0 14px 30px -10px rgba(90,75,232,.7)}
+.cta:active:not(:disabled){transform:translateY(1px)}
+.cta:disabled{background:#C9C5F2;box-shadow:none;cursor:not-allowed;color:#fff}
+.cta svg{width:18px;height:18px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.cta-hint{margin:9px 0 0;font-size:12px;color:var(--ink-4);text-align:center;line-height:1.5}
+
+.spin{width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:sp .7s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* ---------- points estimate ---------- */
+.est{
+  display:flex;align-items:center;gap:9px;margin-top:14px;padding:11px 13px;
+  border:1px solid var(--line);border-radius:var(--r-m);background:var(--tint);
+  font-size:13px;color:var(--ink-3);
+}
+.est svg{width:16px;height:16px;stroke:var(--warn);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.est b{margin-left:auto;font-family:var(--fm);font-size:14px;font-weight:500;color:var(--ink)}
+
+/* ==========================================================
+   RESULT PANEL
+   ========================================================== */
+.col-r{min-width:0}
+@media(min-width:1080px){
+  .col-r{position:sticky;top:calc(var(--topbar-h) + 20px)}
+  .res{display:flex;flex-direction:column;max-height:calc(100vh - var(--topbar-h) - 40px)}
+  .res-b{overflow:auto;flex:1}
+}
+.res-h{display:flex;align-items:center;gap:11px;padding:17px 18px;border-bottom:1px solid var(--line)}
+.res-h .card-t h2{font-size:15.5px}
+.res-tools{margin-left:auto;display:flex;gap:8px;flex:none}
+.res-b{padding:18px}
+
+/* empty */
+.empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  min-height:min(560px,58vh);padding:40px 24px;text-align:center;
+  border:1.5px dashed var(--line-2);border-radius:var(--r-l);background:var(--tint);
+}
+.empty-i{width:64px;height:64px;border-radius:18px;background:var(--card);border:1px solid var(--line-2);display:grid;place-items:center;box-shadow:var(--sh-1)}
+.empty-i svg{width:28px;height:28px;stroke:var(--ink-5);fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.empty p{margin:0;font-size:13.5px;color:var(--ink-4);line-height:1.8;max-width:30ch}
+
+/* task rows */
+.tasks{display:flex;flex-direction:column;gap:9px;margin-bottom:14px}
+.tasks:empty{display:none}
+.tk{border:1px solid var(--line);border-radius:var(--r-m);background:var(--tint);padding:12px 13px}
+.tk-top{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.tk-id{font-family:var(--fm);font-size:12.5px;font-weight:500;color:var(--ink-2)}
+.tk-st{margin-left:auto;font-size:11.5px;font-weight:600;padding:3px 9px;border-radius:99px;line-height:1.5}
+.tk-st.q{background:var(--tint-2);color:var(--ink-3)}
+.tk-st.g{background:var(--warn-tint);color:var(--warn)}
+.tk-st.s{background:var(--ok-tint);color:var(--ok)}
+.tk-st.f{background:var(--bad-tint);color:var(--bad)}
+.pbar{height:5px;border-radius:99px;background:var(--line);overflow:hidden;position:relative}
+.pbar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--ac),var(--ac-2));transition:width .5s cubic-bezier(.4,0,.2,1)}
+.pbar.s i{background:var(--ok)}
+.pbar.f i{background:var(--bad)}
+.pbar.live::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent);animation:sweep 1.5s linear infinite}
+@keyframes sweep{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+.tk-note{margin-top:7px;font-family:var(--fm);font-size:11px;color:var(--ink-4)}
+
+/* gallery */
+.gal{display:grid;grid-template-columns:repeat(auto-fill,minmax(clamp(150px,20vw,208px),1fr));gap:12px}
+.gal:empty{display:none}
+.sh{
+  position:relative;border-radius:var(--r-m);overflow:hidden;border:1px solid var(--line-2);
+  background:var(--tint-2);aspect-ratio:var(--ar,1);cursor:zoom-in;
+  transition:box-shadow .2s,border-color .2s,transform .2s;
+}
+.sh:hover{box-shadow:var(--sh-3);border-color:var(--ac-line);transform:translateY(-2px)}
+.sh img{width:100%;height:100%;object-fit:cover;transition:transform .45s cubic-bezier(.2,.7,.3,1)}
+.sh:hover img{transform:scale(1.04)}
+.sh-i{
+  position:absolute;top:8px;left:8px;font-family:var(--fm);font-size:10px;font-weight:500;
+  padding:3px 7px;border-radius:6px;background:rgba(255,255,255,.9);color:var(--ink-2);
+  backdrop-filter:blur(6px);box-shadow:var(--sh-1);
+}
+.sh-a{
+  position:absolute;right:8px;bottom:8px;display:flex;gap:6px;opacity:0;transform:translateY(4px);
+  transition:opacity .2s,transform .2s;
+}
+.sh:hover .sh-a,.sh:focus-within .sh-a{opacity:1;transform:none}
+.mini{
+  width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:8px;
+  background:rgba(255,255,255,.94);color:var(--ink-2);cursor:pointer;box-shadow:var(--sh-2);
+  backdrop-filter:blur(6px);transition:background .16s,color .16s;
+}
+.mini:hover{background:var(--ac);color:#fff}
+.mini svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+
+/* skeleton */
+.sk{border-radius:var(--r-m);border:1px solid var(--line);aspect-ratio:var(--ar,1);position:relative;overflow:hidden;background:var(--tint-2)}
+.sk::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.9),transparent);animation:sweep 1.5s linear infinite}
+.sk span{position:absolute;inset:0;display:grid;place-items:center;font-size:11.5px;color:var(--ink-5);font-family:var(--fm);z-index:1}
+
+/* ==========================================================
+   HISTORY
+   ========================================================== */
+.hd{display:flex;align-items:flex-end;gap:12px;margin-bottom:16px;flex-wrap:wrap}
+.hd h1{margin:0;font-size:20px;font-weight:800;letter-spacing:-.01em;display:flex;align-items:center;gap:10px}
+.hd p{margin:0;font-size:13px;color:var(--ink-4)}
+
+.filt{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 16px}
+.dt{display:flex;align-items:center;gap:8px}
+.dt .in{width:auto;min-width:150px;height:40px;min-height:40px;font-family:var(--fm);font-size:13px;padding:8px 11px}
+.dt .sep{color:var(--ink-5);font-size:13px}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{
+  height:34px;padding:0 13px;border-radius:9px;border:1px solid transparent;background:var(--tint-2);
+  font-size:12.5px;font-weight:600;color:var(--ink-3);cursor:pointer;
+  transition:background .16s,color .16s,border-color .16s;
+}
+.chip:hover{background:var(--line);color:var(--ink-2)}
+.chip[aria-pressed="true"]{background:var(--ac-tint);color:var(--ac-ink);border-color:var(--ac-line)}
+.filt .go{margin-left:auto}
+
+.hlist{display:flex;flex-direction:column;gap:14px;margin-top:14px}
+
+.hrow{padding:16px;display:grid;gap:16px}
+@media(min-width:820px){.hrow{grid-template-columns:200px minmax(0,1fr)}}
+
+.hsrc{position:relative;border-radius:var(--r-m);overflow:hidden;border:1px solid var(--line-2);background:var(--tint-2);aspect-ratio:1;cursor:zoom-in}
+.hsrc img{width:100%;height:100%;object-fit:cover;transition:transform .45s cubic-bezier(.2,.7,.3,1)}
+.hsrc:hover img{transform:scale(1.04)}
+.hsrc-b{
+  position:absolute;top:8px;left:8px;font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;
+  background:rgba(23,24,38,.66);color:#fff;backdrop-filter:blur(6px);
+}
+.hsrc-n{
+  position:absolute;right:8px;bottom:8px;font-family:var(--fm);font-size:10.5px;padding:3px 7px;border-radius:6px;
+  background:rgba(255,255,255,.92);color:var(--ink-2);box-shadow:var(--sh-1);
+}
+
+.hbody{min-width:0;display:flex;flex-direction:column;gap:11px}
+.hmeta{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+.htime{display:inline-flex;align-items:center;gap:7px;font-family:var(--fm);font-size:13px;color:var(--ink-2);font-weight:500}
+.htime svg{width:15px;height:15px;stroke:var(--ink-4);fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.hstats{margin-left:auto;display:flex;gap:7px;align-items:center;flex-wrap:wrap}
+.stat{
+  display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:8px;
+  font-size:12px;font-weight:600;line-height:1;
+}
+.stat svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.stat.n{background:var(--info-tint);color:var(--info)}
+.stat.p{background:var(--warn-tint);color:var(--warn)}
+.stat .mono{font-family:var(--fm)}
+
+.hprompt{
+  padding:11px 13px;border-radius:var(--r-m);background:var(--tint);border:1px solid var(--line);
+  font-size:13px;line-height:1.7;color:var(--ink-2);
+}
+.htext{
+  display:block;width:100%;min-width:0;min-height:24px;margin:0;padding:1px 2px;
+  border:0;border-radius:5px;background:none;text-align:left;font:inherit;line-height:1.7;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:help;
+}
+.htext:focus-visible{outline:2px solid var(--ac);outline-offset:1px}
+.hprompt .ttl{font-weight:700;color:var(--ink)}
+.hprompt .dsc{color:var(--ink-3);margin-top:3px}
+.his-tip{
+  position:fixed;z-index:940;width:max-content;
+  max-width:min(420px,calc(100vw - 24px));max-height:min(240px,calc(100dvh - 24px));
+  overflow:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;
+  padding:10px 12px;border:1px solid var(--line-2);border-radius:10px;
+  background:rgba(35,42,54,.97);color:#fff;box-shadow:var(--sh-pop);
+  font-size:13px;line-height:1.65;text-align:left;white-space:pre-wrap;
+  overflow-wrap:anywhere;word-break:normal;touch-action:pan-y;
+}
+.his-tip[hidden]{display:none}
+.hmodel{display:flex;gap:6px;flex-wrap:wrap}
+.tagm{
+  display:inline-flex;align-items:center;height:24px;padding:0 8px;border-radius:6px;
+  background:var(--tint-2);color:var(--ink-3);font-family:var(--fm);font-size:11px;font-weight:400;
+}
+.houts{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,116px));gap:9px}
+.hout{
+  position:relative;aspect-ratio:1;border-radius:var(--r-s);overflow:hidden;border:1px solid var(--line-2);
+  background:var(--tint-2);cursor:zoom-in;transition:box-shadow .18s,border-color .18s,transform .18s;
+}
+.hout:hover{box-shadow:var(--sh-2);border-color:var(--ac-line);transform:translateY(-2px)}
+.hout img{width:100%;height:100%;object-fit:cover}
+
+/* empty history */
+.hempty{display:flex;flex-direction:column;align-items:center;gap:13px;padding:70px 24px;text-align:center}
+.hempty .empty-i{width:58px;height:58px;border-radius:16px}
+.hempty p{margin:0;font-size:13.5px;color:var(--ink-4)}
+
+/* pagination */
+.pg{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:18px;padding:13px 16px}
+.pg-info{font-size:13px;color:var(--ink-3)}
+.pg-info b{font-family:var(--fm);font-weight:500;color:var(--ink)}
+.pg-nav{margin-left:auto;display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+.pgb{
+  min-width:36px;height:36px;padding:0 9px;border-radius:9px;border:1px solid var(--line-2);
+  background:var(--card);color:var(--ink-2);font-family:var(--fm);font-size:13px;font-weight:500;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  transition:border-color .16s,background .16s,color .16s;
+}
+.pgb:hover:not(:disabled){border-color:var(--ac-line);background:var(--ac-tint);color:var(--ac-ink)}
+.pgb:disabled{opacity:.4;cursor:not-allowed}
+.pgb[aria-current="page"]{background:var(--ac);border-color:var(--ac);color:#fff;box-shadow:var(--sh-ac)}
+.pgb.el{border:0;background:none;cursor:default;color:var(--ink-5);min-width:22px}
+.pgb.el:hover{background:none}
+.pgb svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.pg-size{display:flex;align-items:center;gap:7px;font-size:12.5px;color:var(--ink-4)}
+.pg-size .sel-btn{min-height:34px;padding:6px 32px 6px 11px;font-size:12.5px;border-radius:9px}
+.pg-size .sel-chev{right:10px}
+
+/* skeleton row */
+.hsk{padding:16px;display:grid;gap:16px}
+@media(min-width:820px){.hsk{grid-template-columns:200px minmax(0,1fr)}}
+.shim{background:var(--tint-2);border-radius:var(--r-s);position:relative;overflow:hidden}
+.shim::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.9),transparent);animation:sweep 1.4s linear infinite}
+
+/* ==========================================================
+   MODALS
+   ========================================================== */
+dialog{border:0;padding:0;background:transparent;max-width:100vw;max-height:100vh;overflow:visible}
+dialog::backdrop{background:rgba(23,24,38,.46);backdrop-filter:blur(6px)}
+
+.sheet{
+  background:var(--card);border-radius:var(--r-xl);box-shadow:var(--sh-pop);
+  width:min(452px,calc(100vw - 32px));overflow:hidden;
+}
+.sheet-h{padding:20px 22px 0}
+.sheet-h h2{margin:0;font-size:17px;font-weight:700;letter-spacing:-.005em}
+.sheet-h p{margin:5px 0 0;font-size:13px;color:var(--ink-4);line-height:1.65}
+.sheet-b{padding:18px 22px}
+.sheet-f{display:flex;gap:9px;justify-content:flex-end;padding:0 22px 20px}
+
+/* ---------- 图片预览：满屏 · 顶部工具条 · 两侧翻页 ---------- */
+dialog#lb{
+  width:100vw;height:100vh;height:100dvh;max-width:100vw;max-height:100vh;max-height:100dvh;
+  margin:0;padding:0;border:0;background:transparent;overflow:hidden;
+}
+dialog#lb::backdrop{
+  background:rgba(0,0,0,.47);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+}
+.lbx{
+  position:relative;width:100%;height:100%;
+  display:grid;place-items:center;padding:46px 84px;
+  outline:none;overflow:hidden;
+}
+.lbx-fig{
+  margin:0;width:calc(100vw - 168px);height:calc(100dvh - 92px);
+  max-width:100%;max-height:100%;min-width:0;min-height:0;
+  display:grid;place-items:center;
+  transition:transform .28s cubic-bezier(.24,.86,.32,1);will-change:transform;
+}
+.lbx.drag .lbx-fig{transition:none}
+.lbx-fig img{
+  display:block;max-width:calc(100vw - 168px);max-height:calc(100dvh - 92px);width:auto;height:auto;object-fit:contain;
+  user-select:none;-webkit-user-drag:none;touch-action:none;
+  animation:lbIn .3s cubic-bezier(.22,.68,.3,1);
+}
+.lbx[data-zoom="1"] .lbx-fig img{cursor:zoom-in}
+.lbx[data-zoom="2"] .lbx-fig img{cursor:grab}
+.lbx.drag .lbx-fig img{cursor:grabbing}
+@keyframes lbIn{from{opacity:0;transform:scale(.97)}to{opacity:1;transform:none}}
+
+/* 顶部工具条 */
+.lbx-tb{
+  position:absolute;top:22px;right:25px;z-index:3;
+  display:flex;align-items:center;gap:0;height:46px;padding:0 4px;border-radius:13px;
+  background:rgba(35,42,54,.94);
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  box-shadow:0 10px 30px -12px rgba(0,0,0,.55);
+}
+.lbx-tb button{
+  width:44px;height:44px;display:grid;place-items:center;flex:none;
+  border:0;background:none;border-radius:10px;cursor:pointer;
+  color:rgba(255,255,255,.85);transition:background .16s,color .16s,opacity .16s;
+}
+.lbx-tb button:hover{background:rgba(255,255,255,.11);color:#fff}
+.lbx-tb button[hidden]{display:none}
+.lbx-tb button:disabled{opacity:.32;cursor:not-allowed}
+.lbx-tb button:disabled:hover{background:none;color:rgba(255,255,255,.85)}
+.lbx-tb button:focus-visible{outline:2px solid rgba(255,255,255,.8);outline-offset:-3px}
+.lbx-tb button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.85;stroke-linecap:round;stroke-linejoin:round}
+.lbx-tb .bar{width:1px;height:20px;flex:none;margin:0 6px;background:rgba(255,255,255,.22)}
+#lb-close svg{width:23px;height:23px;stroke-width:1.9}
+
+/* 两侧翻页 */
+.lbx-nav{
+  position:absolute;top:50%;z-index:3;margin-top:-28px;
+  width:48px;height:56px;border-radius:50%;display:grid;place-items:center;
+  border:0;background:rgba(45,50,59,.94);color:rgba(255,255,255,.9);cursor:pointer;
+  transition:background .16s,color .16s;
+}
+.lbx-nav:hover{background:rgba(58,64,75,.96);color:#fff}
+.lbx-nav:focus-visible{outline:2px solid rgba(255,255,255,.8);outline-offset:3px}
+.lbx-nav svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.lbx-nav.pv{left:19px}
+.lbx-nav.nx{right:19px}
+.lbx-nav[hidden]{display:none}
+
+@media(max-width:640px){
+  .lbx{padding:80px 8px 24px}
+  .lbx-fig{width:calc(100vw - 16px);height:calc(100dvh - 104px)}
+  .lbx-fig img{max-width:calc(100vw - 16px);max-height:calc(100dvh - 104px)}
+  .lbx-tb{top:14px;right:50%;transform:translateX(50%);height:44px}
+  .lbx-tb button{width:40px;height:40px}
+  .lbx-nav{width:40px;height:48px;margin-top:-24px}
+  .lbx-nav.pv{left:8px}.lbx-nav.nx{right:8px}
+}
+
+/* ---------- toast ---------- */
+#toasts{
+  position:fixed;top:calc(var(--topbar-h) + 14px);left:50%;transform:translateX(-50%);
+  z-index:220;display:flex;flex-direction:column;align-items:stretch;gap:10px;
+  width:min(520px,calc(100vw - 24px));pointer-events:none;
+}
+.tst{
+  pointer-events:auto;display:flex;align-items:flex-start;gap:11px;
+  padding:12px 12px 12px 13px;border-radius:13px;
+  border:1px solid var(--line-2);background:rgba(255,255,255,.95);
+  backdrop-filter:blur(16px) saturate(1.6);-webkit-backdrop-filter:blur(16px) saturate(1.6);
+  box-shadow:0 2px 5px rgba(23,24,38,.05),0 20px 44px -16px rgba(23,24,38,.34);
+  font-size:13.5px;line-height:1.62;color:var(--ink-2);
+  animation:tstIn .3s cubic-bezier(.24,.9,.32,1) backwards;
+}
+.tst.out{animation:tstOut .2s ease forwards}
+@keyframes tstIn{from{opacity:0;transform:translateY(-14px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes tstOut{to{opacity:0;transform:translateY(-8px) scale(.98)}}
+.tst-i{flex:none;width:23px;height:23px;border-radius:50%;display:grid;place-items:center;margin-top:1px;background:var(--ac-tint);color:var(--ac)}
+.tst-i svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2.1;stroke-linecap:round;stroke-linejoin:round}
+.tst.ok .tst-i{background:var(--ok-tint);color:#0B7F4F}
+.tst.bad .tst-i{background:var(--bad-tint);color:#B3373D}
+.tst-t{flex:1;min-width:0;padding-top:2px;overflow-wrap:anywhere}
+.tst-t b{font-weight:700;color:var(--ink)}
+.tst-a{
+  flex:none;align-self:center;height:30px;padding:0 12px;border-radius:8px;
+  border:1px solid var(--ac-line);background:var(--ac-tint);color:var(--ac-ink);
+  font-family:inherit;font-size:12.5px;font-weight:650;cursor:pointer;white-space:nowrap;
+  transition:background .16s,border-color .16s;
+}
+.tst-a:hover{background:#E4E1FD;border-color:var(--ac)}
+.tst-x{
+  position:relative;flex:none;align-self:center;width:26px;height:26px;display:grid;place-items:center;
+  border:0;border-radius:7px;background:none;color:var(--ink-4);cursor:pointer;transition:background .16s,color .16s;
+}
+.tst-x::before{content:"";position:absolute;top:50%;left:50%;width:44px;height:44px;transform:translate(-50%,-50%)}
+.tst-x:hover{background:var(--tint-2);color:var(--ink-2)}
+.tst-x svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:2.1;stroke-linecap:round}
+@media(max-width:520px){#toasts{top:calc(var(--topbar-h) + 8px)}}
+
+/* ---------- load-in ---------- */
+.rz{animation:rz .5s cubic-bezier(.2,.7,.3,1) backwards}
+@keyframes rz{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:none}}
+.d1{animation-delay:.04s}.d2{animation-delay:.09s}.d3{animation-delay:.14s}.d4{animation-delay:.19s}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+  .rz{animation:none}
+}
+
+@media(max-width:1079px){
+  .col-r .res{max-height:none}
+  .empty{min-height:340px}
+}
+@media(max-width:560px){
+  .top-in{gap:8px;padding:0 14px}
+  .logo b{display:none}
+  .tab span{display:none}
+  .tab{padding:0 11px}
+  .pill .lbl{display:none}
+  .filt .go{margin-left:0;width:100%}
+  .dt{width:100%}
+  .dt .in{flex:1;min-width:0}
+  .pg-nav{margin-left:0}
+}
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main">跳到主要内容</a>
+
+<header class="top">
+  <div class="top-in">
+    <a class="logo" href="#/" aria-label="飞鱼神图 首页">
+      <span class="logo-m" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M3 12c3.6-4.6 7.2-6.9 10.8-6.9 3.2 0 5.6 1.6 7.2 4.8-1.6 3.2-4 4.8-7.2 4.8C10.2 14.7 6.6 14 3 12Z"/><path d="m14 15.6 5 3.4-1.4-4.6"/><circle cx="16.4" cy="10.6" r="1.05" fill="currentColor" stroke="none"/></svg>
+      </span>
+      <b>飞鱼神图</b>
+    </a>
+
+    <nav class="tabs" aria-label="主导航">
+      <a class="tab" id="tab-gen" href="#/" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.5 4.6L18 9l-4.5 1.4L12 15l-1.5-4.6L6 9l4.5-1.4L12 3Z"/><path d="m18.5 15.5.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/></svg>
+        <span>图片生成</span>
+      </a>
+      <a class="tab" id="tab-his" href="#/history">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v5h5"/><path d="M12 8v4.5l3 1.8"/></svg>
+        <span>生图历史</span>
+      </a>
+    </nav>
+
+    <span class="top-sp"></span>
+
+    <button class="pill" id="token-btn" type="button" aria-haspopup="dialog">
+      <span class="dot" id="token-dot" aria-hidden="true"></span>
+      <span class="lbl">Token</span>
+      <span class="st" id="token-state">未配置</span>
+    </button>
+  </div>
+</header>
+
+<main id="main" class="wrap" tabindex="-1">
+
+  <!-- ══════════════════ VIEW A · 生成 ══════════════════ -->
+  <section class="view" id="view-gen" aria-label="图片生成">
+    <form class="bench" id="gen-form" novalidate>
+
+      <!-- ───────── 左栏 ───────── -->
+      <div class="col-l">
+
+        <!-- 商品图 -->
+        <section class="card rz d1" aria-labelledby="h-img">
+          <div class="card-h">
+            <span class="ic" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><circle cx="8.6" cy="10" r="1.6"/><path d="m4 17 4.6-4.4 3 2.8 3.4-3.4L20 17"/></svg>
+            </span>
+            <span class="card-t">
+              <h2 id="h-img">商品图 <span class="req" aria-hidden="true">*</span></h2>
+              <p>上传清晰的商品图片，本地文件与图片链接二选一</p>
+            </span>
+            <span class="count" id="img-count">0/6</span>
+          </div>
+          <div class="card-b">
+            <div class="seg" id="src-seg" data-i="0" role="tablist" aria-label="商品图来源">
+              <button class="seg-b" type="button" role="tab" id="seg-up" aria-selected="true" aria-controls="pane-up">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5V4.5"/><path d="m8 8.5 4-4 4 4"/><path d="M4.5 15v3.5a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+                本地上传
+              </button>
+              <button class="seg-b" type="button" role="tab" id="seg-link" aria-selected="false" aria-controls="pane-link" tabindex="-1">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.5 13.5a3.6 3.6 0 0 0 5.2.3l2.4-2.4a3.6 3.6 0 0 0-5.1-5.1l-1.4 1.3"/><path d="M13.5 10.5a3.6 3.6 0 0 0-5.2-.3l-2.4 2.4a3.6 3.6 0 0 0 5.1 5.1l1.3-1.3"/></svg>
+                图片链接
+              </button>
+              <span class="seg-ind" aria-hidden="true"></span>
+            </div>
+
+            <div id="pane-up" role="tabpanel" aria-labelledby="seg-up">
+              <label class="dz" id="dz" for="file-input">
+                <span class="dz-i" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 15.5V4.5"/><path d="m8 8.5 4-4 4 4"/><path d="M4.5 15v3.5a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5V15"/></svg>
+                </span>
+                <b>点击或拖拽上传</b>
+                <small>JPG · PNG · WEBP　单张 ≤ 12MB</small>
+              </label>
+              <input class="vh" id="file-input" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+            </div>
+
+            <div id="pane-link" role="tabpanel" aria-labelledby="seg-link" hidden>
+              <div class="fld">
+                <label class="lab" for="url-input">公网图片链接</label>
+                <div class="url-row">
+                  <input class="in" id="url-input" type="url" placeholder="https://…/product.jpg" autocomplete="off">
+                  <button class="btn" type="button" id="url-add">加入</button>
+                </div>
+                <p class="tip">链接会直接作为 <span class="mono">setting.images</span> 提交，无需上传。回车即可加入。</p>
+              </div>
+            </div>
+
+            <div class="thumbs" id="thumbs" aria-live="polite"></div>
+            <p class="werr" id="e-img" style="margin-top:8px"></p>
+
+            <div class="note">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+              <span>多图上传时建议仅上传必要的视角或 SKU 图，图片不是越多越好。</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 商品信息 -->
+        <section class="card rz d2" aria-labelledby="h-info">
+          <div class="card-h">
+            <span class="ic" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M5 4.5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1Z"/><path d="M8 9h8M8 12.5h8M8 16h4.5"/></svg>
+            </span>
+            <span class="card-t">
+              <h2 id="h-info">商品信息 <span class="req" aria-hidden="true">*</span></h2>
+              <p>描述商品类型、材质、颜色、尺寸与核心用途</p>
+            </span>
+          </div>
+          <div class="card-b">
+            <div class="fld">
+              <label for="p-title">商品标题 <span class="req" aria-hidden="true">*</span></label>
+              <input class="in" id="p-title" type="text" maxlength="200" autocomplete="off"
+                     placeholder="例如：32 oz Stainless Steel Insulated Water Bottle">
+              <p class="werr" id="e-title"></p>
+            </div>
+
+            <div class="fld">
+              <label for="p-desc">商品描述 <span class="req" aria-hidden="true">*</span></label>
+              <textarea class="in" id="p-desc" maxlength="3000"
+                        placeholder="建议写清：容量、尺寸、材质、配件、兼容性、目标人群与使用场景。&#10;例如：BPA-free 双层真空不锈钢保温瓶，32 oz，防漏盖，冷饮保冷 24 小时，适合健身、通勤与户外。"></textarea>
+              <div class="meta-row">
+                <span class="tip">不要写未经证实的认证、功效、保修或品牌声明。</span>
+                <span class="c" id="desc-count">0/3000</span>
+              </div>
+              <p class="werr" id="e-desc"></p>
+            </div>
+          </div>
+        </section>
+
+        <!-- 生成设置 -->
+        <section class="card rz d3" aria-labelledby="h-set">
+          <div class="card-h">
+            <span class="ic" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></svg>
+            </span>
+            <span class="card-t">
+              <h2 id="h-set">生成设置</h2>
+              <p>模型、风格与生成数量</p>
+            </span>
+          </div>
+          <div class="card-b">
+            <div class="fld">
+              <span class="lab" id="l-model">使用模型 <span class="req" aria-hidden="true">*</span></span>
+              <div id="model-host"></div>
+              <p class="tip" id="model-tip">建议使用 1|nano-banana-2。</p>
+              <p class="werr" id="e-model"></p>
+            </div>
+
+            <div id="model-set" class="fld" style="gap:0"></div>
+            <div id="fixed-set" class="fld" style="gap:0"></div>
+
+            <div class="fld">
+              <span class="lab" id="l-total">生成数量 <span class="req" aria-hidden="true">*</span></span>
+              <div id="total-host"></div>
+              <p class="werr" id="e-total"></p>
+            </div>
+
+            <div class="est">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9M9.6 9.8h3.6a1.7 1.7 0 0 1 0 3.4H9.6h3.9"/></svg>
+              <span>预计消耗</span>
+              <b id="est-pts">—</b>
+            </div>
+          </div>
+        </section>
+
+        <div class="cta-wrap">
+          <button class="cta" type="submit" id="go" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true" id="go-ic"><path d="m13 2-8 11h6l-1 9 8-11h-6l1-9Z"/></svg>
+            <span id="go-label">开始生成</span>
+          </button>
+          <p class="cta-hint" id="go-hint">请先配置 Token。</p>
+        </div>
+      </div>
+
+      <!-- ───────── 右栏 ───────── -->
+      <div class="col-r rz d4">
+        <section class="card res" aria-labelledby="h-res">
+          <div class="res-h">
+            <span class="ic" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M9.5 3v5.6L4.8 17a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3l-4.7-8.4V3"/><path d="M8 3h8M8.2 13h7.6"/></svg>
+            </span>
+            <span class="card-t">
+              <h2 id="h-res">生成结果</h2>
+              <p id="res-sub">上传商品图并点击开始生成</p>
+            </span>
+            <span class="res-tools" id="res-tools"></span>
+          </div>
+          <div class="res-b" id="res-body" aria-live="polite">
+            <div class="empty" id="res-empty">
+              <span class="empty-i" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M9.5 3v5.6L4.8 17a2 2 0 0 0 1.7 3h11a2 2 0 0 0 1.7-3l-4.7-8.4V3"/><path d="M8 3h8M8.2 13h7.6"/><circle cx="10" cy="16" r=".9"/><circle cx="13.6" cy="17.4" r=".7"/></svg>
+              </span>
+              <p>上传商品图并填写要求后<br>点击「开始生成」开始</p>
+            </div>
+            <div class="tasks" id="tasks"></div>
+            <div class="gal" id="gal"></div>
+          </div>
+        </section>
+      </div>
+    </form>
+  </section>
+
+  <!-- ══════════════════ VIEW B · 生图历史 ══════════════════ -->
+  <section class="view" id="view-his" hidden aria-label="生图历史">
+    <div class="hd">
+      <h1>
+        <span class="ic" aria-hidden="true" style="width:34px;height:34px;border-radius:10px">
+          <svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v5h5"/><path d="M12 8v4.5l3 1.8"/></svg>
+        </span>
+        生图历史
+      </h1>
+      <p id="his-sub">按时间倒序展示每一次生成任务</p>
+    </div>
+
+    <div class="card">
+      <div class="filt">
+        <div class="dt">
+          <label class="vh" for="dt-start">开始日期</label>
+          <input class="in" id="dt-start" type="date">
+          <span class="sep" aria-hidden="true">—</span>
+          <label class="vh" for="dt-end">结束日期</label>
+          <input class="in" id="dt-end" type="date">
+        </div>
+        <div class="chips" id="range-chips" role="group" aria-label="快捷时间范围">
+          <button class="chip" type="button" data-range="all"  aria-pressed="true">全部</button>
+          <button class="chip" type="button" data-range="0"    aria-pressed="false">今天</button>
+          <button class="chip" type="button" data-range="1"    aria-pressed="false">昨天</button>
+          <button class="chip" type="button" data-range="3"    aria-pressed="false">近3天</button>
+          <button class="chip" type="button" data-range="7"    aria-pressed="false">近7天</button>
+        </div>
+        <button class="btn ac go" type="button" id="his-query">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>
+          查询
+        </button>
+      </div>
+    </div>
+
+    <div class="hlist" id="hlist" aria-live="polite"></div>
+
+    <div class="card pg" id="pager" hidden>
+      <span class="pg-info">共 <b id="pg-total">0</b> 条　第 <b id="pg-cur">1</b> / <b id="pg-max">1</b> 页</span>
+      <span class="pg-size">
+        <span class="lab" id="l-pgsize" style="font-weight:400;color:var(--ink-4)">每页</span>
+        <div id="pgsize-host" style="width:96px"></div>
+      </span>
+      <span class="pg-nav" id="pg-nav"></span>
+    </div>
+  </section>
+</main>
+
+<!-- ══════════════════ TOKEN ══════════════════ -->
+<dialog id="tk-dlg" aria-labelledby="tk-h">
+  <div class="sheet">
+    <div class="sheet-h">
+      <h2 id="tk-h">配置 Token</h2>
+      <p>只保存在当前页面会话中，不写入浏览器存储，也不会回显已保存的值。</p>
+    </div>
+    <div class="sheet-b">
+      <div class="fld">
+        <label for="tk-in">飞鱼神图 Token <span class="req" aria-hidden="true">*</span></label>
+        <input class="in" id="tk-in" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 Token">
+        <p class="werr" id="e-token"></p>
+      </div>
+      <div class="note acc">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 5.5 6.3v5c0 4.2 2.8 7.1 6.5 8.6 3.7-1.5 6.5-4.4 6.5-8.6v-5L12 3.5Z"/><path d="m9.4 11.9 1.8 1.8 3.4-3.4"/></svg>
+        <span>保存后立即验证并加载模型与风格。刷新页面即清空，替换时直接填入新值。</span>
+      </div>
+    </div>
+    <div class="sheet-f">
+      <button class="btn" type="button" id="tk-cancel">取消</button>
+      <button class="btn ac" type="button" id="tk-save"><span id="tk-save-l">保存并验证</span></button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ══════════════════ LIGHTBOX ══════════════════ -->
+<dialog id="lb" aria-label="图片预览">
+  <div class="lbx" id="lb-box" tabindex="-1" data-zoom="1">
+
+    <div class="lbx-tb" role="group" aria-label="预览工具">
+      <button type="button" id="lb-out" aria-label="缩小">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M7.6 10.5h5.8"/><path d="m15.4 15.4 4.4 4.4"/></svg>
+      </button>
+      <button type="button" id="lb-in" aria-label="放大">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M7.6 10.5h5.8M10.5 7.6v5.8"/><path d="m15.4 15.4 4.4 4.4"/></svg>
+      </button>
+      <button type="button" id="lb-reset" aria-label="恢复图片大小" aria-keyshortcuts="0" title="恢复图片大小">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/><path d="m4 9 5-5M20 9l-5-5M4 15l5 5M20 15l-5 5"/></svg>
+      </button>
+      <button type="button" id="lb-rot" aria-label="旋转">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="9" width="11" height="11" rx="1.6"/><path d="M11.5 5.5h4.6a3.4 3.4 0 0 1 3.4 3.4v1.6"/><path d="m13.6 3.4-2.1 2.1 2.1 2.1"/></svg>
+      </button>
+      <button type="button" id="lb-dl" aria-label="下载这张图片">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.6v10.6"/><path d="m7.9 10.2 4.1 4.1 4.1-4.1"/><path d="M6.6 17.2v2.6h10.8v-2.6"/></svg>
+      </button>
+      <span class="bar" aria-hidden="true"></span>
+      <button type="button" id="lb-close" aria-label="关闭预览">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.4 5.6 5.6 18.4M5.6 5.6l12.8 12.8"/></svg>
+      </button>
+    </div>
+
+    <button class="lbx-nav pv" type="button" id="lb-prev" aria-label="上一张">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14.4 5.4-7 6.6 7 6.6"/></svg>
+    </button>
+
+    <figure class="lbx-fig" id="lb-fig">
+      <img id="lb-img" alt="">
+    </figure>
+
+    <button class="lbx-nav nx" type="button" id="lb-next" aria-label="下一张">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9.6 5.4 7 6.6-7 6.6"/></svg>
+    </button>
+  </div>
+</dialog>
+
+<div id="toasts" aria-live="polite" aria-atomic="false"></div>
+<div class="his-tip" id="his-tip" role="tooltip" hidden></div>
+
+<script>
+(function(){
+"use strict";
+
+/* ==========================================================
+   0 · 基础
+   ========================================================== */
+const API = "https://server.feiyushentu.com/api/v0.1";
+const $  = (id) => document.getElementById(id);
+const te = new TextEncoder();
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const esc = (s) => String(s == null ? "" : s)
+  .replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;")
+  .replace(/"/g,"&quot;").replace(/'/g,"&#39;");
+const pad = (n) => String(n).padStart(2,"0");
+
+const RECOMMEND_MODEL = "1|nano-banana-2";
+const RECOMMEND_STYLE = "亚马逊风格";
+const FIXED_DEFAULTS  = { language:"en", style:RECOMMEND_STYLE, scene:"混合 (以使用场景为主)" };
+const FIELD_CN = { aspect_ratio:"尺寸", resolution:"像素", style:"风格", language:"目标语言", scene:"场景" };
+
+const POLL_INTERVAL = 5000, POLL_MAX = 120, POLL_DEADLINE = 10*60*1000;
+const MAX_FILES = 6, MAX_FILE_BYTES = 12*1024*1024;
+
+const state = {
+  token:"", tokenOk:false,
+  config:null, model:null, modelSetting:{}, fixedSetting:{},
+  refs:[], refSeq:0,
+  tasks:[], shots:[], lastPayload:null,
+  running:false, polling:false,
+  lb:{items:[],index:0,taskId:"",title:""},
+  his:{page:1,size:5,start:"",end:"",range:"all",total:0,loading:false}
+};
+
+/* ==========================================================
+   1 · 提示
+   ========================================================== */
+/* 全部提示都走弹出式 toast，页面本体不再插入提示模块 */
+const TST_IC = {
+  ok  : '<path d="M4.5 12.4 9.6 17.5 19.5 7"/>',
+  bad : '<path d="M12 6.5v7"/><path d="M12 17.4h.01"/>',
+  info: '<path d="M12 10.6v6.8"/><path d="M12 6.7h.01"/>'
+};
+const toastBox = $("toasts");
+/* toast(msg, kind, opts)
+   msg  : 允许少量行内 HTML（调用方负责转义）
+   kind : "ok" | "bad" | 空（默认信息）
+   opts : { action:{label,onClick}, timeout:ms（0 = 常驻）, key:去重键 } */
+function toast(msg, kind, opts){
+  opts = opts || {};
+  if(opts.key) toastBox.querySelectorAll('[data-key="'+opts.key+'"]').forEach(n => n.remove());
+  const el = document.createElement("div");
+  el.className = "tst" + (kind ? " " + kind : "");
+  if(opts.key) el.dataset.key = opts.key;
+  el.innerHTML =
+    '<span class="tst-i"><svg viewBox="0 0 24 24" aria-hidden="true">' +
+      (TST_IC[kind] || TST_IC.info) + '</svg></span>' +
+    '<span class="tst-t"></span>' +
+    (opts.action ? '<button class="tst-a" type="button"></button>' : '') +
+    '<button class="tst-x" type="button" aria-label="关闭提示">' +
+      '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>';
+  el.querySelector(".tst-t").innerHTML = msg;
+  let timer = null;
+  const kill = () => {
+    clearTimeout(timer);
+    el.classList.add("out");
+    setTimeout(() => el.remove(), 220);
+  };
+  el.querySelector(".tst-x").addEventListener("click", kill);
+  if(opts.action){
+    const b = el.querySelector(".tst-a");
+    b.textContent = opts.action.label;
+    b.addEventListener("click", () => { kill(); opts.action.onClick(); });
+  }
+  toastBox.appendChild(el);
+  while(toastBox.children.length > 4) toastBox.firstElementChild.remove();
+  const ms = opts.timeout === undefined ? (kind === "bad" ? 6500 : 3400) : opts.timeout;
+  if(ms > 0){
+    timer = setTimeout(kill, ms);
+    el.addEventListener("mouseenter", () => clearTimeout(timer));
+    el.addEventListener("mouseleave", () => { timer = setTimeout(kill, 1600); });
+  }
+  return kill;
+}
+function clearToasts(key){
+  const sel = key ? '[data-key="'+key+'"]' : ".tst";
+  toastBox.querySelectorAll(sel).forEach(n => n.remove());
+}
+
+function werr(id, msg){
+  const el = $(id); if(!el) return;
+  el.textContent = msg || "";
+  el.classList.toggle("on", !!msg);
+}
+
+/* ==========================================================
+   2 · API
+   ========================================================== */
+class ApiError extends Error{ constructor(code,msg){ super(msg||("API "+code)); this.code=code; } }
+const CODE_TEXT = {
+  10002:"Token 为空或未传递，请先配置 Token。",
+  10003:"Token 无效，请替换 Token。",
+  11008:"账号已被禁用，请检查飞鱼神图账号或替换 Token。",
+  10006:"请求方式错误。"
+};
+async function api(path, body){
+  let res;
+  try{
+    res = await fetch(API + path, {
+      method:"POST",
+      headers:{ "Content-Type":"application/json", "token": state.token },
+      body: JSON.stringify(body || {})
+    });
+  }catch(e){ throw new ApiError(0,"网络请求失败，请检查网络，或用 http://localhost 打开本页面。"); }
+  let json;
+  try{ json = await res.json(); }
+  catch(e){ throw new ApiError(0,"接口返回内容无法解析（HTTP "+res.status+"）。"); }
+  if(json.code !== 200) throw new ApiError(json.code, CODE_TEXT[json.code] || json.msg || ("接口返回 code "+json.code));
+  return json;
+}
+function onApiError(err){
+  if(err instanceof ApiError && [10002,10003,11008].includes(err.code)){
+    setToken(false);
+    toast(esc(err.message), "bad", { key:"token", timeout:0,
+      action:{ label:"配置 Token", onClick:() => $("token-btn").click() } });
+  }else{
+    toast(esc(err.message || "请求失败"), "bad");
+  }
+}
+
+/* ==========================================================
+   3 · ZIP（纯手写 · store 模式 · 零依赖）
+   ========================================================== */
+const CRC_T = (function(){
+  const t = new Uint32Array(256);
+  for(let n=0;n<256;n++){ let c=n; for(let k=0;k<8;k++) c = (c&1) ? (0xEDB88320 ^ (c>>>1)) : (c>>>1); t[n]=c>>>0; }
+  return t;
+})();
+function crc32(buf){
+  let c = 0xFFFFFFFF;
+  for(let i=0;i<buf.length;i++) c = CRC_T[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function makeZip(files){
+  const now = new Date();
+  const dtime = ((now.getHours()<<11) | (now.getMinutes()<<5) | (now.getSeconds()>>1)) & 0xFFFF;
+  const ddate = (((now.getFullYear()-1980)<<9) | ((now.getMonth()+1)<<5) | now.getDate()) & 0xFFFF;
+  const parts = [], central = [];
+  let offset = 0, cdSize = 0;
+
+  for(const f of files){
+    const name = te.encode(f.name), data = f.data;
+    const crc = crc32(data), size = data.length;
+
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0,0x04034b50,true); lh.setUint16(4,20,true); lh.setUint16(6,0x0800,true);
+    lh.setUint16(8,0,true); lh.setUint16(10,dtime,true); lh.setUint16(12,ddate,true);
+    lh.setUint32(14,crc,true); lh.setUint32(18,size,true); lh.setUint32(22,size,true);
+    lh.setUint16(26,name.length,true); lh.setUint16(28,0,true);
+    parts.push(new Uint8Array(lh.buffer), name, data);
+
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0,0x02014b50,true); ch.setUint16(4,20,true); ch.setUint16(6,20,true);
+    ch.setUint16(8,0x0800,true); ch.setUint16(10,0,true);
+    ch.setUint16(12,dtime,true); ch.setUint16(14,ddate,true);
+    ch.setUint32(16,crc,true); ch.setUint32(20,size,true); ch.setUint32(24,size,true);
+    ch.setUint16(28,name.length,true); ch.setUint16(30,0,true); ch.setUint16(32,0,true);
+    ch.setUint16(34,0,true); ch.setUint16(36,0,true); ch.setUint32(38,0,true);
+    ch.setUint32(42,offset,true);
+    central.push(new Uint8Array(ch.buffer), name);
+    cdSize += 46 + name.length;
+    offset += 30 + name.length + size;
+  }
+
+  const eo = new DataView(new ArrayBuffer(22));
+  eo.setUint32(0,0x06054b50,true); eo.setUint16(4,0,true); eo.setUint16(6,0,true);
+  eo.setUint16(8,files.length,true); eo.setUint16(10,files.length,true);
+  eo.setUint32(12,cdSize,true); eo.setUint32(16,offset,true); eo.setUint16(20,0,true);
+
+  return new Blob(parts.concat(central, [new Uint8Array(eo.buffer)]), {type:"application/zip"});
+}
+
+/* ---------- 下载 ---------- */
+function saveBlob(blob, filename){
+  const href = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = href; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(href), 5000);
+}
+function extOf(url, mime){
+  const m = /\.(png|jpe?g|webp|gif)(?:$|\?)/i.exec(url || "");
+  if(m) return m[1].toLowerCase() === "jpeg" ? "jpg" : m[1].toLowerCase();
+  if(mime && mime.indexOf("/") > 0) return mime.split("/")[1].split("+")[0];
+  return "png";
+}
+async function fetchBytes(url){
+  const r = await fetch(url, {mode:"cors"});
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  const blob = await r.blob();
+  return { bytes:new Uint8Array(await blob.arrayBuffer()), mime:blob.type };
+}
+async function downloadOne(url, filename){
+  try{
+    const got = await fetchBytes(url);
+    saveBlob(new Blob([got.bytes],{type:got.mime||"image/png"}), filename);
+    return true;
+  }catch(e){
+    window.open(url, "_blank", "noopener");
+    return false;
+  }
+}
+async function downloadZip(urls, zipName, btn){
+  if(!urls || !urls.length) return;
+  const old = btn ? btn.innerHTML : "";
+  if(btn){ btn.disabled = true; btn.innerHTML = '<span class="spin" style="border-color:rgba(0,0,0,.18);border-top-color:currentColor"></span>打包中'; }
+  const files = [], failed = [];
+  for(let i=0;i<urls.length;i++){
+    try{
+      const got = await fetchBytes(urls[i]);
+      files.push({ name: zipName + "_" + pad(i+1) + "." + extOf(urls[i], got.mime), data: got.bytes });
+    }catch(e){ failed.push(urls[i]); }
+  }
+  if(btn){ btn.disabled = false; btn.innerHTML = old; }
+
+  if(!files.length){
+    toast("图片域名未开放跨域，无法在浏览器内打包。已改为逐张打开，可右键另存。", "bad");
+    urls.forEach(u => window.open(u, "_blank", "noopener"));
+    return;
+  }
+  saveBlob(makeZip(files), zipName + ".zip");
+  if(failed.length) toast("已打包 " + files.length + " 张，" + failed.length + " 张抓取失败已单独打开。", "bad");
+  else toast("已打包下载 " + files.length + " 张图片", "ok");
+}
+
+/* ==========================================================
+   4 · Token
+   ========================================================== */
+function setToken(ok){
+  state.tokenOk = ok;
+  if(!ok) state.token = "";
+  $("token-state").textContent = ok ? "已配置" : "未配置";
+  $("token-dot").className = "dot " + (ok ? "ok" : "");
+  $("token-btn").dataset.on = ok ? "1" : "0";
+  gate();
+}
+const tkDlg = $("tk-dlg");
+$("token-btn").addEventListener("click", () => {
+  werr("e-token",""); $("tk-in").value = "";
+  tkDlg.showModal(); $("tk-in").focus();
+});
+$("tk-cancel").addEventListener("click", () => tkDlg.close());
+tkDlg.addEventListener("close", () => { $("tk-in").value = ""; });
+
+$("tk-save").addEventListener("click", async () => {
+  const v = $("tk-in").value.trim();
+  if(!v){ werr("e-token","请输入飞鱼神图的 token"); $("tk-in").focus(); return; }
+  const btn = $("tk-save"), lab = $("tk-save-l");
+  btn.disabled = true; lab.textContent = "验证中…"; werr("e-token","");
+  const prev = state.token; state.token = v;
+  try{
+    const res = await api("/common/plug.select.field", {});
+    $("tk-in").value = "";
+    setToken(true);
+    applyConfig(res.data || {});
+    tkDlg.close(); clearToasts("token");
+    toast("Token 已验证，模型与风格已加载", "ok");
+  }catch(err){
+    state.token = prev;
+    werr("e-token", err.message || "验证失败");
+  }finally{
+    btn.disabled = false; lab.textContent = "保存并验证";
+  }
+});
+
+/* ==========================================================
+   5 · 配置渲染
+   ========================================================== */
+/* 选项归一化：显示读 name，提交读 value。
+   接口里 name 是给人看的名称，value 才是回传的取值，两者必须分开。
+   其余字段名只作为兜底，接口换形状时不至于直接空白。 */
+function has(x){ return x !== undefined && x !== null && x !== ""; }
+function pair(o){
+  if(o && typeof o === "object"){
+    const v = has(o.value) ? o.value
+            : has(o.key)   ? o.key
+            : has(o.id)    ? o.id
+            : has(o.name)  ? o.name
+            : o.label;
+    const t = has(o.name)  ? o.name
+            : has(o.label) ? o.label
+            : has(o.title) ? o.title
+            : v;
+    return { value:String(v), label:String(t) };
+  }
+  return { value:String(o), label:String(o) };
+}
+/* 把已提交的取值翻译回名称，用于摘要与历史展示 */
+function labelOfFixed(key, val){
+  const items = (state.config && state.config.fixedSetting) || [];
+  const it = items.find(x => x.field === key);
+  const opts = it && Array.isArray(it.value) ? it.value.map(pair) : [];
+  const hit = opts.find(o => o.value === String(val));
+  return hit ? hit.label : String(val);
+}
+
+/* ---------- 自定义下拉：面板挂到 body，fixed 定位，永不被卡片裁切 ---------- */
+const selPop = document.createElement("div");
+selPop.className = "sel-pop"; selPop.id = "sel-pop";
+selPop.setAttribute("role","listbox"); selPop.hidden = true;
+document.body.appendChild(selPop);
+let openSel = null;
+
+function closeSel(){
+  if(!openSel) return;
+  openSel.btn.setAttribute("aria-expanded","false");
+  openSel.btn.removeAttribute("aria-activedescendant");
+  selPop.hidden = true; selPop.innerHTML = "";
+  openSel = null;
+}
+function placePop(){
+  if(!openSel) return;
+  const r = openSel.btn.getBoundingClientRect();
+  const vh = window.innerHeight, gapv = 6, edge = 10;
+  selPop.style.width = Math.max(r.width, 132) + "px";
+  selPop.style.maxHeight = "320px";
+  const ph = Math.min(selPop.scrollHeight + 2, 320);
+  const below = vh - r.bottom - gapv - edge;
+  const above = r.top - gapv - edge;
+  if(below >= ph || below >= above){
+    selPop.dataset.dir = "down";
+    selPop.style.maxHeight = Math.max(120, Math.min(320, below)) + "px";
+    selPop.style.top = Math.round(r.bottom + gapv) + "px";
+  }else{
+    selPop.dataset.dir = "up";
+    const h = Math.max(120, Math.min(320, above));
+    selPop.style.maxHeight = h + "px";
+    selPop.style.top = Math.round(r.top - gapv - Math.min(ph, h)) + "px";
+  }
+  const w = parseFloat(selPop.style.width);
+  selPop.style.left = Math.round(Math.min(Math.max(edge, r.left), window.innerWidth - w - edge)) + "px";
+  // 兜底：无论触发器在哪，面板始终留在视口内
+  const top = parseFloat(selPop.style.top);
+  const hh = Math.min(parseFloat(selPop.style.maxHeight), selPop.scrollHeight + 2);
+  selPop.style.top = Math.round(Math.min(Math.max(edge, top), Math.max(edge, vh - hh - edge))) + "px";
+}
+function paintPop(){
+  const s = openSel;
+  selPop.innerHTML = s.options.map((o,i) =>
+    '<div class="sel-opt'+(o.value===s.value?" on":"")+(i===s.active?" hi":"")+'" role="option" ' +
+      'id="sel-opt-'+i+'" data-i="'+i+'" aria-selected="'+(o.value===s.value)+'">' +
+      '<span class="t">'+esc(o.label)+'</span>' +
+      (o.badge ? '<span class="b">'+esc(o.badge)+'</span>' : '') +
+      '<svg class="ck" viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg>' +
+    '</div>').join("");
+  s.btn.setAttribute("aria-activedescendant", "sel-opt-" + s.active);
+  const hi = selPop.querySelector(".sel-opt.hi");
+  if(hi) hi.scrollIntoView({block:"nearest"});
+}
+selPop.addEventListener("mousedown", e => {
+  const el = e.target.closest("[data-i]"); if(!el || !openSel) return;
+  e.preventDefault();
+  openSel.pick(Number(el.dataset.i));
+});
+selPop.addEventListener("mousemove", e => {
+  const el = e.target.closest("[data-i]"); if(!el || !openSel) return;
+  const i = Number(el.dataset.i);
+  if(i !== openSel.active){ openSel.active = i; paintPop(); }
+});
+document.addEventListener("mousedown", e => {
+  if(openSel && !selPop.contains(e.target) && !openSel.btn.contains(e.target)) closeSel();
+});
+window.addEventListener("scroll", () => { if(openSel) placePop(); }, true);
+window.addEventListener("resize", closeSel);
+
+function createSelect(cfg){
+  const wrap = document.createElement("div");
+  wrap.className = "sel";
+  const btn = document.createElement("button");
+  btn.type = "button"; btn.className = "sel-btn";
+  btn.setAttribute("role","combobox");
+  btn.setAttribute("aria-haspopup","listbox");
+  btn.setAttribute("aria-expanded","false");
+  btn.setAttribute("aria-controls","sel-pop");
+  if(cfg.id) btn.id = cfg.id;
+  if(cfg.labelledby) btn.setAttribute("aria-labelledby", cfg.labelledby + (cfg.id ? " " + cfg.id : ""));
+  btn.innerHTML = '<span class="sel-val"></span>' +
+    '<svg class="sel-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>';
+  wrap.appendChild(btn);
+
+  const api = {
+    el: wrap, btn: btn,
+    options: (cfg.options || []).slice(),
+    value: cfg.value !== undefined ? String(cfg.value) : "",
+    placeholder: cfg.placeholder || "请选择",
+    onChange: cfg.onChange || function(){},
+    active: 0,
+    paint(){
+      const o = this.options.find(x => x.value === this.value);
+      const v = btn.querySelector(".sel-val");
+      v.textContent = o ? o.label : this.placeholder;
+      v.classList.toggle("ph", !o);
+      const old = btn.querySelector(".sel-tag");
+      if(old) old.remove();
+      if(o && o.badge){
+        const t = document.createElement("span");
+        t.className = "sel-tag"; t.textContent = o.badge;
+        btn.insertBefore(t, btn.querySelector(".sel-chev"));
+      }
+    },
+    setOptions(list, value){
+      this.options = list.slice();
+      if(value !== undefined) this.value = String(value);
+      if(!this.options.some(x => x.value === this.value)) this.value = this.options.length ? this.options[0].value : "";
+      this.paint();
+    },
+    setValue(v){ this.value = String(v); this.paint(); },
+    setDisabled(d){ btn.disabled = !!d; if(d && openSel === this) closeSel(); },
+    open(){
+      if(btn.disabled || !this.options.length) return;
+      if(openSel && openSel !== this) closeSel();
+      openSel = this;
+      this.active = Math.max(0, this.options.findIndex(x => x.value === this.value));
+      btn.setAttribute("aria-expanded","true");
+      selPop.hidden = false;
+      paintPop(); placePop();
+    },
+    pick(i){
+      const o = this.options[i]; if(!o) return;
+      const changed = o.value !== this.value;
+      this.value = o.value; this.paint(); closeSel(); btn.focus();
+      if(changed) this.onChange(o.value, o);
+    },
+    move(d){
+      if(!openSel){ this.open(); return; }
+      this.active = (this.active + d + this.options.length) % this.options.length;
+      paintPop();
+    }
+  };
+
+  btn.addEventListener("click", () => { if(openSel === api) closeSel(); else api.open(); });
+  btn.addEventListener("keydown", e => {
+    const isOpen = openSel === api;
+    if(e.key === "ArrowDown"){ e.preventDefault(); isOpen ? api.move(1) : api.open(); }
+    else if(e.key === "ArrowUp"){ e.preventDefault(); isOpen ? api.move(-1) : api.open(); }
+    else if(e.key === "Home" && isOpen){ e.preventDefault(); api.active = 0; paintPop(); }
+    else if(e.key === "End" && isOpen){ e.preventDefault(); api.active = api.options.length-1; paintPop(); }
+    else if(e.key === "Enter" || e.key === " "){ e.preventDefault(); isOpen ? api.pick(api.active) : api.open(); }
+    else if(e.key === "Escape" && isOpen){ e.preventDefault(); closeSel(); }
+    else if(e.key === "Tab" && isOpen){ closeSel(); }
+  });
+
+  api.paint();
+  return api;
+}
+
+function applyConfig(data){
+  state.config = {
+    fixedSetting: Array.isArray(data.fixedSetting) ? data.fixedSetting : [],
+    model:        Array.isArray(data.model)        ? data.model        : []
+  };
+  renderModels(); renderFixed(); gate();
+}
+
+/* ---------- 模型 ---------- */
+const modelSel = createSelect({
+  id:"model-sel", labelledby:"l-model", placeholder:"配置 Token 后加载",
+  onChange:(v) => selectModel((state.config ? state.config.model : []).find(m => String(m.value) === v))
+});
+modelSel.setDisabled(true);
+$("model-host").appendChild(modelSel.el);
+
+function modelName(m){
+  return String(has(m.name) ? m.name : has(m.label) ? m.label : m.value);
+}
+function renderModels(){
+  const models = state.config ? state.config.model : [];
+  if(!models.length){
+    modelSel.setOptions([], ""); modelSel.placeholder = "接口未返回可用模型";
+    modelSel.setDisabled(true); modelSel.paint(); return;
+  }
+  const pick = models.find(m => m.value === RECOMMEND_MODEL) || models[0];
+  modelSel.setOptions(models.map(m => ({
+    value:String(m.value),
+    label:modelName(m),
+    badge:(m.value === RECOMMEND_MODEL) ? "推荐" : ((m.points !== undefined && m.points !== null && m.points !== "") ? (m.points + " 积分") : "")
+  })), pick.value);
+  modelSel.setDisabled(false);
+  selectModel(pick);
+}
+function selectModel(m){
+  state.model = m || null;
+  state.modelSetting = {};
+  const tip = $("model-tip");
+  if(m){
+    const bits = ['<span class="mono">' + esc(m.value) + '</span>'];
+    if(m.points !== undefined && m.points !== null && m.points !== "") bits.push(esc(m.points) + " 积分 / 张");
+    if(m.value === RECOMMEND_MODEL) bits.push("推荐");
+    tip.innerHTML = bits.join("　·　");
+  }else tip.textContent = "建议使用 1|nano-banana-2。";
+  renderModelSet(); werr("e-model",""); gate();
+}
+
+/* ---------- 动态设置字段 ---------- */
+function buildField(cfg){
+  const box = document.createElement("div");
+  box.className = "fld" + (cfg.wide ? " wide" : "");
+  const lab = document.createElement("span");
+  lab.className = "lab";
+  lab.id = "lab-" + cfg.key.replace(/[^a-z0-9_-]/gi,"");
+  lab.innerHTML = esc(cfg.label) + (cfg.required ? ' <span class="req" aria-hidden="true">*</span>' : '');
+  box.appendChild(lab);
+
+  if(cfg.options && cfg.options.length){
+    const sel = createSelect({
+      id:"sel-" + cfg.key.replace(/[^a-z0-9_-]/gi,""),
+      labelledby:lab.id, value:cfg.value,
+      options:cfg.options.map(o => ({
+        value:o.value, label:o.label, badge:(o.value === RECOMMEND_STYLE ? "推荐" : "")
+      })),
+      onChange:cfg.onChange
+    });
+    box.appendChild(sel.el);
+  }else{
+    const inp = document.createElement("input");
+    inp.className = "in"; inp.type = "text"; inp.autocomplete = "off";
+    inp.value = cfg.value || "";
+    inp.setAttribute("aria-labelledby", lab.id);
+    inp.addEventListener("input", () => cfg.onChange(inp.value));
+    box.appendChild(inp);
+  }
+  return box;
+}
+
+function renderModelSet(){
+  const wrap = $("model-set");
+  wrap.innerHTML = "";
+  if(!state.model) return;
+  const fields = (state.model.setting || []).filter(f => {
+    const k = f.field_key || f.field || ""; return k && k !== "images";
+  });
+  if(!fields.length) return;
+
+  const grid = document.createElement("div");
+  grid.className = "gset";
+  fields.forEach(f => {
+    const key = f.field_key || f.field;
+    const label = FIELD_CN[key] || f.field_name || f.title || f.label || f.name || key;
+    const req = f.is_required === 1 || f.is_required === true || f.is_required === "1";
+    const opts = Array.isArray(f.field_option) ? f.field_option.map(pair) : [];
+    const def = (f.default_value !== undefined && f.default_value !== null && f.default_value !== "")
+      ? String(f.default_value) : (opts.length ? opts[0].value : "");
+    state.modelSetting[key] = def;
+    grid.appendChild(buildField({
+      key:key, label:label, required:req, options:opts, value:def, wide:!opts.length,
+      onChange:(v) => {
+        state.modelSetting[key] = v;
+        if(key === "aspect_ratio") applyAspect(v);
+        gate();
+      }
+    }));
+  });
+  wrap.appendChild(grid);
+  if(state.modelSetting.aspect_ratio) applyAspect(state.modelSetting.aspect_ratio);
+}
+
+function renderFixed(){
+  const wrap = $("fixed-set");
+  wrap.innerHTML = ""; state.fixedSetting = {};
+  const items = state.config ? state.config.fixedSetting : [];
+  if(!items.length) return;
+
+  const grid = document.createElement("div");
+  grid.className = "gset";
+  items.forEach(it => {
+    const key = it.field;
+    const label = FIELD_CN[key] || it.title || it.name || it.label || key;
+    const opts = Array.isArray(it.value) ? it.value.map(pair) : [];
+    let def = (it.default !== undefined && it.default !== null && it.default !== "") ? String(it.default) : "";
+    if(FIXED_DEFAULTS[key] && opts.some(o => o.value === FIXED_DEFAULTS[key])) def = FIXED_DEFAULTS[key];
+    if(!def && opts.length) def = opts[0].value;
+    state.fixedSetting[key] = def;
+    grid.appendChild(buildField({
+      key:key, label:label, required:!!opts.length, options:opts, value:def, wide:!opts.length,
+      onChange:(v) => { state.fixedSetting[key] = v; }
+    }));
+  });
+  wrap.appendChild(grid);
+}
+
+function applyAspect(r){
+  const p = String(r || "1:1").split(":");
+  const w = parseFloat(p[0]) || 1, h = parseFloat(p[1]) || 1;
+  document.documentElement.style.setProperty("--ar", w + " / " + h);
+}
+
+/* ==========================================================
+   6 · 参考图
+   ========================================================== */
+function renderThumbs(){
+  const wrap = $("thumbs");
+  wrap.innerHTML = state.refs.map((r, i) => {
+    let cls = "", txt = r.kind === "url" ? "链接" : "本地";
+    if(r.status === "uploading"){ cls = "up"; txt = "上传中…"; }
+    if(r.status === "error"){ cls = "bad"; txt = "失败"; }
+    return '<div class="th">' +
+      '<img src="'+esc(r.previewUrl)+'" alt="" loading="lazy">' +
+      '<button class="th-open" type="button" data-open="'+i+'" aria-label="预览商品图 '+esc(r.name)+'"></button>' +
+      '<button class="th-x" type="button" data-rm="'+esc(r.id)+'" aria-label="移除商品图 '+esc(r.name)+'">' +
+        '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg></button>' +
+      '<span class="th-tag '+cls+'">'+esc(txt)+'</span></div>';
+  }).join("");
+  wrap.querySelectorAll("[data-open]").forEach(b => b.addEventListener("click", () => {
+    openLB(state.refs.map(r => r.previewUrl), Number(b.dataset.open), "", "商品图");
+  }));
+  wrap.querySelectorAll("[data-rm]").forEach(b => b.addEventListener("click", e => {
+    e.stopPropagation();
+    const id = b.getAttribute("data-rm");
+    const it = state.refs.find(r => r.id === id);
+    if(it && it.previewUrl.startsWith("blob:")) URL.revokeObjectURL(it.previewUrl);
+    state.refs = state.refs.filter(r => r.id !== id);
+    renderThumbs(); gate();
+  }));
+  $("img-count").textContent = state.refs.length + "/" + MAX_FILES;
+}
+
+function addFiles(list){
+  werr("e-img","");
+  for(const file of Array.from(list || [])){
+    if(state.refs.length >= MAX_FILES){ werr("e-img","最多 "+MAX_FILES+" 张参考图。"); break; }
+    if(!/^image\/(jpeg|png|webp)$/.test(file.type)){ werr("e-img","仅支持 JPG、PNG、WEBP。"); continue; }
+    if(file.size > MAX_FILE_BYTES){ werr("e-img","单张不超过 12MB："+file.name); continue; }
+    state.refs.push({ id:"r"+(++state.refSeq), kind:"file", name:file.name, file:file,
+                      previewUrl:URL.createObjectURL(file), publicUrl:"", status:"ready" });
+  }
+  renderThumbs(); gate();
+}
+$("file-input").addEventListener("change", e => { addFiles(e.target.files); e.target.value = ""; });
+
+const dz = $("dz");
+["dragenter","dragover"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.add("hot"); }));
+["dragleave","drop"].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove("hot"); }));
+dz.addEventListener("drop", e => { if(e.dataTransfer) addFiles(e.dataTransfer.files); });
+
+function addUrl(){
+  const inp = $("url-input"), v = inp.value.trim();
+  werr("e-img","");
+  if(!v) return;
+  if(!/^https?:\/\/\S+$/i.test(v)){ werr("e-img","请填写 http(s) 开头的公网图片链接。"); return; }
+  if(state.refs.length >= MAX_FILES){ werr("e-img","最多 "+MAX_FILES+" 张参考图。"); return; }
+  state.refs.push({ id:"r"+(++state.refSeq), kind:"url", name:(v.split("/").pop()||"image"),
+                    previewUrl:v, publicUrl:v, status:"ready" });
+  inp.value = ""; renderThumbs(); gate();
+}
+/* ---------- 商品图来源：上传 / 链接 二选一 ---------- */
+function setSource(i){
+  const seg = $("src-seg");
+  seg.dataset.i = String(i);
+  $("seg-up").setAttribute("aria-selected", i === 0 ? "true" : "false");
+  $("seg-link").setAttribute("aria-selected", i === 1 ? "true" : "false");
+  $("seg-up").tabIndex   = i === 0 ? 0 : -1;
+  $("seg-link").tabIndex = i === 1 ? 0 : -1;
+  $("pane-up").hidden   = i !== 0;
+  $("pane-link").hidden = i !== 1;
+  werr("e-img","");
+  if(i === 1) $("url-input").focus({preventScroll:true});
+}
+$("seg-up").addEventListener("click", () => setSource(0));
+$("seg-link").addEventListener("click", () => setSource(1));
+$("src-seg").addEventListener("keydown", e => {
+  if(e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+  e.preventDefault();
+  const next = e.key === "ArrowRight" ? 1 : 0;
+  setSource(next);
+  (next === 0 ? $("seg-up") : $("seg-link")).focus();
+});
+
+$("url-add").addEventListener("click", addUrl);
+$("url-input").addEventListener("keydown", e => { if(e.key === "Enter"){ e.preventDefault(); addUrl(); } });
+
+/* ---------- COS 直传（复刻 feiyushentu_amazon.py 的 HMAC-SHA1 签名） ---------- */
+function hex(b){ return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2,"0")).join(""); }
+async function sha1Hex(t){ return hex(await crypto.subtle.digest("SHA-1", te.encode(t))); }
+async function hmacSha1Hex(k,m){
+  const key = await crypto.subtle.importKey("raw", te.encode(k), {name:"HMAC",hash:"SHA-1"}, false, ["sign"]);
+  return hex(await crypto.subtle.sign("HMAC", key, te.encode(m)));
+}
+function qc(v){ return encodeURIComponent(String(v)).replace(/[!*'()]/g, c => "%"+c.charCodeAt(0).toString(16).toUpperCase()); }
+function qp(p){ return String(p).split("/").map(qc).join("/"); }
+function objectPath(name){
+  const d = new Date();
+  const day = d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate());
+  const uid = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random())).replace(/-/g,"");
+  return "/Plug/RRRRRS//" + day + "/" + uid + "_" + String(name).replace(/\//g,"_");
+}
+async function cosAuth(method, uri, host, cos){
+  const start = Math.floor(Date.now()/1000) - 60;
+  const end = Number(cos.expiredTime) || (start + 1800);
+  const keyTime = start + ";" + end;
+  const signed = { host:host, "x-cos-security-token":cos.token };
+  const keys = Object.keys(signed).sort();
+  const httpString = [method.toLowerCase(), uri, "", keys.map(k => qc(k)+"="+qc(signed[k])).join("&"), ""].join("\n");
+  const sts = ["sha1", keyTime, await sha1Hex(httpString), ""].join("\n");
+  const signKey = await hmacSha1Hex(cos.secretKey, keyTime);
+  const sig = await hmacSha1Hex(signKey, sts);
+  return ["q-sign-algorithm=sha1","q-ak="+qc(cos.secretId),"q-sign-time="+keyTime,"q-key-time="+keyTime,
+          "q-header-list="+keys.join(";"),"q-url-param-list=","q-signature="+sig].join("&");
+}
+async function uploadFile(ref, cos){
+  const encoded = qp(objectPath(ref.file.name));
+  const host = cos.bucket + ".cos." + cos.region + ".myqcloud.com";
+  const auth = await cosAuth("PUT", encoded, host, cos);
+  const res = await fetch("https://"+host+encoded, {
+    method:"PUT",
+    headers:{ "Authorization":auth, "Content-Type":ref.file.type||"application/octet-stream", "x-cos-security-token":cos.token },
+    body: ref.file
+  });
+  if(!res.ok) throw new Error("HTTP " + res.status);
+  let domain = String(cos.domain||"").trim();
+  if(!/^https?:\/\//.test(domain)) domain = "https://" + domain;
+  return domain.replace(/\/$/,"") + encoded;
+}
+async function prepareRefs(){
+  const pending = state.refs.filter(r => r.kind === "file" && !r.publicUrl);
+  if(!pending.length) return state.refs.map(r => r.publicUrl).filter(Boolean);
+  if(!(window.crypto && crypto.subtle))
+    throw new Error("当前环境不支持 WebCrypto，无法处理本地图片。请改用公网图片链接，或用 http://localhost 打开本页面。");
+
+  const cos = (await api("/common/yun.token", {})).data || {};
+  const miss = ["token","secretId","secretKey","bucket","region","domain"].filter(k => !cos[k]);
+  if(miss.length) throw new Error("图片准备失败：缺少 " + miss.join("、"));
+
+  for(const ref of pending){
+    ref.status = "uploading"; renderThumbs();
+    try{ ref.publicUrl = await uploadFile(ref, cos); ref.status = "ready"; }
+    catch(e){
+      ref.status = "error"; renderThumbs();
+      throw new Error("本地图片上传被浏览器跨域策略拒绝（"+(e.message||"unknown")+"）。请改用公网图片链接，或走后端代理上传。");
+    }
+  }
+  renderThumbs();
+  return state.refs.map(r => r.publicUrl).filter(Boolean);
+}
+
+/* ==========================================================
+   7 · 校验 / 闸门 / 积分预估
+   ========================================================== */
+const generationCounts = Array.from({length:15}, (_, index) => index + 1);
+const totalSel = createSelect({
+  id:"p-total", labelledby:"l-total", value:"2",
+  options:generationCounts.map(n => ({ value:String(n), label:"生成 " + n + " 张" })),
+  onChange:() => gate()
+});
+$("total-host").appendChild(totalSel.el);
+
+function form(){
+  return { title:$("p-title").value.trim(), desc:$("p-desc").value.trim(), total:String(totalSel.value||"") };
+}
+function estimate(){
+  const n = parseInt(form().total,10) || 0;
+  const p = state.model && state.model.points !== undefined && state.model.points !== null && state.model.points !== ""
+    ? Number(state.model.points) : NaN;
+  $("est-pts").textContent = (!isNaN(p) && n) ? (p*n + " 积分") : "—";
+}
+function gate(){
+  const f = form(), n = parseInt(f.total,10);
+  const ready = !!state.tokenOk && !!f.title && !!f.desc && n >= 1 && n <= 15 &&
+                !!state.model && state.refs.length > 0 && !state.running;
+  $("go").disabled = !ready;
+  let h;
+  if(state.running)                       h = "任务进行中，完成后可再次提交。";
+  else if(!state.tokenOk)                h = "请先配置 Token。";
+  else if(!state.refs.length)             h = "请先上传至少一张商品图。";
+  else if(!f.title || !f.desc)            h = "请填写商品标题与商品描述。";
+  else if(!state.model)                   h = "请选择模型。";
+  else                                    h = "参数就绪，可以开始生成。";
+  $("go-hint").textContent = h;
+  estimate();
+}
+["p-title","p-desc"].forEach(id => $(id).addEventListener("input", () => {
+  if(id === "p-desc") $("desc-count").textContent = $("p-desc").value.length + "/3000";
+  gate();
+}));
+
+function validate(){
+  let ok = true; const f = form();
+  ["e-title","e-desc","e-total","e-model","e-img"].forEach(i => werr(i,""));
+  if(!f.title){ werr("e-title","请填写商品标题。"); ok = false; }
+  if(!f.desc){ werr("e-desc","请填写商品描述。"); ok = false; }
+  if(!(parseInt(f.total,10) >= 1 && parseInt(f.total,10) <= 15)){ werr("e-total","请选择 1–15 张的生成数量。"); ok = false; }
+  if(!state.model){ werr("e-model","请选择模型。"); ok = false; }
+  if(!state.refs.length){ werr("e-img","请至少上传一张商品图。"); ok = false; }
+  (state.model && state.model.setting ? state.model.setting : []).forEach(fd => {
+    const k = fd.field_key || fd.field;
+    const req = fd.is_required === 1 || fd.is_required === true || fd.is_required === "1";
+    if(k && k !== "images" && req && !state.modelSetting[k]){
+      werr("e-model","模型设置「"+(FIELD_CN[k]||fd.field_name||k)+"」为必填。"); ok = false;
+    }
+  });
+  return ok;
+}
+
+/* ==========================================================
+   8 · 结果面板
+   ========================================================== */
+function resSub(t){ $("res-sub").textContent = t; }
+function showEmpty(on){ $("res-empty").style.display = on ? "" : "none"; }
+
+function renderTasks(){
+  const w = $("tasks");
+  if(!state.tasks.length){ w.innerHTML = ""; return; }
+  showEmpty(false);
+  w.innerHTML = state.tasks.map(t => {
+    let cls="q", txt="已排队", bar="";
+    if(t.status === 2){ cls="g"; txt="生成中"; bar="live"; }
+    if(t.status === 3){ cls="s"; txt="已完成"; bar="s"; }
+    if(t.status === -1){ cls="f"; txt="失败"; bar="f"; }
+    const pct = t.status === 3 ? 100 : Math.max(0, Math.min(100, Number(t.progress)||0));
+    return '<div class="tk">' +
+      '<div class="tk-top"><span class="tk-id">'+esc(t.id)+'</span><span class="tk-st '+cls+'">'+txt+'</span></div>' +
+      '<div class="pbar '+bar+'"><i style="width:'+pct+'%"></i></div>' +
+      '<div class="tk-note">进度 '+pct+'%　·　status '+esc(t.status)+'</div></div>';
+  }).join("");
+}
+function renderSkeleton(n){
+  showEmpty(false);
+  $("gal").innerHTML = Array.from({length:n}, (_,i) =>
+    '<div class="sk"><span>生成中 '+pad(i+1)+'</span></div>').join("");
+}
+function renderShots(){
+  const g = $("gal");
+  if(!state.shots.length){ g.innerHTML = ""; return; }
+  showEmpty(false);
+  g.innerHTML = state.shots.map((s,i) =>
+    '<figure class="sh" style="margin:0" tabindex="0" role="button" data-open="'+i+'" aria-label="预览第 '+(i+1)+' 张生成图">' +
+      '<img src="'+esc(s.url)+'" alt="生成图 '+(i+1)+'" loading="lazy">' +
+      '<span class="sh-i">'+pad(i+1)+' · '+esc(s.taskId)+'</span>' +
+      '<span class="sh-a">' +
+        '<button class="mini" type="button" data-dl="'+i+'" aria-label="下载第 '+(i+1)+' 张">' +
+          '<svg viewBox="0 0 24 24"><path d="M12 3.5v11"/><path d="m7.5 11 4.5 4.5 4.5-4.5"/><path d="M5 20h14"/></svg></button>' +
+      '</span></figure>').join("");
+
+  g.querySelectorAll("[data-open]").forEach(el => {
+    const open = () => openLB(state.shots.map(s => s.url), Number(el.dataset.open), state.shots[0].taskId, "本次生成");
+    el.addEventListener("click", e => { if(!e.target.closest("[data-dl]")) open(); });
+    el.addEventListener("keydown", e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); open(); } });
+  });
+  g.querySelectorAll("[data-dl]").forEach(b => b.addEventListener("click", async e => {
+    e.stopPropagation();
+    const i = Number(b.dataset.dl), s = state.shots[i];
+    const okd = await downloadOne(s.url, s.taskId + "_" + pad(i+1) + "." + extOf(s.url));
+    if(!okd) toast("图片域名未开放跨域，已在新标签页打开，可右键另存。", "bad");
+  }));
+
+  const ids = Array.from(new Set(state.shots.map(s => s.taskId))).join("-");
+  $("res-tools").innerHTML =
+    '<button class="btn sm" type="button" id="zip-all">' +
+      '<svg viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2.2h5A2.5 2.5 0 0 1 20 9.7v7.8A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-10Z"/><path d="M12 11v4.5M10 13.5h4"/></svg>' +
+      '全部下载 .zip</button>';
+  $("zip-all").addEventListener("click", e =>
+    downloadZip(state.shots.map(s => s.url), "feiyushentu_" + ids, e.currentTarget));
+}
+
+/* ==========================================================
+   9 · 提交与轮询
+   ========================================================== */
+$("gen-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  if(!validate()) return;
+  clearToasts("token");
+
+  const f = form();
+  state.running = true; gate();
+  $("go-label").textContent = "生成图片中";
+  $("go-ic").outerHTML = '<span class="spin" id="go-ic"></span>';
+  resSub("生成图片中…");
+  state.tasks = []; state.shots = []; $("res-tools").innerHTML = "";
+  renderTasks(); renderShots(); renderSkeleton(parseInt(f.total,10));
+
+  try{
+    const images = await prepareRefs();
+    if(!images.length) throw new Error("没有可用的商品图链接。");
+
+    const payload = {
+      total: f.total, title: f.title, desc: f.desc,
+      fixedSetting: Object.assign({}, state.fixedSetting),
+      aiModel: state.model.value,
+      setting: Object.assign({}, state.modelSetting, { images: images })
+    };
+    state.lastPayload = payload;
+
+    const ids = await realSubmit(payload);
+    resSub("生成中，正在轮询任务状态…");
+    $("go-label").textContent = "生成中";
+    await realPoll(ids, payload);
+
+  }catch(err){
+    resSub("生成失败");
+    $("gal").innerHTML = ""; showEmpty(state.shots.length === 0 && state.tasks.length === 0);
+    $("res-tools").innerHTML = '<button class="btn sm" type="button" id="retry">重新生成</button>';
+    $("retry").addEventListener("click", () => $("gen-form").requestSubmit());
+    onApiError(err);
+  }finally{
+    state.running = false; state.polling = false;
+    $("go-label").textContent = "开始生成";
+    const ic = $("go-ic");
+    if(ic && ic.tagName !== "svg") ic.outerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" id="go-ic"><path d="m13 2-8 11h6l-1 9 8-11h-6l1-9Z"/></svg>';
+    gate();
+  }
+});
+
+async function realSubmit(payload){
+  const rows = (await api("/amazon/amazon.img.task.agent.add", payload)).data || [];
+  state.tasks = rows.map(r => ({ id:r.task_id, status:r.status, progress:0, images:[] }));
+  renderTasks();
+  const ids = state.tasks.map(t => t.id).filter(Boolean);
+  if(!ids.length) throw new Error("接口未返回 task_id。");
+  return ids;
+}
+
+/* 轮询：POST，taskIds 走 query string（放 body 会返回 10006） */
+async function realPoll(ids, payload){
+  state.polling = true;
+  const t0 = Date.now();
+  for(let attempt = 1; attempt <= POLL_MAX; attempt++){
+    if(!state.polling){ resSub("已停止轮询"); return; }
+    const rows = (await api("/amazon/amazon.img.task.status?taskIds=" + encodeURIComponent(ids.join(",")), {})).data || [];
+    const by = {}; rows.forEach(r => { if(r.task_id) by[r.task_id] = r; });
+
+    state.tasks.forEach(t => {
+      const r = by[t.id]; if(!r) return;
+      t.status = r.status; t.progress = r.progress; t.images = r.images || [];
+    });
+    renderTasks();
+
+    if(rows.some(r => r.status === -1)){
+      state.polling = false;
+      resSub("生成失败"); $("gal").innerHTML = "";
+      $("res-tools").innerHTML = '<button class="btn sm" type="button" id="retry">重新生成</button>';
+      $("retry").addEventListener("click", () => $("gen-form").requestSubmit());
+      toast("生成失败。可以用上一次确认的参数重新提交一个新任务。", "bad", {timeout:0});
+      return;
+    }
+    if(ids.every(id => by[id] && by[id].status === 3)){ state.polling = false; finish(ids, by, payload); return; }
+    if(Date.now() - t0 > POLL_DEADLINE) break;
+    if(attempt < POLL_MAX) await sleep(POLL_INTERVAL);
+  }
+  state.polling = false;
+  resSub("超时");
+  $("gal").innerHTML = "";
+  $("res-tools").innerHTML = '<button class="btn sm" type="button" id="retry">重新生成</button>';
+  $("retry").addEventListener("click", () => $("gen-form").requestSubmit());
+  toast("超过轮询上限（120 次 / 10 分钟）任务仍未完成。任务号仍然有效，可稍后重试。", "bad", {timeout:0});
+}
+
+function finish(ids, by, payload){
+  state.shots = [];
+  ids.forEach(id => (by[id].images || []).forEach(u => state.shots.push({ url:u, taskId:id })));
+  resSub("完成 · 共 " + state.shots.length + " 张");
+  renderShots();
+  recordHistory(ids, payload, state.shots.map(s => s.url));
+  toast("生成完成，共 " + state.shots.length + " 张", "ok");
+}
+
+/* ==========================================================
+   10 · 生图历史
+   ----------------------------------------------------------
+   历史列表由「调用方网站」提供，不是飞鱼神图的接口。飞鱼神图只出图，
+   任务号、参数、状态、图片地址等由调用方落在自己的数据库里
+   （见 references/ui-design.md 的 Persistence 规则）。
+   此处约定统一的请求与返回结构，各接入方照此实现即可同质。
+
+     GET  {HISTORY_API}?page=&size=&start=&end=
+       page  : 从 1 开始
+       size  : 每页条数
+       start : YYYY-MM-DD，含当天，可空
+       end   : YYYY-MM-DD，含当天，可空
+       resp  : { code:200, data:{ list:HistoryItem[], total:Number, page:Number, size:Number } }
+
+     HistoryItem = {
+       task_id       : String,          // 任务号，多个用英文逗号连接
+       created_at    : String,          // "YYYY-MM-DD HH:mm:ss"
+       title         : String,          // 商品标题
+       desc          : String,          // 商品描述
+       ai_model      : String,          // model[].value（提交值）
+       model_label   : String,          // model[].name（显示名称）
+       fixed         : { style, language, scene },   // fixedSetting 的提交值
+       fixed_label   : { style, language, scene },   // 对应的显示名称，列表展示读这个
+       setting       : { aspect_ratio, resolution, ... },
+       points        : Number,          // 本次消耗积分
+       source_images : String[],        // 商品原图
+       images        : String[]         // 生成结果
+     }
+
+   分页、日期过滤、倒序排序都在服务端完成，前端只负责传参和渲染。
+   ========================================================== */
+const HISTORY_API = "/api/amazon-image-generator/history";
+
+const HistoryStore = {
+  /* 本次会话刚生成、服务端可能还没写入的记录，先垫在第一页最前面 */
+  pending: [],
+  async list(q){
+    const qs = "page=" + encodeURIComponent(q.page) + "&size=" + encodeURIComponent(q.size) +
+               "&start=" + encodeURIComponent(q.start || "") + "&end=" + encodeURIComponent(q.end || "");
+    let res;
+    try{
+      res = await fetch(HISTORY_API + "?" + qs, { headers:{ "Accept":"application/json" }, credentials:"same-origin" });
+    }catch(e){ throw new ApiError(0, "无法连接生图历史接口。"); }
+    let json;
+    try{ json = await res.json(); }
+    catch(e){ throw new ApiError(0, "生图历史接口返回内容无法解析（HTTP " + res.status + "）。"); }
+    if(json.code !== 200) throw new ApiError(json.code, json.msg || ("生图历史接口返回 code " + json.code));
+    const d = json.data || {};
+    let list = Array.isArray(d.list) ? d.list.slice() : [];
+    const page = Number(d.page) || q.page;
+    if(page === 1 && this.pending.length){
+      const seen = {};
+      list.forEach(r => { seen[r.task_id] = 1; });
+      list = this.pending.filter(r => !seen[r.task_id]).concat(list).slice(0, q.size);
+    }
+    return { list:list, total:Number(d.total) || list.length, page:page, size:Number(d.size) || q.size };
+  },
+  prepend(rec){ this.pending.unshift(rec); }
+};
+
+function recordHistory(ids, payload, urls){
+  const d = new Date();
+  const stamp = d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate())+" "+
+                pad(d.getHours())+":"+pad(d.getMinutes())+":"+pad(d.getSeconds());
+  const pts = Number(state.model && state.model.points) || 0;
+  HistoryStore.prepend({
+    task_id: ids.join(","), created_at: stamp,
+    title: payload.title, desc: payload.desc,
+    ai_model: payload.aiModel,
+    model_label: state.model ? modelName(state.model) : payload.aiModel,
+    fixed: Object.assign({}, payload.fixedSetting),
+    fixed_label: (function(){
+      const o = {};
+      Object.keys(payload.fixedSetting).forEach(k => { o[k] = labelOfFixed(k, payload.fixedSetting[k]); });
+      return o;
+    })(),
+    setting: (function(){ const s = Object.assign({}, payload.setting); delete s.images; return s; })(),
+    points: pts * (parseInt(payload.total,10)||0),
+    source_images: state.refs.map(r => r.previewUrl).filter(Boolean),
+    images: urls
+  });
+}
+
+const hisTip = $("his-tip");
+let hisTipAnchor = null, hisTipPinned = false, hisTipTimer = 0, hisTipFrame = 0;
+function positionHisTip(){
+  if(hisTip.hidden || !hisTipAnchor || !hisTipAnchor.isConnected) return;
+  const pad = 12, gap = 8;
+  const viewport = window.visualViewport;
+  const vw = viewport ? viewport.width : document.documentElement.clientWidth;
+  const vh = viewport ? viewport.height : window.innerHeight;
+  const rect = hisTipAnchor.getBoundingClientRect();
+  hisTip.style.left = pad + "px"; hisTip.style.top = pad + "px";
+  const width = hisTip.offsetWidth, height = hisTip.offsetHeight;
+  const left = Math.max(pad, Math.min(rect.left, vw - width - pad));
+  const below = vh - rect.bottom - pad, above = rect.top - pad;
+  const top = below >= height || below >= above ? rect.bottom + gap : rect.top - height - gap;
+  hisTip.style.left = Math.round(left) + "px";
+  hisTip.style.top = Math.round(Math.max(pad, Math.min(top, vh - height - pad))) + "px";
+}
+function scheduleHisTipPosition(){
+  cancelAnimationFrame(hisTipFrame);
+  hisTipFrame = requestAnimationFrame(positionHisTip);
+}
+function hideHisTip(){
+  clearTimeout(hisTipTimer);
+  if(hisTipAnchor){
+    hisTipAnchor.setAttribute("aria-expanded", "false");
+    hisTipAnchor.removeAttribute("aria-describedby");
+  }
+  hisTipAnchor = null; hisTipPinned = false; hisTip.hidden = true;
+}
+function showHisTip(anchor, pinned){
+  clearTimeout(hisTipTimer);
+  if(hisTipAnchor && hisTipAnchor !== anchor){
+    hisTipAnchor.setAttribute("aria-expanded", "false");
+    hisTipAnchor.removeAttribute("aria-describedby");
+  }
+  hisTipAnchor = anchor; hisTipPinned = !!pinned;
+  hisTip.textContent = anchor.dataset.hisTip || "";
+  hisTip.hidden = false;
+  anchor.setAttribute("aria-expanded", "true");
+  anchor.setAttribute("aria-describedby", "his-tip");
+  scheduleHisTipPosition();
+}
+function scheduleHisTipHide(){
+  clearTimeout(hisTipTimer);
+  if(!hisTipPinned) hisTipTimer = setTimeout(hideHisTip, 120);
+}
+function bindHistoryTips(scope){
+  scope.querySelectorAll("[data-his-tip]").forEach(el => {
+    el.addEventListener("pointerenter", e => {
+      if(e.pointerType !== "touch" && !hisTipPinned) showHisTip(el, false);
+    });
+    el.addEventListener("pointerleave", scheduleHisTipHide);
+    el.addEventListener("focus", () => { if(!hisTipPinned) showHisTip(el, false); });
+    el.addEventListener("blur", scheduleHisTipHide);
+    el.addEventListener("click", e => {
+      e.stopPropagation();
+      if(hisTipAnchor === el && hisTipPinned) hideHisTip();
+      else showHisTip(el, true);
+    });
+  });
+}
+hisTip.addEventListener("pointerenter", () => clearTimeout(hisTipTimer));
+hisTip.addEventListener("pointerleave", scheduleHisTipHide);
+hisTip.addEventListener("click", e => e.stopPropagation());
+document.addEventListener("pointerdown", e => {
+  const target = e.target;
+  if(hisTip.hidden || hisTip.contains(target) || (target.closest && target.closest("[data-his-tip]"))) return;
+  hideHisTip();
+});
+document.addEventListener("keydown", e => { if(e.key === "Escape" && !hisTip.hidden) hideHisTip(); });
+window.addEventListener("resize", scheduleHisTipPosition);
+window.addEventListener("scroll", scheduleHisTipPosition, true);
+
+/* ---------- 渲染 ---------- */
+function hisSkeleton(n){
+  $("hlist").innerHTML = Array.from({length:n}, () =>
+    '<div class="card hsk">' +
+      '<div class="shim" style="aspect-ratio:1"></div>' +
+      '<div style="display:flex;flex-direction:column;gap:11px">' +
+        '<div class="shim" style="height:22px;width:56%"></div>' +
+        '<div class="shim" style="height:56px"></div>' +
+        '<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px">' +
+          '<div class="shim" style="aspect-ratio:1"></div><div class="shim" style="aspect-ratio:1"></div>' +
+          '<div class="shim" style="aspect-ratio:1"></div><div class="shim" style="aspect-ratio:1"></div>' +
+        '</div></div></div>').join("");
+}
+
+function renderHistory(res){
+  const list = $("hlist");
+  hideHisTip();
+  if(!res.list.length){
+    list.innerHTML = '<div class="card hempty">' +
+      '<span class="empty-i" aria-hidden="true"><svg viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 2.6-6.4"/><path d="M3 4v5h5"/><path d="M12 8v4.5l3 1.8"/></svg></span>' +
+      '<p>该时间范围内没有生成记录</p></div>';
+    $("pager").hidden = true;
+    return;
+  }
+
+  list.innerHTML = res.list.map((r, ri) => {
+    const src = (r.source_images && r.source_images[0]) || "";
+    const tags = [];
+    if(r.model_label) tags.push(r.model_label);
+    if(r.setting && r.setting.aspect_ratio) tags.push(r.setting.aspect_ratio);
+    if(r.setting && r.setting.resolution) tags.push(r.setting.resolution);
+    const fl = r.fixed_label || r.fixed || {};
+    if(fl.style) tags.push(fl.style);
+    if(fl.language) tags.push(fl.language);
+
+    return '<article class="card hrow rz" style="animation-delay:'+(ri*45)+'ms">' +
+      '<div class="hsrc" data-hsrc="'+ri+'" role="button" tabindex="0" aria-label="预览原图">' +
+        (src ? '<img src="'+esc(src)+'" alt="原图" loading="lazy">' : '') +
+        '<span class="hsrc-b">原图</span>' +
+        ((r.source_images && r.source_images.length > 1) ? '<span class="hsrc-n">'+r.source_images.length+' 张</span>' : '') +
+      '</div>' +
+      '<div class="hbody">' +
+        '<div class="hmeta">' +
+          '<span class="htime"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/></svg>'+esc(r.created_at)+'</span>' +
+          '<span class="hstats">' +
+            '<span class="stat n"><svg viewBox="0 0 24 24"><rect x="3" y="4.5" width="18" height="15" rx="2.5"/><path d="m4 17 4.6-4.4 3 2.8 3.4-3.4L20 17"/></svg><span class="mono">'+r.images.length+'</span> 张</span>' +
+            '<span class="stat p"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.8v8.4M9.8 9.9h3.4a1.6 1.6 0 0 1 0 3.2H9.8h3.7"/></svg><span class="mono">'+esc(r.points)+'</span> 积分</span>' +
+            '<button class="btn sm" type="button" data-zip="'+ri+'">' +
+              '<svg viewBox="0 0 24 24"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5h4l2 2.2h5A2.5 2.5 0 0 1 20 9.7v7.8A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5v-10Z"/><path d="M12 11v4.5M10 13.5h4"/></svg>' +
+              '全部下载</button>' +
+          '</span>' +
+        '</div>' +
+        '<div class="hprompt">' +
+          '<button class="htext ttl" type="button" data-his-tip="'+esc(r.title)+'" aria-controls="his-tip" aria-expanded="false">'+esc(r.title)+'</button>' +
+          '<button class="htext dsc" type="button" data-his-tip="'+esc(r.desc)+'" aria-controls="his-tip" aria-expanded="false">'+esc(r.desc)+'</button>' +
+        '</div>' +
+        '<div class="hmodel">'+tags.map(t => '<span class="tagm">'+esc(t)+'</span>').join("")+
+          '<span class="tagm">'+esc(r.task_id)+'</span></div>' +
+        '<div class="houts">' + r.images.map((u,i) =>
+          '<div class="hout" data-hout="'+ri+'" data-i="'+i+'" role="button" tabindex="0" aria-label="预览第 '+(i+1)+' 张生成图">' +
+            '<img src="'+esc(u)+'" alt="生成图 '+(i+1)+'" loading="lazy"></div>').join("") +
+        '</div>' +
+      '</div></article>';
+  }).join("");
+
+  bindHistoryTips(list);
+
+  list.querySelectorAll("[data-zip]").forEach(b => b.addEventListener("click", e => {
+    const r = res.list[Number(b.dataset.zip)];
+    downloadZip(r.images, "feiyushentu_" + r.task_id.replace(/,/g,"-"), e.currentTarget);
+  }));
+  const openOut = (el) => {
+    const r = res.list[Number(el.dataset.hout)];
+    openLB(r.images, Number(el.dataset.i), r.task_id, r.title);
+  };
+  list.querySelectorAll("[data-hout]").forEach(el => {
+    el.addEventListener("click", () => openOut(el));
+    el.addEventListener("keydown", e => { if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openOut(el); } });
+  });
+  const openSrc = (el) => {
+    const r = res.list[Number(el.dataset.hsrc)];
+    if(r.source_images && r.source_images.length) openLB(r.source_images, 0, r.task_id, r.title + " · 原图");
+  };
+  list.querySelectorAll("[data-hsrc]").forEach(el => {
+    el.addEventListener("click", () => openSrc(el));
+    el.addEventListener("keydown", e => { if(e.key==="Enter"||e.key===" "){ e.preventDefault(); openSrc(el); } });
+  });
+
+  renderPager(res);
+}
+
+function renderPager(res){
+  const max = Math.max(1, Math.ceil(res.total / res.size));
+  state.his.page = res.page; state.his.total = res.total;
+  $("pager").hidden = false;
+  $("pg-total").textContent = res.total;
+  $("pg-cur").textContent = res.page;
+  $("pg-max").textContent = max;
+
+  const nums = [];
+  const push = (n) => nums.push(
+    '<button class="pgb" type="button" data-p="'+n+'"'+(n===res.page?' aria-current="page"':'')+'>'+n+'</button>');
+  const el = () => nums.push('<span class="pgb el" aria-hidden="true">…</span>');
+
+  if(max <= 7){ for(let i=1;i<=max;i++) push(i); }
+  else{
+    push(1);
+    if(res.page > 3) el();
+    for(let i = Math.max(2, res.page-1); i <= Math.min(max-1, res.page+1); i++) push(i);
+    if(res.page < max-2) el();
+    push(max);
+  }
+
+  $("pg-nav").innerHTML =
+    '<button class="pgb" type="button" data-p="'+(res.page-1)+'" '+(res.page<=1?"disabled":"")+' aria-label="上一页">' +
+      '<svg viewBox="0 0 24 24"><path d="m14.5 5-7 7 7 7"/></svg></button>' +
+    nums.join("") +
+    '<button class="pgb" type="button" data-p="'+(res.page+1)+'" '+(res.page>=max?"disabled":"")+' aria-label="下一页">' +
+      '<svg viewBox="0 0 24 24"><path d="m9.5 5 7 7-7 7"/></svg></button>';
+
+  $("pg-nav").querySelectorAll("[data-p]").forEach(b => b.addEventListener("click", () => {
+    const p = Number(b.dataset.p);
+    if(p >= 1 && p <= max && p !== res.page){ state.his.page = p; loadHistory(); window.scrollTo({top:0,behavior:"smooth"}); }
+  }));
+}
+
+async function loadHistory(){
+  if(state.his.loading) return;
+  state.his.loading = true;
+  hisSkeleton(Math.min(state.his.size, 3));
+  try{
+    const res = await HistoryStore.list({ page:state.his.page, size:state.his.size, start:state.his.start, end:state.his.end });
+    renderHistory(res);
+    $("his-sub").textContent = "按时间倒序展示每一次生成任务　·　共 " + res.total + " 条记录";
+  }catch(err){
+    $("hlist").innerHTML = '<div class="card hempty"><p>历史加载失败：'+esc(err.message||"未知错误")+'</p></div>';
+    $("pager").hidden = true;
+  }finally{ state.his.loading = false; }
+}
+
+/* ---------- 筛选 ---------- */
+function ymd(d){ return d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate()); }
+function setRange(kind){
+  const today = new Date();
+  let s = "", e = "";
+  if(kind === "all"){ s = ""; e = ""; }
+  else if(kind === "0"){ s = e = ymd(today); }
+  else if(kind === "1"){ const y = new Date(today.getTime()-864e5); s = e = ymd(y); }
+  else { const n = Number(kind); const from = new Date(today.getTime()-(n-1)*864e5); s = ymd(from); e = ymd(today); }
+  state.his.range = kind; state.his.start = s; state.his.end = e;
+  $("dt-start").value = s; $("dt-end").value = e;
+  document.querySelectorAll("#range-chips .chip").forEach(c =>
+    c.setAttribute("aria-pressed", c.dataset.range === kind ? "true" : "false"));
+}
+document.querySelectorAll("#range-chips .chip").forEach(c => c.addEventListener("click", () => {
+  setRange(c.dataset.range); state.his.page = 1; loadHistory();
+}));
+["dt-start","dt-end"].forEach(id => $(id).addEventListener("change", () => {
+  state.his.start = $("dt-start").value; state.his.end = $("dt-end").value;
+  state.his.range = "";
+  document.querySelectorAll("#range-chips .chip").forEach(c => c.setAttribute("aria-pressed","false"));
+}));
+$("his-query").addEventListener("click", () => {
+  state.his.start = $("dt-start").value; state.his.end = $("dt-end").value;
+  state.his.page = 1; loadHistory();
+});
+const pgSizeSel = createSelect({
+  id:"pg-size", labelledby:"l-pgsize", value:"5",
+  options:[3,5,10].map(n => ({ value:String(n), label:n + " 条" })),
+  onChange:(v) => { state.his.size = Number(v) || 5; state.his.page = 1; loadHistory(); }
+});
+$("pgsize-host").appendChild(pgSizeSel.el);
+
+/* ==========================================================
+   11 · 灯箱
+   ========================================================== */
+const lb   = $("lb");
+const lbBox = $("lb-box");
+const lbFig = $("lb-fig");
+const ZOOMS = [0.4, 0.6, 0.8, 1, 1.3, 1.7, 2.2, 3];
+const Z0 = 3;                                    /* ZOOMS[3] === 1 */
+
+function openLB(items, index, taskId, title){
+  state.lb = { items:items.slice(), index:index||0, taskId:taskId||"", title:title||"预览",
+               z:Z0, rot:0, x:0, y:0 };
+  closeSel();
+  if(!lb.open) lb.showModal();
+  paintLB();
+  lbBox.focus({preventScroll:true});
+}
+function fitLBImage(){
+  const img = $("lb-img");
+  if(!img.naturalWidth || !img.naturalHeight) return;
+  const style = getComputedStyle(lbBox);
+  const px = name => parseFloat(style[name]) || 0;
+  const viewport = window.visualViewport;
+  const boxWidth = lbBox.clientWidth || (viewport ? viewport.width : window.innerWidth);
+  const boxHeight = lbBox.clientHeight || (viewport ? viewport.height : window.innerHeight);
+  const visibleWidth = viewport ? Math.min(boxWidth, viewport.width) : boxWidth;
+  const visibleHeight = viewport ? Math.min(boxHeight, viewport.height) : boxHeight;
+  const availableWidth = Math.max(1, visibleWidth - px("paddingLeft") - px("paddingRight"));
+  const availableHeight = Math.max(1, visibleHeight - px("paddingTop") - px("paddingBottom"));
+  const fit = Math.min(1, availableWidth / img.naturalWidth, availableHeight / img.naturalHeight);
+  img.style.width = Math.max(1, Math.floor(img.naturalWidth * fit)) + "px";
+  img.style.height = Math.max(1, Math.floor(img.naturalHeight * fit)) + "px";
+  img.style.maxWidth = Math.floor(availableWidth) + "px";
+  img.style.maxHeight = Math.floor(availableHeight) + "px";
+  lbFig.style.width = Math.floor(availableWidth) + "px";
+  lbFig.style.height = Math.floor(availableHeight) + "px";
+}
+function applyTransform(){
+  const s = state.lb;
+  lbFig.style.transform = "translate(" + s.x + "px," + s.y + "px) scale(" + ZOOMS[s.z] + ") rotate(" + s.rot + "deg)";
+  lbBox.dataset.zoom = ZOOMS[s.z] > 1 ? "2" : "1";
+  $("lb-in").disabled  = s.z >= ZOOMS.length - 1;
+  $("lb-out").disabled = s.z <= 0;
+  $("lb-reset").disabled = isResetLB(s);
+}
+function isResetLB(s){
+  const rot = ((s.rot % 360) + 360) % 360;
+  return s.z === Z0 && rot === 0 && s.x === 0 && s.y === 0;
+}
+function resetLB(){
+  const s = state.lb;
+  s.z = Z0; s.rot = 0; s.x = 0; s.y = 0;
+  applyTransform();
+}
+function paintLB(){
+  const s = state.lb, url = s.items[s.index] || "";
+  const img = $("lb-img");
+  img.style.width = img.style.height = img.style.maxWidth = img.style.maxHeight = "";
+  img.onload = () => { fitLBImage(); applyTransform(); };
+  img.src = url;
+  img.alt = s.title + " 第 " + (s.index + 1) + " 张，共 " + s.items.length + " 张";
+  img.style.animation = "none"; void img.offsetWidth; img.style.animation = "";
+  lbFig.style.transition = "none"; resetLB();
+  void lbFig.offsetWidth; lbFig.style.transition = "";
+  const many = s.items.length > 1;
+  $("lb-prev").hidden = !many;
+  $("lb-next").hidden = !many;
+}
+let fitFrame = 0;
+function refitLBViewport(){
+  if(!lb.open) return;
+  cancelAnimationFrame(fitFrame);
+  fitFrame = requestAnimationFrame(() => { fitLBImage(); applyTransform(); });
+}
+window.addEventListener("resize", refitLBViewport);
+if(window.visualViewport) window.visualViewport.addEventListener("resize", refitLBViewport);
+function stepLB(d){
+  const s = state.lb; if(!s.items.length) return;
+  s.index = (s.index + d + s.items.length) % s.items.length;
+  paintLB();
+}
+function zoomLB(d){
+  const s = state.lb;
+  const nz = Math.min(ZOOMS.length - 1, Math.max(0, s.z + d));
+  if(nz === s.z) return;
+  s.z = nz;
+  if(ZOOMS[s.z] <= 1){ s.x = 0; s.y = 0; }
+  applyTransform();
+}
+
+$("lb-prev").addEventListener("click", () => stepLB(-1));
+$("lb-next").addEventListener("click", () => stepLB(1));
+$("lb-close").addEventListener("click", () => lb.close());
+$("lb-in").addEventListener("click",  () => zoomLB(1));
+$("lb-out").addEventListener("click", () => zoomLB(-1));
+$("lb-reset").addEventListener("click", resetLB);
+$("lb-rot").addEventListener("click", () => { state.lb.rot += 90; applyTransform(); });
+$("lb-dl").addEventListener("click", async () => {
+  const s = state.lb;
+  const okd = await downloadOne(s.items[s.index], (s.taskId || "image") + "_" + pad(s.index + 1) + "." + extOf(s.items[s.index]));
+  if(!okd) toast("图片域名未开放跨域，已在新标签页打开，可右键另存。", "bad");
+});
+/* 滚轮缩放 · 双击切换 · 放大后拖拽 */
+lbBox.addEventListener("wheel", e => { e.preventDefault(); zoomLB(e.deltaY < 0 ? 1 : -1); }, {passive:false});
+$("lb-img").addEventListener("dblclick", e => {
+  e.stopPropagation();
+  const s = state.lb;
+  if(!isResetLB(s)) resetLB();
+  else zoomLB(2);
+});
+let drag = null;
+$("lb-img").addEventListener("pointerdown", e => {
+  if(ZOOMS[state.lb.z] <= 1) return;
+  drag = { id:e.pointerId, sx:e.clientX, sy:e.clientY, ox:state.lb.x, oy:state.lb.y, moved:false };
+  lbBox.classList.add("drag");
+  e.currentTarget.setPointerCapture(e.pointerId);
+});
+$("lb-img").addEventListener("pointermove", e => {
+  if(!drag || e.pointerId !== drag.id) return;
+  const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
+  if(Math.abs(dx) > 3 || Math.abs(dy) > 3) drag.moved = true;
+  state.lb.x = drag.ox + dx; state.lb.y = drag.oy + dy;
+  applyTransform();
+});
+["pointerup","pointercancel"].forEach(ev => $("lb-img").addEventListener(ev, e => {
+  if(!drag || e.pointerId !== drag.id) return;
+  lbBox.classList.remove("drag");
+  const moved = drag.moved; drag = null;
+  if(moved) lbBox.dataset.justDragged = "1", setTimeout(() => delete lbBox.dataset.justDragged, 0);
+}));
+
+/* 点击图片以外的区域关闭 */
+lbBox.addEventListener("click", e => {
+  if(lbBox.dataset.justDragged) return;
+  if(e.target === lbBox || e.target === lbFig) lb.close();
+});
+lb.addEventListener("keydown", e => {
+  if(e.key === "ArrowLeft"){ e.preventDefault(); stepLB(-1); }
+  if(e.key === "ArrowRight"){ e.preventDefault(); stepLB(1); }
+  if(e.key === "+" || e.key === "="){ e.preventDefault(); zoomLB(1); }
+  if(e.key === "-" || e.key === "_"){ e.preventDefault(); zoomLB(-1); }
+  if(e.key === "0"){ e.preventDefault(); resetLB(); }
+});
+
+/* ==========================================================
+   12 · 路由 & 初始化
+   ========================================================== */
+function route(){
+  const his = (location.hash || "").indexOf("history") >= 0;
+  $("view-gen").hidden = his;
+  $("view-his").hidden = !his;
+  if(his){ $("tab-his").setAttribute("aria-current","page"); $("tab-gen").removeAttribute("aria-current"); }
+  else   { $("tab-gen").setAttribute("aria-current","page"); $("tab-his").removeAttribute("aria-current"); }
+  if(his) loadHistory();
+}
+window.addEventListener("hashchange", route);
+
+setToken(false);
+renderThumbs();
+applyAspect("1:1");
+setRange("all");
+gate();
+route();
+
+})();
+</script>
+</body>
+</html>
