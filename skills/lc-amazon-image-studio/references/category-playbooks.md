@@ -1,6 +1,6 @@
 # Category Playbooks
 
-Use this file when the default 7+1 image structure is too generic. Pick the closest category and adapt the image set accordingly.
+Use this file when the default seven Listing images (A+ is optional) is too generic. Pick the closest category and adapt the image set accordingly.
 
 ## 1. Tools / Hardware / Garage
 

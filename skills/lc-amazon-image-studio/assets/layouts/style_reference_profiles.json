@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "black-rabbit-05-primary",
+      "description": "黑兔 Listing 05：以可见耳朵、完整坐姿和蝴蝶结为核心的单品视觉细节画面。",
+      "signals": {
+        "product_category": ["home_decor"],
+        "image_intent": ["editorial_hero", "visual_detail"],
+        "composition": ["catalog_left_lifestyle_right", "copy_top_right"],
+        "lighting": ["warm_interior", "low_key"]
+      },
+      "related_product_categories": ["tabletop_gifting", "home_lighting", "home_organization"],
+      "max_auxiliary": 2,
+      "minimum_score": 8,
+      "minimum_matched_dimensions": 2,
+      "tie_break_case_ids": ["fy_05_taper_candles", "fy_10_floor_lamp", "fy_17_vanity_organizer"],
+      "selection_note": "主参考优先匹配家居装饰、编辑化层级和暖暗室内视觉；不以兔子外观相似度排序，也不借用样本文案、CTA或品牌。"
+    },
+    {
+      "id": "black-rabbit-10-scene-whitespace",
+      "description": "黑兔 A+ 10：产品在右、左侧干净留白的横幅场景细节底图。",
+      "signals": {
+        "product_category": ["home_decor"],
+        "image_intent": ["scene_whitespace", "lifestyle_hero"],
+        "composition": ["right_product_left_blank", "negative_space"],
+        "lighting": ["warm_interior", "soft_studio"]
+      },
+      "related_product_categories": ["home_lighting", "home_organization", "giftable_decor"],
+      "max_auxiliary": 2,
+      "minimum_score": 8,
+      "minimum_matched_dimensions": 2,
+      "tie_break_case_ids": ["fy_10_floor_lamp", "fy_17_vanity_organizer", "fy_16_rabbit_plush"],
+      "selection_note": "场景留白优先于外观相似；主参考用于右侧主体、左侧文本安全区和暖室内明暗，产品证据仍只来自黑兔主图与细节图。"
+    },
+    {
+      "id": "black-rabbit-11-detail-auxiliary",
+      "description": "黑兔 A+ 11：内部 HOLD 的可见细节辅助画面，不表达未经证实的规格或背面。",
+      "signals": {
+        "product_category": ["animal_decor"],
+        "image_intent": ["feature_detail", "detail_callout"],
+        "composition": ["callout_circles", "detail_insets"],
+        "lighting": ["low_key", "neutral_studio"]
+      },
+      "related_product_categories": ["home_decor", "giftable_decor", "storage_organizer"],
+      "max_auxiliary": 2,
+      "minimum_score": 7,
+      "minimum_matched_dimensions": 2,
+      "tie_break_case_ids": ["fy_11_car_organizer", "fy_20_winter_jacket", "fy_16_rabbit_plush"],
+      "selection_note": "细节标注结构优先于产品物种相似；仅提取暗色产品分离和局部框节奏，实际输出只显示已证实的黑兔正面可见细节。"
+    }
+  ]
+}

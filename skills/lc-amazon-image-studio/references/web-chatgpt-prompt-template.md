@@ -1,147 +1,69 @@
-# Web ChatGPT / Image 2 Prompt Template
+# 可选网页 ChatGPT 提示包
 
-Use this when you want web ChatGPT / Image 2 to create a secondary reference set, not a copied clone of marketplace images.
+仅在用户明确要求额外的网页版提示包时使用。常规生成与内置排版不需要此流程，不切换默认生成后端，不自动追加额外图片。
 
-## Usage Rules
+把以下占位内容替换为当前产品已核实事实。输出仍回到本 skill 的路由、质量和元数据流程；仅 `local_overlay` 再本地排字，`model_native` 不重复叠字。网页模型的响应尺寸、文字及产品细节不能直接视为验收通过。
 
-- Replace every placeholder with current product facts.
-- Keep the product facts grounded in the user's facts, selected strategy source, and real images.
-- Preserve the exact product proportions, structure, and visible details from the real images.
-- If numeric dimensions are known, preserve the normalized `L:W:H` ratio from those dimensions. If any axis is unsupported, keep it marked uncertain instead of guessing it.
-- If using the user-planned branch, tell web ChatGPT to follow the user's image plan and not introduce competitor-derived composition logic.
-- If using the competitor-learning branch, tell web ChatGPT to learn from the competitor references without copying layouts or text.
-- Tell web ChatGPT explicitly that canvas fitting must happen through padding, background extension, or scene recomposition, never by stretching or warping the product.
-- Prefer using the real product as a reference anchor or composite source for high-fidelity images instead of repainting the product body from scratch.
-- Provide separate close-up crops for every P0/P1 critical detail that should be visible in the requested view.
-- Mark details that are hidden from a view. Never move a hidden port, button, seam, or connector to another surface just to show it.
-- If a critical detail is unreadable in the source, stop that image instead of reconstructing it from imagination.
-- If the product category is obvious, inject category-specific scene logic from `category-playbooks.md`.
+## 整套说明模板
 
-## Master Prompt Template
+```text
+Create the requested image assets for [PRODUCT] for Amazon [MARKETPLACE]. All approved marketing copy uses [LANGUAGE].
+Deliver one candidate for each of [REQUESTED LISTING COUNT; DEFAULT 7] images with width:height [1:1 or 1:1.3]. The local final exporter will produce [2000×2000 or 2000×2600] Listing images, with neither edge below 1600 pixels. Add A+ only if requested, for [MODULE AND CANVAS]. Do not create extra variants or a draft-then-regenerate sequence by default.
 
-```markdown
-I am providing real product images and this strategy source: [USER IMAGE PLAN or COMPETITOR REFERENCE].
+Strategy: [user_planned or competitor_learning].
+User plan to preserve: [PURPOSES / CONTENT / COMPOSITIONS / ORDER].
+Buyer and primary task: [FACTS].
+Confirmed product facts and evidence: [FACTS WITH SOURCE IDS].
+Unknown facts and surfaces: [UNSUPPORTED CONTENT].
 
-Strategy branch:
-- [User-planned branch: follow the user's image generation plan/design ideas directly. Do not analyze or borrow competitor image logic unless I explicitly ask for comparison.]
-- [Competitor-learning branch: use the competitor reference only to understand selling jobs, objection handling, and market image logic. Do not copy exact layouts, text, brand names, badge systems, packaging, composition, or visual style.]
+Inspect the product region at original detail, not just the file dimensions. Assess actual clarity, effective product pixels, target-view fit and available evidence. A high-resolution file may still contain a blurred product. A clear source may still have the wrong angle.
+Choose pixel composite when product pixels are clear and fit the target scene; local reference edit when only part needs correction; reference-constrained generation when the product is globally blurred but supported by sufficient other evidence, or when the target view, lighting, pose or interaction requires reconstruction. Do not use a fixed render-mode order.
 
-Use the real product images to understand the product's structure, size, materials, included parts, and real usage context. Preserve the exact product proportions, silhouette, relative part sizes, and visible details from the real product images. Preserve the normalized `L:W:H` ratio from confirmed dimensions when available. If an axis is unsupported by the user facts, listing, or reference views, keep it uncertain instead of inventing it. Do not stretch, compress, slim, widen, elongate, shorten, or otherwise distort the product. Do not add, remove, relocate, simplify, or redesign any visible product detail or component.
+Preserve physical dimensions, structure, material identity, included parts and evidence-backed identifying details. Allow realistic perspective, visible silhouette, highlights and shadows to change with the target camera and environment. Never invent hidden ports, labels, textures or components. Reconstructed assets remain generated interpretations, not new evidence.
 
-Task:
-Create a new Amazon image set for [PRODUCT TYPE].
-
-Product truth:
-- [FACT 1]
-- [FACT 2]
-- [FACT 3]
-- [FACT 4]
-
-Geometry Lock:
-- Confirmed dimensions: [L x W x H or N/A]
-- Normalized L:W:H ratio: [RATIO or N/A]
-- Reference image anchors: [front / side / top / 45deg / detail]
-- Unsupported or uncertain axes: [NONE or DETAILS]
-
-Material Lock:
-- Material and finish: [CONFIRMED MATERIAL / FINISH]
-- Texture and light behavior: [CONFIRMED TEXTURE / REFLECTION / TRANSLUCENCY]
-
-Scene Scale Lock:
-- Product physical dimensions: [DIMENSIONS or UNKNOWN]
-- Support surface / reference object: [CONFIRMED SCALE CONTEXT]
-- Contact and shadow logic: [HOW THE PRODUCT PHYSICALLY SITS OR ATTACHES]
-
-Critical Detail Lock:
-- [P0 DETAIL]: [EXACT COMPONENT, SUPPORTED VIEW, POSITION, SHAPE, ORIENTATION, COLOR]
-- [P1 DETAIL]: [EXACT COMPONENT, SUPPORTED VIEW, POSITION, SHAPE, ORIENTATION, COLOR]
-- Hidden from this view: [DETAILS THAT MUST NOT BE MOVED INTO VIEW]
-- Do not delete, fill, move, enlarge, shrink, rotate, simplify, or replace any required P0/P1 detail.
-
-Locked physical traits that must not change:
-- [PROPORTION / SILHOUETTE FACT]
-- [VISIBLE DETAIL FACT]
-- [INCLUDED PART / ATTACHMENT FACT]
-
-Buyer context:
-- Buyer: [WHO BUYS IT]
-- Use environment: [WHERE IT IS USED]
-- Core job: [WHAT PROBLEM IT SOLVES]
-- Main objection to answer visually: [OBJECTION]
-
-User image plan to preserve:
-- [IMAGE PLAN ITEM or N/A]
-- [IMAGE PLAN ITEM or N/A]
-
-Output required:
-- 7 square Amazon listing images at 1600x1600
-- 1 A+ style image
-
-Render-mode guidance:
-- Prefer composite/edit for main, size/components, detail/material, and storage/package images so the real product body stays unchanged.
-- Use reference-constrained generation only when the scene must change substantially, and still keep the product locked to the Geometry Lock.
-
-Image system:
-1. Main image: white background, product only, no text, no scene.
-2. Size/components image: explain dimensions, variants, or included parts.
-3. Primary use image: show the product doing its most important real task.
-4. Compatibility/installation image: explain fit, mounting, connection, or workflow.
-5. Detail/material image: close-up evidence of construction quality or feature logic.
-6. Storage/package image: show storage, carrying, packaging, or set completeness if relevant.
-7. Problem/solution image: show pain point, workflow improvement, before/after, or efficiency logic.
-8. A+ image: premium wide image combining product, context, and concise value.
-
-Style:
-Photorealistic product photography mixed with clean Amazon infographic structure. Keep text short, readable, and secondary to the product. Use original composition. Avoid fake certifications, impossible scenes, over-claims, copied layouts, warped product geometry, or altered product details.
+Each image must express one core selling job. Product render mode and marketing text mode are independent decisions. Follow the per-image text_mode exactly:
+- none: no added marketing text; main images use this route.
+- local_overlay: generate a text-free base with the planned text space and protection regions; approved headings, dimensions, FAQ, precise labels and grids are composed locally afterward.
+- model_native: compose a complete photographic poster with integrated typography and purposeful graphics, rendering exactly the approved headline/body once each. Do not add claims, logos, badges or unexpected small print. There will be no local marketing text overlay afterward.
+Preserve authentic product labels in every route. Never use model_native for the main image or a pixel_composite job. Keep copy readable in the final image at 360px width; shorten or recompose instead of endlessly shrinking text.
+Design-reference priority: current user references, confirmed project design, then category-appropriate generic samples. Learn visual hierarchy, image crop, panel proportions, reading order and background purpose from individual finished units only; ignore screenshot UI, numbering and outer before/after comparison-board structure. References are not product facts. Use original execution; never transfer sample copy, products, packaging, brands, badges, purchase buttons or unsupported claims.
 ```
 
-## Per-Image Prompt Template
+## 单图提示模板
 
-```markdown
-Create Amazon listing image [IMAGE NUMBER] for [PRODUCT TYPE].
-
-Selling job:
-[ONE SELLING JOB]
-
-Render mode:
-[composite/edit or reference-constrained generation]
-
-Product facts that must stay accurate:
-- [FACT]
-- [FACT]
-
+```text
 Geometry Lock:
-- Confirmed dimensions: [L x W x H or N/A]
-- Normalized L:W:H ratio: [RATIO or N/A]
-- Reference image anchors: [front / side / top / 45deg / detail]
-- Unsupported or uncertain axes: [NONE or DETAILS]
+- Confirmed physical dimensions, ratios and structure: [FACTS]
+- Source views: [REFERENCES]
+- Target view and allowed projection changes: [CAMERA / POSE]
+- Unsupported surfaces and axes: [UNKNOWNS]
 
 Material Lock:
-- [CONFIRMED MATERIAL / FINISH / TEXTURE]
+- Material, colour, finish and texture identity: [FACTS]
+- Permitted lighting and reflection changes: [SCENE]
 
 Scene Scale Lock:
-- [PHYSICAL SIZE / SUPPORT / REFERENCE OBJECT / CONTACT SHADOW]
+- Physical size and scale context: [FACTS]
+- Support, attachment, contact and occlusion: [RELATIONSHIPS]
 
 Critical Detail Lock:
-- Required and visible: [DETAIL + EXACT SUPPORTED LOCATION]
-- Hidden from this view: [DETAILS THAT MUST NOT BE RELOCATED]
-- Attach a separate reference crop for every required P0/P1 detail.
-- Do not delete, fill, move, resize, rotate, simplify, or replace a required detail.
+- Required P0/P1 details: [DETAIL, LOCATION, EVIDENCE CROP]
+- Hidden details: [DO NOT MOVE INTO VIEW]
+- Any required detail without readable evidence: [BLOCK OR RECOMPOSE]
 
-Locked physical traits that must remain unchanged:
-- [PROPORTION / SILHOUETTE FACT]
-- [VISIBLE DETAIL FACT]
+Image: [ID / SELLING JOB]
+Render mode and rationale: [pixel_composite / reference_edit / reference_generate; QUALITY AND FIT REASON]
+Text mode: [none / local_overlay / model_native]
+Approved copy: [EXACT headline AND optional body; model_native ONLY]
+Input roles: [WHOLE PRODUCT / EDIT TARGET / DETAIL / MATERIAL / COMPONENT]
+Reference clarity and local defects: [ASSESSMENT]
+Design brief: [REFERENCE UNIT / READING ORDER / TYPE HIERARCHY / IMAGE-TEXT RELATIONSHIP / BACKGROUND PURPOSE]
+Layout and product region: [RECIPE / CANVAS / PRODUCT BOUNDS]
+Reserved text region and protected regions: [BOUNDS]
+Scene and lighting: [DESCRIPTION]
+Forbidden claims or additions: [LIST]
 
-Scene/composition:
-- [WHAT MUST BE SHOWN]
-- [WHAT THE PRODUCT IS DOING]
-- [WHAT SHOULD STAY SIMPLE]
-
-Do not show:
-- [CLAIM OR VISUAL TO AVOID]
-- [COMPETITOR-LIKE ELEMENT TO AVOID]
-- any altered proportions, warped geometry, or modified product details
-
-Style:
-Clean, photorealistic, conversion-focused Amazon base visual with no text. Add text later through deterministic layout.
+For none/local_overlay, create a photorealistic base without added marketing text. For model_native, create the complete designed poster with only the approved copy above; render text values only, not metadata or evidence IDs. Do not stretch the product. Preserve authentic product labels. For a repair, change only [X] and keep all other established product features, correct text and scene regions unchanged.
 ```
+
+导出前实际核对原尺寸及 360 预览；native 逐字转录真实成品并检查意外文字，不能拿提示文案当审阅结果。逐图记录是否含逼真 AI 人物，包括局部人物；规则与写入方式见 [AI 图片来源与导出](ai-image-policy.md)。不要要求网页模型在主图直接绘制 AI 水印来代替元数据。未知规格保持 HOLD，不生成虚构尺寸；本模板不授权 Amazon 上传。

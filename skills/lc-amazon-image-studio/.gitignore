@@ -1,0 +1,5 @@
+# Local production credentials and private template extensions must never be published.
+/config.json
+/assets/layouts/design_templates.user.json
+/scripts/__pycache__/
+*.py[cod]

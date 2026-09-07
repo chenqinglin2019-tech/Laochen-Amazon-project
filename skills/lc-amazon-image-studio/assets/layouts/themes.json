@@ -1,0 +1,6 @@
+{
+ "neutral":{"ink":"#17212B","muted":"#39434E","accent":"#244C52","surface":"#F7F8F6"},
+ "warm":{"ink":"#30251F","muted":"#59483D","accent":"#8D4931","surface":"#F7F1E8"},
+ "technical":{"ink":"#102637","muted":"#364E60","accent":"#065B87","surface":"#F0F6FA"},
+ "playful":{"ink":"#233426","muted":"#435746","accent":"#47682C","surface":"#F7F8EA"}
+}

@@ -1,0 +1,75 @@
+{
+  "fonts": [
+    {
+      "file": "NotoSans-Bold.ttf",
+      "sha256": "3a08a47daa00cade516425c15c57615aef2fd418ec9811a7b9f465088f92cc05",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/notofonts/noto-fonts",
+      "language_behavior": "Latin or Arabic shaping"
+    },
+    {
+      "file": "NotoSans-Regular.ttf",
+      "sha256": "f5f552c8c5edb61fe6efb824baf4d4de47b1a8689ab4925ff43f7bd6a4ebece5",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/notofonts/noto-fonts",
+      "language_behavior": "Latin or Arabic shaping"
+    },
+    {
+      "file": "NotoSansArabic-Bold.ttf",
+      "sha256": "457926cb001ac787dc7415c89e6f5b1c4ce3a0f2c91d0cabc1bc19a05638e7de",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/notofonts/noto-fonts",
+      "language_behavior": "Latin or Arabic shaping"
+    },
+    {
+      "file": "NotoSansArabic-Regular.ttf",
+      "sha256": "d6efa4c9fac8ecefd2de19676acc3a396ba7aee99ba7a2d513950246841b6725",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/notofonts/noto-fonts",
+      "language_behavior": "Latin or Arabic shaping"
+    },
+    {
+      "file": "NotoSansCJKsc-Bold.otf",
+      "sha256": "b5f0d1a190a7f9b43c310a8850630af12553df32c4c050543f9059732d9b4c0a",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/notofonts/noto-cjk",
+      "language_behavior": "CJK uses locl shaping with lang=zh-CN/ja/ko"
+    },
+    {
+      "file": "NotoSansCJKsc-Regular.otf",
+      "sha256": "2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b",
+      "license": "SIL Open Font License 1.1",
+      "source": "https://github.com/notofonts/noto-cjk",
+      "language_behavior": "CJK uses locl shaping with lang=zh-CN/ja/ko"
+    },
+    {
+      "file": "NotoSerif-Regular.ttf",
+      "family": "Noto Serif",
+      "weight": 400,
+      "sha256": "07c58a67d9a9d42565e94ed945a47fe58b90c2efc2f1474e151622a935f6b3b1",
+      "license": "SIL Open Font License 1.1",
+      "license_file": "OFL-NotoSerif.txt",
+      "source": "https://github.com/google/fonts/blob/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/notoserif/NotoSerif%5Bwdth%2Cwght%5D.ttf",
+      "source_sha256": "4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713",
+      "derivation": "Static wdth=100,wght=400 instance of the official variable font; FontTools 4.60.2 was build-time only.",
+      "language_behavior": "Latin/Greek/Cyrillic serif; fall back to the existing CJK font for Han text"
+    },
+    {
+      "file": "NotoSerif-SemiBold.ttf",
+      "family": "Noto Serif",
+      "weight": 600,
+      "sha256": "260cc315eff46698c2ddf1b861de5d841481af9f10744e61fb185f1a9bedc005",
+      "license": "SIL Open Font License 1.1",
+      "license_file": "OFL-NotoSerif.txt",
+      "source": "https://github.com/google/fonts/blob/5e35378e6bda803962ee6fd257e444a7d459660d/ofl/notoserif/NotoSerif%5Bwdth%2Cwght%5D.ttf",
+      "source_sha256": "4d8e6761424656867019081a1a01336f3cb086982682698714054fc33f782713",
+      "derivation": "Static wdth=100,wght=600 instance of the official variable font; FontTools 4.60.2 was build-time only.",
+      "language_behavior": "Latin/Greek/Cyrillic serif; fall back to the existing CJK font for Han text"
+    }
+  ],
+  "license_files": [
+    "OFL-CJK.txt",
+    "OFL-NotoSans.txt",
+    "OFL-NotoSerif.txt"
+  ]
+}

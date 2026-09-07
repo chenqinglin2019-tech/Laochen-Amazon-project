@@ -1,194 +1,99 @@
 ---
 name: lc-amazon-image-studio
-description: 基于真实产品图和卖点规划、生成与质检 Amazon Listing 与 A+ 图片，严格保留产品比例、材质和关键细节。
+description: 基于真实产品资料与可扩充的英文设计模板库制作 Amazon Listing 和 A+ 图片；自动选择套系与图位模板、拆解用户新参考入库，支持统一排字、产品一致性质检和增量交付。
 ---
 
-# 易逊-亚马逊套图生成
+# 易逊-亚马逊套图生成 V6
 
-Build a sellable `7+1` Amazon image system without repainting or simplifying the real product unnecessarily.
+同时验收设计与效率。默认 1 张主图＋6 张副图，A+ 按需默认 6 张；用户图位计划优先。Listing 默认 2000×2000，可选 2000×2600，两边至少 1600 px。A+ 按具体模块独立构图，不能把方图压扁。
 
-## Cloud Auth Gate
+## 使用边界与鉴权
 
-Before reading product images, inspecting competitor listings, planning image slots, writing prompts, generating images, or giving strategy output, run the Laochen cloud auth gate from this skill root.
+修改、审阅、测试 skill 属于维护，不要求生产输入。实际产品分析、策略、生成、编辑、恢复或交付前，必须从 skill 根目录运行云端鉴权；维护不能替代生产鉴权。
 
-The user's key goes in `config.json`:
+config.json 配置 backend_url（默认 https://mcp.yixunkuajing.com）与 backend_token；不得打印 token。按平台选择 tools/bin/ 下的 lc-auth-check-linux-amd64、lc-auth-check-darwin-arm64、lc-auth-check-darwin-amd64 或 lc-auth-check-windows-amd64.exe。
 
-```json
-{
-  "backend_url": "https://mcp.yixunkuajing.com",
-  "backend_token": ""
-}
-```
+macOS 首次运行前从根目录静默执行 `xattr -dr com.apple.quarantine tools/bin 2>/dev/null || true` 和 `chmod +x tools/bin/* 2>/dev/null || true`。运行鉴权工具；失败、缺 token 或二进制不可用时停止生产，仅回复“云端鉴权未通过，本轮不继续执行。”
 
-Choose the binary for the current platform:
+## 必读与按需读取
 
-- Linux: `tools/bin/lc-auth-check-linux-amd64`
-- macOS Apple Silicon: `tools/bin/lc-auth-check-darwin-arm64`
-- macOS Intel: `tools/bin/lc-auth-check-darwin-amd64`
-- Windows: `tools/bin/lc-auth-check-windows-amd64.exe`
+- 新项目选模板、用户提供风格参考、模板入库或维护：先读 [英文模板库](references/design-template-library.md)。模板拆解属于维护；实际产品生产仍先鉴权。
+- 生成、恢复、QA、交付：读 [运行流程](references/runtime-pipeline.md)、[设计与性能契约](references/v5-design-and-performance.md)。本地脚本不调用模型，默认使用内置 image_gen。
+- 图位与文案规划：读 [套图策略](references/amazon-listing-image-sop.md)。
+- 选择合成、编辑或重绘，处理素材质量与排版：读 [区域质量与内置排版](references/layout-and-quality.md)。
+- 每次生产：读 [AI 图片规则](references/ai-image-policy.md)，核对适用站点、类目、渠道。
+- 品类顾虑需要细化时读 [品类手册](references/category-playbooks.md)。仅用户要求额外网页版提示包时读 [网页提示模板](references/web-chatgpt-prompt-template.md)。
 
-On macOS, before the first run, silently execute:
+## 输入与真实性
 
-```bash
-xattr -dr com.apple.quarantine tools/bin 2>/dev/null || true
-chmod +x tools/bin/* 2>/dev/null || true
-```
+确认产品身份、真实图片、包含物、事实依据、站点语言、数量与图位计划。用户给出任一图位意图即用 user_planned，保留意图补齐空缺；否则 competitor_learning 学习信息顺序。缺单图资料只暂停该图，共享身份不明才阻断整套。未确认规格进入 HOLD，不进模型队列、不进上传清单。
 
-Then run the selected auth tool from the skill root. Never print or reveal the full key.
+原尺寸检查商品区域与关键细节；大文件不代表产品清晰。逐图按区域质量、放大倍率、证据和目标场景选择 pixel_composite、reference_edit 或 reference_generate，不设固定优先级。
 
-If auth fails, the token is missing, or the binary is unavailable, stop immediately and use only:
+建立四项锁：Geometry（结构、比例、可证视角）、Material（已知身份与可见外观）、Scene Scale（支撑、尺度与接触）、Critical Detail（P0 功能、P1 识别、P2 次要细节）。未知尺寸、基材、背面、配件不能从设计样本或生成图补事实。合理透视与照明变化允许，但必须可追溯到真实来源。
 
-```text
-云端鉴权未通过，本轮不继续执行。
-```
+必要 P0/P1 无可辨认依据时补资料或调整构图，不能猜。已验收修复／生成素材可复用，仍保留真实照片依赖，不升级成未知事实的证据。
 
-## Load Only What Is Needed
+## 参考驱动的逐图设计
 
-- Read `references/runtime-pipeline.md` for every full generation, edit, resume, QA, or delivery run.
-- Read `references/amazon-listing-image-sop.md` for product/buyer strategy, slot planning, and the delivery checklist.
-- Read `references/category-playbooks.md` when category-specific scenes or objections matter.
-- Read `references/web-chatgpt-prompt-template.md` only when the user requests a secondary web ChatGPT/Image 2 prompt pack.
+新项目默认 `design_template_policy={version:1,mode:auto}`，先选套系风格再选单图模板；优先级：本轮用户成品参考／指定模板 → 项目确认风格 → 模板库自动选择。模板设计说明、适用条件、提示词及避错要求统一英文，最终营销文案仍按站点语言。用户新参考实际看图拆解、语义审核和去重通过后自动进入用户库，报告结果，不等待例行二次确认；不清晰部分不猜。只借用设计，不抄样本商品、品牌或主张。
 
-## Required Inputs
+新项目 `style_contract.version=3`、`selection=design_first`；按选中套系、实际产品和品牌确定共享颜色／字体角色，显式文字组／layout 设置优先。默认角色为空，Agent 规划时填写，不能机械套用节日样本配色。商品原有标签不改色，主图无营销字。
 
-Collect before planning:
+保留设计指定值与实际采用值，`typography_decision` 记录两者及调整。指定颜色达到 4.5:1 即保留，不追求候选最高对比度。失败只在项目 `allowed_adjustments` 允许的明度、位置或局部柔和背景范围内修正；仍失败则修复该图布局，不静默换成白字或整块实色底框。V1 固定设计和 V2 自适应规则保留原行为。
 
-- one or more real product images
-- confirmed product facts, included parts, constraints, and selling points
-- either the user's image plan or one competitor Amazon URL/ASIN
-- target marketplace and requested output
+design_templates.json 保存内置套系／单图模板，design_templates.user.json 保存用户扩充，两者只含文本与追溯元数据。已采用模板以版本、内容哈希和完整文本快照绑定项目，不再依赖历史风格原图；不存图片、缩略图或 Base64，不删除用户原图。维护或分发更新不得覆盖已有用户库。真实产品照片、来源绑定与四项产品锁保持不变。
 
-Choose exactly one strategy branch:
+风格固定、构图适配：按画布、产品比例、批准文案和保护区安排图位，记录选择理由与实际调整。无合适模板则为当前项目撰写原创 design_brief 并注明未匹配，不强套，不自动把未验证项目方案收入库。prepare 编译为原有 design_brief，生成／排版依赖分离；模板库更新不替换已采用快照。
 
-- `user_planned`: select whenever the user specifies the purpose, content, composition, or sequence of at least one requested image; a partial plan is usable and may be completed from product truth
-- `competitor_learning`: select only when no usable user plan exists; learn selling jobs and objection handling, never copy execution
+旧项目不自动启用模板模式。style_reference_index.json 与 design_reference_units.json 保留旧外部参考接口；显式外部原图失效仍暂停受影响的新生成，不能声称匹配。无论模式，截图的 UI、编号和原图／生成图对照板外层关系都不属于目标设计。
 
-## Non-Negotiable Product Truth
+首次集中完成整套已批准文案、事实绑定、版式与素材可用性检查，再生成。新项目不创建 `copy_budget`，不得自动压缩、改写或删除批准文案；尺寸、步骤、品牌和必要限制必须保留。单图仍聚焦一个核心信息，但容量不足时只能换配方、扩大文字区或重新分配既有图位；仍无法容纳则 `needs_input`，不得缩字或擅自新增图位。尺寸、步骤和 FAQ 优先复用合格原图／底图，保留用户图位意图及真实来源。旧项目已有显式预算契约保持原行为。字段及默认解析见 [设计与性能契约](references/v5-design-and-performance.md)。
 
-Inspect source images at original detail before writing prompts.
+## 三种文字路线
 
-Build one reusable `Product Truth Profile`:
+逐图设置 text_mode，与产品 render_mode 独立：
 
-- `Geometry Lock`: confirmed dimensions, normalized ratios, silhouette, thickness, relative part sizes, supported views, and unknown axes
-- `Material Lock`: substrate, color, finish, gloss/roughness, translucency, texture, edges, and light behavior
-- `Scene Scale Lock`: physical dimensions, support surface, camera view, known reference-object range, contact point, and shadow logic
-- `Critical Detail Lock`: ports, buttons, indicators, screws, holes, clips, hinges, seams, stitching, scales, logos, labels, and other identifying details
+- none：主图、备用白底或无需文字的图片。
+- model_native：Agent 可在短装饰性标题确需融入场景时选择，填写 `model_native_reason`；若是 3D 立体嵌字，还必须填写 `embedding_decision={kind:surface_embedded_3d,reason,surface,material_lighting}`。仅限 1–5 词、无数字、无尺寸/限制/事实主张的标题，承载面须有可信透视、材质和受光；不得伪装商品标签。模型统筹摄影、文字与图形。准确文案只放 job.copy，禁止扩写。跳过本地排字及字体加载，不跳过实际文字／设计／产品审核。
+- local_overlay：默认用于场景海报、A+、卖点、尺寸、FAQ、步骤及拼版；先定构图、生成无字底图，再本地排版。文案只放 layout，不能重复填写 job.copy。可在一个文字组设置 `decorative_effect.kind=surface_emboss`，使用局部浅浮雕素材替换该组平面标题，品牌和正文照常本地排字，整图不转换为 model_native。
 
-Never infer a hidden axis, surface, component, accessory, port, label, or texture from an unsupported view.
+新项目初始化为 V3 本地空骨架，主图 none；普通文案保持本地排字。准确卖点、尺寸、步骤、FAQ、品牌和必要限制一律不得转为立体编辑；浅浮雕只允许 1–5 词、无数字和事实主张的装饰性短标题，须有可信承载面。十三张套图建议最多选择 1–2 张，也可完全不用；不新增四张样图或全套重生的必做关卡。旧项目缺 text_mode 时保持旧行为，不自动失效全部 raw。
 
-Never stretch, squeeze, widen, slim, elongate, shorten, thicken, smooth, redesign, add, delete, close, move, or simplify the real product.
+每张提示以四项锁开头，只附本图必需产品、细节与设计参考，默认一个候选。model_native 明确准确文字及禁止额外文字；其他路线无模型营销字。不例行“全部低清草稿→全部高清重做”。
 
-## Source-Quality Gate
+## 本地设计与视觉验收
 
-Judge the product's effective pixel area, not only the full image size.
+V3 六类配方：全幅叠字、页眉／页脚、摄影侧栏、四格场景、细节卡／标注、步骤分镜。最多六个独立文字组、四张可追溯素材，不建设通用设计器。
 
-- Allow `original_pixels` when final product pixels require at most `1.25x` enlargement.
-- Treat `1.25x–1.75x` as marginal; do not use it for macro material or critical-detail claims.
-- Block direct pixel compositing above `1.75x`; create and confirm one restored master or request better photos.
+文字组共用内部对齐线，标题、正文、标签保持合理距离。普通卡片随内容收缩；标题带、侧栏可以是有目的的完整构图区。透明、渐变或实色分区按画面用途选择，不能把“全部无底框”当设计准则。
 
-Do not claim that upscaling restored real details. If a logo, label, interface, scale, or texture is unreadable, request a close-up.
+新项目复用离线、许可证与哈希锁定的 Noto Sans/Noto Serif，按产品选择字体组合，用现有文字组组织引题、主标题、说明；氛围标题可用 Regular，功能标题可用粗体。`plain`、`outline`、`shadow` 不能替代主字形对比度，正文与标签保持清晰，按实际字形、语言和字重加载最小集合。方图、竖图、A+ 各自规划。最终按宽 360 px 预览，标题至少 18 px，正文／标签至少 12 px；放不下则换版式、扩展文字区或等待确认，绝不自动改写、删词或缩字。
 
-## Critical Detail Census
+局部浅浮雕的 `headline_treatment` 保持plain，先制作精确平面字引导，再实际调用编辑工具；CLI只登记提示、素材、遮罩及真实工具事件，不执行或伪造模型调用。采用遮罩只覆盖允许文字与接触阴影，必须避开全部产品保护区和其他文字；同组不重复绘字。素材或配置失效时恢复完整平面标题并记录原因，采用效果后仍通过正常审核包记录实际转录、承载面、透视、受光与保护检查。
 
-Register every functional or identifying micro-detail as `P0`, `P1`, or `P2`:
+原尺寸、360 预览与参考对照逐张看：产品真实性、焦点、文字主次、分组、底框用途、图文融合及整套重复度。几何自动通过不是设计通过。模型文字须记录实际转录、文字区域及意外小字／徽章；计划 copy 不能冒充实际观察。
 
-- `P0`: functional; missing, moved, filled, or redesigned is a hard failure
-- `P1`: identifying; obvious change is a failure
-- `P2`: minor appearance; reasonable lighting variation is allowed
+对比度在最终编码的 JPG 字形核心检查，最低 4.5:1；普通文字与浅浮雕分别保留方法和证据，不使用整框平均亮度替代。质量 92 失败时仅该图重试 95，仍失败则修复；A/B 比较由项目显式设置相同编码条件。产品保护先比对统一尺寸的无损合成像素，再检查 JPEG 损失，不能声称 JPG 与源 PNG 逐像素相同。
 
-For every detail, record:
+## 调度与增量处理
 
-- evidence level: `visual_confirmed`, `user_claim_only`, `listing_fact`, or `unknown`
-- separate visual confirmation: `confirmed`, `unverifiable`, or `unknown`
-- supported reference and view
-- normalized bounding box inside the product box
-- component, position, shape, orientation, color, and surrounding structure
-- per-image visibility: `required`, `optional`, or `hidden`
+prepare/plan 在生成前以仅测量模式缓存检查真实字体、文字容量、区域和保护区，不生成截图、360 预览或审核文件；派发时自动保存实际构图约束，后期改字不反复修改模型构图。先 prepare、plan，仅派发一个最高风险可执行锚点；真实 QA 通过后并发 2，限流／重复超时降 1。审核、排版和导出不占模型名额；有结果立即入库，有可运行任务立即补位。三张升级验证锚图不是日常固定三轮审批。
 
-Extract a separate detail reference crop. Mark it `unverifiable` when every crop has a longest edge below `32px`, a shortest edge below `8px`, or cannot be visually identified. Block any image that requires an unverifiable P0/P1 detail.
+transition generating 获得 attempt 与提示指纹；真实工具开始／返回时记录 attempt-event，返回立即 ingest 绝对产物路径并保留精确返回时间。重复同绑定幂等；旧 attempt／旧提示／不同产物冲突拒绝。禁止手改状态或哈希伪装完成。
 
-Set `critical_detail_census_completed=true` only after inspecting all source images at original resolution. For every P0/P1 detail, explicitly assign `required`, `optional`, or `hidden` to every job. A user's statement that a USB port exists is product evidence, but without a readable view and location it remains `user_claim_only` and blocks any image that must show it.
+提示与参考应在 transition 之前预读完；将 transition、tool_started 与实际生图调用紧接执行，避免占着生成名额再组织请求。返回后先 ingest 再审图，不能把代理准备／等待记成模型时间。
 
-Do not force a detail into an angle where it should be hidden. Never move a USB port to another surface to make it visible.
+重处理采用短锁快照、锁外独立暂存、指纹复核后短锁合并；不能用旧 Manifest 覆盖其他任务。只处理当前就绪图，不为凑批等待模型。无变化不调用模型、不启动渲染器、不重建审核素材；总览及完整对照在交付或明确预览请求时统一更新。
 
-## Render Modes
+本地改字只重排该图；局部标题的文字、字号、位置、素材、遮罩、承载面或光照变化只更新相关效果／布局及审核，不重生未变的产品底图。模型原生文字改动只修该图；构图变化才重生相关底图，元数据变化只导出。网络瞬时失败最多两次，模型质量默认每图修复一次；initial／quality_repair／transient_retry 历史独立记录，重新 prepare 不补充修复预算。
 
-Choose the safest mode per slot:
+## 审核与交付
 
-- `pixel_composite`: preserve real or confirmed-master product pixels; use first for main, size, material, detail, and package slots
-- `reference_edit`: change only the requested background, light, or local environment
-- `reference_generate`: use only for complex interaction scenes; require full geometry/material/scale/detail review
+推荐命令使用 --json，stdout 只返回一个对象；日志写 stderr。review-prepare 准备同轮就绪任务及待本地合成任务，原尺寸、360 预览和细节对照都看过后 review-submit；准备命令不能签发。annotations 支持完整 job map，review-submit 接受单包、包列表或 job map；批处理逐图返回 results/errors，失败图回滚，成功图保留。仅复用已有真实提交且产品上下文未变的观察，文字、布局及遮挡仍重新看；review/submissions 保留实际记录。旧图、旧坐标、旧文案或旧预览的提交必须拒绝。
 
-Prefer generating around the product over generating the product again.
+模型文字符号逐字核对；拼版逐面板核对来源、产品身份和裁切。缺结论留 review_pending；本地文字失败走本地修复，模型文字失败走受控模型修复。未知规格 HOLD 不作为正式交付。
 
-Main image requirements:
+区分参考、规划、就绪等待、工具调用、交接、锁等待、编码、字体、渲染、审核准备／等待、导出、打包计时；批开销记一次。历史 generation 保留生命周期，不补造推理时间。模型服务时间不可控，真实样本不足时明确标注，不能用本地基准称整套提速倍数。
 
-- pure white background
-- actual product only
-- no text, claims, props, people, watermark, or invented component
-
-## Fast Resumable Execution
-
-Use `scripts/lc_image_pipeline.py` and `assets/project_manifest.template.json` as described in `references/runtime-pipeline.md`.
-
-Default to `risk_gated_auto`:
-
-- pause only for missing product truth, insufficient source quality, an unverified restored master, or an unverifiable required P0/P1 detail
-- obey the manifest-wide `generation_gate`; do not generate other required jobs while it is closed
-- generate two anchors first: main image and primary-use scene
-- after anchor QA, generate remaining jobs in pairs with concurrency `2`
-- reduce concurrency to `1` after rate limiting or repeated timeouts
-- generate only the requested `7+1`; do not add bonus images by default
-- retry transient failures twice with the same prompt hash
-- allow one targeted quality repair per job
-- reuse every unchanged `qa_passed` job
-
-The built-in `image_gen` path remains the default. Do not switch to CLI/API generation unless the user explicitly requests it.
-
-## Prompt Contract
-
-Begin every per-image prompt with the four locks. Include only critical details relevant to that view.
-
-Label every input image role explicitly:
-
-- whole-product reference
-- edit target
-- critical-detail reference
-- material reference
-- component or package reference
-
-Generate text-free bases. Add dimensions, headlines, and callouts deterministically during local postprocessing.
-
-For edits, say `change only X; keep everything else unchanged`. Repeat product invariants on every repair.
-
-## Hard QA Gate
-
-Do not deliver from a contact-sheet-only review.
-
-For every required P0/P1 detail:
-
-1. locate the expected region from the output product box and normalized detail coordinates
-2. generate a side-by-side reference/output detail comparison
-3. inspect it at original detail
-4. record an explicit `pass` or `fail` in `detail_qa_results`
-
-Treat a missing verdict as `repair_needed`. Treat an unverifiable required detail as `blocked`.
-
-Also record explicit semantic verdicts for geometry, material, components, and scene scale, plus policy verdicts for main-image content, claims, competitor copying, and text readability. A prompt is an instruction, not QA evidence.
-
-When a P0/P1 detail fails, perform one precise-object edit using the generated repair prompt. Change only that local detail. If it fails again, block the job and request a better close-up or human retouch.
-
-## Delivery Gate
-
-Deliver only when:
-
-- all required jobs are `qa_passed`
-- every required P0/P1 detail has an explicit pass
-- listing images are exactly `1600x1600`
-- A+ matches the requested module, normally `970x600`
-- no non-uniform scaling, unsupported component, hallucinated claim, copied competitor execution, or unreadable text remains
-- `project_manifest.json`, `qa_report.json`, final contact sheet, and micro-detail contact sheet exist
-
-Run the runtime `delivery-check`; file presence alone is insufficient because it also verifies current prompt/output hashes and every required job state.
-
-If any required job is `blocked`, `repair_needed`, or `failed`, identify it as not production-ready. Never describe an incomplete set as finished.
+完整 finalize 更新总览，再 deliver 验证当前依赖与产物。新项目默认 compact_jpg：保持上传尺寸，JPG 质量 92、4:4:4；细节不满意的单图用 95。保留一次原始来源、采用底图、最终 JPG、Manifest、文案／布局及真实审核／计时记录。通过交付检查后持久保存证据绑定，再清理已登记的自有预览、对比缓存及未采用候选；缓存可重建，输入或成品改变仍失效。默认不生成 PNG 成品、ZIP 或 HTML，且不再提供独立 HTML 分享入口。旧项目缺配置保持原行为，启用新配置须重新验证受影响部分。全部必需图通过才声明整套完成；旧版保留、新版单独交付，不默认上传 Amazon。

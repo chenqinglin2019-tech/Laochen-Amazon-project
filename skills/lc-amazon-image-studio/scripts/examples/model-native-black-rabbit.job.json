@@ -1,0 +1,46 @@
+{
+  "id": "03_scene_poster",
+  "required": true,
+  "kind": "listing",
+  "render_mode": "reference_generate",
+  "text_mode": "model_native",
+  "copy": {
+    "headline": "A Springtime Accent",
+    "body": "Black bunny. Checked bow."
+  },
+  "claim_ids": ["black_single_visual", "checked_bow_visual", "indoor_display_use"],
+  "canvas": [2000, 2000],
+  "view": "observed_single_view",
+  "target_view": "observed_single_view",
+  "selling_job": "Present one black rabbit as a styled indoor decorative accent with a compact photographic-poster heading.",
+  "source_reference_ids": ["black_master_white"],
+  "scene": "A warmly lit indoor side table with a single black rabbit. Layered wood, a small vase and soft background depth establish a lived-in room. Context props are not included product accessories.",
+  "composition": "Use the single rabbit as the focal point; integrate the approved short headline into natural upper-left negative space without obscuring ears or bow.",
+  "lighting": "Warm window light with natural surface contact, gentle side highlights and a softly receding background.",
+  "target_product_bbox_norm": [0.5, 0.25, 0.34, 0.66],
+  "requires_fine_detail": false,
+  "padding_color": "#ffffff",
+  "raw_output": "raw/03_scene_poster.png",
+  "final_output": "final/03_scene_poster.png",
+  "layout": {},
+  "design_brief": {
+    "version": 1,
+    "reference_ids": [],
+    "generation": {
+      "photography": "Warm lifestyle photography, clear subject/background separation, plausible indoor scale and restrained spring accents.",
+      "composition": "One integrated scene with upper-left editorial copy and a lower-right single-product focal point. Do not create a two-product bundle, measurements or comparison claims."
+    },
+    "layout": {
+      "headline_tone": "Strong clean sans serif title; lighter, shorter supporting line.",
+      "text_surface": "Natural image contrast first; a soft localized tonal transition is allowed when needed, never a disconnected oversized rectangle.",
+      "hierarchy": "The product and headline are the two dominant elements. Keep copy compact and readable at 360px width."
+    }
+  },
+  "status": "pending",
+  "attempts": 0,
+  "quality_repairs": 0,
+  "semantic_qa_results": {},
+  "policy_qa_results": {},
+  "detail_qa_results": {},
+  "ai_disclosure": {"human_source": "unknown", "notes": "Review the actual generated image before export."}
+}

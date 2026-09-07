@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "renderer_version": "3.0.0",
+  "node_min_major": 20,
+  "playwright_version": "1.62.1",
+  "chromium_version": "149.0.7827.55",
+  "pillow_version": "12.3.0",
+  "discovery": "PATH, LC_LAYOUT_NODE, LC_LAYOUT_NODE_MODULES, LC_LAYOUT_CHROMIUM, bundled Codex runtime and Playwright caches; versions must match"
+}

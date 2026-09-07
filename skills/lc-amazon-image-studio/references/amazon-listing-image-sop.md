@@ -1,127 +1,58 @@
-# Amazon Listing Image Strategy SOP
+# 买家与套图策略
 
-Use this reference for buyer logic, image-slot strategy, and product-understanding output. Use `runtime-pipeline.md` for execution, state, detail crops, retries, postprocessing, and QA.
+本文件用于产品理解、图位和文案规划；执行命令见 [运行流程](runtime-pipeline.md)，素材决策及排版见 [区域质量与内置排版](layout-and-quality.md)。
 
-## 1. Inputs and branch
+## 产品理解与事实边界
 
-Collect:
+确认真实产品图片、组件及包装资料、卖点依据、目标买家、站点和语言。先看每张图片里的产品原尺寸裁图，再判断可以展示的视角、细节和材质；不要从文件像素尺寸推断商品清晰度。
 
-- real product, component, detail, and packaging photos
-- confirmed facts, selling points, included parts, constraints, and target buyer
-- target marketplace
-- either the user's image plan or one competitor URL/ASIN
+使用简短产品检查点，记录：
 
-Select one branch:
+- 产品、买家、主要任务、使用环境和最重要的购买顾虑。
+- 已确认尺寸／物理比例、材料、颜色、包含物，以及需要证明的数值和性能。
+- 参考与目标视角、未知轴面、结构和关键细节的实拍依据。
+- 商品区域质量、需要局部修复或重绘的原因，以及受影响图位。
+- 四项锁、P0/P1 可见性、禁止推断内容、尚缺资料。
+- 策略分支及需保留的用户构图；竞品仅提炼信息目的。
 
-- `user_planned`: use when the user specifies the purpose, content, composition, or sequence of at least one image; preserve that partial or complete plan and fill only its gaps
-- `competitor_learning`: study only selling jobs, objections, and sequence; do not copy layout, wording, badges, branding, packaging, or composition
+检查点用于确认理解，不默认增加整套审批。遇到未知背面接口等具体事实缺口，仅暂停依赖它的图片；清晰度差但证据充分时可以参考重绘。
 
-## 2. Product understanding
+## 图位系统
 
-Inspect real product images at original resolution. Record:
+默认 7 张 Listing：
 
-- product type, buyer, primary job, and use environment
-- confirmed dimensions and supported ratios
-- supported front/rear/side/top/bottom/45-degree views
-- silhouette, thickness, relative part sizes, attachment geometry, and included parts
-- materials, finish, color, texture, transparency, and light behavior
-- ports, buttons, indicators, screws, holes, clips, seams, labels, and other micro-details
-- known and unknown facts
-- claims that require proof
+1. `01_main`：白底清楚展示实际商品及包含物，无额外文案。
+2. `02_size_or_components`：已确认的尺寸或套装内容。
+3. `03_primary_use_case`：最有价值的真实使用任务。
+4. `04_compatibility_or_installation`：适配、连接、安装或操作逻辑。
+5. `05_material_or_detail`：有清晰证据的材质、工艺或结构。
+6. `06_storage_or_package`：收纳、携带、包装或完整包含物。
+7. `07_problem_solution`：解决一个真实购买顾虑。
 
-Build Geometry, Material, Scene Scale, and Critical Detail locks. Never infer hidden product truth.
+用户要求 A+ 时增加 `08_a_plus`，按所选模块单独规划。以上是可替换的默认卖点顺序，图位不适用时换成更有购买价值的内容，不用无依据尺寸、空泛材料特写或假前后对比补数。
 
-## 3. Product Understanding Checkpoint
+每张图必须有一个核心结论和明确视觉焦点，记录目标视角、参考依据、商品生成方式及理由、`text_mode`、产品区域、关键细节可见性、接触关系、准确文案来源和 `design_brief`。拼版的每个 panel 也要说明来源与阅读顺序；用户的部分计划可据此补齐，无需强制索要竞品。
 
-Output:
+## 文案与布局规划
 
-```markdown
-## Product Understanding Checkpoint
-- Product:
-- Buyer:
-- Primary use:
-- Confirmed dimensions and ratios:
-- Supported views:
-- Unsupported axes / surfaces:
-- Geometry Lock:
-- Material Lock:
-- Scene Scale Lock:
-- P0/P1 Critical Detail Lock:
-- Source quality and safe enlargement:
-- Master asset mode:
-- Included parts:
-- Trust-building facts:
-- Claims to avoid:
-- Selected strategy branch:
-- User plan to preserve:
-- Competitor logic worth learning from:
-- Must-not-generate list:
-- Blocking uncertainties:
-```
+以产品任务决定布局，参考优先级为本轮用户参考、已确认项目设计、通用样本库。将用户截图分成单张成品单元，分析文字层级、图片裁切、分区、背景用途、焦点与阅读顺序；丢弃截图 UI、编号和原图／成品外层对比板。参考分析按内容指纹复用，不逐图重看整库。
 
-Under `risk_gated_auto`, stop only when a blocking uncertainty could change product truth, a restored master needs confirmation, or a required P0/P1 detail is unverifiable.
+整套共享视觉规范，每张根据内容选配方，不统一套白卡，也不统一套无框衬线字。只学习参考的视觉语言，不迁移样本文字、品牌、数量、功能或未经确认主张。通用选择必须适合当前品类，不能固定套用某个示例产品。
 
-## 4. Image system
+标题说清一个结果，正文提供必要限定，标注提供证据。数值、兼容性、性能和认证都须有明确来源；禁止擅自加保证章、购买按钮、排名或贬低竞品的比较。
 
-Default sequence:
+首次集中完成整套准确且已批准的文案、素材和版式规划，预查容量与依据。主图／无字图用 `none`；普通场景海报、A+、卖点、尺寸、FAQ、步骤及拼版默认 `local_overlay`，先生成无字底图，再按实际背景选择项目契约允许的颜色与字体；只有装饰性短标题确需融入实物或场景时才用 `model_native`，填写 `model_native_reason`，3D 嵌字另填 `embedding_decision`，只绘制 `job.copy` 中已批准内容。两条文字路线不能重复叠字，也不能让模型扩写卖点。
 
-1. `01_main`: exact product on white; no text or props
-2. `02_size_or_components`: confirmed dimensions or confirmed set contents
-3. `03_primary_use_case`: highest-value believable task
-4. `04_compatibility_or_installation`: confirmed fit, connection, mounting, or workflow
-5. `05_material_or_detail`: real construction evidence from a verified crop/master
-6. `06_storage_or_package`: confirmed organization, carrying, package, or set completeness
-7. `07_problem_solution`: resolve one buyer objection
-8. `08_a_plus`: wide premium summary grounded in confirmed facts
+local 用真实文案测量 V3 文字组，再把留白和保护区写进底图构图；native 也在生成前给出文字主次与图文关系。正文放不下先换构图、扩大文字区或请求确认，不生成长段模型文字，不把标题缩成小字，也不自动精简批准文案。360 px 预览标题至少 18 px、正文至少 12 px；尺寸、标签和必要限定不能为美观删除。
 
-Replace a weak slot when the category does not need it. Every image must have one visual lead and one selling job.
+场景应解释产品如何使用。道具尺寸、连接、安装、支撑、接触阴影和遮挡保持物理可信；改变角度后允许正常透视变化，但不能改变产品结构或增加配件。
 
-For every slot, record:
+## 出图顺序与最终审阅
 
-- selling job
-- supported view
-- render mode
-- source references
-- required and hidden critical details
-- product output bounding box
-- scene scale and support/contact logic
-- facts and claims allowed in deterministic overlays
+日常选新视角、互动、细节或布局中风险最高的一张锚图，不固定增加审批轮次。每图默认一个候选，不例行低清后全部重做高清；锚点通过后保持独立生成并发 2，限流降为 1。结果立即入库并补位，排版和 QA 不占生成名额；HOLD 与缺资料图不进入模型队列。
 
-## 5. Composition and anti-copy rules
+只附本图必要的产品、细节与设计参考。local 改字只重排本图，native 改字只修订本图模型海报；无变化复用素材和审核，总览在交付或明确预览时统一更新。真实工具、交接、锁等待、本地处理与审阅等待分开计时，不用本地渲染提速代替端到端结论。
 
-- Show a believable task, not decorative staging.
-- Keep props subordinate to the product and physically plausible in size.
-- Keep connection, installation, support, contact shadow, and occlusion physically coherent.
-- Use padding, background extension, or recomposition instead of product distortion.
-- Borrow only the objection being answered from competitors.
-- Never copy a competitor's layout, headline, badge stack, scene, packaging cue, brand term, or distinctive execution.
+最终用原尺寸审阅商品清晰度、关键细节和全部文字，用 360 px 预览看可读性，对照选中参考检查层级、分组、背景用途和图文融合，再看整套节奏与重复度。native 文字从真实成品逐字转录并盘点意外小字／徽章；拼版逐 panel 审来源、产品一致性与裁切。自动尺寸、白角或碰撞通过不能证明商品真实或设计好看。
 
-## 6. Prompt strategy
-
-Create one prompt per image from the manifest-generated lock blocks.
-
-- Attach only references relevant to the current view.
-- Attach a separate crop for every required P0/P1 detail.
-- Mark details hidden from the view so the model does not relocate them.
-- Ask for text-free bases.
-- Prefer `pixel_composite`, then `reference_edit`, then `reference_generate`.
-- Use targeted single-change edits for repairs; never rewrite the whole prompt and regenerate the full set.
-
-## 7. Delivery checklist
-
-- Required inputs and strategy branch recorded
-- Source-quality gate completed
-- Critical Detail Census explicitly completed after original-resolution inspection
-- Every P0/P1 visibility rule covers every job
-- Restored master confirmed when used
-- Four locks present in every prompt
-- Every required P0/P1 detail explicitly passed
-- No hidden detail was moved into view
-- No unsupported accessory, port, texture, label, or claim added
-- Main image is product-only on pure white
-- Listing images are `1600x1600`
-- A+ matches requested size
-- Text comes from deterministic postprocessing
-- Manifest, QA report, contact sheet, and micro-detail sheet delivered
-- Runtime `delivery-check` passed against current prompt and output hashes
-- Human review risks stated for dimensions, compliance claims, and IP
+完整交付条件统一以 [运行流程的交付门槛](runtime-pipeline.md#交付门槛) 为准；不要另建不同的放行清单。

@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "project_id": "",
   "run_mode": "risk_gated_auto",
   "generation_backend": "built_in_image_gen",
@@ -9,11 +9,8 @@
   "max_quality_repairs": 1,
   "product_truth": {
     "product": "",
-    "source_quality": "unknown",
     "safe_upscale_ratio": 1.25,
     "max_marginal_upscale_ratio": 1.75,
-    "master_asset_mode": "original_pixels",
-    "master_confirmed": false,
     "geometry_lock": {
       "confirmed_dimensions": "",
       "normalized_ratio": "",
@@ -41,22 +38,46 @@
       "role": "whole_product_reference",
       "view": "front",
       "visual_quality": "unknown",
-      "product_bbox_norm": [0.1, 0.05, 0.8, 0.9]
+      "product_bbox_norm": [
+        0.1,
+        0.05,
+        0.8,
+        0.9
+      ],
+      "quality_review": {
+        "clarity": "unknown",
+        "evidence": "unknown",
+        "defects": [],
+        "notes": "",
+        "reviewed_sha256": "",
+        "reviewed_region_fingerprint": ""
+      }
     }
   ],
   "critical_details": [],
   "jobs": [
     {
       "id": "01_main",
+      "text_mode": "none",
       "required": true,
       "kind": "main",
       "view": "front",
       "selling_job": "Show the exact product clearly on a pure white background",
-      "render_mode": "pixel_composite",
+      "render_mode": "reference_generate",
       "requires_fine_detail": false,
-      "canvas": [1600, 1600],
-      "source_reference_ids": ["product_front"],
-      "target_product_bbox_norm": [0.075, 0.075, 0.85, 0.85],
+      "canvas": [
+        2000,
+        2000
+      ],
+      "source_reference_ids": [
+        "product_front"
+      ],
+      "target_product_bbox_norm": [
+        0.075,
+        0.075,
+        0.85,
+        0.85
+      ],
       "raw_product_bbox_norm": null,
       "output_product_bbox_norm": null,
       "detail_output_bbox_norms": {},
@@ -66,25 +87,55 @@
       "padding_color": "#ffffff",
       "raw_output": "raw/01_main.png",
       "final_output": "final/01_main.png",
-      "text_overlays": [],
       "status": "pending",
       "attempts": 0,
       "quality_repairs": 0,
       "semantic_qa_results": {},
       "policy_qa_results": {},
-      "detail_qa_results": {}
+      "detail_qa_results": {},
+      "target_view": "front",
+      "source_assessment": {
+        "scene_fit": "unknown",
+        "evidence": "unknown",
+        "degradation": "unknown",
+        "reason": "",
+        "reviewed_reference_hashes": {},
+        "reviewed_context_fingerprint": ""
+      },
+      "ai_disclosure": {
+        "human_source": "unknown",
+        "notes": "",
+        "reviewed_image_sha256": ""
+      },
+      "claim_ids": [],
+      "placement_mode": "template",
+      "product_layers": [],
+      "detail_evidence_reference_ids": {},
+      "layout": {},
+      "generation_dependency_version": 2
     },
     {
       "id": "02_size_or_components",
+      "text_mode": "local_overlay",
       "required": true,
       "kind": "listing",
       "view": "front",
       "selling_job": "Explain confirmed size or included components without inventing accessories",
-      "render_mode": "pixel_composite",
+      "render_mode": "reference_generate",
       "requires_fine_detail": false,
-      "canvas": [1600, 1600],
-      "source_reference_ids": ["product_front"],
-      "target_product_bbox_norm": [0.1, 0.1, 0.8, 0.8],
+      "canvas": [
+        2000,
+        2000
+      ],
+      "source_reference_ids": [
+        "product_front"
+      ],
+      "target_product_bbox_norm": [
+        0.1,
+        0.1,
+        0.8,
+        0.8
+      ],
       "raw_product_bbox_norm": null,
       "output_product_bbox_norm": null,
       "detail_output_bbox_norms": {},
@@ -94,25 +145,63 @@
       "padding_color": "#ffffff",
       "raw_output": "raw/02_size_or_components.png",
       "final_output": "final/02_size_or_components.png",
-      "text_overlays": [],
       "status": "pending",
       "attempts": 0,
       "quality_repairs": 0,
       "semantic_qa_results": {},
       "policy_qa_results": {},
-      "detail_qa_results": {}
+      "detail_qa_results": {},
+      "target_view": "front",
+      "source_assessment": {
+        "scene_fit": "unknown",
+        "evidence": "unknown",
+        "degradation": "unknown",
+        "reason": "",
+        "reviewed_reference_hashes": {},
+        "reviewed_context_fingerprint": ""
+      },
+      "ai_disclosure": {
+        "human_source": "unknown",
+        "notes": "",
+        "reviewed_image_sha256": ""
+      },
+      "claim_ids": [],
+      "placement_mode": "template",
+      "product_layers": [],
+      "detail_evidence_reference_ids": {},
+      "layout": {
+        "template": "dimensions",
+        "version": 3,
+        "recipe": "detail_callouts",
+        "theme": "neutral",
+        "text_groups": [],
+        "items": [],
+        "protected_regions": []
+      },
+      "generation_dependency_version": 2
     },
     {
       "id": "03_primary_use_case",
+      "text_mode": "local_overlay",
       "required": true,
       "kind": "listing",
       "view": "front",
       "selling_job": "Show the product performing its primary believable task",
       "render_mode": "reference_generate",
       "requires_fine_detail": false,
-      "canvas": [1600, 1600],
-      "source_reference_ids": ["product_front"],
-      "target_product_bbox_norm": [0.2, 0.18, 0.6, 0.65],
+      "canvas": [
+        2000,
+        2000
+      ],
+      "source_reference_ids": [
+        "product_front"
+      ],
+      "target_product_bbox_norm": [
+        0.2,
+        0.18,
+        0.6,
+        0.65
+      ],
       "raw_product_bbox_norm": null,
       "output_product_bbox_norm": null,
       "detail_output_bbox_norms": {},
@@ -122,25 +211,63 @@
       "padding_color": "#ffffff",
       "raw_output": "raw/03_primary_use_case.png",
       "final_output": "final/03_primary_use_case.png",
-      "text_overlays": [],
       "status": "pending",
       "attempts": 0,
       "quality_repairs": 0,
       "semantic_qa_results": {},
       "policy_qa_results": {},
-      "detail_qa_results": {}
+      "detail_qa_results": {},
+      "target_view": "front",
+      "source_assessment": {
+        "scene_fit": "unknown",
+        "evidence": "unknown",
+        "degradation": "unknown",
+        "reason": "",
+        "reviewed_reference_hashes": {},
+        "reviewed_context_fingerprint": ""
+      },
+      "ai_disclosure": {
+        "human_source": "unknown",
+        "notes": "",
+        "reviewed_image_sha256": ""
+      },
+      "claim_ids": [],
+      "placement_mode": "template",
+      "product_layers": [],
+      "detail_evidence_reference_ids": {},
+      "layout": {
+        "template": "scene",
+        "version": 3,
+        "recipe": "photo_overlay",
+        "theme": "neutral",
+        "text_groups": [],
+        "items": [],
+        "protected_regions": []
+      },
+      "generation_dependency_version": 2
     },
     {
       "id": "04_compatibility_or_installation",
+      "text_mode": "local_overlay",
       "required": true,
       "kind": "listing",
       "view": "front",
       "selling_job": "Explain confirmed fit, attachment, installation, or workflow",
-      "render_mode": "reference_edit",
+      "render_mode": "reference_generate",
       "requires_fine_detail": false,
-      "canvas": [1600, 1600],
-      "source_reference_ids": ["product_front"],
-      "target_product_bbox_norm": [0.18, 0.15, 0.64, 0.7],
+      "canvas": [
+        2000,
+        2000
+      ],
+      "source_reference_ids": [
+        "product_front"
+      ],
+      "target_product_bbox_norm": [
+        0.18,
+        0.15,
+        0.64,
+        0.7
+      ],
       "raw_product_bbox_norm": null,
       "output_product_bbox_norm": null,
       "detail_output_bbox_norms": {},
@@ -150,25 +277,63 @@
       "padding_color": "#ffffff",
       "raw_output": "raw/04_compatibility_or_installation.png",
       "final_output": "final/04_compatibility_or_installation.png",
-      "text_overlays": [],
       "status": "pending",
       "attempts": 0,
       "quality_repairs": 0,
       "semantic_qa_results": {},
       "policy_qa_results": {},
-      "detail_qa_results": {}
+      "detail_qa_results": {},
+      "target_view": "front",
+      "source_assessment": {
+        "scene_fit": "unknown",
+        "evidence": "unknown",
+        "degradation": "unknown",
+        "reason": "",
+        "reviewed_reference_hashes": {},
+        "reviewed_context_fingerprint": ""
+      },
+      "ai_disclosure": {
+        "human_source": "unknown",
+        "notes": "",
+        "reviewed_image_sha256": ""
+      },
+      "claim_ids": [],
+      "placement_mode": "template",
+      "product_layers": [],
+      "detail_evidence_reference_ids": {},
+      "layout": {
+        "template": "components",
+        "version": 3,
+        "recipe": "photo_sidebar",
+        "theme": "neutral",
+        "text_groups": [],
+        "items": [],
+        "protected_regions": []
+      },
+      "generation_dependency_version": 2
     },
     {
       "id": "05_material_or_detail",
+      "text_mode": "local_overlay",
       "required": true,
       "kind": "listing",
       "view": "front",
       "selling_job": "Show only confirmed material or construction evidence",
-      "render_mode": "pixel_composite",
+      "render_mode": "reference_generate",
       "requires_fine_detail": true,
-      "canvas": [1600, 1600],
-      "source_reference_ids": ["product_front"],
-      "target_product_bbox_norm": [0.08, 0.08, 0.84, 0.84],
+      "canvas": [
+        2000,
+        2000
+      ],
+      "source_reference_ids": [
+        "product_front"
+      ],
+      "target_product_bbox_norm": [
+        0.08,
+        0.08,
+        0.84,
+        0.84
+      ],
       "raw_product_bbox_norm": null,
       "output_product_bbox_norm": null,
       "detail_output_bbox_norms": {},
@@ -178,25 +343,63 @@
       "padding_color": "#ffffff",
       "raw_output": "raw/05_material_or_detail.png",
       "final_output": "final/05_material_or_detail.png",
-      "text_overlays": [],
       "status": "pending",
       "attempts": 0,
       "quality_repairs": 0,
       "semantic_qa_results": {},
       "policy_qa_results": {},
-      "detail_qa_results": {}
+      "detail_qa_results": {},
+      "target_view": "front",
+      "source_assessment": {
+        "scene_fit": "unknown",
+        "evidence": "unknown",
+        "degradation": "unknown",
+        "reason": "",
+        "reviewed_reference_hashes": {},
+        "reviewed_context_fingerprint": ""
+      },
+      "ai_disclosure": {
+        "human_source": "unknown",
+        "notes": "",
+        "reviewed_image_sha256": ""
+      },
+      "claim_ids": [],
+      "placement_mode": "template",
+      "product_layers": [],
+      "detail_evidence_reference_ids": {},
+      "layout": {
+        "template": "detail",
+        "version": 3,
+        "recipe": "detail_callouts",
+        "theme": "neutral",
+        "text_groups": [],
+        "items": [],
+        "protected_regions": []
+      },
+      "generation_dependency_version": 2
     },
     {
       "id": "06_storage_or_package",
+      "text_mode": "local_overlay",
       "required": true,
       "kind": "listing",
       "view": "front",
       "selling_job": "Show confirmed storage, carrying, packaging, or set completeness",
-      "render_mode": "pixel_composite",
+      "render_mode": "reference_generate",
       "requires_fine_detail": false,
-      "canvas": [1600, 1600],
-      "source_reference_ids": ["product_front"],
-      "target_product_bbox_norm": [0.12, 0.12, 0.76, 0.76],
+      "canvas": [
+        2000,
+        2000
+      ],
+      "source_reference_ids": [
+        "product_front"
+      ],
+      "target_product_bbox_norm": [
+        0.12,
+        0.12,
+        0.76,
+        0.76
+      ],
       "raw_product_bbox_norm": null,
       "output_product_bbox_norm": null,
       "detail_output_bbox_norms": {},
@@ -206,25 +409,63 @@
       "padding_color": "#ffffff",
       "raw_output": "raw/06_storage_or_package.png",
       "final_output": "final/06_storage_or_package.png",
-      "text_overlays": [],
       "status": "pending",
       "attempts": 0,
       "quality_repairs": 0,
       "semantic_qa_results": {},
       "policy_qa_results": {},
-      "detail_qa_results": {}
+      "detail_qa_results": {},
+      "target_view": "front",
+      "source_assessment": {
+        "scene_fit": "unknown",
+        "evidence": "unknown",
+        "degradation": "unknown",
+        "reason": "",
+        "reviewed_reference_hashes": {},
+        "reviewed_context_fingerprint": ""
+      },
+      "ai_disclosure": {
+        "human_source": "unknown",
+        "notes": "",
+        "reviewed_image_sha256": ""
+      },
+      "claim_ids": [],
+      "placement_mode": "template",
+      "product_layers": [],
+      "detail_evidence_reference_ids": {},
+      "layout": {
+        "template": "components",
+        "version": 3,
+        "recipe": "photo_sidebar",
+        "theme": "neutral",
+        "text_groups": [],
+        "items": [],
+        "protected_regions": []
+      },
+      "generation_dependency_version": 2
     },
     {
       "id": "07_problem_solution",
+      "text_mode": "local_overlay",
       "required": true,
       "kind": "listing",
       "view": "front",
       "selling_job": "Resolve one confirmed buyer objection through a believable workflow",
       "render_mode": "reference_generate",
       "requires_fine_detail": false,
-      "canvas": [1600, 1600],
-      "source_reference_ids": ["product_front"],
-      "target_product_bbox_norm": [0.18, 0.16, 0.64, 0.68],
+      "canvas": [
+        2000,
+        2000
+      ],
+      "source_reference_ids": [
+        "product_front"
+      ],
+      "target_product_bbox_norm": [
+        0.18,
+        0.16,
+        0.64,
+        0.68
+      ],
       "raw_product_bbox_norm": null,
       "output_product_bbox_norm": null,
       "detail_output_bbox_norms": {},
@@ -234,41 +475,51 @@
       "padding_color": "#ffffff",
       "raw_output": "raw/07_problem_solution.png",
       "final_output": "final/07_problem_solution.png",
-      "text_overlays": [],
       "status": "pending",
       "attempts": 0,
       "quality_repairs": 0,
       "semantic_qa_results": {},
       "policy_qa_results": {},
-      "detail_qa_results": {}
-    },
-    {
-      "id": "08_a_plus",
-      "required": true,
-      "kind": "a_plus",
-      "view": "front",
-      "selling_job": "Create a premium summary visual grounded in confirmed product facts",
-      "render_mode": "reference_generate",
-      "requires_fine_detail": false,
-      "canvas": [970, 600],
-      "source_reference_ids": ["product_front"],
-      "target_product_bbox_norm": [0.55, 0.08, 0.38, 0.84],
-      "raw_product_bbox_norm": null,
-      "output_product_bbox_norm": null,
-      "detail_output_bbox_norms": {},
-      "scene": "premium but believable category environment",
-      "composition": "wide editorial composition with usable negative space",
-      "lighting": "natural premium product lighting",
-      "padding_color": "#ffffff",
-      "raw_output": "raw/08_a_plus.png",
-      "final_output": "final/08_a_plus.png",
-      "text_overlays": [],
-      "status": "pending",
-      "attempts": 0,
-      "quality_repairs": 0,
-      "semantic_qa_results": {},
-      "policy_qa_results": {},
-      "detail_qa_results": {}
+      "detail_qa_results": {},
+      "target_view": "front",
+      "source_assessment": {
+        "scene_fit": "unknown",
+        "evidence": "unknown",
+        "degradation": "unknown",
+        "reason": "",
+        "reviewed_reference_hashes": {},
+        "reviewed_context_fingerprint": ""
+      },
+      "ai_disclosure": {
+        "human_source": "unknown",
+        "notes": "",
+        "reviewed_image_sha256": ""
+      },
+      "claim_ids": [],
+      "placement_mode": "template",
+      "product_layers": [],
+      "detail_evidence_reference_ids": {},
+      "layout": {
+        "template": "benefits",
+        "version": 3,
+        "recipe": "header_footer",
+        "theme": "neutral",
+        "text_groups": [],
+        "items": [],
+        "protected_regions": []
+      },
+      "generation_dependency_version": 2
     }
-  ]
+  ],
+  "marketplace": "",
+  "language": "",
+  "listing_profile": {
+    "aspect": "1:1",
+    "short_edge": 2000
+  },
+  "style_profile": {
+    "theme": "neutral"
+  },
+  "facts": [],
+  "shared_blockers": []
 }

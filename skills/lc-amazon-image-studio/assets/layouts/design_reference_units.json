@@ -1,0 +1,1191 @@
+{
+  "schema_version": 1,
+  "asset_policy": "external_regions_only",
+  "units": [
+    {
+      "id": "screenshot_33_01",
+      "external_path": "/Users/laochen/Downloads/33.png",
+      "sha256": "0caa693729266be2ed8e8016d1d4556eb500b2e0b2cac2dbcd78d1760bd4b48e",
+      "unit_region_norm": [
+        0.002566,
+        0.004425,
+        0.187767,
+        0.388496
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "header_footer",
+      "generation": {
+        "visual_composition": "warm wood shelf; product left with hand arranging a seasonal prop",
+        "reading_order": "footer plus narrow vertical detail rail",
+        "background_treatment": "cream footer and translucent dark rail"
+      },
+      "layout": {
+        "recipe": "header_footer",
+        "headline_tone": "serif",
+        "reading_order": "footer plus narrow vertical detail rail",
+        "surface_treatment": "cream footer and translucent dark rail",
+        "headline_family": "serif",
+        "headline_weight": 400,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.79,
+          0.88,
+          0.16
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_33_02",
+      "external_path": "/Users/laochen/Downloads/33.png",
+      "sha256": "0caa693729266be2ed8e8016d1d4556eb500b2e0b2cac2dbcd78d1760bd4b48e",
+      "unit_region_norm": [
+        0.204876,
+        0.004425,
+        0.187767,
+        0.388496
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "visual_detail",
+      "recipe": "photo_overlay",
+      "generation": {
+        "visual_composition": "large head and checked bow crop on right; hand interaction; warm blurred background",
+        "reading_order": "short white title at middle left",
+        "background_treatment": "natural dark negative space"
+      },
+      "layout": {
+        "recipe": "photo_overlay",
+        "headline_tone": "sans",
+        "reading_order": "short white title at middle left",
+        "surface_treatment": "natural dark negative space",
+        "headline_family": "sans",
+        "headline_weight": 400,
+        "text_color": "#FFFFFF",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.43,
+          0.38,
+          0.24
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_33_03",
+      "external_path": "/Users/laochen/Downloads/33.png",
+      "sha256": "0caa693729266be2ed8e8016d1d4556eb500b2e0b2cac2dbcd78d1760bd4b48e",
+      "unit_region_norm": [
+        0.407613,
+        0.004425,
+        0.187767,
+        0.388496
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "photo_overlay",
+      "generation": {
+        "visual_composition": "bright desk scene with laptop and writing hand; product on right",
+        "reading_order": "headline then subtitle at upper left",
+        "background_treatment": "natural light background"
+      },
+      "layout": {
+        "recipe": "photo_overlay",
+        "headline_tone": "bold_sans",
+        "reading_order": "headline then subtitle at upper left",
+        "surface_treatment": "natural light background",
+        "headline_family": "sans",
+        "headline_weight": 700,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_33_04",
+      "external_path": "/Users/laochen/Downloads/33.png",
+      "sha256": "0caa693729266be2ed8e8016d1d4556eb500b2e0b2cac2dbcd78d1760bd4b48e",
+      "unit_region_norm": [
+        0.609923,
+        0.004425,
+        0.187767,
+        0.388496
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "scene_grid",
+      "generation": {
+        "visual_composition": "four distinct indoor settings in a precise two by two photo grid",
+        "reading_order": "centered header above four scenes",
+        "background_treatment": "white header band and even gutters"
+      },
+      "layout": {
+        "recipe": "scene_grid",
+        "headline_tone": "serif",
+        "reading_order": "centered header above four scenes",
+        "surface_treatment": "white header band and even gutters",
+        "headline_family": "serif",
+        "headline_weight": 400,
+        "text_color": "#25221E",
+        "align": "center",
+        "text_group_box": [
+          0.05,
+          0.02,
+          0.9,
+          0.16
+        ],
+        "text_surface": {
+          "kind": "solid",
+          "color": "#FFFFFF",
+          "opacity": 1,
+          "padding_em": 0.3
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_33_05",
+      "external_path": "/Users/laochen/Downloads/33.png",
+      "sha256": "0caa693729266be2ed8e8016d1d4556eb500b2e0b2cac2dbcd78d1760bd4b48e",
+      "unit_region_norm": [
+        0.811377,
+        0.004425,
+        0.187767,
+        0.388496
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "photo_overlay",
+      "generation": {
+        "visual_composition": "single product in foreground; warm fireplace and seated reader soft in background",
+        "reading_order": "right aligned white headline then subtitle at top right",
+        "background_treatment": "dark warm photographic negative space"
+      },
+      "layout": {
+        "recipe": "photo_overlay",
+        "headline_tone": "bold_sans",
+        "reading_order": "right aligned white headline then subtitle at top right",
+        "surface_treatment": "dark warm photographic negative space",
+        "headline_family": "sans",
+        "headline_weight": 700,
+        "text_color": "#FFFFFF",
+        "align": "right",
+        "text_group_box": [
+          0.41,
+          0.055,
+          0.53,
+          0.18
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_33_06",
+      "external_path": "/Users/laochen/Downloads/33.png",
+      "sha256": "0caa693729266be2ed8e8016d1d4556eb500b2e0b2cac2dbcd78d1760bd4b48e",
+      "unit_region_norm": [
+        0.002566,
+        0.607965,
+        0.187767,
+        0.388496
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "visual_detail",
+      "recipe": "photo_overlay",
+      "generation": {
+        "visual_composition": "large cropped product left; hand placing decorative object on table",
+        "reading_order": "short middle-right title and smaller subtitle",
+        "background_treatment": "warm blurred background"
+      },
+      "layout": {
+        "recipe": "photo_overlay",
+        "headline_tone": "condensed_sans",
+        "reading_order": "short middle-right title and smaller subtitle",
+        "surface_treatment": "warm blurred background",
+        "headline_family": "sans",
+        "headline_weight": 400,
+        "text_color": "#FFFFFF",
+        "align": "left",
+        "text_group_box": [
+          0.54,
+          0.4,
+          0.4,
+          0.3
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_33_07",
+      "external_path": "/Users/laochen/Downloads/33.png",
+      "sha256": "0caa693729266be2ed8e8016d1d4556eb500b2e0b2cac2dbcd78d1760bd4b48e",
+      "unit_region_norm": [
+        0.204876,
+        0.607965,
+        0.187767,
+        0.388496
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "header_footer",
+      "generation": {
+        "visual_composition": "wide lived-in living room scene with seasonal styling",
+        "reading_order": "compact bottom heading and subtitle",
+        "background_treatment": "content-sized translucent footer card; omit button"
+      },
+      "layout": {
+        "recipe": "header_footer",
+        "headline_tone": "bold_sans",
+        "reading_order": "compact bottom heading and subtitle",
+        "surface_treatment": "content-sized translucent footer card; omit button",
+        "headline_family": "sans",
+        "headline_weight": 700,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.79,
+          0.88,
+          0.16
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_33_08",
+      "external_path": "/Users/laochen/Downloads/33.png",
+      "sha256": "0caa693729266be2ed8e8016d1d4556eb500b2e0b2cac2dbcd78d1760bd4b48e",
+      "unit_region_norm": [
+        0.407613,
+        0.607965,
+        0.187767,
+        0.388496
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "photo_overlay",
+      "generation": {
+        "visual_composition": "bright kitchen tabletop with flowers; softly blurred adult torso behind",
+        "reading_order": "centered short title above product",
+        "background_treatment": "natural pale background"
+      },
+      "layout": {
+        "recipe": "photo_overlay",
+        "headline_tone": "light_sans",
+        "reading_order": "centered short title above product",
+        "surface_treatment": "natural pale background",
+        "headline_family": "sans",
+        "headline_weight": 400,
+        "text_color": "#25221E",
+        "align": "center",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_33_09",
+      "external_path": "/Users/laochen/Downloads/33.png",
+      "sha256": "0caa693729266be2ed8e8016d1d4556eb500b2e0b2cac2dbcd78d1760bd4b48e",
+      "unit_region_norm": [
+        0.609923,
+        0.607965,
+        0.187767,
+        0.388496
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "photo_overlay",
+      "generation": {
+        "visual_composition": "console scene with hand near product and soft window backlight",
+        "reading_order": "centered top headline and subtitle",
+        "background_treatment": "darkened upper photographic area"
+      },
+      "layout": {
+        "recipe": "photo_overlay",
+        "headline_tone": "bold_sans",
+        "reading_order": "centered top headline and subtitle",
+        "surface_treatment": "darkened upper photographic area",
+        "headline_family": "sans",
+        "headline_weight": 700,
+        "text_color": "#FFFFFF",
+        "align": "center",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_33_10",
+      "external_path": "/Users/laochen/Downloads/33.png",
+      "sha256": "0caa693729266be2ed8e8016d1d4556eb500b2e0b2cac2dbcd78d1760bd4b48e",
+      "unit_region_norm": [
+        0.811377,
+        0.607965,
+        0.187767,
+        0.388496
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "header_footer",
+      "generation": {
+        "visual_composition": "dining setting with plates and person arranging the table",
+        "reading_order": "lower-left title and subtitle",
+        "background_treatment": "light tablecloth negative space"
+      },
+      "layout": {
+        "recipe": "header_footer",
+        "headline_tone": "light_sans",
+        "reading_order": "lower-left title and subtitle",
+        "surface_treatment": "light tablecloth negative space",
+        "headline_family": "sans",
+        "headline_weight": 400,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.79,
+          0.88,
+          0.16
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_11_01",
+      "external_path": "/Users/laochen/Downloads/11.png",
+      "sha256": "a4eea1b4d121b41832c2647cf542b033a55a663e767fb94c547f2b466a3232b2",
+      "unit_region_norm": [
+        0.005115,
+        0.012175,
+        0.186701,
+        0.355519
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "photo_overlay",
+      "generation": {
+        "visual_composition": "warm seasonal console scene with product as hero",
+        "reading_order": "centered top headline and supporting sentence",
+        "background_treatment": "darkened top photo; omit all promotional badges/buttons"
+      },
+      "layout": {
+        "recipe": "photo_overlay",
+        "headline_tone": "bold_sans",
+        "reading_order": "centered top headline and supporting sentence",
+        "surface_treatment": "darkened top photo; omit all promotional badges/buttons",
+        "headline_family": "sans",
+        "headline_weight": 700,
+        "text_color": "#FFFFFF",
+        "align": "center",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_11_02",
+      "external_path": "/Users/laochen/Downloads/11.png",
+      "sha256": "a4eea1b4d121b41832c2647cf542b033a55a663e767fb94c547f2b466a3232b2",
+      "unit_region_norm": [
+        0.207161,
+        0.012175,
+        0.186701,
+        0.355519
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "photo_overlay",
+      "generation": {
+        "visual_composition": "bright living room shelf, books and plant, layered window background",
+        "reading_order": "top headline and short supporting line",
+        "background_treatment": "soft top gradient"
+      },
+      "layout": {
+        "recipe": "photo_overlay",
+        "headline_tone": "light_sans",
+        "reading_order": "top headline and short supporting line",
+        "surface_treatment": "soft top gradient",
+        "headline_family": "sans",
+        "headline_weight": 400,
+        "text_color": "#FFFFFF",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_11_03",
+      "external_path": "/Users/laochen/Downloads/11.png",
+      "sha256": "a4eea1b4d121b41832c2647cf542b033a55a663e767fb94c547f2b466a3232b2",
+      "unit_region_norm": [
+        0.405371,
+        0.012175,
+        0.186701,
+        0.355519
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "how_to",
+      "recipe": "steps",
+      "generation": {
+        "visual_composition": "two top panels and one wider bottom panel show a styling sequence",
+        "reading_order": "header then numbered image panels",
+        "background_treatment": "white header and narrow gutters; do not imply multiple-unit pack"
+      },
+      "layout": {
+        "recipe": "steps",
+        "headline_tone": "serif",
+        "reading_order": "header then numbered image panels",
+        "surface_treatment": "white header and narrow gutters; do not imply multiple-unit pack",
+        "headline_family": "serif",
+        "headline_weight": 400,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_11_04",
+      "external_path": "/Users/laochen/Downloads/11.png",
+      "sha256": "a4eea1b4d121b41832c2647cf542b033a55a663e767fb94c547f2b466a3232b2",
+      "unit_region_norm": [
+        0.606991,
+        0.012175,
+        0.186701,
+        0.355519
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "photo_sidebar",
+      "generation": {
+        "visual_composition": "desk scene with product foreground, laptop and out-of-focus reader",
+        "reading_order": "short right-side headline plus tightly grouped body",
+        "background_treatment": "light upper-right region integrated with photograph"
+      },
+      "layout": {
+        "recipe": "photo_sidebar",
+        "headline_tone": "serif",
+        "reading_order": "short right-side headline plus tightly grouped body",
+        "surface_treatment": "light upper-right region integrated with photograph",
+        "headline_family": "serif",
+        "headline_weight": 400,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.57,
+          0.13,
+          0.37,
+          0.7
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_11_05",
+      "external_path": "/Users/laochen/Downloads/11.png",
+      "sha256": "a4eea1b4d121b41832c2647cf542b033a55a663e767fb94c547f2b466a3232b2",
+      "unit_region_norm": [
+        0.80861,
+        0.012175,
+        0.186701,
+        0.355519
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "feature_detail",
+      "recipe": "photo_sidebar",
+      "generation": {
+        "visual_composition": "two contrasting tonal columns with strong vertical division",
+        "reading_order": "column headers and one focal headline",
+        "background_treatment": "light/dark split; use only verified own-product information, not comparison claims"
+      },
+      "layout": {
+        "recipe": "photo_sidebar",
+        "headline_tone": "bold_sans",
+        "reading_order": "column headers and one focal headline",
+        "surface_treatment": "light/dark split; use only verified own-product information, not comparison claims",
+        "headline_family": "sans",
+        "headline_weight": 700,
+        "text_color": "#FFFFFF",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_11_06",
+      "external_path": "/Users/laochen/Downloads/11.png",
+      "sha256": "a4eea1b4d121b41832c2647cf542b033a55a663e767fb94c547f2b466a3232b2",
+      "unit_region_norm": [
+        0.005115,
+        0.563312,
+        0.186701,
+        0.355519
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "visual_detail",
+      "recipe": "detail_callouts",
+      "generation": {
+        "visual_composition": "four equally sized detail cards with circular visual crops",
+        "reading_order": "headline above two by two labeled details",
+        "background_treatment": "white cards and consistent border; do not copy tablet-device frame"
+      },
+      "layout": {
+        "recipe": "detail_callouts",
+        "headline_tone": "serif",
+        "reading_order": "headline above two by two labeled details",
+        "surface_treatment": "white cards and consistent border; do not copy tablet-device frame",
+        "headline_family": "serif",
+        "headline_weight": 400,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_11_07",
+      "external_path": "/Users/laochen/Downloads/11.png",
+      "sha256": "a4eea1b4d121b41832c2647cf542b033a55a663e767fb94c547f2b466a3232b2",
+      "unit_region_norm": [
+        0.207161,
+        0.563312,
+        0.186701,
+        0.355519
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "visual_detail",
+      "recipe": "photo_sidebar",
+      "generation": {
+        "visual_composition": "large close crop of head and checked bow on left; warm wood on right",
+        "reading_order": "right title, concise description, small separated feature group",
+        "background_treatment": "wood-toned side panel and thin image border"
+      },
+      "layout": {
+        "recipe": "photo_sidebar",
+        "headline_tone": "sans",
+        "reading_order": "right title, concise description, small separated feature group",
+        "surface_treatment": "wood-toned side panel and thin image border",
+        "headline_family": "sans",
+        "headline_weight": 400,
+        "text_color": "#FFFFFF",
+        "align": "left",
+        "text_group_box": [
+          0.57,
+          0.13,
+          0.37,
+          0.7
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_11_08",
+      "external_path": "/Users/laochen/Downloads/11.png",
+      "sha256": "a4eea1b4d121b41832c2647cf542b033a55a663e767fb94c547f2b466a3232b2",
+      "unit_region_norm": [
+        0.405371,
+        0.563312,
+        0.186701,
+        0.355519
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "visual_detail",
+      "recipe": "detail_callouts",
+      "generation": {
+        "visual_composition": "large ear/head macro with hand; small direct leader annotations",
+        "reading_order": "short annotation at upper right and body below",
+        "background_treatment": "natural bokeh; reference has wrong color, never use as product evidence"
+      },
+      "layout": {
+        "recipe": "detail_callouts",
+        "headline_tone": "serif",
+        "reading_order": "short annotation at upper right and body below",
+        "surface_treatment": "natural bokeh; reference has wrong color, never use as product evidence",
+        "headline_family": "serif",
+        "headline_weight": 400,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_11_09",
+      "external_path": "/Users/laochen/Downloads/11.png",
+      "sha256": "a4eea1b4d121b41832c2647cf542b033a55a663e767fb94c547f2b466a3232b2",
+      "unit_region_norm": [
+        0.606991,
+        0.563312,
+        0.186701,
+        0.355519
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "gift_lifestyle",
+      "recipe": "scene_grid",
+      "generation": {
+        "visual_composition": "one wider hero scene above two smaller scenes with human interaction",
+        "reading_order": "white header above asymmetric three-image composition",
+        "background_treatment": "white gutters; omit unverified social proof and packaging"
+      },
+      "layout": {
+        "recipe": "scene_grid",
+        "headline_tone": "serif",
+        "reading_order": "white header above asymmetric three-image composition",
+        "surface_treatment": "white gutters; omit unverified social proof and packaging",
+        "headline_family": "serif",
+        "headline_weight": 400,
+        "text_color": "#25221E",
+        "align": "center",
+        "text_group_box": [
+          0.05,
+          0.02,
+          0.9,
+          0.16
+        ],
+        "text_surface": {
+          "kind": "solid",
+          "color": "#FFFFFF",
+          "opacity": 1,
+          "padding_em": 0.3
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_11_10",
+      "external_path": "/Users/laochen/Downloads/11.png",
+      "sha256": "a4eea1b4d121b41832c2647cf542b033a55a663e767fb94c547f2b466a3232b2",
+      "unit_region_norm": [
+        0.80861,
+        0.563312,
+        0.186701,
+        0.355519
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "header_footer",
+      "generation": {
+        "visual_composition": "sunlit indoor product scene with flowers",
+        "reading_order": "top headline/subtitle and three compact bottom icon labels",
+        "background_treatment": "small light pills; only visible verified detail labels"
+      },
+      "layout": {
+        "recipe": "header_footer",
+        "headline_tone": "bold_sans",
+        "reading_order": "top headline/subtitle and three compact bottom icon labels",
+        "surface_treatment": "small light pills; only visible verified detail labels",
+        "headline_family": "sans",
+        "headline_weight": 700,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.79,
+          0.88,
+          0.16
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_22_11",
+      "external_path": "/Users/laochen/Downloads/22.png",
+      "sha256": "b0a6f23258f29d5738633b9241272ed2bb6a22f4d45ab2efe71b49269fe56126",
+      "unit_region_norm": [
+        0.011752,
+        0.020202,
+        0.467949,
+        0.739057
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "feature_detail",
+      "recipe": "detail_callouts",
+      "generation": {
+        "visual_composition": "product shown with directional measurement arrows",
+        "reading_order": "title upper left; three separate dimension labels",
+        "background_treatment": "natural light scene; screenshot measurements are NOT measured evidence"
+      },
+      "layout": {
+        "recipe": "detail_callouts",
+        "headline_tone": "bold_sans",
+        "reading_order": "title upper left; three separate dimension labels",
+        "surface_treatment": "natural light scene; screenshot measurements are NOT measured evidence",
+        "headline_family": "sans",
+        "headline_weight": 700,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_22_12",
+      "external_path": "/Users/laochen/Downloads/22.png",
+      "sha256": "b0a6f23258f29d5738633b9241272ed2bb6a22f4d45ab2efe71b49269fe56126",
+      "unit_region_norm": [
+        0.516026,
+        0.020202,
+        0.467949,
+        0.739057
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "feature_detail",
+      "recipe": "photo_sidebar",
+      "generation": {
+        "visual_composition": "aligned explanatory rows with image columns and clear header hierarchy",
+        "reading_order": "title, column labels, then aligned feature rows",
+        "background_treatment": "white/gray structural panels; exclude unsupported comparisons"
+      },
+      "layout": {
+        "recipe": "photo_sidebar",
+        "headline_tone": "bold_sans",
+        "reading_order": "title, column labels, then aligned feature rows",
+        "surface_treatment": "white/gray structural panels; exclude unsupported comparisons",
+        "headline_family": "sans",
+        "headline_weight": 700,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_44_11",
+      "external_path": "/Users/laochen/Downloads/44.png",
+      "sha256": "d7cd3550ac9699c533a4277b5539e03c97435780379fd0ac71e0d84240b159c5",
+      "unit_region_norm": [
+        0.017058,
+        0.02381,
+        0.468017,
+        0.950216
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "header_footer",
+      "generation": {
+        "visual_composition": "adult styling one product beside indoor side table; seasonal flowers",
+        "reading_order": "centered title and subtitle in top band",
+        "background_treatment": "white header band"
+      },
+      "layout": {
+        "recipe": "header_footer",
+        "headline_tone": "light_sans",
+        "reading_order": "centered title and subtitle in top band",
+        "surface_treatment": "white header band",
+        "headline_family": "sans",
+        "headline_weight": 400,
+        "text_color": "#25221E",
+        "align": "center",
+        "text_group_box": [
+          0.05,
+          0.02,
+          0.9,
+          0.16
+        ],
+        "text_surface": {
+          "kind": "solid",
+          "color": "#FFFFFF",
+          "opacity": 1,
+          "padding_em": 0.3
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    },
+    {
+      "id": "screenshot_44_12",
+      "external_path": "/Users/laochen/Downloads/44.png",
+      "sha256": "d7cd3550ac9699c533a4277b5539e03c97435780379fd0ac71e0d84240b159c5",
+      "unit_region_norm": [
+        0.521322,
+        0.02381,
+        0.468017,
+        0.950216
+      ],
+      "reference_kind": "finished_design_unit",
+      "category": [
+        "home_decor"
+      ],
+      "intent": "lifestyle_hero",
+      "recipe": "photo_overlay",
+      "generation": {
+        "visual_composition": "hands presenting single product against softly blurred bright room",
+        "reading_order": "upper-left title and subtitle",
+        "background_treatment": "natural light background; require scale evidence for handheld demonstration"
+      },
+      "layout": {
+        "recipe": "photo_overlay",
+        "headline_tone": "bold_sans",
+        "reading_order": "upper-left title and subtitle",
+        "surface_treatment": "natural light background; require scale evidence for handheld demonstration",
+        "headline_family": "sans",
+        "headline_weight": 700,
+        "text_color": "#25221E",
+        "align": "left",
+        "text_group_box": [
+          0.06,
+          0.05,
+          0.88,
+          0.2
+        ],
+        "text_surface": {
+          "kind": "transparent"
+        }
+      },
+      "excluded_content": [
+        "application badges/numbers/file names/buttons",
+        "sample marketing copy",
+        "brands and endorsements",
+        "unverified product facts"
+      ],
+      "reviewed": true,
+      "product_evidence": false
+    }
+  ]
+}

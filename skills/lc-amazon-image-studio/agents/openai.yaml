@@ -1,4 +1,4 @@
 interface:
-  display_name: "易逊-亚马逊套图生成"
-  short_description: "基于真实产品图和卖点规划、生成与质检 Amazon Listing 与 A+ 图片，严格保留产品比例、材质和关键细节。"
-  default_prompt: "Use $lc-amazon-image-studio to build a fast, resumable Amazon image set from my real product photos with source-quality, geometry, material, scale, and critical-detail locks."
+  display_name: "易逊-亚马逊套图生成 V5"
+  short_description: "参考驱动商业海报与精确拼版，混合文字路线、产品一致性审核和增量快速交付。"
+  default_prompt: "Use $lc-amazon-image-studio to create a reference-driven Amazon image set with per-image native or local typography, verified product details, incremental processing and actual visual review."
