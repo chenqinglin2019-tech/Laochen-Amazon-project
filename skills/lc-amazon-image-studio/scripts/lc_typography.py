@@ -141,7 +141,8 @@ def include_glyph_overhang(mask, bboxes):
 
 def raster_contrast(image, background, mask, bboxes):
     """Glyph-core checks deliberately exclude anti-alias fringe and exterior shadows."""
-    fg, bg = luminance(image), luminance(background)
+    # Every checked pixel and the original float32 formula are retained. Only
+    # unused pixels outside text regions avoid the expensive RGB linearization.
     core = np.asarray(mask.convert("L")) >= 245
     checks = []
     for item in bboxes:
@@ -151,7 +152,16 @@ def raster_contrast(image, background, mask, bboxes):
         x, y = max(0, math.floor(box["x"])), max(0, math.floor(box["y"]))
         r, b = min(image.width, math.ceil(box["x"] + box["width"])), min(image.height, math.ceil(box["y"] + box["height"]))
         selected = core[y:b, x:r]
-        a, z = fg[y:b, x:r][selected], bg[y:b, x:r][selected]
+        # Preserve numpy slice semantics even for historical off-canvas boxes;
+        # geometry validation remains responsible for rejecting those layouts.
+        x, r, _ = slice(x, r).indices(image.width)
+        y, b, _ = slice(y, b).indices(image.height)
+        if r > x and b > y:
+            region = (x, y, r, b)
+            a = luminance(image.crop(region))[selected]
+            z = luminance(background.crop(region))[selected]
+        else:
+            a = z = np.empty(0, dtype=np.float32)
         ratios = (np.maximum(a, z) + .05) / (np.minimum(a, z) + .05)
         minimum = float(ratios.min()) if ratios.size else 0
         checks.append({"check": "glyph_contrast", "element": item["id"], "passed": minimum >= 4.5,

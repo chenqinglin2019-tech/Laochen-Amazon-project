@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageFilter, ImageOps, ImageStat
+from lc_assets import file_hash, file_hash_context
 
 VERSION = "source-quality-v3.1"
 CLARITIES = {"clear", "mild_softness", "blurred", "unknown"}
@@ -26,11 +27,7 @@ def _fingerprint(value: Any) -> str:
 
 
 def _sha(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return file_hash(path)
 
 
 def _bbox_valid(value: Any) -> bool:
@@ -205,7 +202,9 @@ def _assess_layer_assets(manifest: dict, job: dict, base: Path, cache: dict, has
     return records
 
 
-def assess_sources(manifest: dict[str, Any], base: Path, *, materialize: bool = True) -> None:
+@file_hash_context()
+def assess_sources(manifest: dict[str, Any], base: Path, *, materialize: bool = True,
+                   job_ids: set[str] | None = None) -> None:
     """Inspect every source crop and cache originals, detail crops, target previews.
 
     This runs before the detail census is complete. It never marks a human review
@@ -245,29 +244,46 @@ def assess_sources(manifest: dict[str, Any], base: Path, *, materialize: bool = 
         ref["sha256"] = _sha(path)
         file_hashes[str(path.resolve())] = ref["sha256"]
         region_hash = source_region_fingerprint(ref)
+        old_metrics = ref.get("quality_metrics", {})
+        retained_previews = [item for item in old_metrics.get("target_previews", [])
+                             if job_ids is not None and item.get("job_id") not in job_ids]
+        if old_metrics.get("region_fingerprint") != region_hash:
+            retained_previews = []
+        product = None
+        source_size = None
+        def product_pixels():
+            nonlocal product, source_size
+            if product is None:
+                with Image.open(path) as original:
+                    source = ImageOps.exif_transpose(original).convert("RGB")
+                try:
+                    source_size = list(source.size)
+                    product = source.crop(_pixels(ref["product_bbox_norm"], source.size))
+                finally:
+                    source.close()
+            return product
         source_key = "source_" + region_hash
         entry = entries.get(source_key, {})
         if not usable(entry, ("image_size", "product_pixel_size", "metrics", "product_crop")):
-            with Image.open(path) as source:
-                # The same orientation must be used by downstream detail extraction.
-                source = ImageOps.exif_transpose(source).convert("RGB")
-                crop = source.crop(_pixels(ref["product_bbox_norm"], source.size))
-                filename = f"{region_hash}_product.png"
-                if materialize:
-                    crop.save(root / filename)
-                entry = {"image_size": list(source.size), "product_pixel_size": list(crop.size),
-                         "metrics": _metrics(crop), "product_crop": filename,
-                         "artifacts": {filename: _sha(root / filename)} if materialize else {}}
-                entries[source_key] = entry
+            crop = product_pixels()
+            filename = f"{region_hash}_product.png"
+            if materialize:
+                crop.save(root / filename)
+            entry = {"image_size": source_size, "product_pixel_size": list(crop.size),
+                     "metrics": _metrics(crop), "product_crop": filename,
+                     "artifacts": {filename: _sha(root / filename)} if materialize else {}}
+            entries[source_key] = entry
         ref["image_size"] = entry["image_size"]
         ref["product_pixel_size"] = entry["product_pixel_size"]
         ref["quality_metrics"] = {**entry["metrics"], "version": VERSION,
                                   "region_fingerprint": region_hash,
                                   "product_crop_path": str((root / entry["product_crop"]).relative_to(base)),
-                                  "target_previews": [], "detail_regions": []}
+                                  "target_previews": retained_previews, "detail_regions": []}
         # Keep v2 diagnostic consumers working; never use this for pass/fail.
         ref["edge_signal"] = entry["metrics"]["edge_signal"]
         for job in manifest.get("jobs", []):
+            if job_ids is not None and job["id"] not in job_ids:
+                continue
             if ref["id"] not in _reference_ids(manifest, job):
                 continue
             canvas = job.get("canvas", [2000, 2000])
@@ -282,9 +298,7 @@ def assess_sources(manifest: dict[str, Any], base: Path, *, materialize: bool = 
                 filename = f"{preview_hash}_target.png"
                 smallname = f"{preview_hash}_360.png"
                 if materialize:
-                    with Image.open(path) as original:
-                        source = ImageOps.exif_transpose(original).convert("RGB")
-                        crop = source.crop(_pixels(ref["product_bbox_norm"], source.size))
+                    crop = product_pixels()
                     result = Image.new("RGB", tuple(canvas), "#eeeeee")
                     fitted = ImageOps.contain(crop, (rect[2] - rect[0], rect[3] - rect[1]), Image.Resampling.LANCZOS)
                     result.paste(fitted, (rect[0] + (rect[2] - rect[0] - fitted.width) // 2,
@@ -307,22 +321,26 @@ def assess_sources(manifest: dict[str, Any], base: Path, *, materialize: bool = 
                 detail_key = "detail_" + detail_hash
                 detail_entry = entries.get(detail_key, {})
                 if not usable(detail_entry, ("path", "pixel_size", "metrics")):
-                    with Image.open(path) as original:
-                        source = ImageOps.exif_transpose(original).convert("RGB")
-                        product = source.crop(_pixels(ref["product_bbox_norm"], source.size))
-                        crop = product.crop(_pixels(box, product.size))
-                        filename = f"{detail_hash}_detail.png"
-                        if materialize:
-                            crop.save(root / filename)
+                    product_crop = product_pixels()
+                    crop = product_crop.crop(_pixels(box, product_crop.size))
+                    filename = f"{detail_hash}_detail.png"
+                    if materialize:
+                        crop.save(root / filename)
                     detail_entry = {"path": filename, "pixel_size": list(crop.size), "metrics": _metrics(crop),
                                     "artifacts": {filename: _sha(root / filename)} if materialize else {}}
                     entries[detail_key] = detail_entry
                 ref["quality_metrics"]["detail_regions"].append({"detail_id": detail.get("id"),
                     "path": str((root / detail_entry["path"]).relative_to(base)),
                     "bbox_in_product_norm": box, "pixel_size": detail_entry["pixel_size"], "metrics": detail_entry["metrics"]})
+        order = {job["id"]: index for index, job in enumerate(manifest.get("jobs", []))}
+        ref["quality_metrics"]["target_previews"].sort(key=lambda item: order.get(item["job_id"], len(order)))
         summary.append({"reference_id": ref["id"], "sha256": ref["sha256"], "image_size": ref["image_size"],
                         "product_pixel_size": ref["product_pixel_size"], "quality_metrics": ref["quality_metrics"]})
+        if product is not None:
+            product.close()
     for job in manifest.get("jobs", []):
+        if job_ids is not None and job["id"] not in job_ids:
+            continue
         job["layer_asset_hashes"] = _assess_layer_assets(manifest, job, base, entries, file_hashes)
         job["assessment_context_fingerprint"] = assessment_context_fingerprint(manifest, job)
     _write_json_if_changed(index_path, cache)

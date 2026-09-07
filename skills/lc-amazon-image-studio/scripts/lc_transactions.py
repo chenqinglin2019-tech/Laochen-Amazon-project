@@ -36,6 +36,8 @@ _GLOBAL_FILES = {"execution_plan.json", "qa_report.json", "delivery_report.json"
                  "review/micro_detail_contact_sheet.cache.json"}
 _SKIP_DIRS = {_AREA, ".git", "revision", "__pycache__", "node_modules"}
 _SKIP_SUFFIXES = {".zip", ".html", ".lock", ".tmp"}
+_JOB_ARTIFACT_DIRS = ("review/layouts", "review/image_layers", "review/packets",
+                      "review/submissions", "prompts", "repairs")
 
 
 def _json(path):
@@ -142,13 +144,12 @@ def _strings(value):
         yield value
 
 
-def _declared_project_files(manifest, base):
+def _project_files_in(value, base):
     declared = set()
-    # Validation checks assets for ALL jobs, including jobs not selected to run.
-    for value in _strings(manifest):
-        if not value or len(value) > 4096 or "\n" in value or "://" in value:
+    for text in _strings(value):
+        if not text or len(text) > 4096 or "\n" in text or "://" in text:
             continue
-        path = Path(value).expanduser()
+        path = Path(text).expanduser()
         if not path.is_absolute():
             path = base / path
         try:
@@ -162,6 +163,74 @@ def _declared_project_files(manifest, base):
     return declared
 
 
+def _declared_project_files(manifest, base):
+    return _project_files_in(manifest, base)
+
+
+def _objects(value):
+    """Inspect only valid list containers; the manifest validator owns errors."""
+    return (item for item in value if isinstance(item, dict)) if isinstance(value, list) else iter(())
+
+
+def _validation_inputs(manifest):
+    """Files checked for every job, not every job's generated/cache outputs."""
+    values = [ref.get("path") for ref in _objects(manifest.get("references"))]
+    for job in _objects(manifest.get("jobs")):
+        values.append(job.get("background_asset"))
+        values.extend(item.get("path") for item in _objects(job.get("disclosure_extra_images")))
+        for layer in _objects(job.get("product_layers")):
+            values.extend(layer.get(key) for key in ("asset_path", "mask_path"))
+        layout = job.get("layout") or {}
+        if not isinstance(layout, dict):
+            continue  # The staged manifest validator provides the schema error.
+        for key in ("items", "panels"):
+            values.extend(item.get("image") for item in _objects(layout.get(key)))
+    return values
+
+
+def _stage_project_files(manifest, base, selected, *, command_name):
+    """Closed input/owned-output set for a private single/batch-job workspace.
+
+    Shared source metadata and real validation inputs remain available for every
+    job. Unselected rasters, historical attempts, and unrelated user files are
+    not transaction inputs merely because they live below the project root.
+    """
+    values = [_input_projection(manifest), _validation_inputs(manifest)]
+    for job in manifest.get("jobs", []):
+        if job["id"] in selected:
+            values.append({key: value for key, value in job.items()
+                           if key not in {"generation_attempts", "metrics", "timings", "review_history"}})
+    for detail in _objects(manifest.get("critical_details")):
+        values.append(detail.get("reference_crops", []))
+    for ref in _objects(manifest.get("references")):
+        quality = ref.get("quality_metrics") or {}
+        if not isinstance(quality, dict):
+            continue
+        values.extend((quality.get("product_crop_path"), quality.get("detail_regions", [])))
+        values.append([preview for preview in _objects(quality.get("target_previews"))
+                       if isinstance(preview.get("job_id"), str) and preview["job_id"] in selected])
+    shared = {relative for relative in _GLOBAL_FILES if relative.endswith(".json")}
+    shared.update({"review/source_quality/index.json", "review/source_quality/review.json"})
+    if command_name == "finalize" and selected == {job["id"] for job in manifest.get("jobs", [])}:
+        shared.update(_GLOBAL_FILES)
+    values.append(list(shared))
+    paths = _project_files_in(values, base)
+    for directory in _JOB_ARTIFACT_DIRS:
+        folder = base / directory
+        if folder.is_dir() and not folder.is_symlink():
+            paths.update(str(path.relative_to(base)) for path in folder.iterdir()
+                         if path.is_file() and not path.is_symlink()
+                         and _artifact_owner(str(path.relative_to(base)), manifest) in selected)
+    for job_id in selected:
+        for parent in ("review/details", "title_effects"):
+            folder = base / parent / job_id
+            if folder.is_dir() and not folder.is_symlink():
+                paths.update(str(path.relative_to(base)) for path in _files(folder))
+    # A symlinked directory is never a way to stage a writable live artifact.
+    return {relative for relative in paths
+            if not any((base / parent).is_symlink() for parent in Path(relative).parents)}
+
+
 def _input_projection(manifest):
     def clean(value):
         if isinstance(value, dict):
@@ -170,14 +239,14 @@ def _input_projection(manifest):
             return [clean(child) for child in value]
         return value
     result = clean({key: value for key, value in manifest.items() if key not in _VOLATILE})
-    for detail in result.get("critical_details", []):
+    for detail in _objects(result.get("critical_details")):
         # Confirmation/location are evidence; this status is computed by prepare.
         detail.pop("status", None)
     return result
 
 
 def _dependencies(manifest, selected, base):
-    values = [_input_projection(manifest)]
+    values = [_input_projection(manifest), _validation_inputs(manifest)]
     values.extend(job for job in manifest["jobs"] if job["id"] in selected)
     result = set()
     for value in _strings(values):
@@ -196,7 +265,7 @@ def _dependencies(manifest, selected, base):
         for field in ("raw_output", "final_output"):
             if job.get(field):
                 result.add((base / job[field]).resolve())
-        for directory in ("review/layouts", "review/image_layers", "review/packets", "prompts", "repairs"):
+        for directory in _JOB_ARTIFACT_DIRS:
             folder = base / directory
             if folder.is_dir():
                 result.update(path.resolve() for path in folder.glob(f"{job_id}*") if path.is_file()
@@ -215,11 +284,11 @@ def _artifact_owner(relative, manifest):
         if relative in {job.get("raw_output"), job.get("final_output"), job.get("prompt_file")}:
             return job["id"]
         parent, name = str(Path(relative).parent), Path(relative).name
-        if parent == "review/details/" + job["id"]:
+        if relative.startswith("review/details/" + job["id"] + "/"):
             return job["id"]
         if relative.startswith("title_effects/" + job["id"] + "/"):
             return job["id"]
-        if parent in {"review/layouts", "review/image_layers", "review/packets", "prompts", "repairs"}:
+        if parent in _JOB_ARTIFACT_DIRS:
             if name.startswith(job["id"] + ".") or name.startswith(job["id"] + "-") or name.startswith(job["id"] + "__"):
                 return job["id"]
     return None
@@ -387,8 +456,9 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
     try:
         clone_started = time.monotonic()
         declared = _declared_project_files(snapshot, base)
-        for source in _files(base, declared):
-            relative = str(source.relative_to(base))
+        staged_files = _stage_project_files(snapshot, base, selected, command_name=command_name)
+        for relative in sorted(staged_files):
+            source = base / relative
             if source == manifest_path:
                 continue
             destination = stage / relative
@@ -405,6 +475,7 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
         stage_manifest = stage / manifest_path.name
         _atomic(stage_manifest, _bytes(_map_outputs(snapshot, base, stage)))
         metrics["snapshot_seconds"] = round(time.monotonic() - clone_started, 6)
+        metrics["staged_files"] = len(initial)
         work_started = time.monotonic()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             result = operation(stage_manifest)
@@ -491,15 +562,18 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
                     merged.pop("delivery_artifacts", None)
             # A tiny plan is rebuilt from merged state, never copied from a stale worker.
             plan = None
-            try:
-                from lc_image_pipeline import execution_plan
-                plan = execution_plan(merged)
-                _atomic(stage / "execution_plan.json", _bytes(plan))
-                if _sha(stage / "execution_plan.json") != _sha(base / "execution_plan.json"):
-                    changed["execution_plan.json"] = _sha(stage / "execution_plan.json")
-            except KeyError:
-                if not snapshot.get("test_fixture"):
-                    raise
+            # A rejected, unchanged manifest (e.g. schema validation failure)
+            # must not acquire an anchor as a side effect of rebuilding a plan.
+            if not (isinstance(result, int) and result != 0 and proposed == snapshot):
+                try:
+                    from lc_image_pipeline import execution_plan
+                    plan = execution_plan(merged)
+                    _atomic(stage / "execution_plan.json", _bytes(plan))
+                    if _sha(stage / "execution_plan.json") != _sha(base / "execution_plan.json"):
+                        changed["execution_plan.json"] = _sha(stage / "execution_plan.json")
+                except KeyError:
+                    if not snapshot.get("test_fixture"):
+                        raise
             manifest_payload = _bytes(merged)
             journal.update(state="committing", before_manifest_sha256=_sha(manifest_path),
                            after_manifest_sha256=hashlib.sha256(manifest_payload).hexdigest(), files=[])

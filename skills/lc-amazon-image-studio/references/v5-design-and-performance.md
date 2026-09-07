@@ -60,19 +60,27 @@ visual_design说明焦点、主次、分组间距、背景用途、图文融合�
 
 新图声明 generation_dependency_version=2，细节可见性只绑定本图，避免修改其他图引起重生。旧项目缺字段保留旧hash算法。已有raw升级使用 migrate-dependencies --source-manifest 的真实旧快照；重建旧依赖视图必须明确 source-kind=reconstructed_verified_dependency_view，并严格重现已ingested attempt与raw SHA后验证本图新依赖等价。不能直接手改旧generated hash。明确创建新版项目时 --allow-project-fork 只放开project_id差异，其余验证不变并记录两边项目ID。
 
-短锁快照 → 隔离写时复制暂存 → 锁外重处理 → 目标任务与共享证据CAS → 短锁合并。可恢复日志保护多文件提交，不同任务互不覆盖，同任务陈旧提交拒绝。暂存必须包括Manifest所有真实声明依赖，即使文件位于revision目录；只跳过不需要的历史报告/归档。
+短锁快照 → 隔离写时复制暂存 → 锁外重处理 → 目标任务与共享证据CAS → 短锁合并。单图暂存只包含全项目校验必需输入、共享报告和本图产物；所有真实声明的校验依赖即使位于revision目录也保留，省去其他图的无关raw/final/缓存。副本使用独立inode，保留冲突校验、提交日志和崩溃恢复，不同任务互不覆盖，同任务陈旧提交拒绝。
 
-ingest仅校验当前attempt/提示/artifact并原子提交，立即释放生成槽。锚图通过后并发2，限流降1；审核/排版独立推进，不为凑本地批次等待模型。
+正常起点一次 `plan --json`，不例行先prepare；它完成既有准备并返回提示路径和本图所需引用。ingest和review-submit返回最新可执行任务，Agent预读后紧接派发，完成图立即入库，不等其他模型凑批。派发锁内只复核真实来源内容、递归实拍证据和当前任务绑定，缺少／过期评估要求重新plan，不生成预览或重新排版。
 
-已验证方向、色彩、透明度的规范化PNG直接读取原字节；不确定元数据仍规范化。按实际文字加载最小字体，不省略许可证/哈希/缺字检查。就绪批次复用浏览器，不设常驻服务。
+新项目 `scheduler_policy={version:1,mode:adaptive,max_concurrency:4}`；`concurrency`为当前上限，`network_health`沿用健康记录，额外保存epoch、当前档位成功数、升速冷却、Retry-After及tool_capacity。真实锚QA通过后从2开始，当前epoch和档位中连续两个不同attempt首次成功入库升一档，最高4，initial/quality_repair/transient_retry均适用。429降1，单次超时降一档、连续两次超时降1；退避后60秒不升速，明确Retry-After期间暂停新增调用。重复回调不计数，旧epoch/旧档位在途成功不用于升档；降档不取消在途任务。
 
-本地改字只该图layout→review→export；局部效果的文案、字号、区域、承载面/受光、素材或遮罩改变只更新效果及受影响排版/审阅，不重生未变raw；native改字仅该图模型修复；构图改变只相关raw；元数据只export。无变化模型调用/渲染器启动/审核素材重建为0，以实际计数及文件指纹验证。总览在完整finalize交付或明确预览请求时更新，之后delivery-check。
+产品生成与局部标题编辑共用容量和健康记录；本地动作独立列出，不被模型槽满截断，但来源与锚门保持生效。实际工具较低上限通过 `plan --tool-capacity 1..4` 保存，调度取配置／工具能力较小值。无scheduler_policy旧项目保持原行为。`ingest --tool-returned-at <epoch>` 同次校验真实返回时刻和产物，也兼容原分步事件；不得编造开始或返回时间。
+
+单图与批量审核准备共用实现：共享准备与排版后逐图组包，正常就绪批次只启动一次浏览器并共用字体加载，逐图错误与回滚不影响成功图。已绑定布局和内容哈希的360预览不重复编码，缺失／篡改／内容变化才重建；仍逐图看原尺寸、移动预览和细节。
+
+同次来源评估每张源图只必要解码、方向校正和RGB转换一次，供产品裁图、画布预览、细节裁图复用，处理完释放；细节缓存先检查源、坐标、算法与内容再决定解码，细节循环不重复整图RGB转换。字形对比度只计算实际文字区域，但检查全部核心像素，原float32公式／阈值／最终JPG检查不变；成品、无字背景、字形遮罩证据用途不合并。
+
+同次操作复用重复内容摘要与只读资源检查，写入或文件变化立即失效，提交及独立门禁使用新校验边界，不保留跨命令时间戳缓存。已验证方向、色彩、透明度的规范化PNG直接读取原字节；不确定元数据仍规范化。字体许可证／哈希／缺字检查保留，不设常驻服务。
+
+本地改字只该图layout→review→export；局部效果的文案、字号、区域、承载面/受光、素材或遮罩改变只更新效果及受影响排版/审阅，不重生未变raw；native改字仅该图模型修复；构图改变只相关raw；元数据只export。无变化模型调用/渲染器启动/审核素材重建为0，以实际计数及文件指纹验证。总览在完整finalize交付或明确预览请求时更新，交付接续deliver；delivery-check仅用于独立诊断，不例行额外执行。
 
 ## 计时口径
 
-记录参考、规划、就绪等待、工具调用、交接、锁等待、编码、字体、渲染、审核准备/等待、导出、打包。工具调用含网络和服务端排队，不是纯推理时间；审核生命周期含用户/编排等待。共享batch开销只记一次，逐图不可重复记整批累计时间。
+记录参考、规划、就绪等待、工具调用、交接、锁等待、编码、字体、渲染、审核准备/等待、导出及交付整理（保留旧计时字段兼容，不代表生成ZIP）。工具调用含网络和服务端排队，不是纯推理时间；审核生命周期含用户/编排等待。共享batch开销只记一次，逐图不可重复记整批累计时间。
 
-历史generation保留lifecycle含义，不回填虚构拆分。生产工具返回瞬间捕获epoch，再attempt-event；取锁后时间不能代表真实交接起点。
+历史generation保留lifecycle含义，不回填虚构拆分。生产工具返回瞬间捕获epoch，优先用ingest --tool-returned-at一次提交，也兼容attempt-event；取锁后时间不能代表真实交接起点。
 
 实际字段口径：reference_compile 是本地参考选择/指纹编译，planning 是本地 prepare 校验与规划（包含 reference_compile）；外部代理看图分析和创作文案没有可观测事件时记录 unavailable，不计为 0。review_prepare 是准备执行，review_wait 是包 ready_at 至提交开始（包含观察及等待），review_submit 是本地校验/导出/QA；旧 review 仍保留生命周期。
 
@@ -85,7 +93,7 @@ ingest仅校验当前attempt/提示/artifact并原子提交，立即释放生成
 
 ## V6 默认契约与紧凑交付
 
-`init` 创建 V3 `style_contract`、`delivery_profile`、`review_dependency_version: 2`；新项目不创建 `copy_budget`。缺少字段或已有显式预算的旧项目保持原行为。A+ 按用户要求启用，`--a-plus-count` 默认 6，因此普通 Listing 七张加六张 A+ 共十三张；每个 A+ 仍独立规划模块与画布。
+`init` 创建 V3 `style_contract`、`delivery_profile`、`review_dependency_version: 2` 及上述scheduler_policy；新项目不创建 `copy_budget`。缺少字段或已有显式预算的旧项目保持原行为。A+ 按用户要求启用，`--a-plus-count` 默认 6，因此普通 Listing 七张加六张 A+ 共十三张；每个 A+ 仍独立规划模块与画布。
 
 `style_contract` version=1 保留固定设计，version=2 保留 `adaptive_per_image`。新项目 version=3 使用 `selection=design_first`、`color_roles`、`font_roles` 和 `allowed_adjustments=[lightness,position,local_surface]`；正文/标签400、mobile_sizes、`min_contrast_ratio=4.5` 保留。角色默认空，Agent 必须按产品或明确参考填写颜色、字体；没有设计色返回 DESIGN_COLOR_REQUIRED，不靠节日关键词或最高对比度补白字。
 
@@ -106,5 +114,9 @@ model_native 仍须 model_native_reason={kind: artistic_lettering|integrated_mat
 `review_dependency_version: 2` 按本图所用事实、产品层、面板与递归真实来源计算审核依赖，不绑定其他图的派生预览。文字变化保留未变的产品事实证据，所有文字／布局／遮挡重新审核。review/submissions 保存真实提交；只有内容、来源、坐标与原观察校验一致时才能预填既有观察。初次生成、质量修复与瞬时重试以 generation_attempts[].kind 分别记录；prepare 不清零修复预算。
 
 `delivery_profile={name: compact_jpg, jpeg_quality: 92}`：只导出最终 JPG，保持 canvas，4:4:4；单图 export.quality 可显式提高到95。所有实际输入保留一次，复用素材引用原路径；不再人工复制 accepted_ 文件或把成品 PNG 再拷贝一份。`deliver` 完整检查后保存输入、配置、成品及真实审核记录的绑定，再删除已登记、校验一致、未被引用的自有缓存和历史未采用候选。原始来源、采用底图、detail_refs、review/submissions 与证据 JSON 均保留；不扫描清理用户文件，不在尚有未完成任务时清理。独立 HTML 分享已移除；旧 profile 的 `standalone_html:false` 被忽略，`true` 会被拒绝。旧项目必须显式启用该 profile 并重新验证，不能用重写哈希继承不再适用的旧结论。
+
+新项目有序主图／副图／A+ JPG平铺在 `final/`，其中不交付报告、总览、预览或ZIP。`deliver --json` 和 delivery_report.json 增加 `output_dir`、`images:[{job_id,filename,path,sha256}]`、`image_count`；清单来自当前QA通过任务，并逐文件核验。紧凑整理复用其前后两次必要检查，不在进入整理前再做第三次完整检查。旧项目显式deliver时对分散产物或混有其他文件的final建立 `delivery/images-vNNN/`，不覆盖旧版本、不改变旧编码；重复交付内容相同即复用，不重编码或重复复制。最终回复只需成品文件夹入口，工作资料仍留项目目录。
+
+本次运行优化不改变生成提示或PIPELINE_VERSION，既有产品底图的生成指纹不因本地实现更新失效；相关布局／审核脚本改变仍触发必要的本地复核，不改写历史哈希继承旧审核。维护验收使用无模型回归及同机1/3/13张cold/cache/single-edit/recovery回放，模型等待与本地耗时分开报告，真实端到端下一次正式生成核验。
 
 本案例预算：JPG约5.5 MiB、必要素材和可修改工作目录目标35 MiB内；不同项目按必要输入量调整，质量优先。普通十三张套图25–35分钟仅为同等模型服务速度下的目标；维护阶段只做真实素材压缩回放与无模型回归，下次正式生成记录端到端、模型等待、交接与本地阶段核验，不额外重生整套用于测速。

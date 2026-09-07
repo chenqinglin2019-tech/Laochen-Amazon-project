@@ -29,16 +29,19 @@ def _layout_blocks(layout: dict) -> list[dict]:
             result.append({"id": identifier, "role": role, "text": text, "evidence_refs": list(evidence or ())})
     for key in ("headline", "body", "label"):
         add(key, key, layout.get(key))
-    for index, group in enumerate(layout.get("text_groups", []) or []):
+    groups = layout.get("text_groups")
+    for index, group in enumerate(groups if isinstance(groups, list) else []):
         if not isinstance(group, dict):
             continue
         for key in ("headline", "body", "label"):
             add(f"group:{group.get('id', index)}:{key}", key, group.get(key), group.get("evidence_refs"))
-    for index, item in enumerate(layout.get("items", []) or []):
+    items = layout.get("items")
+    for index, item in enumerate(items if isinstance(items, list) else []):
         if not isinstance(item, dict):
             continue
         add(f"item:{item.get('id', index)}", "label", item.get("text"), item.get("evidence_refs"))
-    for index, item in enumerate(layout.get("faq", []) or []):
+    faq = layout.get("faq")
+    for index, item in enumerate(faq if isinstance(faq, list) else []):
         if not isinstance(item, dict):
             continue
         for key in ("question", "answer"):

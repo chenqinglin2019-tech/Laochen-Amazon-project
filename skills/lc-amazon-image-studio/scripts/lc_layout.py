@@ -46,13 +46,11 @@ def _json(path: Path) -> Any:
 def _digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
-@lru_cache(maxsize=64)
-def _file_hash(path: str, mtime: int, size: int) -> str:
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
 def file_hash(path: Path) -> str:
-    stat = path.stat()
-    return _file_hash(str(path), stat.st_mtime_ns, stat.st_size)
+    # Reuse only the caller's bounded command/snapshot context. A process-wide
+    # mtime/size cache can conceal same-size file replacement between commands.
+    from lc_assets import file_hash as hash_asset
+    return hash_asset(path)
 
 def _project_file(base: Path, value: Any) -> Path:
     if not isinstance(value, str) or not value or Path(value).is_absolute() or "://" in value:
@@ -868,6 +866,8 @@ def render_batch(manifest: dict, base: Path, jobs: list[dict], *, measure_only: 
                 with Image.open(image_path) as im:
                     preview=im.convert("RGB");preview.thumbnail((360,10000),Image.Resampling.LANCZOS)
                     preview_path=output/f"{job_id}-360.png";preview.save(preview_path)
+                item["mobile_preview_binding"] = {"sha256": file_hash(preview_path),
+                                                  "layout_sha256": file_hash(image_path)}
                 item["output_path"]=str(image_path.relative_to(base))
                 item["preview_path"]=str(preview_path.relative_to(base))
             item["runtime"]["preview_seconds"] = round(time.monotonic() - preview_started, 4)

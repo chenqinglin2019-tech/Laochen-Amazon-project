@@ -28,7 +28,7 @@ python3 <skill-root>/scripts/lc_image_pipeline.py init \
 
 下面保留 V5 外部参考接口，仅适用于旧项目或本轮明确外部引用；普通新项目不运行这一路选择：
 
-首次 `prepare` 前集中规划整套文案与设计。设计参考优先级为本轮用户参考、项目已确认设计、通用样本库；V5 将选中的单张成品参考编译为逐图 `design_brief`，实际进入对应的生成或本地排版依赖。`design_brief.generation` 约束摄影、构图及图形关系，`design_brief.layout` 约束排版；它们不是产品事实，不可重写 `references` 或四项产品锁。
+首次 `plan` 前集中规划整套文案与设计。设计参考优先级为本轮用户参考、项目已确认设计、通用样本库；V5 将选中的单张成品参考编译为逐图 `design_brief`，实际进入对应的生成或本地排版依赖。`design_brief.generation` 约束摄影、构图及图形关系，`design_brief.layout` 约束排版；它们不是产品事实，不可重写 `references` 或四项产品锁。
 
 新项目的 `style_contract.version=3`、`selection=design_first`，color_roles/font_roles默认空；Agent先按实际产品或明确参考填写角色，显式组／layout优先，不用最高对比候选覆盖已指定颜色。完整保留批准文案，不创建30%精简任务；容量不足先调整版式与既有图位，不能删词、缩字或擅自新增图位。旧V1/V2契约按原规则运行，应用新设计时仅重新验证受影响部分。
 
@@ -73,13 +73,15 @@ V2 的全局 `product_truth.source_quality/master_asset_mode/master_confirmed` �
 ## 准备与调度
 
 ```bash
-python3 <skill-root>/scripts/lc_image_pipeline.py prepare --manifest <manifest> [--jobs <id> ...]
-python3 <skill-root>/scripts/lc_image_pipeline.py plan --manifest <manifest>
+python3 <skill-root>/scripts/lc_image_pipeline.py plan --manifest <manifest> --json
+# 仅当实际工具能力较低时登记，例如：--tool-capacity 2
 ```
 
-`prepare` 校验结构、计算区域像素及裁图、检查审阅与证据、编译提示及分阶段依赖。读取输出中的阻断原因；未知清晰度需要先审阅，必要细节缺实拍需要补资料或改构图，不能把状态直接改成通过。
+`plan` 已调用 prepare 完成结构、区域像素／裁图、审阅证据、提示与分阶段依赖准备；不要例行 prepare→plan 双跑。独立 `prepare --jobs <id> ...` 接口保留，输入改变或恢复状态不明时重新 plan。读取阻断原因；未知清晰度需要先审阅，必要细节缺实拍需要补资料或改构图，不能把状态直接改成通过。
 
-`plan` 用于决定下一批操作。共享商品身份或 census 等全局事实未完成时不能生成；单张证据缺口仅阻断该图，其他独立任务继续。日常先做风险最高的一个可执行锚点；通过 QA 后保持并发 2，有结果立即补位，限流或重复超时降为 1。默认每图一个候选，不例行多方案或低清后全部重做高清；HOLD 和资料不足任务不进模型队列。浅浮雕为可选效果，十三图建议最多1–2图且可为零；不增加固定四样图或全十三图重生关卡。
+`plan` 用于决定下一批操作。共享商品身份或 census 等全局事实未完成时不能生成；单张证据缺口仅阻断该图，其他独立任务继续。先做风险最高的一个可执行锚点，真实 QA 通过后从并发 2 开始。新项目默认 adaptive 策略：当前档位连续两个不同 attempt 首次成功入库升一档，最高 4；429 降 1，单次超时降一档、连续两次超时降 1。退避后 60 秒不升速，工具明确 Retry-After 期间不新增模型派发；旧 epoch 或旧档位在途成功不用于升档，重复回调不计数，降档不取消在途任务。旧项目无 scheduler_policy 保留既有策略，不自动升级。
+
+只有模型调用扣减容量；产品生图和局部标题编辑共享健康记录与槽位，本地 compose 独立列出，仍检查来源及锚门。`concurrency` 是当前档位，`network_health` 保存健康与实际工具上限；`plan --tool-capacity 1..4` 记录较低工具能力，未传保留已知值。默认每图一个候选，HOLD 不进模型队列；浅浮雕可为零，不增加固定样图或全套重生关卡。
 
 生成与本地处理、审核分别推进，不能让待审图占生成 slot，也不能为凑本地批次等待模型。已绑定且指纹未变的 raw／布局／QA 必须复用；本地改字只重排，模型原生文字改字只修订该图，改元数据不重生。
 
@@ -94,21 +96,22 @@ python3 <skill-root>/scripts/lc_image_pipeline.py transition \
   --manifest <manifest> --job <id> --status generating
 ```
 
-该命令 JSON 输出的 `attempt_id`、`prompt_hash` 必须随本次工具调用保存。工具真正开始和返回时记录事件；返回后不要等待其他 slot，立刻 ingest 绝对 raw 文件：
+预读 plan/ingest/review-submit 返回的提示文件与参考路径，再紧接执行 transition、tool_started 和实际工具调用。派发锁内只核验来源内容、递归证据与准备绑定，不生成预览或排版；缺少或过期评估返回重新 plan 要求。transition JSON 的 `attempt_id`、`prompt_hash` 随工具调用保存；返回不等待其他 slot，立刻 ingest 绝对 raw 文件：
 
 ```bash
 python3 <skill-root>/scripts/lc_image_pipeline.py attempt-event \
   --manifest <manifest> --job <id> --attempt-id <attempt-id> --event tool_started
-# 调用 image_gen；其返回文件路径为 <absolute-raw-path>
-python3 <skill-root>/scripts/lc_image_pipeline.py attempt-event \
-  --manifest <manifest> --job <id> --attempt-id <attempt-id> --event tool_returned
+# 调用 image_gen；在工具真实返回时捕获 <returned-epoch> 及 <absolute-raw-path>
 python3 <skill-root>/scripts/lc_image_pipeline.py ingest \
-  --manifest <manifest> --job <id> --artifact <absolute-raw-path> --attempt-id <attempt-id>
+  --manifest <manifest> --job <id> --artifact <absolute-raw-path> --attempt-id <attempt-id> \
+  --tool-returned-at <returned-epoch> --json
 ```
 
 `ingest` 绑定 raw、立即置为 `generated` 并释放 slot；同一 attempt 绑定同一 artifact 是幂等的，旧 attempt、旧 prompt、同一 attempt 的不同 artifact 或其他冲突会被拒绝。它不覆盖旧 raw：重试／修复使用 `raw/attempts/<job>-<attempt>.<ext>`。读取当前编译提示及 `generation_reference_paths`，只附本图必要的产品、细节和设计引用，标明角色。编辑本地图像前先查看目标。提示以 Geometry、Material、Scene Scale、Critical Detail 四项锁开头；`none/local_overlay` 不生成额外营销文字，`model_native` 只绘制已批准的准确短文案，所有路线都保护商品自身真实标签。
 
-测量真实交接延迟时，在编排层工具实际返回的瞬间捕获 Unix 时间，并给 `attempt-event` 传 `--timestamp <epoch>`；默认时间是在命令取得锁后记录，不能代表此前的工具返回或锁等待。`tool` 是工具调用墙钟（含网络与服务端排队），不是纯模型推理耗时；历史 `generation` 只作生命周期记录。真实返回到入库的 p95 目标为 ≤30 秒，需要新生产样本验证，不以模拟回调或排版耗时代替。
+`ingest --tool-returned-at` 在同一次提交校验真实事件顺序、记录返回时间及入库；仍兼容单独 `attempt-event --event tool_returned --timestamp <epoch>`。缺少真实时刻时不得补造；默认命令时刻不代表此前工具返回或锁等待。ingest 和 review-submit 返回最新 dispatch，预读后立即补位，无需再例行完整 plan。`tool` 是调用墙钟（含网络与服务端排队），不是纯推理；真实返回到入库 p95 ≤30 秒仍需正式生产验证。
+
+网络失败使用既有 `transition --status pending --reason <actual-error>`；工具明确给出等待秒数时追加 `--retry-after-seconds <seconds>`，不能仅在说明文字中记录而忽略调度等待。
 
 同视角可复用已验收生成素材，但保留生成身份及实拍依赖。新视角必须重新定位商品框和关键细节：在 `detail_output_bbox_norms` 写整个最终画面的精确归一化框，不能沿用源图二维位置假定真实位置。
 
@@ -129,7 +132,7 @@ python3 <skill-root>/scripts/lc_image_pipeline.py title-effect-ingest \
   --artifact <actual-returned-image> --mask <reviewed-grayscale-mask> --json
 ```
 
-事件可用 `--timestamp <epoch>` 记录真实工具时刻；工具失败使用 `--event failed --reason <reason>`。新尝试用新attempt-id，质量修复/瞬时重试分别填写 `--kind quality_repair|transient_retry --reason <reason>`；不把普通产品生图的attempt混入局部效果历史。prepare、event和ingest只登记真实操作，不能代替实际编辑或伪造返回时间。
+事件可用 `--timestamp <epoch>` 记录真实工具时刻；工具失败使用 `--event failed --reason <reason>`，明确等待时追加 `--retry-after-seconds <seconds>`。新尝试用新attempt-id，质量修复/瞬时重试分别填写 `--kind quality_repair|transient_retry --reason <reason>`；历史独立保存，调度容量／退避／成功计数与产品生图共用。prepare、event和ingest只登记真实操作，不能代替实际编辑或伪造返回时间。
 
 派发前校验原字形确实位于允许区内，且不碰产品或其他文字；版式失败及 HOLD 不得派发。局部效果与产品生成共用项目并发上限，工具返回后释放效果槽位。禁用效果使用 `decorative_effect={"kind":"none"}` 或移除该字段；保留历史但不再绑定弃用候选。
 
@@ -153,7 +156,7 @@ python3 <skill-root>/scripts/lc_image_pipeline.py finalize --manifest <manifest>
 
 V3设计契约在最终JPG字形核心检查最低4.5:1，保留实际成品、无文字背景及字形遮罩的绑定；不能以整框平均亮度或外部阴影替代。质量92不通过时仅该图重新编码95，仍不通过进入修复；其余图不重编码。A/B须显式设置相同画布及编码质量，不自动生成试验图。先检查统一尺寸无损合成的产品保护，再判断JPEG压缩损失。
 
-先准备审阅包，annotations 仅可写 `raw_product_bbox_norm`（相对 raw 画布归一化）与 `detail_output_bbox_norms`（相对最终输出归一化）；命令制作待审成品、预览及细节对照，不签 pass。`mobile_preview` 为相对路径，预览绑定自动计算；相同输入与坐标复用审核包，预览或对照被修改／删除则旧包失效。`--job` 处理单图；`--jobs <id> ...` 处理同轮已就绪任务，省略两者处理全部就绪任务。批量 annotations 顶层以 job id 为键，未就绪和 HOLD 跳过：
+先准备审阅包，annotations 仅可写 `raw_product_bbox_norm`（相对 raw 画布归一化）与 `detail_output_bbox_norms`（相对最终输出归一化）；命令制作待审成品、预览及细节对照，不签 pass。单图与批量共用实现：同轮就绪图一次共享准备和排版、正常批次最多一个浏览器，再逐图组包；逐图错误回滚，成功结果保留。360 预览绑定布局及自身内容哈希，已有有效预览不重复编码，缺失／篡改时重建，不省去逐图目视。`--job` 处理单图；`--jobs <id> ...` 处理同轮就绪图，省略两者处理全部就绪任务。批量 annotations 顶层以 job id 为键，未就绪和 HOLD 跳过：
 
 ```bash
 python3 <skill-root>/scripts/lc_image_pipeline.py review-prepare \
@@ -191,9 +194,9 @@ python3 <skill-root>/scripts/lc_image_pipeline.py qa --manifest <manifest> [--jo
 
 来源审阅、生成、排版、导出与QA指纹分别绑定实际依赖。local文案、字体或允许范围内的设计修正只重排并重审该图；局部浅浮雕的文案、字号、区域、素材、遮罩、承载面或受光变化只更新相关效果/布局和审核，不重生未变的商品底图。native文案或旧3D嵌字变化只修订该模型海报；构图／留白变化仅影响依赖它的底图，元数据变化只重新导出核验。未变任务不调用模型、不启动渲染器、不重建审核素材。
 
-重处理命令采用“短锁读取快照 → 独立暂存区锁外处理 → 校验目标与共享依赖后短锁提交”。提交只合并目标任务及其有效产物，冲突拒绝，不用旧 Manifest 覆盖其他任务；恢复时先处理事务日志。图片编码、字体准备、浏览器排版与对照制作不持有整个执行期写锁，入库不等待人工审核。
+重处理命令采用“短锁读取快照 → 独立暂存区锁外处理 → 校验目标与共享依赖后短锁提交”。单图快照保留全项目校验必需输入、共享报告和本图产物，包括历史目录中声明的真实依赖；省去其他图的无关 raw／final／缓存，副本独立，冲突拒绝，恢复先处理事务日志。提交只合并目标任务及有效产物，不用旧 Manifest 覆盖其他任务；图片编码、字体准备、排版与对照不持有整个执行期写锁。
 
-已确认方向、色彩与透明度的规范化 PNG 可复用原字节，其他输入仍规范化一次；字体按实际文字、语言和字重最小加载，缺字、许可证及哈希检查保留。已有就绪本地任务合批复用一个浏览器，不引入常驻服务。
+同次来源评估按源图复用一次解码／方向校正／RGB 转换，供产品、目标画布与细节裁图使用，随后释放。细节裁图先校验来源、坐标、算法版本与缓存内容，命中不解码。内容摘要及只读资源仅在本次操作内复用，写入、文件变化、提交边界重新核验，不依赖跨命令时间戳缓存。字体、许可证、缺字与内容哈希检查保留，不引入常驻服务。
 
 不要伪造哈希或仅修改 `status` 复用旧验收。性能报告分别记录参考／规划、就绪等待、工具墙钟、交接、锁等待、编码、字体、渲染、审核准备／等待、导出与打包；批级共享开销只记一次，不把累计时间重复当作逐图成本，也不相加重叠区间。历史 generation/review 生命周期保留原义，缺少真实事件的指标标记待验证。真实交接 p95 目标 ≤30 秒、无阻断派发空档 p95 目标 ≤10 秒，必须用足够实际生产样本验证，不承诺模型耗时固定。
 
@@ -203,13 +206,15 @@ python3 <skill-root>/scripts/lc_image_pipeline.py qa --manifest <manifest> [--jo
 python3 <skill-root>/scripts/lc_image_pipeline.py delivery-check --manifest <manifest>
 ```
 
-单图操作不重建整套总览；交付前运行不带 `--jobs` 的全项目 `finalize`，统一刷新或复用联系表和完整对照，新项目再运行 `deliver --json`，旧项目仍可只运行 `delivery-check`。最终门槛重查当前来源、生成与排版依赖、成品哈希、审阅及元数据，而非只信任旧状态或文件存在。任何必需图阻断、失败、待修复或缺审阅，都不能把整套声明为完成。
+单图操作不重建整套总览；交付前运行不带 `--jobs` 的全项目 `finalize`，统一刷新或复用联系表和完整对照，再运行 `deliver --json`。后者复用紧凑整理前后两次必要门禁，不在其前再重复整套检查；单独诊断仍可使用 delivery-check。门槛重查当前来源、生成与排版依赖、成品哈希、审阅及元数据。任何必需图未通过都不能声明整套完成。
 
-新项目交付最终 JPG、可重排布局与文案、真实来源及采用底图、`project_manifest.json`、`qa_report.json`、`delivery_report.json` 和持久审核证据；联系表、预览和微细节对照是通过实际审核后可清理、可重建的缓存。旧项目无 delivery_profile 保留原 PNG/JPEG 行为。流水线不再生成独立 HTML 分享文件。Listing 与所选比例及尺寸一致，A+ 与请求模块一致；不得以放大尺寸通过掩盖成品商品不清晰。
+`deliver --json` 返回 `output_dir`、`images`（job_id、filename、path、sha256）和 `image_count`，清单来自当前 QA 任务，不扫描目录猜成品。新项目主图、副图、A+ 按原有序名称平铺于 `final/`，其中仅已通过 QA 的最终 JPG；最终回复链接 output_dir。Manifest、报告、底图与审核记录留在项目目录，总览／预览不作成品交付，不生成 ZIP 或 HTML。
+
+旧项目仅在显式 deliver 时把分散的已审图片汇集到 `delivery/images-vNNN/`；额外文件或历史版本存在时也创建新版本，不覆盖原图与历史文件。没有 compact_jpg 的旧 PNG/JPEG 编码不改变；无变化重复交付逐文件验哈希后复用，不重编码、不重复复制。Listing 与选定尺寸、A+ 与请求模块仍须一致。
 
 
 ### 自动化调用与最短正常流程
 
-命令可带 `--json`，stdout 返回一个 JSON 对象（含 ok、command、manifest），日志到 stderr。先 prepare/plan（文字预检仅测量，不产生预览），模型输出立即 ingest；就绪图直接 review-prepare，真实查看后 review-submit。待本地合成图也可直接 review-prepare，无需额外 compose→prepare 循环。annotations 推荐完整 job map，命令只使用已选择的已知 job，未知 ID 报错。批审核部分失败返回非零退出码和逐图 errors，但成功任务仍保留。整套最后一次 finalize→deliver，默认不制作完整ZIP或 HTML。清理后无变化继续复用成品；修改单图只物化该图所需缓存，整套对照有变化时再按需重建。
+命令推荐带 `--json`，stdout 返回一个对象（含 ok、command、manifest），日志到 stderr。一次 plan → 预读本图提示和参考 → transition／真实工具开始 → 工具返回立即 ingest → 同轮就绪图 review-prepare → 实际逐图观察 → review-submit，随返回 dispatch 补位。待本地合成图直接 review-prepare，无需额外 compose→prepare 循环，也不等待其他模型凑批。批审核部分失败返回非零退出码与逐图 errors，成功任务保留。整套最后一次 finalize→deliver，回复成品文件夹入口。清理后未变成品复用，修改单图只物化其必需缓存。
 
 V6 字段、例外及预算见 [设计与性能契约](v5-design-and-performance.md#v6-默认契约与紧凑交付)。缺少契约的旧项目不自动启用；维护过程中也不自动迁移或清理现有生产目录。

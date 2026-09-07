@@ -4,6 +4,9 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
@@ -16,6 +19,25 @@ DC = "http://purl.org/dc/elements/1.1/"
 RDF = "http://www.w3.org/1999/02/22-rdf-syntax-ns#"
 XMP = "adobe:ns:meta/"
 HUMAN_SOURCES = {"synthetic", "real", "none", "non_photorealistic", "unknown"}
+_HASH_SCOPE = ContextVar("studio_file_hash_scope", default=None)
+
+
+@contextmanager
+def file_hash_context(*, fresh: bool = False):
+    """Share verified digests only inside one operation, never across commits."""
+    current = _HASH_SCOPE.get()
+    if current is not None and not fresh:
+        yield
+        return
+    token = _HASH_SCOPE.set({})
+    try:
+        yield
+    finally:
+        _HASH_SCOPE.reset(token)
+
+
+def _file_token(stat):
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
 
 def digest(value: Any) -> str:
@@ -24,8 +46,31 @@ def digest(value: Any) -> str:
 
 
 def file_hash(path: Path) -> str:
-    with path.open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
+    requested = Path(path)
+    resolved = requested.resolve(strict=True)
+    before = _file_token(resolved.stat())
+    cache = _HASH_SCOPE.get()
+    saved = cache.get(str(resolved)) if cache is not None else None
+    if saved is not None and saved[0] == before:
+        if requested.resolve(strict=True) != resolved or _file_token(resolved.stat()) != before:
+            raise ValueError("File changed while verifying its content binding")
+        return saved[1]
+    with resolved.open("rb") as stream:
+        if _file_token(os.fstat(stream.fileno())) != before:
+            raise ValueError("File changed before hashing")
+        hasher = hashlib.sha256()
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            hasher.update(chunk)
+        after = _file_token(os.fstat(stream.fileno()))
+    if (after != before or requested.resolve(strict=True) != resolved
+            or _file_token(resolved.stat()) != before):
+        raise ValueError("File changed while hashing")
+    result = hasher.hexdigest()
+    if cache is not None:
+        if len(cache) >= 4096:
+            cache.clear()
+        cache[str(resolved)] = (before, result)
+    return result
 
 
 def pixel_hash(image: Image.Image) -> str:

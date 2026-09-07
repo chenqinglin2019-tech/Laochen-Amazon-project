@@ -9,7 +9,7 @@ import os
 import tempfile
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from pathlib import Path
 
 from PIL import Image
@@ -92,6 +92,9 @@ def attempt_event(manifest, job_id, attempt_id, event, timestamp=None):
         if timestamp is None or attempt[key] == when:
             return copy.deepcopy(attempt)
         raise p.PipelineError("An existing tool event cannot be rewritten")
+    if event == "tool_started" and attempt.get("ingested_at") is None:
+        from lc_scheduler import require_capacity
+        require_capacity(manifest, job, exclude_product=job_id)
     if when < attempt["dispatched_at"] or when > time.time():
         raise p.PipelineError("Event timestamp is outside the dispatched attempt")
     if event == "tool_started" and "tool_returned_at" in attempt:
@@ -119,11 +122,16 @@ def _atomic_bytes(path: Path, payload: bytes):
             temp.unlink()
 
 
-def ingest(manifest, base: Path, job_id, artifact: Path, attempt_id):
+def ingest(manifest, base: Path, job_id, artifact: Path, attempt_id, *, tool_returned_at=None):
     import lc_image_pipeline as p
     started = time.monotonic()
     job = _job(manifest, job_id)
     attempt = _attempt(job, attempt_id)
+    if tool_returned_at is not None:
+        # Reject a missing start, future timestamp or conflicting prior event
+        # before admitting any image bytes or changing the live attempt.
+        attempt_event(copy.deepcopy(manifest), job_id, attempt_id,
+                      "tool_returned", tool_returned_at)
     current = p.generation_fingerprint(manifest, job, base)
     bound = p.attempt_generation_binding(job, attempt)
     if current != bound or job.get("attempt_prompt_hash") not in {attempt.get("prompt_hash"), bound}:
@@ -140,6 +148,8 @@ def ingest(manifest, base: Path, job_id, artifact: Path, attempt_id):
         if (attempt.get("artifact_sha256") != artifact_hash or raw is None or not raw.is_file()
                 or p.sha256_file(raw) != artifact_hash or job.get("bound_raw_sha256") != artifact_hash):
             raise p.PipelineError("INGEST_CONFLICT: attempt already has a different or modified artifact")
+        if tool_returned_at is not None:
+            attempt_event(manifest, job_id, attempt_id, "tool_returned", tool_returned_at)
         return {"job": job_id, "attempt_id": attempt_id, "idempotent": True,
                 "status": job["status"], "dispatch": p.execution_plan(manifest)["dispatch"]}
     if job.get("status") != "generating":
@@ -156,9 +166,13 @@ def ingest(manifest, base: Path, job_id, artifact: Path, attempt_id):
         _atomic_bytes(raw, payload)
     job["raw_output"] = p.relpath(raw, base)
     p.transition_job(manifest, job_id, "generated", "Ingested the current model artifact", base)
+    if tool_returned_at is not None:
+        attempt_event(manifest, job_id, attempt_id, "tool_returned", tool_returned_at)
     now = time.time()
     attempt.update(status="ingested", artifact_sha256=artifact_hash,
                    artifact_path=str(artifact), retained_artifact_path=p.relpath(raw, base), ingested_at=now)
+    from lc_scheduler import record_success
+    record_success(manifest, attempt, now=now)
     p.record_timing(job, "ingest", started)
     if "tool_started_at" in attempt and "tool_returned_at" in attempt:
         job.setdefault("timings", []).extend([
@@ -341,20 +355,20 @@ def _reusable_product_reviews(manifest, job, base, comparisons):
 
 
 def review_prepare(manifest, base: Path, job_id, annotations=None, *, force=False):
-    from lc_stage_timing import record_stage
-    started = time.perf_counter()
+    import lc_image_pipeline as p
+    _job(manifest, job_id)
     annotations = normalize_annotations(manifest, {job_id}, annotations, single_job=job_id)
-    result = _review_prepare_impl(manifest, base, job_id, annotations.get(job_id), force=force)
-    record_stage(_job(manifest, job_id), "review_prepare", started=started, cached=result.get("cached", False),
-        measurement="local_review_package_preparation_or_cache_validation",
-        includes=["planning", "reference_compile", "image_prepare", "layout"])
-    return result
+    result = _prepare_reviews(manifest, base, {job_id}, annotations, force=force, only_ready=False)
+    if result["errors"]:
+        raise p.PipelineError(result["errors"][0]["error"])
+    return result["packets"][0]
 
 
-def _review_prepare_impl(manifest, base: Path, job_id, annotations=None, *, force=False):
+def _review_prepare_inputs(manifest, base: Path, job_id, annotations=None, *, force=False):
+    """Validate/cache each request before any shared work or annotation mutation."""
     import lc_image_pipeline as p
     job = _job(manifest, job_id)
-    annotations = annotations or {}
+    annotations = {} if annotations is None else annotations
     if not isinstance(annotations, dict) or set(annotations) - ANNOTATIONS:
         raise p.PipelineError("Annotations accept raw_product_bbox_norm and detail_output_bbox_norms only")
     errors = []
@@ -385,13 +399,25 @@ def _review_prepare_impl(manifest, base: Path, job_id, annotations=None, *, forc
         if (saved.get("review_id") == request.get("id") and p.digest(context) == request.get("context_hash")
                 and p.digest(saved.get("context")) == request.get("context_hash") and comparisons_ok
                 and (candidate.get("output_product_bbox_norm") or not candidate.get("raw_product_bbox_norm"))):
-            return {"job": job_id, "status": "review_pending", "packet": str(output),
-                    "missing_annotations": saved.get("missing_annotations", []), "cached": True}
-    boxes = copy.deepcopy(boxes)
+            return annotations, copy.deepcopy(boxes), {
+                "job": job_id, "status": "review_pending", "packet": str(output),
+                "missing_annotations": saved.get("missing_annotations", []), "cached": True}
+    return annotations, copy.deepcopy(boxes), None
+
+
+def _review_prepare_impl(manifest, base: Path, job_id, annotations=None, *, force=False,
+                         prepared=False, inputs=None):
+    import lc_image_pipeline as p
+    job = _job(manifest, job_id)
+    annotations, boxes, cached = inputs or _review_prepare_inputs(
+        manifest, base, job_id, annotations, force=force)
+    if cached:
+        return cached
     if "raw_product_bbox_norm" in annotations:
         job["raw_product_bbox_norm"] = annotations["raw_product_bbox_norm"]
-    p.prepare(manifest, base, [job_id])
-    p.aspect_safe_postprocess(manifest, base, job_ids=[job_id], export=False)
+    if not prepared:
+        p.prepare(manifest, base, [job_id])
+        p.aspect_safe_postprocess(manifest, base, job_ids=[job_id], export=False)
     if job.get("status") != "review_pending" or not job.get("layout_result", {}).get("passed"):
         raise p.PipelineError(f"Cannot prepare review while {job_id} is {job.get('status')}")
     job["detail_output_bbox_norms"] = boxes
@@ -402,22 +428,29 @@ def _review_prepare_impl(manifest, base: Path, job_id, annotations=None, *, forc
     required = [d for d in manifest.get("critical_details", []) if d.get("visibility", {}).get(job_id) == "required"]
     comparisons, missing = [], []
     layout = base / "review" / "layouts" / f"{job_id}.png"
-    # A cached layout must never leave a missing or altered mobile review image.
-    # Re-derive this lightweight thumbnail from the bound layout, not from raw.
+    # The renderer has already produced this exact preview. Verify both bindings
+    # before reuse; missing/tampered previews still rebuild from the bound layout.
     preview = layout.with_name(f"{job_id}-360.png")
-    with Image.open(layout) as image:
-        thumbnail = image.convert("RGB")
-        thumbnail.thumbnail((360, 10000), Image.Resampling.LANCZOS)
-        payload = io.BytesIO()
-        thumbnail.save(payload, format="PNG")
-    preview_bytes = payload.getvalue()
-    preview_hash = hashlib.sha256(preview_bytes).hexdigest()
-    if not preview.is_file() or p.sha256_file(preview) != preview_hash:
-        _atomic_bytes(preview, preview_bytes)
-    job["mobile_preview_binding"] = {"sha256": preview_hash, "layout_sha256": p.sha256_file(layout)}
+    layout_hash = p.sha256_file(layout)
+    binding = job.get("layout_result", {}).get("mobile_preview_binding") or job.get("mobile_preview_binding") or {}
+    if (binding.get("layout_sha256") == layout_hash and preview.is_file()
+            and binding.get("sha256") == p.sha256_file(preview)):
+        preview_hash = binding["sha256"]
+    else:
+        with Image.open(layout) as image:
+            thumbnail = image.convert("RGB")
+            thumbnail.thumbnail((360, 10000), Image.Resampling.LANCZOS)
+            payload = io.BytesIO()
+            thumbnail.save(payload, format="PNG")
+        preview_bytes = payload.getvalue()
+        preview_hash = hashlib.sha256(preview_bytes).hexdigest()
+        if not preview.is_file() or p.sha256_file(preview) != preview_hash:
+            _atomic_bytes(preview, preview_bytes)
+    job["mobile_preview_binding"] = {"sha256": preview_hash, "layout_sha256": layout_hash}
     if not job.get("output_product_bbox_norm"):
         missing.append("raw_product_bbox_norm")
     with Image.open(layout) as image:
+        image = image.convert("RGB")
         for detail in required:
             location, crop = p.evidence_for_job(detail, job)
             override = boxes.get(detail["id"])
@@ -427,7 +460,7 @@ def _review_prepare_impl(manifest, base: Path, job_id, annotations=None, *, forc
                 continue
             if not override and not job.get("output_product_bbox_norm"):
                 continue
-            output_crop = p.crop_output_detail(image.convert("RGB"), job.get("output_product_bbox_norm") or [0, 0, 1, 1],
+            output_crop = p.crop_output_detail(image, job.get("output_product_bbox_norm") or [0, 0, 1, 1],
                                               location["bbox_in_product_norm"], override)
             path = base / "review" / "details" / job_id / f"{detail['id']}.png"
             with Image.open(p.resolve_path(crop["path"], base)) as reference:
@@ -497,28 +530,118 @@ def _review_prepare_impl(manifest, base: Path, job_id, annotations=None, *, forc
 
 
 def review_prepare_many(manifest, base: Path, job_ids=None, annotations=None, *, force=False):
-    """Prepare ready jobs independently; review never occupies generation slots."""
+    """Share local preparation for jobs already ready in this invocation."""
     import lc_image_pipeline as p
     selected = p.job_selection(manifest, job_ids)
     annotations = normalize_annotations(manifest, selected, annotations)
+    return _prepare_reviews(manifest, base, selected, annotations, force=force, only_ready=True)
+
+
+def _prepare_reviews(manifest, base, selected, annotations, *, force, only_ready):
+    """One shared renderer with per-job rollback and an isolated error fallback."""
+    import lc_image_pipeline as p
+    from lc_stage_timing import record_batch_stage
+    from lc_assets import file_hash_context
+    base = Path(base).resolve()
     results, skipped, errors = [], [], []
+    pending = {}
+    started = time.perf_counter()
+
+    def commit(candidate):
+        # The public single-job API historically updates its job dict in place;
+        # preserve references held by callers while adopting the shared state.
+        existing = {job["id"]: job for job in manifest["jobs"]}
+        adopted = []
+        for job in candidate["jobs"]:
+            target = existing.get(job["id"], {})
+            target.clear(); target.update(job)
+            adopted.append(target)
+        manifest.clear(); manifest.update(candidate)
+        manifest["jobs"] = adopted
+
+    def finish():
+        order = {job["id"]: i for i, job in enumerate(manifest["jobs"])}
+        results.sort(key=lambda result: order[result["job"]])
+        errors.sort(key=lambda result: order[result["job"]])
+        if results:
+            record_batch_stage(manifest, [result["job"] for result in results], "review_prepare",
+                started=started, cached=all(result.get("cached", False) for result in results),
+                measurement="local_review_package_preparation_or_cache_validation",
+                includes=["planning", "reference_compile", "image_prepare", "layout"])
+        return {"packets": results, "skipped": skipped, "errors": errors}
+
     for job in manifest["jobs"]:
         if job["id"] not in selected:
             continue
-        if not review_candidate(job):
+        if only_ready and not review_candidate(job):
             skipped.append({"job": job["id"], "status": job.get("status"), "reason": "not_ready_or_hold"})
             continue
-        candidate = copy.deepcopy(manifest)
         try:
-            with _job_artifact_guard(manifest, base, job["id"]):
-                result = review_prepare(candidate, base, job["id"], annotations.get(job["id"]), force=force)
+            inputs = _review_prepare_inputs(manifest, base, job["id"], annotations.get(job["id"]), force=force)
         except (p.PipelineError, ValueError, OSError) as exc:
             errors.append({"job": job["id"], "error": str(exc)})
             continue
-        manifest.clear()
-        manifest.update(candidate)
-        results.append(result)
-    return {"packets": results, "skipped": skipped, "errors": errors}
+        if inputs[2]:
+            results.append(inputs[2])
+        else:
+            pending[job["id"]] = inputs
+    if not pending:
+        return finish()
+
+    candidate = copy.deepcopy(manifest)
+    original_jobs = {key: copy.deepcopy(_job(manifest, key)) for key in pending}
+    guards = {}
+    prior_error_count = len(errors)
+    # A shared preparation exception restores every attempted job, then retries
+    # the same single-job worker so one malformed input cannot starve siblings.
+    with file_hash_context():
+        try:
+            with ExitStack() as lifetime:
+                for job_id, inputs in pending.items():
+                    guard = lifetime.enter_context(ExitStack())
+                    guard.enter_context(_job_artifact_guard(manifest, base, job_id))
+                    guards[job_id] = guard
+                    if "raw_product_bbox_norm" in inputs[0]:
+                        _job(candidate, job_id)["raw_product_bbox_norm"] = copy.deepcopy(inputs[0]["raw_product_bbox_norm"])
+                p.prepare(candidate, base, list(pending))
+                p.aspect_safe_postprocess(candidate, base, job_ids=list(pending), export=False)
+                completed = []
+                for job_id, inputs in pending.items():
+                    try:
+                        result = _review_prepare_impl(candidate, base, job_id, prepared=True, inputs=inputs)
+                    except (p.PipelineError, ValueError, OSError) as exc:
+                        guards[job_id].__exit__(type(exc), exc, exc.__traceback__)
+                        target = _job(candidate, job_id)
+                        target.clear(); target.update(original_jobs[job_id])
+                        errors.append({"job": job_id, "error": str(exc)})
+                    else:
+                        completed.append((job_id, result))
+                if completed:
+                    # Per-job guards also protect this shared file. Rebuild its
+                    # current state after individual rollback, never keep a
+                    # sibling's earlier snapshot of the plan.
+                    p.write_json(base / "execution_plan.json", p.execution_plan(candidate))
+                    commit(candidate)
+                    for job_id, _ in completed:
+                        guards[job_id].close()
+                    for job_id, result in completed:
+                        results.append(result)
+        except (p.PipelineError, ValueError, OSError):
+            # The shared attempt was rolled back, including any packet work.
+            # Keep pre-validation errors, but report only the fallback outcome
+            # for jobs that will now be retried independently.
+            del errors[prior_error_count:]
+            for job_id, inputs in pending.items():
+                fallback = copy.deepcopy(manifest)
+                try:
+                    with _job_artifact_guard(manifest, base, job_id):
+                        result = _review_prepare_impl(fallback, base, job_id, inputs=inputs)
+                except (p.PipelineError, ValueError, OSError) as exc:
+                    errors.append({"job": job_id, "error": str(exc)})
+                    continue
+                commit(fallback)
+                results.append(result)
+    return finish()
 
 
 def review_submit(manifest, base: Path, packet):

@@ -402,10 +402,15 @@ def prepare(manifest, base, job, *, flat_path=None, background_path=None, glyph_
             "model_calls": 0}
 
 
-def attempt_event(manifest, base, job, event, *, attempt_id=None, kind="initial", at=None, reason=None):
+def attempt_event(manifest, base, job, event, *, attempt_id=None, kind="initial", at=None, reason=None,
+                  retry_after_seconds=None):
     """Record explicit tool timestamps; append-only budgets span all input edits."""
     if event not in {"tool_started", "tool_returned", "failed"}:
         raise TitleEffectError("TITLE_EFFECT_EVENT_INVALID")
+    from lc_scheduler import adaptive, bind_attempt, record_failure, require_capacity, retry_after
+    retry_after(retry_after_seconds)
+    if retry_after_seconds is not None and event != "failed":
+        raise TitleEffectError("TITLE_EFFECT_RETRY_AFTER_REQUIRES_FAILURE")
     stamp = time.time() if at is None else at
     if isinstance(stamp, bool) or not isinstance(stamp, (int, float)) or not math.isfinite(stamp) or stamp < 0:
         raise TitleEffectError("TITLE_EFFECT_TIMESTAMP_INVALID")
@@ -413,11 +418,13 @@ def attempt_event(manifest, base, job, event, *, attempt_id=None, kind="initial"
     attempt = next((a for a in history if a["id"] == attempt_id), None)
     if event == "tool_started":
         if attempt is None:
-            from lc_image_pipeline import active_model_count, is_hold
+            from lc_image_pipeline import is_hold
             if is_hold(job) or job.get("status") in {"blocked", "failed", "generating"}:
                 raise TitleEffectError("TITLE_EFFECT_JOB_NOT_READY")
-            if active_model_count(manifest) >= manifest.get("concurrency", 2):
-                raise TitleEffectError("TITLE_EFFECT_CONCURRENCY_FULL")
+            try:
+                require_capacity(manifest, job)
+            except ValueError as exc:
+                raise TitleEffectError("TITLE_EFFECT_CONCURRENCY_FULL: " + str(exc)) from exc
             if "layout_result" in job and not job["layout_result"].get("passed"):
                 raise TitleEffectError("TITLE_EFFECT_LAYOUT_PREFLIGHT_FAILED")
         prepared = prepare(manifest, base, job)
@@ -439,6 +446,7 @@ def attempt_event(manifest, base, job, event, *, attempt_id=None, kind="initial"
                    "fingerprint": prepared["fingerprint"], "prompt_sha256": prepared["prompt_sha256"],
                    "prompt": prepared["prompt"], "guide": copy.deepcopy(prepared["guide"]),
                    "tool_started_at": stamp, "reason": reason}
+        bind_attempt(manifest, attempt)
         job.setdefault("title_effect_attempts", []).append(attempt)
         job["title_effect_state"]["status"] = "generating"
     else:
@@ -458,6 +466,8 @@ def attempt_event(manifest, base, job, event, *, attempt_id=None, kind="initial"
         attempt["status"] = "returned" if event == "tool_returned" else "failed"
         if event == "failed":
             attempt["failure_reason"] = reason
+            if adaptive(manifest):
+                record_failure(manifest, attempt, reason, retry_after_seconds=retry_after_seconds)
     return copy.deepcopy(attempt)
 
 
@@ -514,6 +524,9 @@ def ingest(manifest, base, job, artifact_path, mask_path, *, attempt_id, review=
     state.update(candidate=candidate, status="candidate_ready", fallback_reason=None)
     state.pop("applied", None)
     attempt.update(status="ingested", binding=binding, artifact=artifact, mask=mask_record)
+    if manifest.get("scheduler_policy"):
+        from lc_scheduler import record_success
+        record_success(manifest, attempt)
     return {"binding": binding, "cached": False, "review_required": True,
             "artifact": copy.deepcopy(artifact), "mask": copy.deepcopy(mask_record)}
 

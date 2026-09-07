@@ -9,10 +9,13 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
+import shutil
+import tempfile
 from pathlib import Path
 from typing import Callable
 
-from lc_assets import digest, file_hash
+from lc_assets import digest, file_hash, file_hash_context
 
 COMPACT_DEFAULTS = {"name": "compact_jpg", "jpeg_quality": 92}
 EVIDENCE_VERSION = 1
@@ -354,4 +357,158 @@ def compact_project(manifest: dict, base: Path, *, manifest_path: Path,
     _write_json(manifest_path, manifest)
     return {"ready": True, "removed": removed, "reclaimed_bytes": reclaimed,
             "retained_input_files": len(protected), "model_calls": 0,
-            "project_bytes": sum(path.stat().st_size for path in base.rglob("*") if path.is_file() and not path.is_symlink())}
+            "project_bytes": sum(path.stat().st_size for path in base.rglob("*") if path.is_file() and not path.is_symlink()),
+            "delivery_result": after}
+
+
+def _approved_delivery_images(manifest: dict, base: Path) -> list[dict]:
+    """Validate current approved bytes, without repeating the full product gate."""
+    images, paths = [], set()
+    for job in manifest.get("jobs", []):
+        identifier = job.get("id")
+        if not isinstance(identifier, str) or not re.fullmatch(r"[a-z0-9][a-z0-9_-]*", identifier):
+            raise ValueError("Delivery image requires a valid job ID")
+        held = (job.get("hold") is True or job.get("publication_status") == "hold"
+                or (not job.get("required", True) and "specs_hold" in identifier))
+        if held or job.get("status") != "qa_passed":
+            if job.get("required", True):
+                raise ValueError(f"{job.get('id')}: required image is not approved for delivery")
+            continue
+        value = job.get("final_output")
+        if not isinstance(value, str) or not value:
+            raise ValueError(f"{identifier}: final_output is required")
+        source = _inside(base, value)
+        expected = job.get("qa_final_sha256")
+        if source.suffix.lower() not in {".png", ".jpg", ".jpeg"} or not source.is_file():
+            raise ValueError(f"{identifier}: approved final image is missing or unsupported")
+        if source in paths:
+            raise ValueError("Delivery images may not share the same final output path")
+        paths.add(source)
+        if not isinstance(expected, str) or not re.fullmatch(r"[0-9a-f]{64}", expected) or file_hash(source) != expected:
+            raise ValueError(f"{identifier}: final image changed after QA")
+        images.append({"job_id": identifier, "filename": source.name, "source": source, "sha256": expected})
+    if not images:
+        raise ValueError("No current QA-approved images are available for delivery")
+    # Flatten without losing original names unless two legacy subfolders clash.
+    names = [image["filename"].casefold() for image in images]
+    for image in images:
+        if names.count(image["filename"].casefold()) > 1:
+            image["filename"] = image["job_id"] + "--" + image["filename"]
+    if len({image["filename"].casefold() for image in images}) != len(images):
+        raise ValueError("Delivery filenames still collide after job-ID disambiguation")
+    return images
+
+
+def _directory_matches(base: Path, directory: Path, images: list[dict], *, hashes: bool) -> bool:
+    try:
+        directory = _inside(base, directory)
+        if not directory.is_dir():
+            return False
+        entries = list(directory.iterdir())
+        if {path.name for path in entries} != {image["filename"] for image in images}:
+            return False
+        if any(path.is_symlink() or not path.is_file() for path in entries):
+            return False
+        return not hashes or all(file_hash(_inside(base, directory / image["filename"])) == image["sha256"] for image in images)
+    except (OSError, ValueError):
+        return False
+
+
+def _directory_result(directory: Path, images: list[dict], *, reused: bool, copied_files: int) -> dict:
+    return {"output_dir": str(directory), "images": [
+        {"job_id": image["job_id"], "filename": image["filename"], "path": str(directory / image["filename"]), "sha256": image["sha256"]}
+        for image in images], "image_count": len(images), "reused": reused, "copied_files": copied_files}
+
+
+def prepare_delivery_directory(manifest: dict, base: Path, *, delivery_result: dict) -> dict:
+    """Expose only current approved images as a flat directory, never a ZIP.
+
+    The caller holds its manifest lock and supplies the successful delivery gate
+    for this same state (the post-cleanup result for compact projects). This
+    helper checks current final bytes and directory contents, not the full QA
+    graph again. Version-folder publication also has its own lock for callers
+    that prepare the same already-approved manifest concurrently.
+    """
+    if not isinstance(delivery_result, dict) or delivery_result.get("ready") is not True:
+        raise ValueError("A successful current delivery gate is required")
+    if delivery_result.get("project_id", manifest.get("project_id")) != manifest.get("project_id"):
+        raise ValueError("Delivery gate belongs to a different project")
+    base = Path(base).resolve()
+    with file_hash_context(fresh=True):
+        images = _approved_delivery_images(manifest, base)
+        final = _inside(base, "final")
+        if all(image["source"].parent == final for image in images) and _directory_matches(base, final, images, hashes=False):
+            return _directory_result(final, images, reused=True, copied_files=0)
+        root = _inside(base, "delivery")
+        if root.exists() and not root.is_dir():
+            raise ValueError("The delivery output root is occupied by a user file")
+        root.mkdir(parents=True, exist_ok=True)
+        from lc_style_reference import _selection_lock
+        lock_target = root / "directory-delivery"
+        _inside(base, root / ".directory-delivery.lock")
+        with _selection_lock(lock_target):
+            _inside(base, root)
+            # Re-read approval bytes after lock acquisition; no inherited digest
+            # is valid across another writer's directory publication interval.
+            with file_hash_context(fresh=True):
+                images = _approved_delivery_images(manifest, base)
+                inventory = [{key: image[key] for key in ("job_id", "filename", "sha256")} for image in images]
+                binding = {"version": 1, "project_id": manifest.get("project_id"), "images": inventory}
+                for marker in sorted(root.glob(".images-v*.json")):
+                    if marker.is_symlink() or not marker.is_file():
+                        continue
+                    try:
+                        record = json.loads(marker.read_text(encoding="utf-8"))
+                    except (OSError, ValueError):
+                        continue
+                    if record != binding:
+                        continue
+                    directory = root / marker.name[1:-5]
+                    if _directory_matches(base, directory, images, hashes=True):
+                        return _directory_result(directory, images, reused=True, copied_files=0)
+                version = 1
+                while True:
+                    name = f"images-v{version:03d}"
+                    directory, marker = root / name, root / f".{name}.json"
+                    if not directory.exists() and not directory.is_symlink() and not marker.exists() and not marker.is_symlink():
+                        break
+                    version += 1
+                temporary = Path(tempfile.mkdtemp(prefix=".images-stage-", dir=root))
+                try:
+                    for image in images:
+                        source = _inside(base, image["source"])
+                        target = temporary / image["filename"]
+                        shutil.copy2(source, target)
+                        if file_hash(target) != image["sha256"]:
+                            raise ValueError(f"{image['job_id']}: copied final image failed hash verification")
+                    # Detect source replacement (including symlinks) before the
+                    # directory is published and preserve every original path.
+                    for image in images:
+                        if file_hash(_inside(base, image["source"])) != image["sha256"]:
+                            raise ValueError(f"{image['job_id']}: final changed while preparing delivery")
+                    if directory.exists() or directory.is_symlink() or marker.exists() or marker.is_symlink():
+                        raise ValueError("Delivery destination became occupied; no user files were overwritten")
+                    directory.mkdir()  # Exclusive allocation; never replace an existing user directory.
+                    for image in images:
+                        # Exclusive publication of already-copied private inodes.
+                        # These are not links to the original QA output files.
+                        source, target = temporary / image["filename"], directory / image["filename"]
+                        try:
+                            os.link(source, target)
+                        except OSError:
+                            # FAT/network filesystems may not support hard links;
+                            # exclusive creation retains the no-overwrite contract.
+                            with source.open("rb") as input_stream, target.open("xb") as output_stream:
+                                shutil.copyfileobj(input_stream, output_stream)
+                            shutil.copystat(source, target)
+                        if file_hash(target) != image["sha256"]:
+                            raise ValueError(f"{image['job_id']}: published image failed hash verification")
+                    with marker.open("x", encoding="utf-8") as stream:
+                        json.dump(binding, stream, ensure_ascii=False, indent=2, allow_nan=False)
+                        stream.write("\n")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                finally:
+                    if temporary.exists():
+                        shutil.rmtree(temporary)
+                return _directory_result(directory, images, reused=False, copied_files=len(images))

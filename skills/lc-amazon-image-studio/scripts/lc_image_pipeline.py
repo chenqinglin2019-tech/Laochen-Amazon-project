@@ -36,7 +36,7 @@ if str(SCRIPT_DIR) not in sys.path:
 if __name__ == "__main__":
     sys.modules.setdefault("lc_image_pipeline", sys.modules[__name__])
 from lc_assets import (POLICY_VERSION, digest, pixel_hash, compose_product_layers,
-                       export_image, check_export, disclosure_issues)
+                       export_image, check_export, disclosure_issues, file_hash, file_hash_context)
 from lc_design import (resolve_text_mode, copy_blocks, has_marketing_text, needs_local_layout,
                        requires_visual_design, design_prompt_lines, design_layout_payload,
                        native_text_review_issues, validate_design, panel_contracts, panel_review_issues,
@@ -49,6 +49,9 @@ from lc_delivery import resolve_delivery_profile, apply_delivery_profile, artifa
 
 SCHEMA_VERSION = 3
 PIPELINE_VERSION = "3.0.0"
+# The original source/box cache-key schema is algorithm v1. Preserve its bytes
+# (and existing generation dependencies); later crop algorithms must version it.
+DETAIL_CROP_ALGORITHM_VERSION = 1
 VALID_RUN_MODES = {"risk_gated_auto", "confirm_each_stage"}
 VALID_BACKENDS = {"built_in_image_gen"}
 VALID_SOURCE_QUALITY = {"unknown", "sufficient", "marginal", "insufficient"}
@@ -145,7 +148,7 @@ def assess_sources_scoped(manifest: dict, base: Path, selected: set[str]) -> Non
     untouched = {j["id"]: copy.deepcopy(j) for j in manifest["jobs"] if j["id"] not in selected}
     try:
         assess_sources(manifest, base, materialize=not (manifest.get("review_evidence")
-            and resolve_delivery_profile(manifest)["name"] == "compact_jpg"))
+            and resolve_delivery_profile(manifest)["name"] == "compact_jpg"), job_ids=selected)
     finally:
         for job in manifest["jobs"]:
             if job["id"] in untouched:
@@ -195,11 +198,7 @@ def relpath(path: Path, base: Path) -> str:
 
 
 def sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+    return file_hash(path)
 
 
 def require_enum(value: Any, allowed: set[str], label: str, errors: list[str]) -> None:
@@ -319,7 +318,8 @@ def validate_manifest(manifest: dict[str, Any], base: Path, check_files: bool = 
     validate_id(manifest.get("project_id"), "project_id", errors)
     require_enum(manifest.get("run_mode"), VALID_RUN_MODES, "run_mode", errors)
     require_enum(manifest.get("generation_backend"), VALID_BACKENDS, "generation_backend", errors)
-    number(manifest.get("concurrency"), "concurrency", 1, 2, integer=True)
+    from lc_scheduler import validate as validate_scheduler
+    errors.extend(validate_scheduler(manifest))
     boolean(manifest, "critical_detail_census_completed", "critical_detail_census_completed")
     for key, default in (("max_transient_retries", 2), ("max_quality_repairs", 1)):
         number(manifest.get(key, default), key, 0, default, integer=True)
@@ -743,23 +743,45 @@ def extract_detail_references(manifest: dict[str, Any], base: Path, job_ids: Ite
     output_dir.mkdir(parents=True, exist_ok=True)
     references = {ref["id"]: ref for ref in manifest["references"]}
     selected = job_selection(manifest, job_ids)
-
+    grouped = {}
+    chosen = []
+    results = {}
     for detail in manifest.get("critical_details", []):
         if job_ids is not None and not any(detail.get("visibility", {}).get(j) == "required" for j in selected):
             continue
-        crops: list[dict[str, Any]] = []
-        has_confirmed = False
-        for location in detail.get("locations", []):
-            ref = references[location["reference_id"]]
-            source_path = resolve_path(ref["path"], base)
-            assert source_path is not None
-            with Image.open(source_path) as source:
-                source = ImageOps.exif_transpose(source).convert("RGB")
+        chosen.append(detail)
+        for index, location in enumerate(detail.get("locations", [])):
+            grouped.setdefault(location["reference_id"], []).append((detail, index, location))
+    for reference_id, locations in grouped.items():
+        ref = references[reference_id]
+        source_path = resolve_path(ref["path"], base)
+        assert source_path is not None
+        source_hash = sha256_file(source_path)
+        # assess_sources has already bound the correctly oriented dimensions to
+        # these source bytes. Standalone calls can obtain them while decoding.
+        source_size = ref.get("image_size") if ref.get("sha256") == source_hash else None
+        if (not isinstance(source_size, (list, tuple)) or len(source_size) != 2
+                or any(type(n) is not int or n <= 0 for n in source_size)):
+            source_size = None
+        source = None
+        def source_pixels():
+            nonlocal source, source_size
+            if source is None:
+                with Image.open(source_path) as original:
+                    source = ImageOps.exif_transpose(original).convert("RGB")
+                if source_size is not None and tuple(source_size) != source.size:
+                    raise PipelineError("Source dimensions changed; reassess product evidence")
+                source_size = source.size
+            return source
+        try:
+            if source_size is None:
+                source_pixels()
+            for detail, index, location in locations:
                 image_bbox = detail_bbox_in_image(
                     ref["product_bbox_norm"], location["bbox_in_product_norm"]
                 )
                 left, top, right, bottom = normalized_to_pixels(
-                    image_bbox, source.width, source.height
+                    image_bbox, *source_size
                 )
                 detail_width, detail_height = right - left, bottom - top
                 longest = max(detail_width, detail_height)
@@ -767,25 +789,27 @@ def extract_detail_references(manifest: dict[str, Any], base: Path, job_ids: Ite
                 pixel_verifiable = longest >= 32 and shortest >= 8
                 visually_confirmed = location.get("visual_confirmation", detail.get("visual_confirmation")) == "confirmed"
                 verifiable = pixel_verifiable and visually_confirmed
-                has_confirmed = has_confirmed or verifiable
                 padding = max(4, round(max(detail_width, detail_height) * 0.5))
                 crop_box = (
                     max(0, left - padding),
                     max(0, top - padding),
-                    min(source.width, right + padding),
-                    min(source.height, bottom + padding),
+                    min(source_size[0], right + padding),
+                    min(source_size[1], bottom + padding),
                 )
-                crop = source.crop(crop_box)
                 output_path = output_dir / (
                     f"{detail['id']}__{location['view']}__{location['reference_id']}.png"
                 )
-                cache_key = digest({"source": sha256_file(source_path), "box": crop_box})
+                crop_inputs = {"source": source_hash, "box": crop_box}
+                if DETAIL_CROP_ALGORITHM_VERSION != 1:
+                    crop_inputs["algorithm_version"] = DETAIL_CROP_ALGORITHM_VERSION
+                cache_key = digest(crop_inputs)
                 previous = next((c for c in detail.get("reference_crops", [])
                                  if c.get("path") == relpath(output_path, base)), {})
-                if previous.get("cache_key") != cache_key or not output_path.is_file():
-                    crop.save(output_path, format="PNG")
-                crops.append(
-                    {
+                if (previous.get("cache_key") != cache_key or not output_path.is_file()
+                        or previous.get("sha256") != sha256_file(output_path)):
+                    with source_pixels().crop(crop_box) as crop:
+                        crop.save(output_path, format="PNG")
+                results[(detail["id"], index)] = {
                         "view": location["view"],
                         "reference_id": location["reference_id"],
                         "path": relpath(output_path, base),
@@ -796,9 +820,13 @@ def extract_detail_references(manifest: dict[str, Any], base: Path, job_ids: Ite
                         "sha256": sha256_file(output_path),
                         "cache_key": cache_key,
                     }
-                )
+        finally:
+            if source is not None:
+                source.close()
+    for detail in chosen:
+        crops = [results[(detail["id"], i)] for i in range(len(detail.get("locations", [])))]
         detail["reference_crops"] = crops
-        detail["status"] = "confirmed" if has_confirmed else "unverifiable"
+        detail["status"] = "confirmed" if any(c["verifiable"] for c in crops) else "unverifiable"
 
 
 def lock_lines(lock: dict[str, Any]) -> list[str]:
@@ -1954,6 +1982,7 @@ def reported_timings(job: dict) -> list[dict]:
     return records
 
 
+@file_hash_context(fresh=True)
 def delivery_check(manifest: dict[str, Any], base: Path) -> dict[str, Any]:
     issues = validate_manifest(manifest, base, check_files=True)
     if issues:
@@ -2044,7 +2073,12 @@ def delivery_check(manifest: dict[str, Any], base: Path) -> dict[str, Any]:
 
 
 def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
-                   reason: str | None, base: Path | None = None) -> None:
+                   reason: str | None, base: Path | None = None, *, retry_after_seconds=None) -> None:
+    from lc_scheduler import (adaptive, bind_attempt, record_failure, retry_after,
+                              require_capacity, source_dispatch_decision)
+    retry_after(retry_after_seconds)
+    if retry_after_seconds is not None and (next_status != "pending" or not reason):
+        raise PipelineError("retry_after_seconds requires a failed attempt returning to pending with a reason")
     job = find_by_id(manifest["jobs"], job_id)
     if job is None:
         raise PipelineError(f"Unknown job: {job_id}")
@@ -2072,16 +2106,15 @@ def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
             raise PipelineError("Invalid generation inputs:\n- " + "\n- ".join(errors))
         if not manifest.get("critical_detail_census_completed") or manifest.get("shared_blockers"):
             raise PipelineError("Shared product evidence changed; run prepare before generation")
-        from lc_quality import assess_sources, decide_job
-        assess_sources(manifest, base)
-        decision = decide_job(manifest, job)
+        decision = source_dispatch_decision(manifest, job, base)
         if decision["blocked_reasons"] or decision.get("recommended_mode") != job["render_mode"]:
             raise PipelineError("Current source evidence or processing mode requires review: " + ";".join(decision["blocked_reasons"]))
-        running = active_model_count(manifest, exclude_product=job_id)
         if any(a.get("status") == "started" for a in job.get("title_effect_attempts", [])):
             raise PipelineError("An active local title edit must return before replacing its product base")
-        if running >= manifest.get("concurrency", 2):
-            raise PipelineError("Generation concurrency is full; finish an active image before dispatching another")
+        try:
+            require_capacity(manifest, job, exclude_product=job_id)
+        except ValueError as exc:
+            raise PipelineError(str(exc)) from exc
         if base is not None and generation_fingerprint(manifest, job, base) != job["prompt_hash"]:
             raise PipelineError("Generation inputs changed; run prepare before dispatch")
         if manifest.get("style_contract") and resolve_text_mode(job) == "local_overlay" and has_marketing_text(job):
@@ -2132,6 +2165,7 @@ def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
         job["active_attempt_id"] = uuid.uuid4().hex
         attempt = {"id": job["active_attempt_id"], "prompt_hash": job["prompt_hash"], "kind": attempt_kind,
                    "dispatched_at": job["generation_started_at"], "status": "dispatched"}
+        bind_attempt(manifest, attempt)
         if manifest.get("style_contract") or manifest.get("review_dependency_version") == 2:
             geometry = generation_geometry(job)
             job["generation_geometry_lock"] = copy.deepcopy(geometry)
@@ -2163,7 +2197,8 @@ def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
             job["generated_prompt_hash"] = job["prompt_hash"]
             job["bound_raw_sha256"] = sha256_file(path)
             job["repair_in_progress"] = False
-            manifest.setdefault("network_health", {})["consecutive_timeouts"] = 0
+            if not adaptive(manifest):
+                manifest.setdefault("network_health", {})["consecutive_timeouts"] = 0
             job.setdefault("timings", []).append({"stage": "generation", "seconds": round(time.time()-job.get("generation_started_at", time.time()), 4),
                                                    "cached": False, "measurement": "dispatch_to_ingest_lifecycle"})
     job["status"] = next_status
@@ -2171,13 +2206,10 @@ def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
         job["status_reason"] = reason
         if next_status == "pending":
             job["queued_at"] = time.time()
-            if any(v in reason.lower() for v in ("rate limit", "rate_limit", "429")):
-                manifest["concurrency"] = 1
-            elif "timeout" in reason.lower():
-                health = manifest.setdefault("network_health", {})
-                health["consecutive_timeouts"] = health.get("consecutive_timeouts", 0) + 1
-                if health["consecutive_timeouts"] >= 2:
-                    manifest["concurrency"] = 1
+            attempt = next((a for a in job.get("generation_attempts", [])
+                            if a.get("id") == job.get("active_attempt_id")), None)
+            if current == "generating" or not adaptive(manifest):
+                record_failure(manifest, attempt, reason, retry_after_seconds=retry_after_seconds)
 
 
 def prepare(manifest: dict[str, Any], base: Path, job_ids: Iterable[str] | None = None) -> None:
@@ -2299,10 +2331,17 @@ def execution_plan(manifest: dict) -> dict:
     allowed = ready if anchor_passed else [j for j in ready if j["id"] == anchor]
     if manifest.get("generation_gate", {}).get("status") != "open":
         allowed = []
-    capacity = max(0, manifest.get("concurrency", 2) - active_model_count(manifest))
+    from lc_scheduler import state as scheduler_state
+    scheduling = scheduler_state(manifest)
+    models = [j for j in allowed if j["render_mode"] != "pixel_composite"][:scheduling["model_capacity"]]
+    local = [j for j in allowed if j["render_mode"] == "pixel_composite"]
+    dispatched = {j["id"] for j in models + local}
     return {"anchor": anchor, "anchor_passed": anchor_passed, "concurrency": manifest.get("concurrency", 2),
+            "scheduler": scheduling,
             "dispatch": [{"id": j["id"], "action": "compose" if j["render_mode"] == "pixel_composite" else "image_gen",
-                          "prompt_hash": j.get("prompt_hash"), "risk": risk(j)} for j in allowed[:capacity]],
+                          "prompt_hash": j.get("prompt_hash"), "prompt_file": j.get("prompt_file"),
+                          "generation_reference_paths": list(j.get("generation_reference_paths") or []),
+                          "risk": risk(j)} for j in allowed if j["id"] in dispatched],
             "deterministic_resume": [j["id"] for j in manifest["jobs"] if j.get("status") in {"generated", "layout_repair_needed", "export_repair_needed"}],
             "review_pending": [j["id"] for j in manifest["jobs"] if j.get("status") == "review_pending"],
             "blocked": [{"id": j["id"], "reason": j.get("blocked_reason")} for j in manifest["jobs"] if j.get("status") == "blocked"],
@@ -2342,7 +2381,9 @@ def init_project(project_dir: Path, project_id: str, force: bool = False, *,
         backup = path.with_name(f"project_manifest.backup-{time.time_ns()}.json")
         backup.write_bytes(path.read_bytes())
     project_dir.mkdir(parents=True, exist_ok=True)
+    from lc_scheduler import default_policy as default_scheduler_policy
     template.update(project_id=project_id, marketplace=marketplace, language=language,
+                    scheduler_policy=default_scheduler_policy(), concurrency=2,
                     listing_profile={"aspect": listing_aspect, "short_edge": short_edge},
                     design_template_policy={"version": 1, "mode": "auto"},
                     style_contract=default_style_contract(),
@@ -2429,6 +2470,7 @@ def parser() -> argparse.ArgumentParser:
         if name in {"prepare", "plan", "compose", "postprocess", "qa", "finalize"}:
             sub.add_argument("--jobs", nargs="+", help="Only process these job ids; preserve unrelated job outputs and reviews")
         if name == "postprocess": sub.add_argument("--force", action="store_true")
+        if name == "plan": sub.add_argument("--tool-capacity", type=int, choices=range(1, 5))
         if name == "migrate":
             sub.add_argument("--marketplace")
             sub.add_argument("--language")
@@ -2437,6 +2479,7 @@ def parser() -> argparse.ArgumentParser:
     transition.add_argument("--job", required=True)
     transition.add_argument("--status", required=True)
     transition.add_argument("--reason")
+    transition.add_argument("--retry-after-seconds", type=float)
     dependencies = subs.add_parser("migrate-dependencies", help="Verify a legacy bound artifact before adopting scoped per-image dependencies")
     dependencies.add_argument("--manifest", type=Path, required=True)
     dependencies.add_argument("--source-manifest", type=Path, required=True)
@@ -2448,6 +2491,7 @@ def parser() -> argparse.ArgumentParser:
     ingest.add_argument("--job", required=True)
     ingest.add_argument("--artifact", type=Path, required=True)
     ingest.add_argument("--attempt-id", required=True)
+    ingest.add_argument("--tool-returned-at", type=float)
     event = subs.add_parser("attempt-event", help="Record an actual tool start/return timestamp, independent of ingestion")
     event.add_argument("--manifest", type=Path, required=True)
     event.add_argument("--job", required=True)
@@ -2474,6 +2518,7 @@ def parser() -> argparse.ArgumentParser:
             effect.add_argument("--kind", choices=["initial", "quality_repair", "transient_retry"], default="initial")
             effect.add_argument("--timestamp", type=float)
             effect.add_argument("--reason")
+            effect.add_argument("--retry-after-seconds", type=float)
         elif name == "title-effect-ingest":
             effect.add_argument("--artifact", type=Path, required=True)
             effect.add_argument("--mask", type=Path, required=True)
@@ -2483,6 +2528,7 @@ def parser() -> argparse.ArgumentParser:
     return command
 
 
+@file_hash_context(fresh=True)
 def run_command(args) -> int:
     manifest = manifest_path = None
     result = None
@@ -2530,6 +2576,9 @@ def run_command(args) -> int:
         if args.command == "prepare":
             prepare(manifest, base, args.jobs)
         elif args.command == "plan":
+            if getattr(args, "tool_capacity", None) is not None:
+                from lc_scheduler import set_tool_capacity
+                set_tool_capacity(manifest, args.tool_capacity)
             prepare(manifest, base, args.jobs)
             result = execution_plan(manifest)
         elif args.command in {"postprocess", "compose"}:
@@ -2545,15 +2594,21 @@ def run_command(args) -> int:
         elif args.command == "delivery-check":
             result = delivery_check(manifest, base)
         elif args.command == "deliver":
-            from lc_delivery import compact_project
-            result = delivery_check(manifest, base)
+            from lc_delivery import compact_project, prepare_delivery_directory
             profile = resolve_delivery_profile(manifest)
             if profile["name"] == "compact_jpg":
-                result["compaction"] = compact_project(manifest, base, manifest_path=manifest_path,
+                compaction = compact_project(manifest, base, manifest_path=manifest_path,
                     delivery_check_fn=delivery_check, qa_fingerprint_fn=qa_fingerprint,
                     stage_fingerprints_fn=current_fingerprints)
+                result = compaction.pop("delivery_result")
+                result["compaction"] = compaction
+            else:
+                result = delivery_check(manifest, base)
+            result.update(prepare_delivery_directory(manifest, base, delivery_result=result))
+            write_json(base / "delivery_report.json", result)
         elif args.command == "transition":
-            transition_job(manifest, args.job, args.status, args.reason, base)
+            transition_job(manifest, args.job, args.status, args.reason, base,
+                           retry_after_seconds=getattr(args, "retry_after_seconds", None))
             job = find_by_id(manifest["jobs"], args.job)
             result = {"job": args.job, "status": job["status"], "attempt_id": job.get("active_attempt_id"),
                       "prompt_hash": job.get("prompt_hash")}
@@ -2572,7 +2627,8 @@ def run_command(args) -> int:
                 result = prepare_effect(manifest, base, job)
             elif args.command == "title-effect-event":
                 result = effect_event(manifest, base, job, args.event, attempt_id=args.attempt_id,
-                                      kind=args.kind, at=args.timestamp, reason=args.reason)
+                                      kind=args.kind, at=args.timestamp, reason=args.reason,
+                                      retry_after_seconds=getattr(args, "retry_after_seconds", None))
             else:
                 result = ingest_effect(manifest, base, job, args.artifact, args.mask, attempt_id=args.attempt_id)
                 if not result.get("cached"):
@@ -2583,7 +2639,8 @@ def run_command(args) -> int:
         elif args.command in {"ingest", "attempt-event", "review-prepare", "review-submit"}:
             from lc_workflow import ingest, attempt_event, review_prepare, review_prepare_many, review_submit, review_submit_many
             if args.command == "ingest":
-                result = ingest(manifest, base, args.job, args.artifact, args.attempt_id)
+                result = ingest(manifest, base, args.job, args.artifact, args.attempt_id,
+                                tool_returned_at=getattr(args, "tool_returned_at", None))
             elif args.command == "attempt-event":
                 result = attempt_event(manifest, args.job, args.attempt_id, args.event, args.timestamp)
             elif args.command == "review-prepare":
