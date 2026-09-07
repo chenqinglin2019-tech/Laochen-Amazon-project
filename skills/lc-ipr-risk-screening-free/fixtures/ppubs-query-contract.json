@@ -1,0 +1,30 @@
+{
+  "source": "https://www.uspto.gov/patents/search/patent-public-search/searchable-indexes",
+  "verified_at": "2026-09-06",
+  "cases": [
+    {"q": "(lid OR cover) AND (strap OR retainer)", "field": "design", "right_type": "design", "strategy": "boolean", "rendered": "((lid OR cover) AND (strap OR retainer)) AND S.KD."},
+    {"q": "flexible lid strap", "field": "structural_feature", "right_type": "patent", "strategy": "boolean", "rendered": "flexible AND lid AND strap"},
+    {"q": "lid AND strap", "field": "title", "right_type": "patent", "strategy": "boolean", "rendered": "(lid AND strap).TI."},
+    {"q": "lid latch", "field": "title", "right_type": "patent", "strategy": "phrase", "rendered": "(\"lid latch\").TI."},
+    {"q": "lid AND latch", "field": "title", "right_type": "design", "strategy": "boolean", "rendered": "((lid AND latch).TI.) AND S.KD."},
+    {"q": "lid AND strap", "field": "TI", "right_type": "patent", "strategy": "boolean", "error": true},
+    {"q": "lid AND strap", "field": "title", "right_type": "patent", "strategy": null, "error": true},
+    {"q": "锅盖固定带", "field": "title", "right_type": "patent", "strategy": "phrase", "error": true},
+    {"q": "Cameron Hughes", "field": "inventor", "right_type": "design", "strategy": "phrase", "rendered": "((\"Cameron Hughes\").INV.) AND S.KD."},
+    {"q": "Acme", "field": "owner", "right_type": "patent", "strategy": "phrase", "rendered": "(\"Acme\").ASNM."},
+    {"q": "Acme", "field": "applicant", "right_type": "patent", "strategy": "phrase", "rendered": "(\"Acme\").AANM."},
+    {"q": "D07/391", "field": "uspc", "right_type": "design", "strategy": "boolean", "rendered": "(D07/391.CCLS.) AND S.KD."},
+    {"q": "A47J36/12", "field": "cpc", "right_type": "patent", "strategy": "boolean", "rendered": "A47J36/12.CPC."},
+    {"q": "USD123456S1", "field": "record_number", "right_type": "design", "strategy": "record_number", "rendered": "D123456.PN."},
+    {"q": "USRE12345E1", "field": "record_number", "right_type": "patent", "strategy": "record_number", "error": true},
+    {"q": "USPP12345P2", "field": "record_number", "right_type": "patent", "strategy": "record_number", "error": true},
+    {"q": "US11401089B2", "field": "record_number", "right_type": "patent", "strategy": "record_number", "rendered": "11401089.PN."},
+    {"q": "lid strap", "field": "design", "right_type": "design", "strategy": null, "error": true},
+    {"q": "PATENTED UNIVERSAL FIT LID LATCH", "field": "product", "right_type": "patent", "strategy": "phrase", "error": true},
+    {"q": "one two three four five six seven eight nine", "field": "product", "right_type": "patent", "strategy": "phrase", "error": true},
+    {"q": "lid AND (strap OR)", "field": "design", "right_type": "design", "strategy": "boolean", "error": true},
+    {"q": "lid.TI. OR D123456.PN.", "field": "design", "right_type": "design", "strategy": "boolean", "error": true},
+    {"q": "07-02", "field": "locarno", "right_type": "design", "strategy": "boolean", "error": true},
+    {"q": "硅胶锅盖固定带", "field": "design", "right_type": "design", "strategy": "phrase", "error": true}
+  ]
+}

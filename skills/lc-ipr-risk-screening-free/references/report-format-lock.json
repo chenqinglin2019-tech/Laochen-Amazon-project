@@ -1,0 +1,18 @@
+{
+  "purpose": "User requires the current eight-section, seven-module HTML format to remain unchanged during logic/performance optimization. Explicit format changes require updating this lock with visual acceptance.",
+  "css_path": "assets/evidence-estimate-template.css",
+  "css_sha256": "00a9d553569189bd72a6dfbbfbb7b8524142a77dbcac1bb9ff67d3e098ce9810",
+  "render_source_sha256": {
+    "_Inline": "700a316ca04f3c301217a0d7894e32f488b1cbd55dddb9f09957e7aaa2b8a718",
+    "_inline": "067ac7bc0ad03088bda62e2978cd3ff8e6b0e17d5c8606cf8f3fb6b3235cff4f",
+    "_pill": "31e29cc23394ea4e6ba43e03aba910b50ee835d893379370dca66d41b2ca3a94",
+    "_list_html": "7482387503cb867fb095736edc87d17b66ecac6e6ab2439d73521d934e63a9f0",
+    "_refs_html": "4d021860af8c73f7815b0cb50d81c1aad27856aec49854a080d48451a4b30fd6",
+    "_reason_html": "5aa908519127f2f190564f6b725967db556bbad4794189b002fcba48c1fd5e0b",
+    "_figure": "175165c30af4895e6b94969fc7ca82e4babfa031a78b3c5c6a247215a502824f",
+    "_blocks_html": "74b951554b48f890eb3f6eb4fdddd1f66a3101ff9690a9495174bea4bd7d0ca4",
+    "_human_priority": "f8ce3f8f39c67acb53056a7b0824160517046705c803914f952ecba81cbc0c64",
+    "_gaps_html": "1ee7252669b83c8f6ae2259b482d7750a9db93b649b7c5a6068c1a03d3b13acc",
+    "render_html": "ff2261cf6d90cfc430357f889a8de83c34eb0b0fead9dc531001b79afe269113"
+  }
+}

@@ -1,108 +1,79 @@
-# Runtime business logic
+# 2.4 业务流程与停止条件
 
-## 1. Task shell
+新建任务另启用 `workflow_correction_revision=workflow-correction-v1`；必要范围漏审、未来信号资格、按需原文读取、提交恢复和统一工作视图以[纠错契约](workflow-correction.md)为准。下文 v1 字段及旧任务行为保留，不通过改旧标记迁移。
 
-`create_task.py` receives an Amazon URL containing an ASIN, optional jurisdictions, and optional output directory. It parses only the Amazon host, marketplace, URL ASIN, and requested jurisdictions. It creates `task.json`, `evidence.json`, `assessment.json`, `raw/`, `images/`, and `screenshots/` under `/Users/laochen/Documents/产品专利等知识产权排查/runs-free/<ASIN>_<UTC date-time>/` unless an explicit directory is supplied.
+采集与真实性约束共用。新任务在 `recall-integrity-v1` 基础上启用 `decision_workflow_revision=scenario-triage-v1`，按下文的情景与分流规则执行。缺少新修订的历史任务保留其原阶段性报告分支；没有评级策略的历史任务保留 [risk-rules.md](risk-rules.md) 的发布门禁。不要通过补版本字段改写历史。
 
-No product conclusion is made here. The URL ASIN is a request identity, not confirmed product identity. The task starts at `pending` and lists mandatory providers derived from target jurisdiction.
+## 1. 产品与范围
 
-## 2. Credential preflight
+用户提供的是拟售产品还是竞品参考，必须记录为 `product.input_role`。参考竞品的截图不能证明用户实际商品的结构、装饰和许可状态。用户明确拟售物与链接外观、功能及规格一致时，按这个已授权假设评估可见部分，无需重复要求另交实物图；未展示的内部结构仍未知。仅为竞品参考时，新策略将评价明确限定到参考物或已知共有特征，不能声称完成实际拟售物清查；旧策略不发布拟售物正式低风险。
 
-`preflight.py --phase credentials` performs the following in order:
+`scenario-triage-v1` 默认 `reference_product`，主情景为 `product_entry`：假设采用参考物可见结构与用途，不假定已经实施、取得许可或复制品牌、摄影、文案。`brand_reuse` 是独立条件情景；`genuine_resale` 仅用户明确选择时启用。实际拟售物确认及授权材料按用户原话和证据留存，不能由参考卖家的身份关系代替。
 
-1. Run the bundled cloud-auth binary with local config. A failure stops before Amazon product data is read.
-2. Resolve credentials from environment variables first, then `config.local.json`; never serialize secret values.
-3. Probe each provider with the smallest read-only request available.
-4. Classify HTTP 401/403 as `AUTH_FAILED` unless the response explicitly identifies plan access; classify 402 or a paid-plan response as `PAID_PLAN_REQUIRED`; classify 429 with exhausted quota as `FREE_QUOTA_EXHAUSTED`.
-5. Record response headers or account fields that describe remaining quota without recording credentials.
-6. When Signa is required for a non-US task, probe `/v1/offices`, select target offices, verify production availability (`live` or legacy `production`), sync date, record count, and a known-mark sample. A target office that fails any coverage test is `COVERAGE_UNVERIFIED` or `SOURCE_DATA_STALE`.
-7. For EU targets, require active subscriptions for both EUIPO Trademark Search and Design Search. For US targets, probe EPO OPS as a non-blocking low-risk gate and require visible Chrome CDP capability for Amazon, USPTO TM Search, TSDR, and Patent Public Search. WIPO remains an operator-confirmed manual checkpoint. Signa and RapidAPI are optional US cross-recall sources. The TSDR API is deliberately disabled. For other jurisdictions, require a manual official-registry checkpoint.
-8. Persist provider results to `evidence.json`. Any mandatory failure sets `incomplete`; no automatic paid request or silent replacement is allowed.
+情景身份及摘要绑定分流、必要行动、双审、主审和总评。同一原文可在多个情景共享，但比较和许可适用性不能直接继承。每个情景单独取最高适用当前风险；主情景结论不被条件商标使用风险替代。
 
-Successful credential preflight changes the task to `awaiting_browser`. CDP capability is confirmed later with `cdp-cli.mjs doctor` and `preflight.py --phase evidence --cdp-capability-confirmed`. The disabled TSDR API route is recorded as `not_applicable` and cannot satisfy candidate verification. An unavailable US EPO OPS account does not block credential preflight, but its planned queries remain a low-risk clearance gate.
+合法候选分流范围与必要工作范围分别计算。默认 `reference_product` 的 `product_entry` 没有用户自有品牌/Logo且不假定沿用参考标识时，不要求完成该主情景的文字/图形商标召回；参考标识查询仍服务 `brand_reuse`，原共享查询及回执不改写，已有分流记录继续有效。实际拟售物、自有品牌已提供或正品转售情景保留相应商标义务；商业外观等结构性权利仍需排查。未知标识未纳入范围不是商标清白或低风险结论。
 
-## 3. Amazon CDP collection
+Agent 从现有资料提取关键结构、功能、用途、尺寸、装饰、文字和 Logo。`product.assets` 枚举照片、角色、插画、花纹、包装、说明书等，每项有稳定 `asset_id`、原始来源及证据；没有资料的字段用 unknown，不能根据图片编造内部结构或授权。用户未给定的新品牌/Logo 标为未纳入范围；同款销售不自动意味着复制卖家图片、文案或包装。新任务启用 `asset-scope-v1`，用途与实际专项工作队列按 [trademark-copyright.md](trademark-copyright.md) 执行；API/浏览器结束后还须读取 Agent 待办，不能跳过版权和商业外观的公开调查。
 
-After credential preflight, `tools/cdp/cdp-cli.mjs capture-amazon` opens the supplied URL in visible dedicated Chrome and records requested/final URL, requested/actual ASIN, current variant, title, brand, manufacturer, category, bullets, specifications, and visible patent/copyright/license claims. It saves:
+目标为 US、GB、FR、DE、IT、ES、JP。FR/DE/IT/ES 增加 EU 权利层，GB 不继承 EU 商标或外观；普通 EP 在 GB 的效力仍须查。UP 的国家集合按单件登记时确定，不是 EU27，也不覆盖 GB、ES；普通 EP、UP、各国登记、转换权利分别核验。
 
-- one screenshot of the product core area;
-- one screenshot of product details;
-- exactly one current-variant main image;
-- the original HTTPS image URL;
-- a capture JSON.
+## 2. 三层证据
 
-`record_browser_product.py` requires `capture_transport=cdp` plus sanitized browser/protocol/session provenance and rejects a robot-check capture, final-ASIN mismatch, unknown current variant, non-HTTPS main image URL, multiple main images, missing files, mismatched SHA-256, or serialized CDP connection details. A robot check sets `needs_user_action`; identity or image gaps set `incomplete`.
+- 产品身份：ASIN、变体、实际拟售物、重要视图与内部功能依据。
+- 权利事实：准确号码、权利人、地域、当前状态、保护文本/图样、查询时间。
+- 比较结论：逐项说明相同、差异、法律意义、缺失信息，绑定原始证据。
 
-## 4. Evidence preflight
+注册成功只证明登记事实；授权公告不是永久有效证明。无效、放弃、届满或不在目标国的判断，需要对应权利和国家的可核验依据。其他国家的失效状态不能排除本国，同族成员也不能相互替代。
 
-`preflight.py --phase evidence --cdp-capability-confirmed` verifies the accepted Amazon capture, screenshot files, image format/hash/dimensions, explicit jurisdictions, jurisdiction/source routing, recent credential-preflight records, required Signa coverage, and visible Chrome CDP capability. It records WIPO as manual and USPTO as CDP. Success moves the task to `collecting`. Legacy `2.1-free` tasks retain the old capability flags.
+## 3. 召回与扩展
 
-## 5. Search plan
+Agent 自动填写 `query_terms`：结构/功能词、同义词、当地语言、IPC/CPC/Locarno/Nice 或图形分类、商标近音/读音，以及候选中发现的权利人、申请人和同族。每项保留 `derived_from`；翻译是 Agent 检索辅助，不能作为法律原文。文本的实际文字必须与 `language` 相符：中文/日文不得作为英文、法文等目标语言查询执行。目标语言缺少有来源的词时，追加可追溯翻译或保留语言缺口；不能把跨语言的零结果作为召回或排除证据。
 
-`generate_search_plan.py` derives queries from browser evidence. Each term is an object with `value`, `kind`, and `derived_from`. Sources include title, brand, manufacturer, bullets, specifications, structure, OCR, and agent-supplied visual features. The plan groups:
+严格修订只从经过分析的术语构造专利召回。确认 `product.analysis` 与当前身份相符后才生成初始计划；外观须有 `kind=design` 的用途/形状术语。不要把电商标题、类目路径或段落当检索句。主体、分类和已知号码使用对应字段，无法编译时记录语义错误，不降成普通全文词。专利声明是必须追踪的发现线索；`patent_claim_followup` 记录发现、真实证据及未解决部分，不以品牌官网一句“patented”证明专利类型或现行权属。
 
-- generic category terms;
-- structural/functional terms;
-- ornamental-design terms;
-- brand/model/series/slogan text;
-- owner/assignee clues;
-- IPC/CPC/Locarno/Nice candidates;
-- per-provider requests and limits.
+严格修订的发明人姓名默认使用 `strategy=boolean`，在发明人字段内以词项 AND 召回，避免姓名倒序造成短语漏检；候选扩展沿用此默认，显式 `phrase`、其他主体默认和历史计划均不改写。
 
-Query caps come from `config.json`. A plan may narrow or combine terms but may not invent undocumented product features.
+初次 `generate_search_plan.py` 后，计划行只追加，不重写。`--expand` 读取候选扩展权利人与分类，并读取有效响应追加 EPO range、EUIPO page、INPI position 的下一页。每查询最多 8 页，API 还有任务次数和来源免费额度硬限制；达到上限写截断而不是完成。Agent 需要进一步缩小查询时添加新的可追溯词并追加计划。
 
-## 6. Patent collection
+全部已取得去重候选须有轻量分流；不等于逐件官网核验、读全文或五级评级。关键词、类别、同名和来源分数只决定检查顺序，不能通过固定 Top N 或分数阈值丢弃余下记录。
 
-For US, the fixed patent chain is `operator-performed WIPO PATENTSCOPE recall -> EPO OPS -> SerpApi Google Patents / Serper Patents supplement -> USPTO Patent Public Search CDP recall and candidate verification`. For non-US, the fixed discovery order remains EPO OPS, SerpApi Google Patents, Serper Patents, then Serper Web.
+### 候选分流与必要核验（scenario-triage-v1）
 
-- WIPO PATENTSCOPE queries are submitted and read by the operator. Each planned low-frequency query produces a rendered URL, screenshot, checked time, `capture_transport=manual`, `operator_confirmed=true`, and candidate/zero-result capture through `record_patent_browser_recall.py`. CDP may save the screenshot only; it must not submit the query or extract the result DOM.
-- Espacenet browser automation is disabled for new tasks. Existing `2.1-free` captures remain readable.
-- EPO OPS obtains OAuth, searches published data, and stores XML. It initially requests bibliographic search results. Family, full text, images, and legal events are fetched only for relevant candidates, bounded by `epo_candidate_detail_limit`. In US work an unfinished planned OPS query prohibits a final low-risk conclusion but never represents absence of patent risk.
-- SerpApi sends at most six searches per task with `country`, `status`, `type`, `assignee`, `inventor`, and optional date filters. It accepts only `search_metadata.status=Success` with an array-shaped `organic_results`.
-- Serper Patents provides a separate index. Serper Web searches assignees, enforcement, litigation, and public patent claims. Neither is official verification.
+- `not_selected`：现有真实资料足以说明与当前产品／情景无实质关联。明确异领域候选可用充分的标题、分类或摘要分流；准确重复记录合并保留全部来源。未入选只是当前不需深入核验，不是法律不侵权、失效或全家族排除，不填入法律反证。
+- `needs_info`：相关性尚不能判断。记录缺失项及下一步最小动作，例如摘要、关键附图、完整商品服务、目标国成员。取得资料后再次决定；失败、限额或访问限制不能自动变成未入选。
+- `selected`：已有具体关联可能改变本次决策。按对应权利类型核实身份、目标国效力、保护内容及产品关系；充分且仍适用的证据直接复用，不为每件执行所有备选来源。
+- 技术专利不能仅因不是厨房类目或标题不同而排除通用条带、紧固件和锁盖机构；有相关形状线索的外观需看图；商标需结合标识、具体商品和使用情景，而非只看同名或 Nice 类别。产品声明、可靠号码及明显结构对应优先核查，但发现号码仍不证明现行效力。
+- 每条分流按候选、情景、国家及权利类型定位，绑定真实证据、阅读层级、身份与判断依据摘要。没有有效台账决定的 `material=true` 只是未审线索，不生成正式核验或主体／分类扩展。待补充动作和身份冲突修复必须有独立明确目的。
+- 产品情景改变、身份纠正或新增相关附图／保护文本可重新打开对应决定；重复下载、转载、抓取时间变化不触发全量重审。同申请后续授权独立分流，不能沿用公开申请的筛除结果。
+- 必要证据义务与来源动作分开。合格替代须绑定国家、权利、目的和新旧查询身份／hash，并由实际结果证明满足义务。分流变化时追加撤销／替代记录，不删除历史计划；取消、限流或延期本身不完成义务。
 
-All clients save the raw response before normalization. Quota/access/schema errors become source runs and coverage gaps, never zero-result conclusions.
+没有新修订的历史任务仍使用原 `material/excluded` 台账语义和原核验门槛。
 
-## 7. Trademark collection
+新建 `identity-discovery-v1` 规划在不扩大来源额度的前提下，为身份线索与技术/外观词保留不同发现用途；品牌、OCR 产品名和制造商是发现线索，不自动成为权利人。原始结构、形状与 OCR 不因重新建任务而静默消失，Agent 逐项确认术语映射或有理由地排除。源成功但没有相关候选时，先审阅实际结果，再按绑定原计划及证据的补搜决定启用未消费的免费备用查询；不能新增消费授权或绕过额度。
 
-For a non-US task where Signa is required, it begins with office coverage validation. Search executes four strategies: `exact`, `phonetic`, `fuzzy`, and `prefix`, with target office, Nice class, live/current status, goods/services, and owner clues where known.
+准确案号已出现在取得的原始文献中时，通过显式可信线索入库连接正式候选；不得把“仅在补充证据引用该案号”视为已完成核验。该入口不生成搜索命中或官方回执，候选仍须审阅，当前权属和效力仍待分别核实。同申请公开与授权文献只在有原文依据时建立关系，不重复计为独立权利。
 
-For US:
+新修订只有有效入选决定触发正式号码核验、文献原文及相关主体扩展。相关 WO／外国文献先定向查目标国成员，不因文献国别直接判整个产品无风险；找不到号码保留具体缺口。不完整外观图样、未能确认的状态不能自身构成排除依据。
 
-`USPTO TM Search visible Chrome CDP recall -> merge -> TSDR visible Chrome CDP verify`
+## 4. 访问与恢复
 
-Execute every planned `exact`, `phrase`, and `prefix` query in `https://tmsearch.uspto.gov/` through visible Chrome CDP. Record the rendered query, strategy, final URL, distinct screenshot path, and result with `record_uspto_tmsearch_browser_result.py`; use optional Signa/RapidAPI for phonetic/fuzzy cross-recall. A zero result is valid only when the official rendered page confirms it; CAPTCHA or incomplete rendering is a mandatory gap. TSDR receives serial numbers from TM Search candidates and verifies each material candidate.
+`preflight.py` 保留既有云端授权检查；不因缺少 EPO、EUIPO、JPO 或 INPI 账号阻断产品采集。`source-capabilities.json` 的状态为 automatic、access_verification_only、unvalidated、unavailable；可尝试真实查询不等于已验收。
 
-If every required TM Search query validly returns zero candidates, TSDR is `not_applicable`. If a candidate exists, at least one `candidate_verification` run must exist and every material candidate must carry `official_verification.status=verified`. CAPTCHA or an inaccessible official page creates a mandatory gap and produces `incomplete`. Signa and RapidAPI may be run as optional US cross-recall, but their absence or failure cannot replace or block the required TM Search route.
+API 与浏览器分别串行写证据，成功且计划哈希一致的动作再次执行时跳过。登录、CAPTCHA 或 MFA 可以请用户完成该访问动作，随后 Agent 从同一任务/计划查询恢复；查询、翻页、抓取、保存截图和判断全部由 Agent 完成。
 
-## 7a. US patent and design official verification
+未通过规则或技术适配的来源不生成“人工搜索待办”。不能自动查询的官网即使用户可浏览，也不以人工提交查询回退。可执行替代都不足时保留精确缺口，继续其他国家、权利和来源。
 
-For US patent recall, execute every planned WIPO query manually, every EPO OPS query through its API, and every Patent Public Search query through visible Chrome CDP. Each source is a low-risk clearance gate: a missing, CAPTCHA-blocked, quota-blocked, or otherwise incomplete source does not erase detected higher risk, but prohibits a final `极低` or `低` conclusion. For every material US patent or design candidate, use visible Chrome CDP to open `https://ppubs.uspto.gov/basic/` and search the record number. Prefer Basic Search because it is the supported low-friction entry; do not use the `external.html` Advanced SPA as the default route. Capture the matching rendered record number, title, owner/assignee, legal status, final official URL, checked time, screenshot, and relevant design views. Ingest it with `record_uspto_patent_chrome_verification.py`; each capture must declare CDP provenance. A material candidate with no validated capture blocks final grading.
+## 5. 结论与交付
 
-For EU trademarks:
+风险、证据置信度、检索覆盖分别计算。来源故障只影响其缺失的事实或覆盖，不自动增加法律风险，也不连带降低无关已核实事实的置信度。当前风险与未授权申请未来变化、投诉/诉讼紧迫度分开。
 
-`Signa EUIPO recall -> EUIPO Trademark Search -> detail/image`
+两轮使用同一证据快照独立复核，重点检查高/极高风险、低/极低风险和关键排除。分歧检查到候选、国家、状态和要素；有新证据时重新冻结摘要并复核。新策略的主审最终明确选级并保留分歧，不让用户承担当前评级决定；可列专业复核或用户独有资料核查作为提高把握和调整等级的后续事项。
 
-For EU designs:
+新策略总评取主审确认的最高适用当前风险；总体置信度由驱动证据链及能改变总评的覆盖缺口决定。证据缺口不清空最终风险，预判不等于完整清查；缺口不能独立推导中/高风险。报告并列正反证据、主审推论、假设、核查及升降级条件。
 
-`EPO/SerpApi/Serper discovery -> Locarno/text search -> EUIPO Design detail/all views -> agent visual comparison`
+“缺口不清空风险”针对已有依据的判断，不授权为无依据项补低或补中。`scenario-triage-v1` 将候选分流、入选核验、必要检索完成度分别计算；未入选和已审未来信号不计当前漏评，真正未审、待补充和截断保留。`overall.risk` 为主情景有依据的当前预判，`status/business_completion` 独立表达未完成；仅有局部排除不能外推全情景低风险。HTML、Markdown、CSV 使用同一模型并列这些信息，条件情景单列。
 
-## 8. Copyright, character, and trade dress
+仅 `recall-integrity-v1` 而无新修订的历史任务仍保持整项未完成时总评为空、局部风险另存的原合同。新报告明确标注变化来自规则、判断还是新事实，不将重新归档日期当作新检索日期。
 
-The agent uses the single Amazon main image, Serper Images/Web, runtime-probed optional Lens, official trademark/design images, OCR, and the local high-risk IP list. A registry zero result does not negate copyright. Unknown provenance for a central pattern is at least medium risk. One-image coverage caps copyright, figurative-mark, and trade-dress confidence at medium.
-
-## 9. Candidate normalization
-
-`merge_candidates.py` reads normalized collection entries and creates `normalized-candidates.json`.
-
-Patent keys prefer DOCDB publication number, then application/grant number plus jurisdiction and kind code; family IDs form a second grouping key. Trademark keys prefer office plus application/serial/registration number, falling back to normalized text and figurative identifier.
-
-Every merged candidate retains source IDs, queries, collection times, raw paths, relevance, freshness, and official-verification objects. Merging never deletes conflicting source claims.
-
-## 10. Assessment and report
-
-The first reviewer reads evidence, normalized candidates, methodology, and risk rules. The second reviewer, when triggered, receives the same inputs but not the first review. `finalize_assessment.py` validates all seven modules, evidence references, source completeness, and material-candidate official verification.
-
-Mandatory failure or unverified material rights yields `incomplete` with no overall grade. High/extreme risk or any uncertainty trigger yields `needs_review`. Two completed reviews that differ by two or more levels require human review; otherwise the more conservative review prevails.
-
-`build_report.py` renders the fixed `IPR Evidence Dossier v1.0` into Markdown and responsive/printable HTML, plus `report-manifest.json`. It includes the Amazon main image and clearly named or explicitly recorded official drawings, figures, details, TSDR pages, and search screenshots. `validate_run.py` recomputes provider/query coverage and checks report input digests, path containment/hashes, task/assessment state agreement, fixed report schema, and secret absence.
+无策略字段的历史任务仍要求全部范围满足已定义检索比较条件才给全范围低风险；局部已确认中高风险继续显示。历史任务保留原版本、证据、计划和报告；显式重评写独立目录并注明变化来自规则/推论还是新增证据。

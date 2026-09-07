@@ -1,11 +1,46 @@
-# Risk and independent-review contract
+# 历史 2.4 风险、置信度和独立复核
 
-Use modules exactly: `appearance_patent`, `utility_patent`, `pending_application`, `word_mark`, `figurative_trade_dress`, `copyright_ip`, `enforcement`.
+> 仅适用于未配置 `assessment_policy` 的历史任务及旧策略回归。本文件保留旧语义，不适用于新默认 `evidence-estimate-v1`；五级风险预判、主审定级与缺口处理见 [risk-estimate-rules.md](risk-estimate-rules.md)。
 
-Risks are `极低`, `低`, `中`, `高`, `极高`; confidence is `低`, `中`, `高`. Overall risk is the highest module risk. A one-level compound escalation requires explicit justification. Never average away a high module.
+## 风险语义
 
-Each module contains `risk`, `confidence`, `reasoning`, and `findings`; each finding contains `finding_id`, `title`, `evidence_refs`, and `recommended_action`. Reviews also contain `review_triggers`, `summary_reasons`, and `recommended_actions`.
+采用 `无法判断／低／中／高`，不输出伪概率、不按关键词命中数打侵权分。
 
-Mandatory source failure or a material candidate without official verification produces `incomplete` and no grade. Optional source loss prohibits `极低` and caps confidence at `中`. One Amazon image caps copyright, figurative-mark, and trade-dress confidence at `中`.
+- 无法判断：身份、地域效力、保护范围或重要比较事实不足，或两轮关键分歧未消解。访问失败本身属于此类信息缺口，不能变成中/高风险。
+- 低：在明确国家、权利和证据时间内，充分检索后未见实质威胁，或候选有可靠排除依据。检索不完整时不能发布全范围低风险。
+- 中：已有具体权利和相似事实，法律要件存在有依据的争议或需要实质规避，明确解释争点；不用于收纳所有未知状态。
+- 高：目标国现行权利、产品事实和侵权要件都有具体支持，关键排除不成立。只是“很像”、权利人知名或存在登记，不足以正式高风险；可以先显示发现层警报。
 
-Require a second independent review when the first grade is high/extreme or a trigger is true. Both reviews record distinct session IDs and the same evidence/candidate digest; both declare `first_review_visible=false`. A difference of two or more overall levels requires human review; otherwise reconcile conservatively per module and retain non-duplicate findings from both reviews. Overall confidence follows the module(s) driving the overall risk; coverage confidence remains separately visible.
+等级是证据支持的业务排查结论，不是法院裁判。总体风险不能平均掉局部高风险；存在其他未完成范围时只发布已确认的局部风险与覆盖缺口。
+
+## 比较规则
+
+专利/实用新型先找当前适用权利要求，再逐要素映射产品。高风险至少有一项独立权利要求的全部必要要素得到证据支持；原文引句须覆盖完整权利要求以防漏引，但该机械检查不替代 Agent 对必要要素、前序和引用关系的法律判断；解释权利要求、从属关系、排除或等同问题，不按摘要和标题判断。待审申请单列未来观察，不用 A/B kind code 推断当前是否有效。
+
+外观先确认保护的视图、部分设计、虚线排除、功能性特征与实际必要产品视图，再比较整体印象和关键差异。`visual_coverage.required_views` 由真实争点决定，两侧都应绑定相应视图证据，不能用图片数量代替视图充分性。US、EU/GB、JP 的适用判断标准由审阅说明，不能把图像相似度当统一法律标准。
+
+文字/图形商标分别比较标识、读音、含义、视觉、商品服务和实际使用语境；同 Nice 类并不自动冲突，不同类也不能机械排除。标识来源功能、兼容性表述、授权、商品原厂转售等具体事实分别检查。
+
+版权比较可保护表达、原作品与产品表达、来源/接触或复制证据和授权范围。版权不以登记为成立前提。trade_dress 按实际国家的商业外观/来源混淆或不正当竞争路径记录，不把美国规则通用到七国；非注册外观核验披露、期限、复制及适用地域。
+
+## 证据置信度
+
+使用低/中/高，只评价结论依赖的证据充分性，不输出未经校准的百分数。记录五项 `confidence_basis`：identity、scope、status、product、comparison，每项包含 satisfied、reasoning、evidence_refs。
+
+高：关键事实有直接证据、身份与地域一致、产品资料充分、比较可重复且独立复核一致。中：已有可靠主要证据，但仍有不决定该结论的限制；缺重要视图、当前状态或要素会限制可发布性，不能仅调低置信度后照发正式结论。低：主要事实不足、产品非拟售物、身份冲突或关键分歧。
+
+可选来源失效不减已确认事实的分数；覆盖不足限制“没有其他风险”的推断。没有候选时，不能把成功 HTTP 请求等同于高置信低风险：还须满足各语言、维度、完整分页和实际审阅要求。
+
+## 独立复核与发布
+
+两轮审阅绑定同一 evidence/candidates/materiality-ledger/search-plan 和 task 产品范围 digest，使用不同 reviewer 与 session，第二轮不能看第一轮结论。所有拟确认范围需复核，高风险、拟发布低风险、关键排除重点检查；分歧细化到每个候选的风险、现行状态、比较要素和排除依据。
+
+`confirmed_scoped` 表示该国家/权利/候选已满足发布条件；`discovery_only` 表示线索或待补事实。低风险门禁失败回到无法判断；登记核验缺口不会隐藏明确标记为“发现层”的警报。两轮不一致时 Agent 查证并重新审阅，未解决保留分歧，不设人工侵权判定步骤。
+
+## 法律依据入口
+
+- [EPO：UP 地域在登记时确定，之后不扩张](https://www.epo.org/en/legal/guidelines-up/2026/section_1_5_1)
+- [英国 IPO：版权自动产生，无须申请或付费](https://www.gov.uk/copyright)
+- [JPO：意匠审查指引及其适用版本](https://www.jpo.go.jp/e/system/laws/rule/guideline/design/shinsa_kijun/)
+
+每件案件仍应读取与其权利、国家和日期对应的原始登记与法律资料，不能把以上入口页面当作单案核验证据。

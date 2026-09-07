@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 from urllib.parse import quote
 
-from common import credential, load_skill_config
+from common import assert_provider_execution_allowed, credential, ensure_object, load_json, load_skill_config
 from provider_utils import ProviderError, enforce_task_limit, http_json, quota_summary, record_error, record_result
 
 
@@ -73,6 +73,11 @@ def main() -> None:
     parser.add_argument("--jurisdiction", default="US")
     parser.add_argument("--search-type", choices=("active", "all"), default="active")
     args = parser.parse_args()
+    task = ensure_object(load_json(args.task_dir.resolve() / "task.json"), "task.json")
+    try:
+        assert_provider_execution_allowed(task, "rapidapi_uspto_trademark")
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
     try:
         config, _, _ = settings()
         enforce_task_limit(args.task_dir.resolve(), "rapidapi_uspto_trademark", "trademark_search", int(config["limits"]["trademark_queries_per_strategy"]))

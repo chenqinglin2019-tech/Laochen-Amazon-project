@@ -1,0 +1,67 @@
+{
+  "schema_version": "PROVIDER-LIVE-ACCEPTANCE/1.0",
+  "recorded_at": "2026-09-06T00:36:08.065953+00:00",
+  "skill_version": "2.4-free",
+  "checks": [
+    {
+      "provider": "epo_publication_server",
+      "operation": "document_retrieval",
+      "status": "historical_summary_pending_evidence",
+      "historical_status": "passed",
+      "audit_note": "2026-09-06: only the original summary was found in the Skill and current workspace; raw response bytes, hash and execution receipt were not located. No live call was repeated and no historical evidence was recreated.",
+      "raw_evidence_replayable": false,
+      "execution": "real_public_https_no_credentials",
+      "endpoint": "https://data.epo.org/publication-server/rest/v1.2/patents/EP1004359NWB1/document.xml",
+      "requested_document": "EP1004359B1",
+      "response_bytes": 32699,
+      "identity_match": true,
+      "parsed_claim_records": 21,
+      "parsed_description_sections": 1,
+      "format": "xml",
+      "client": "scripts/eps_client.py",
+      "quota_policy": {
+        "rolling_window_days": 7,
+        "free_limit_bytes": 5000000000,
+        "stop_margin_bytes": 50000000,
+        "max_response_bytes": 33554432,
+        "reservation_and_settlement": "shared_local_ledger"
+      },
+      "authoritative_scope": "published_document_content_only",
+      "does_not_validate": [
+        "current_national_effect",
+        "complete_EP_document_family",
+        "drawing_image_retrieval",
+        "complete_search_recall",
+        "all_documents_online"
+      ],
+      "limitations": [
+        "This local ledger cannot observe other devices sharing the same public IP.",
+        "Only this known positive XML document was tested online."
+      ]
+    },
+    {
+      "provider": "inpi_api",
+      "status": "not_live_validated",
+      "reason": "No activated PI API credentials used in this implementation task.",
+      "contract_status": "documented_endpoints_and_fields_implemented; authenticated_envelope_acceptance_pending",
+      "collections_FR": "Documented as valid for brevets/marques/modeles; not tested with a live account.",
+      "design_media": "Not accepted as complete; notice remains partial without a validated view manifest."
+    },
+    {
+      "provider": "serpapi_google_lens",
+      "status": "not_live_validated",
+      "reason": "No credential read or metered search performed; mocked contract and shared Free-plan guard tests passed."
+    }
+  ],
+  "official_references": [
+    "https://www.epo.org/en/searching-for-patents/data/web-services/publication-server",
+    "https://data.epo.org/publication-server/doc/EPS%20REST%20services.pdf",
+    "https://www.inpi.fr/sites/default/files/Inpi_doc_tech_API_PI_v1.0_0.pdf",
+    "https://serpapi.com/google-lens-api"
+  ],
+  "offline_validation": {
+    "command": "python3 -m unittest discover -s scripts -p test_free_provider_clients.py -v",
+    "passed_tests": 21,
+    "no_credentials": true
+  }
+}

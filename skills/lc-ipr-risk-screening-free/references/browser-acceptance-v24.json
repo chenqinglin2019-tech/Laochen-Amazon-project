@@ -1,0 +1,1661 @@
+{
+  "schema_version": "1.0",
+  "task_schema_version": "2.4-free",
+  "policy_revision": "automation-first-v1",
+  "reviewed_at": "2026-09-06",
+  "scope": "Implementation acceptance inventory; not evidence of source availability or a product risk search.",
+  "online_tested": false,
+  "reason": "No real logged-in sessions, credentials, product queries, or acceptance probes were used during this implementation.",
+  "user_actions_allowed": [
+    "login",
+    "captcha",
+    "mfa",
+    "consent",
+    "qr"
+  ],
+  "business_actions_by": "agent",
+  "acceptance_policy": {
+    "default_status": "unvalidated",
+    "no_fixture_acceptance": true,
+    "probe_flag": "--acceptance-probe",
+    "receipt_file": "raw/browser-execution/<query-id>-<uuid>.json",
+    "reusable_file": "browser-route-acceptance.json",
+    "reuse_scope": [
+      "task_id",
+      "provider",
+      "jurisdiction",
+      "right_type",
+      "operation"
+    ],
+    "reuse_max_age_hours": 48
+  },
+  "prohibited_browser_sources": [
+    {
+      "providers": [
+        "espacenet_browser",
+        "epo_register_browser"
+      ],
+      "source": "https://www.epo.org/en/service-support/ordering/fair-use",
+      "reason": "EPO GUI access is for humans; use approved APIs for automation."
+    },
+    {
+      "providers": [
+        "euipo_esearch_browser",
+        "tmview_browser",
+        "designview_browser"
+      ],
+      "source": "https://www.euipo.europa.eu/pt/info/legal-notices",
+      "reason": "Automated extraction/search is not enabled under the reviewed webpage terms."
+    },
+    {
+      "providers": [
+        "wipo*",
+        "patentscope*"
+      ],
+      "source": "https://www.wipo.int/en/web/global-brand-database/terms_and_conditions",
+      "reason": "Global database automated queries/scraping are prohibited; no manual business-query fallback."
+    }
+  ],
+  "query_limits": {
+    "uspto_patent_browser": {
+      "supported_text_fields": [
+        "structural_feature",
+        "category",
+        "product",
+        "function",
+        "translation",
+        "synonym",
+        "english",
+        "design"
+      ],
+      "unsupported_fields": [
+        "owner",
+        "applicant",
+        "ipc",
+        "cpc",
+        "locarno"
+      ]
+    },
+    "uspto_tmsearch_browser": {
+      "supported_text_fields": [
+        "brand",
+        "ocr",
+        "translation"
+      ],
+      "semantics": "lexical_phrase",
+      "unsupported_fields": [
+        "phonetic",
+        "pronunciation",
+        "reading",
+        "nice",
+        "similar_group",
+        "figurative_classification"
+      ]
+    },
+    "supported_query_languages": [
+      "en",
+      "en-us",
+      "english",
+      ""
+    ],
+    "language_filter_applied": false,
+    "recall_pagination": "Only current rendered page captured; incomplete/unknown until validated.",
+    "design_media": "Captured views are not a declaration of all official drawings."
+  },
+  "routes": [
+    {
+      "provider": "uspto_patent_browser",
+      "jurisdiction": "US",
+      "right_type": "patent",
+      "operation": "patent_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": true,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "An automatic executor exists; a live, plan-bound acceptance run is required before claiming this route is automatic.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "uspto_patent_browser",
+      "jurisdiction": "US",
+      "right_type": "patent",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": true,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "An automatic executor exists; a live, plan-bound acceptance run is required before claiming this route is automatic.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "uspto_patent_browser",
+      "jurisdiction": "US",
+      "right_type": "design",
+      "operation": "design_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": true,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "An automatic executor exists; a live, plan-bound acceptance run is required before claiming this route is automatic.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "uspto_patent_browser",
+      "jurisdiction": "US",
+      "right_type": "design",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": true,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "An automatic executor exists; a live, plan-bound acceptance run is required before claiming this route is automatic.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "uspto_tmsearch_browser",
+      "jurisdiction": "US",
+      "right_type": "trademark_word",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": true,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "An automatic executor exists; a live, plan-bound acceptance run is required before claiming this route is automatic.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "uspto_tsdr",
+      "jurisdiction": "US",
+      "right_type": "trademark_word",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": true,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "An automatic executor exists; a live, plan-bound acceptance run is required before claiming this route is automatic.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "uspto_tmsearch_browser",
+      "jurisdiction": "US",
+      "right_type": "trademark_figurative",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": true,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "The shared US field-tag executor supports evidenced DC/DE queries with tm-figurative-fields-v1. A live, plan-bound acceptance run remains required; this is not reverse-image search.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "uspto_tsdr",
+      "jurisdiction": "US",
+      "right_type": "trademark_figurative",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": true,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "An automatic executor exists; a live, plan-bound acceptance run is required before claiming this route is automatic.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "jplatpat_browser",
+      "jurisdiction": "JP",
+      "right_type": "patent",
+      "operation": "patent_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "jplatpat_browser",
+      "jurisdiction": "JP",
+      "right_type": "patent",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "jplatpat_browser",
+      "jurisdiction": "JP",
+      "right_type": "utility_model",
+      "operation": "utility_model_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "jplatpat_browser",
+      "jurisdiction": "JP",
+      "right_type": "utility_model",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "jplatpat_browser",
+      "jurisdiction": "JP",
+      "right_type": "design",
+      "operation": "design_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "jplatpat_browser",
+      "jurisdiction": "JP",
+      "right_type": "design",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "jplatpat_browser",
+      "jurisdiction": "JP",
+      "right_type": "trademark_word",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "jplatpat_browser",
+      "jurisdiction": "JP",
+      "right_type": "trademark_word",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "jplatpat_browser",
+      "jurisdiction": "JP",
+      "right_type": "trademark_figurative",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "jplatpat_browser",
+      "jurisdiction": "JP",
+      "right_type": "trademark_figurative",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "GB",
+      "right_type": "patent",
+      "operation": "patent_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "GB",
+      "right_type": "patent",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "GB",
+      "right_type": "design",
+      "operation": "design_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "GB",
+      "right_type": "design",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "GB",
+      "right_type": "trademark_word",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "GB",
+      "right_type": "trademark_word",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "GB",
+      "right_type": "trademark_figurative",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "GB",
+      "right_type": "trademark_figurative",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "FR",
+      "right_type": "patent",
+      "operation": "patent_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "FR",
+      "right_type": "patent",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "FR",
+      "right_type": "utility_model",
+      "operation": "utility_model_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "FR",
+      "right_type": "utility_model",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "FR",
+      "right_type": "design",
+      "operation": "design_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "FR",
+      "right_type": "design",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "FR",
+      "right_type": "trademark_word",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "FR",
+      "right_type": "trademark_word",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "FR",
+      "right_type": "trademark_figurative",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "FR",
+      "right_type": "trademark_figurative",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "DE",
+      "right_type": "patent",
+      "operation": "patent_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "DE",
+      "right_type": "patent",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "DE",
+      "right_type": "utility_model",
+      "operation": "utility_model_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "DE",
+      "right_type": "utility_model",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "DE",
+      "right_type": "design",
+      "operation": "design_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "DE",
+      "right_type": "design",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "DE",
+      "right_type": "trademark_word",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "DE",
+      "right_type": "trademark_word",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "DE",
+      "right_type": "trademark_figurative",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "DE",
+      "right_type": "trademark_figurative",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "IT",
+      "right_type": "patent",
+      "operation": "patent_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "IT",
+      "right_type": "patent",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "IT",
+      "right_type": "utility_model",
+      "operation": "utility_model_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "IT",
+      "right_type": "utility_model",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "IT",
+      "right_type": "design",
+      "operation": "design_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "IT",
+      "right_type": "design",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "IT",
+      "right_type": "trademark_word",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "IT",
+      "right_type": "trademark_word",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "IT",
+      "right_type": "trademark_figurative",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "IT",
+      "right_type": "trademark_figurative",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "ES",
+      "right_type": "patent",
+      "operation": "patent_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "ES",
+      "right_type": "patent",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "ES",
+      "right_type": "utility_model",
+      "operation": "utility_model_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "ES",
+      "right_type": "utility_model",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "ES",
+      "right_type": "design",
+      "operation": "design_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "ES",
+      "right_type": "design",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "ES",
+      "right_type": "trademark_word",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "ES",
+      "right_type": "trademark_word",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "ES",
+      "right_type": "trademark_figurative",
+      "operation": "trademark_recall",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "official_registry_browser",
+      "jurisdiction": "ES",
+      "right_type": "trademark_figurative",
+      "operation": "candidate_verification",
+      "status": "unvalidated",
+      "error_code": "AUTOMATION_NOT_VALIDATED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "No accepted automatic query-and-capture adapter exists for this route. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "espacenet_browser",
+      "jurisdiction": "EU",
+      "right_type": "patent",
+      "operation": "patent_recall",
+      "status": "unavailable",
+      "error_code": "AUTOMATION_PROHIBITED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "This source does not permit the automated browser query. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "epo_register_browser",
+      "jurisdiction": "EU",
+      "right_type": "patent",
+      "operation": "candidate_verification",
+      "status": "unavailable",
+      "error_code": "AUTOMATION_PROHIBITED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "This source does not permit the automated browser query. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "designview_browser",
+      "jurisdiction": "EU",
+      "right_type": "design",
+      "operation": "design_recall",
+      "status": "unavailable",
+      "error_code": "AUTOMATION_PROHIBITED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "This source does not permit the automated browser query. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "euipo_esearch_browser",
+      "jurisdiction": "EU",
+      "right_type": "design",
+      "operation": "candidate_verification",
+      "status": "unavailable",
+      "error_code": "AUTOMATION_PROHIBITED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "This source does not permit the automated browser query. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "tmview_browser",
+      "jurisdiction": "EU",
+      "right_type": "trademark_word",
+      "operation": "trademark_recall",
+      "status": "unavailable",
+      "error_code": "AUTOMATION_PROHIBITED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "This source does not permit the automated browser query. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "euipo_esearch_browser",
+      "jurisdiction": "EU",
+      "right_type": "trademark_word",
+      "operation": "candidate_verification",
+      "status": "unavailable",
+      "error_code": "AUTOMATION_PROHIBITED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "This source does not permit the automated browser query. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "tmview_browser",
+      "jurisdiction": "EU",
+      "right_type": "trademark_figurative",
+      "operation": "trademark_recall",
+      "status": "unavailable",
+      "error_code": "AUTOMATION_PROHIBITED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "This source does not permit the automated browser query. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    },
+    {
+      "provider": "euipo_esearch_browser",
+      "jurisdiction": "EU",
+      "right_type": "trademark_figurative",
+      "operation": "candidate_verification",
+      "status": "unavailable",
+      "error_code": "AUTOMATION_PROHIBITED",
+      "executor_available": false,
+      "acceptance_scope": "single_planned_query",
+      "allowed_user_actions": [
+        "login",
+        "captcha",
+        "mfa",
+        "consent",
+        "qr"
+      ],
+      "business_actions_by": "agent",
+      "detail": "This source does not permit the automated browser query. Manual business-query fallback is disabled.",
+      "online_tested": false,
+      "acceptance_evidence": null
+    }
+  ]
+}

@@ -1,13 +1,9 @@
-# Screening methodology
+# 检索方法入口（2.4）
 
-1. Correct the real category from title, function, construction, use, and main image.
-2. Search granted and pending utility/invention patents separately from designs.
-3. Identify category rights holders, assignees, enforcement claims, litigation, and takedowns.
-4. Expand material owners to related families and portfolios.
-5. Compare overall visual impression and distinctive features against official design views.
-6. Treat pending applications as future/monitoring risk, not a safe period.
-7. Search exact, normalized, similar, phonetic, translated, and transliterated word marks.
-8. Search logos, product-shape branding, packaging layout, patterns, and color/shape combinations separately.
-9. Inventory artwork, characters, photos, patterns, manuals, and packaging; trace provenance and license scope.
+先看 [workflow-business-logic.md](workflow-business-logic.md) 的产品范围、三层证据和自动执行循环，新任务再看 [risk-estimate-rules.md](risk-estimate-rules.md) 的五级预判与主审规则；无 `assessment_policy` 的历史任务使用 [risk-rules.md](risk-rules.md) 的旧比较标准与发布门禁。
 
-Preserve source, query, jurisdiction, filters, date, URL, raw result, and screenshots. Explain similarities and differences. Separate discovery from official verification and record every coverage limit.
+排序优先级为：用户实际产品的独特结构/图样 → 具体候选 → 分类和权利人 → 同族/国家效力 → 相似品牌、原作品和授权链。检索词、翻译、分类建议和候选排序均由 Agent 生成，不能把未经证实的功能或分类当作事实。
+
+每一次停止均解释为：检索确实结束、免费额度/任务次数/分页限制、缺少产品事实、访问验证、响应契约变化或没有合格自动来源。只有确实完成且能证明数量、内容和审阅的查询，才能贡献完整覆盖。
+
+历史 2.3 数据结构不因本文件变更而重写；新任务由版本化构建器和验证器执行 2.4 规则。

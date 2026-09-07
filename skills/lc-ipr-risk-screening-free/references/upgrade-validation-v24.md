@@ -1,0 +1,48 @@
+# 2.4 优化交付与验证记录
+
+> 本文为 `automation-first-v1` 原始升级验收记录，保留当时结果。文中“新版”、无法判断与发布门禁不代表后续 `evidence-estimate-v1`；新评级规则见 [risk-estimate-rules.md](risk-estimate-rules.md)，本记录不冒充新策略验收。
+
+2026-09-06 后续审计更正：下文 EPS 线上 passed 仅剩摘要，本次未在 Skill/工作区找到原始响应及收据，现行清单已标为“历史摘要待补证”。原文保留以区分当时记录与当前可复核状态；本次未补造历史证据，也未重新联网。现行离线统一验收入口为 `scripts/verify_skill.py --mode fast|release --output-dir /new/empty/directory`，release 要求布局检查实际运行且没有 skip。
+
+实施日期：2026-09-06。已修改安装目录 `/Users/laochen/.codex/skills/lc-ipr-risk-screening-free`，新任务使用 2.4；历史任务不迁移。
+
+## 备份与恢复
+
+完整原版位于 `/Users/laochen/.codex/skill-backups/lc-ipr-risk-screening-free_20260906-081757+0800/skill/`。原目录 279 个条目、227 个常规文件、40,985,361 字节；复制后逐文件 SHA-256、类型、权限及符号链接对照通过，备份上层目录权限 0700。
+
+[恢复说明](/Users/laochen/.codex/skill-backups/lc-ipr-risk-screening-free_20260906-081757+0800/RESTORE.md) 与 [恢复脚本](/Users/laochen/.codex/skill-backups/lc-ipr-risk-screening-free_20260906-081757+0800/restore.py) 位于备份目录。脚本先重新核验备份，然后将当时整个 Skill 移到 `before-restore-时间戳`，再恢复并核验原版，因此保留优化后新增运行数据。
+
+只验证备份：
+
+```bash
+python3 /Users/laochen/.codex/skill-backups/lc-ipr-risk-screening-free_20260906-081757+0800/restore.py --verify-only
+```
+
+确需回退时运行同一命令并去掉 `--verify-only`。本次已在隔离临时目录做完整复制与清单验证的恢复演练；没有对当前版本执行回退。历史 runs、依赖目录和鉴权二进制未修改或删除。
+
+## 主要改动
+
+- 风险、证据置信度、覆盖分开；按国家、权利、候选发布。当前风险与待审申请、维权紧迫度分开；可见的发现警报不再被全局正式门禁吞掉。
+- 正式比较绑定真实产品、权利原文、状态和必要视图；产品资料、目标国家、计划及证据改变后，旧审阅失效。独立 Agent 逐候选复核高风险、低风险和关键排除。
+- 七国及适用 EU/EP/UP 路由、当地语言、分类、分页、权利人和同族扩展。已知不同国家同族文献生成独立候选，不继承父候选的有效状态、权利要求或排除结论。
+- 异常响应不记为零结果；首屏、未知总数、重复页面、缺少候选审阅、免费额度/任务限制均保留覆盖缺口。计划只追加，支持哈希绑定的恢复。
+- 新增 EPS、INPI、SerpApi Lens。可选官方账号不阻断启动；OEPM 保持未验收。API 和 CDP 调度隔离单来源失败，用户只恢复访问，不做查询、抄录或判断。
+- 所有支出上限零。Serper 暂停 2.4 计量请求：尚无可审计的免费余额/付费余额/自动充值证明，不用本地配置冒充账号事实；有合格 Free 账户时可走 SerpApi。
+
+## 验证范围
+
+- 原 `self_test.py` 通过，包括旧版本来源策略、计划绑定、免费额度、日语、JPO/CDP 和离线报告回归。
+- `security_quota_test.py` 与 `test_candidate_gate_hardening.py` 通过。
+- 新 Python 测试：67 项通过，覆盖响应异常与真实零结果、分页截断及重复记录、同族跨国、无登记版权、参考产品、证据角色、二审分歧、资产哈希、额度和可选账号缺失。
+- Node/CDP 测试：53 项通过；普通 npm test 的报告 fixture 用例因未设置专用路径跳过，随后已单独完成报告浏览器验证。覆盖自动提交收据、禁止人工业务回退、仅允许访问验证、真实查询语义、截图哈希和登录后断点复用。没有使用模拟结果宣称线上能力验收。
+- 独立前向验收运行真实 CLI 的检索、受阻、合并、扩展、双审阅、finalize、build、validate 共 14 步，全部成功退出；55 个范围均保持“无法判断”、整体 incomplete，五项报告生成并校验通过。
+- 实际 Chrome 验证新报告在 390、768、1440 像素下八段齐全、无横向溢出、打印段落齐全且无远程资源请求。旧报告排除候选打印用例由原 self_test 的对应 fixture 验证。
+- Skill frontmatter 校验、Python 语法、配置 JSON、文档本地链接校验通过。
+
+## 线上已验证与仍有缺口
+
+仅 EPS 单件 EP1004359B1 原文接口完成真实免账号验收：32,699 字节，身份一致，解析 21 条含不同语言的权利要求记录和 1 个说明书区段。该结果证明原文接口可用，不能证明当前国家效力、全部附图或七国全面检索能力。原始验收记录见 [provider-live-acceptance-v24.json](provider-live-acceptance-v24.json)。
+
+本机环境变量/固定 Keychain 未解析到 EPO、EUIPO、JPO、INPI、Serper、SerpApi、Signa 的来源凭据，因此没有做这些账号的真实计量查询或认证验收；未注册新账号。US 浏览器路线、各国登记库及其他未验收路线的状态保持明确，见 [browser-acceptance-v24.json](browser-acceptance-v24.json)。
+
+七国仍不是“全部权利已在线跑通”。主要缺口包括欧洲各国现行效力的自动登记核验、日本意匠/商标等召回、部分图形分类与图像检索，以及非 EPS 原文和完整外观视图的结构化提取（当前 US/JPO 适配器尚未产出可用于权利要求门禁的结构化正文）。没有免费、符合自动化边界且已验收的替代时，新版输出对应缺口并继续其他模块。详情与后续可评估的免费来源见 [official-sources.md](official-sources.md) 和 [providers.md](providers.md)。

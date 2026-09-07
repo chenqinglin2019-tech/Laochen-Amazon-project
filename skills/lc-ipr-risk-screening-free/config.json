@@ -1,7 +1,6 @@
 {
-  "schema_version": "2.2-free",
+  "schema_version": "2.4-free",
   "backend_url": "https://mcp.yixunkuajing.com",
-  "backend_token": "",
   "auth": {
     "timeout_seconds": 20,
     "binary_sha256": {
@@ -15,13 +14,27 @@
   "http": {
     "timeout_seconds": 30,
     "retries": 2,
-    "user_agent": "lc-ipr-risk-screening-free/2.2"
+    "user_agent": "lc-ipr-risk-screening-free/2.3"
   },
   "free_policy": {
+    "mode": "official_free_only",
+    "allow_registration": true,
+    "allow_commercial_freemium": true,
+    "commercial_freemium_mode": "explicit_opt_in",
+    "commercial_freemium_default_enabled": [],
+    "commercial_freemium_opt_in": [
+      "serper",
+      "signa",
+      "serpapi"
+    ],
+    "commercial_freemium_allowlist": [
+      "serper",
+      "signa",
+      "serpapi"
+    ],
     "allow_paid": false,
-    "allow_plan_upgrade": false,
     "allow_overage": false,
-    "stop_on_required_quota_gap": true
+    "on_quota_exhausted": "stop_and_report"
   },
   "freshness": {
     "signa_max_age_days": 14,
@@ -30,18 +43,25 @@
   "performance": {
     "max_api_concurrency": 3,
     "preflight_cache_minutes": 30,
-    "official_browser_execution": "sequential"
+    "official_browser_execution": "sequential",
+    "dynamic_evidence_max_age_hours": 48,
+    "api_operation_timeout_seconds": 180
   },
   "limits": {
-    "serpapi_google_patents_queries_per_task": 6,
     "epo_search_queries_per_task": 6,
-    "serper_patents_queries_per_task": 8,
-    "serper_web_queries_per_task": 8,
-    "serper_images_queries_per_task": 4,
-    "wipo_patentscope_browser_queries_per_task": 3,
+    "serper_free_max_queries_per_task": 10,
+    "serper_patents_queries_per_task": 4,
+    "serper_search_queries_per_task": 3,
+    "serper_images_queries_per_task": 3,
+    "signa_free_max_queries_per_task": 3,
+    "signa_results_per_query": 25,
+    "serpapi_google_patents_queries_per_task": 3,
     "uspto_patent_browser_queries_per_task": 3,
     "epo_candidate_detail_limit": 20,
-    "trademark_queries_per_strategy": 5
+    "trademark_queries_per_strategy": 5,
+    "jplatpat_queries_per_right_type": 12,
+    "national_registry_queries_per_right_type": 3,
+    "epo_search_queries_per_task_v24": 96
   },
   "cdp": {
     "chrome_executable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -51,39 +71,96 @@
     "action_timeout_ms": 15000,
     "semantic_poll_ms": 750,
     "semantic_stable_samples": 3,
-    "headless": false
+    "headless": false,
+    "operation_timeout_ms": 165000
   },
   "providers": {
     "epo_ops": {
       "base_url": "https://ops.epo.org/3.2/rest-services",
       "auth_url": "https://ops.epo.org/3.2/auth/accesstoken",
-      "documented_free_bytes_per_week": 4294967296
-    },
-    "wipo_patentscope_browser": {
-      "search_url": "https://patentscope.wipo.int/",
-      "capture_transport": "manual",
-      "browser_allowed_hosts": ["patentscope.wipo.int", "patentscope2.wipo.int"]
+      "access_tier": "registered_free",
+      "allow_overage": false,
+      "documented_free_bytes_per_week": 4000000000,
+      "free_stop_margin_bytes": 67108864,
+      "estimated_max_response_bytes_per_query": 16777216
     },
     "espacenet_browser": {
       "legacy_only": true,
       "search_url": "https://worldwide.espacenet.com/",
-      "browser_allowed_hosts": ["worldwide.espacenet.com"]
+      "browser_allowed_hosts": [
+        "worldwide.espacenet.com"
+      ]
     },
     "serpapi": {
+      "commercial_freemium": true,
+      "default_enabled": false,
+      "network_enabled_when_opted_in": true,
       "base_url": "https://serpapi.com",
-      "engine": "google_patents"
+      "engine": "google_patents",
+      "role": "discovery_only",
+      "authoritative_for_final_rating": false,
+      "documented_free_searches_per_month": 250,
+      "account_api_unmetered": true,
+      "free_plan_only": true,
+      "allow_automatic_early_renewal": false,
+      "allow_extra_credits": false,
+      "allow_paid": false,
+      "allow_overage": false
     },
     "serper": {
+      "commercial_freemium": true,
+      "default_enabled": false,
+      "network_enabled_when_opted_in": true,
       "base_url": "https://google.serper.dev",
-      "lens_optional": true
+      "supported_operations": [
+        "patents",
+        "search",
+        "images"
+      ],
+      "role": "discovery_only",
+      "authoritative_for_final_rating": false,
+      "documented_signup_free_queries": 2500,
+      "documented_balance_model": "one_time_balance_no_reset_assumed",
+      "allow_automatic_recharge": false,
+      "allow_paid": false,
+      "allow_overage": false
     },
     "signa": {
+      "commercial_freemium": true,
+      "default_enabled": false,
+      "network_enabled_when_opted_in": true,
       "base_url": "https://api.signa.so",
+      "supported_operations": [
+        "trademark_search"
+      ],
+      "role": "discovery_only",
+      "authoritative_for_final_rating": false,
+      "free_plan_only": true,
+      "allow_automatic_recharge": false,
+      "allow_paid": false,
+      "allow_overage": false,
       "offices_path": "/v1/offices",
       "trademarks_path": "/v1/trademarks",
-      "known_mark_probe": "NIKE"
+      "office_map": {
+        "US": "US",
+        "EU": "EM",
+        "FR": "FR",
+        "GB": "GB",
+        "SE": "SE",
+        "AU": "AU",
+        "CA": "CA",
+        "CH": "CH",
+        "NO": "NO",
+        "SG": "SG"
+      },
+      "excluded_offices": [
+        "WO"
+      ]
     },
     "rapidapi_uspto_trademark": {
+      "commercial_freemium": true,
+      "default_enabled": false,
+      "network_enabled": false,
       "base_url": "https://uspto-trademark.p.rapidapi.com",
       "host": "uspto-trademark.p.rapidapi.com",
       "database_status_path": "/v1/databaseStatus"
@@ -91,28 +168,390 @@
     "tsdr": {
       "capture_transport": "cdp",
       "browser_base_url": "https://tsdr.uspto.gov/",
-      "browser_allowed_hosts": ["tsdr.uspto.gov", "tsdrsec.uspto.gov"]
+      "browser_allowed_hosts": [
+        "tsdr.uspto.gov",
+        "tsdrsec.uspto.gov"
+      ]
     },
     "uspto_tmsearch_browser": {
       "capture_transport": "cdp",
       "search_url": "https://tmsearch.uspto.gov/",
-      "browser_allowed_hosts": ["tmsearch.uspto.gov"]
+      "browser_allowed_hosts": [
+        "tmsearch.uspto.gov"
+      ]
     },
     "uspto_patent_browser": {
       "verification_browser": "chrome_desktop",
       "capture_transport": "cdp",
+      "search_url": "https://ppubs.uspto.gov/pubwebapp/",
       "basic_search_url": "https://ppubs.uspto.gov/basic/",
-      "browser_allowed_hosts": ["ppubs.uspto.gov", "patents.uspto.gov"]
+      "browser_allowed_hosts": [
+        "ppubs.uspto.gov",
+        "patents.uspto.gov"
+      ]
     },
     "euipo": {
-      "environment": "sandbox",
-      "authoritative_for_final_rating": false,
-      "portal_url": "https://dev-sandbox.euipo.europa.eu",
-      "token_url": "https://auth-sandbox.euipo.europa.eu/oidc/accessToken",
+      "environment": "production",
+      "access_tier": "registered_free",
+      "authoritative_for_final_rating": true,
+      "portal_url": "https://dev.euipo.europa.eu",
+      "token_url": "https://euipo.europa.eu/cas-server-webapp/oidc/accessToken",
       "client_credentials_scope": "uid",
-      "trademark_base_url": "https://api-sandbox.euipo.europa.eu/trademark-search",
-      "design_base_url": "https://api-sandbox.euipo.europa.eu/design-search",
+      "trademark_base_url": "https://api.euipo.europa.eu/trademark-search",
+      "design_base_url": "https://api.euipo.europa.eu/design-search",
+      "api_versions": {
+        "trademark_search": "1.1.0",
+        "design_search": "1.1.0"
+      },
+      "openapi_specs": {
+        "trademark_search": "https://dev.euipo.europa.eu/product/28099/download-specs",
+        "design_search": "https://dev.euipo.europa.eu/product/31336/download-specs"
+      },
       "sandbox_fixture_design_number": "000000013-0001"
+    },
+    "jpo_api": {
+      "access_tier": "registered_free",
+      "base_url": "https://ip-data.jpo.go.jp/api",
+      "auth_url": "https://ip-data.jpo.go.jp/auth/token",
+      "token_ttl_seconds": 3600,
+      "refresh_token_ttl_seconds": 28800,
+      "supported_right_types": [
+        "patent",
+        "design",
+        "trademark"
+      ],
+      "daily_limits": {
+        "progress": 800,
+        "simplified_progress": 800,
+        "priority": 60,
+        "applicant_names": 400,
+        "applicant_codes": 400,
+        "number_reference": 100,
+        "application_documents": 200,
+        "mailed_documents": 200,
+        "refusal_reasons": 200,
+        "registered_information": 400,
+        "jplatpat_fixed_address": 400
+      }
+    },
+    "inpi_api": {
+      "access_tier": "registered_free",
+      "base_url": "https://api-gateway.inpi.fr/",
+      "account_url": "https://data.inpi.fr/",
+      "supported_right_types": [
+        "patent",
+        "utility_model",
+        "design",
+        "trademark_word",
+        "trademark_figurative"
+      ],
+      "adapter_status": "requires_smoke_test",
+      "authoritative_for_final_rating": false
+    },
+    "prv_open_data": {
+      "access_tier": "public_free",
+      "delivery": "ftp_full_and_incremental_files",
+      "method": "local_index",
+      "supported_right_types": [
+        "patent",
+        "design",
+        "trademark_word",
+        "trademark_figurative"
+      ],
+      "adapter_status": "requires_setup",
+      "authoritative_for_final_rating": false
+    },
+    "jplatpat_browser": {
+      "capture_transport": "cdp_assisted",
+      "search_url": "https://www.j-platpat.inpit.go.jp/",
+      "browser_allowed_hosts": [
+        "www.j-platpat.inpit.go.jp"
+      ],
+      "automation_policy": "user_triggered_single_record_or_query",
+      "bulk_or_periodic_access": false
+    },
+    "tmview_browser": {
+      "capture_transport": "cdp_assisted",
+      "search_url": "https://www.tmdn.org/tmview/",
+      "browser_allowed_hosts": [
+        "www.tmdn.org",
+        "tmdn.org"
+      ]
+    },
+    "designview_browser": {
+      "capture_transport": "cdp_assisted",
+      "search_url": "https://www.tmdn.org/tmdsview-web/",
+      "browser_allowed_hosts": [
+        "www.tmdn.org",
+        "tmdn.org"
+      ]
+    },
+    "epo_register_browser": {
+      "capture_transport": "cdp_assisted",
+      "search_url": "https://register.epo.org/",
+      "browser_allowed_hosts": [
+        "register.epo.org"
+      ]
+    },
+    "euipo_esearch_browser": {
+      "capture_transport": "cdp_assisted",
+      "search_url": "https://euipo.europa.eu/eSearch/",
+      "browser_allowed_hosts": [
+        "euipo.europa.eu",
+        "www.euipo.europa.eu"
+      ],
+      "automation_policy": "user_triggered_single_vienna_class_query",
+      "bulk_or_periodic_access": false
+    },
+    "public_web_browser": {
+      "capture_transport": "manual_capture",
+      "automation_policy": "user_triggered_visible_low_frequency",
+      "adapter_status": "requires_smoke_test",
+      "jurisdiction_allowed_hosts": {
+        "US": [
+          "publicrecords.copyright.gov",
+          "ccb.gov",
+          "dockets.ccb.gov",
+          "ttabvue.uspto.gov",
+          "ptab.uspto.gov"
+        ],
+        "EU": [
+          "euipo.europa.eu",
+          "curia.europa.eu"
+        ],
+        "GB": [
+          "www.gov.uk",
+          "caselaw.nationalarchives.gov.uk"
+        ],
+        "JP": [
+          "www.bunka.go.jp",
+          "www.courts.go.jp"
+        ],
+        "DE": [
+          "www.dpma.de",
+          "www.rechtsprechung-im-internet.de"
+        ],
+        "FR": [
+          "www.inpi.fr",
+          "www.courdecassation.fr"
+        ],
+        "IT": [
+          "uibm.gov.it",
+          "www.uibm.gov.it",
+          "uibm.mimit.gov.it",
+          "www.giustizia.it"
+        ],
+        "ES": [
+          "www.oepm.es",
+          "www.poderjudicial.es"
+        ],
+        "NL": [
+          "www.rvo.nl",
+          "uitspraken.rechtspraak.nl"
+        ],
+        "BE": [
+          "economie.fgov.be",
+          "juportal.be"
+        ],
+        "SE": [
+          "search.prv.se",
+          "www.prv.se",
+          "www.domstol.se"
+        ],
+        "PL": [
+          "uprp.gov.pl",
+          "orzeczenia.ms.gov.pl"
+        ]
+      }
+    },
+    "official_registry_browser": {
+      "capture_transport": "cdp_assisted",
+      "registries": {
+        "DE": {
+          "name": "DPMAregister",
+          "search_url": "https://register.dpma.de/",
+          "browser_allowed_hosts": [
+            "register.dpma.de"
+          ],
+          "right_types": [
+            "patent",
+            "utility_model",
+            "design",
+            "trademark_word",
+            "trademark_figurative"
+          ],
+          "interaction_mode": "cdp_assisted"
+        },
+        "FR": {
+          "name": "INPI Data",
+          "search_url": "https://data.inpi.fr/",
+          "browser_allowed_hosts": [
+            "data.inpi.fr"
+          ],
+          "right_types": [
+            "patent",
+            "utility_model",
+            "design",
+            "trademark_word",
+            "trademark_figurative"
+          ],
+          "interaction_mode": "cdp_assisted"
+        },
+        "IT": {
+          "name": "UIBM",
+          "search_url": "https://www.uibm.gov.it/bancadati/home/index/",
+          "browser_allowed_hosts": [
+            "www.uibm.gov.it",
+            "uibm.gov.it",
+            "uibm.mimit.gov.it"
+          ],
+          "right_types": [
+            "patent",
+            "utility_model",
+            "design",
+            "trademark_word",
+            "trademark_figurative"
+          ],
+          "interaction_mode": "cdp_assisted"
+        },
+        "ES": {
+          "name": "OEPM",
+          "search_url": "https://www.oepm.es/",
+          "browser_allowed_hosts": [
+            "www.oepm.es",
+            "consultas2.oepm.es",
+            "sede.oepm.gob.es"
+          ],
+          "right_types": [
+            "patent",
+            "utility_model",
+            "design",
+            "trademark_word",
+            "trademark_figurative"
+          ],
+          "interaction_mode": "cdp_assisted"
+        },
+        "GB": {
+          "name": "UKIPO",
+          "search_url": "https://www.gov.uk/search-for-patent",
+          "browser_allowed_hosts": [
+            "www.gov.uk",
+            "trademarks.ipo.gov.uk",
+            "www.registered-design.service.gov.uk",
+            "patents.service.gov.uk"
+          ],
+          "right_types": [
+            "patent",
+            "design",
+            "trademark_word",
+            "trademark_figurative"
+          ],
+          "interaction_mode": "cdp_assisted"
+        },
+        "NL": {
+          "name": "Netherlands Patent Office / BOIP",
+          "search_url": "https://mijnoctrooi.rvo.nl/",
+          "browser_allowed_hosts": [
+            "mijnoctrooi.rvo.nl",
+            "www.boip.int",
+            "boip.int"
+          ],
+          "right_types": [
+            "patent",
+            "design",
+            "trademark_word",
+            "trademark_figurative"
+          ],
+          "interaction_mode": "cdp_assisted"
+        },
+        "BE": {
+          "name": "Belgian Office for Intellectual Property / BOIP",
+          "search_url": "https://bpp.economie.fgov.be/",
+          "browser_allowed_hosts": [
+            "bpp.economie.fgov.be",
+            "www.boip.int",
+            "boip.int"
+          ],
+          "right_types": [
+            "patent",
+            "design",
+            "trademark_word",
+            "trademark_figurative"
+          ],
+          "interaction_mode": "cdp_assisted"
+        },
+        "SE": {
+          "name": "PRV",
+          "search_url": "https://search.prv.se/",
+          "browser_allowed_hosts": [
+            "search.prv.se",
+            "www.prv.se",
+            "prv.se"
+          ],
+          "right_types": [
+            "patent",
+            "design",
+            "trademark_word",
+            "trademark_figurative"
+          ],
+          "interaction_mode": "cdp_assisted"
+        },
+        "PL": {
+          "name": "UPRP",
+          "search_url": "https://ewyszukiwarka.pue.uprp.gov.pl/",
+          "browser_allowed_hosts": [
+            "ewyszukiwarka.pue.uprp.gov.pl",
+            "uprp.gov.pl"
+          ],
+          "right_types": [
+            "patent",
+            "utility_model",
+            "design",
+            "trademark_word",
+            "trademark_figurative"
+          ],
+          "interaction_mode": "cdp_assisted"
+        }
+      }
+    },
+    "epo_publication_server": {
+      "introduced_in_schema": "2.4-free",
+      "access_tier": "public_free",
+      "base_url": "https://data.epo.org/publication-server/rest/v1.2",
+      "supported_operations": [
+        "document_retrieval"
+      ],
+      "supported_formats": [
+        "xml"
+      ],
+      "registration_required": false,
+      "adapter_status": "known_positive_xml_live_validated",
+      "acceptance_record": "references/provider-live-acceptance-v24.json",
+      "authority_scope": "published_document_only",
+      "authoritative_for_final_rating": false,
+      "documented_free_bytes_per_rolling_seven_days": 5000000000,
+      "runtime_hard_cap_source": "scripts/eps_client.py",
+      "allow_paid": false,
+      "allow_overage": false
+    },
+    "serpapi_google_lens": {
+      "introduced_in_schema": "2.4-free",
+      "access_tier": "commercial_freemium_free_plan",
+      "base_url": "https://serpapi.com",
+      "engine": "google_lens",
+      "supported_operations": [
+        "image_search"
+      ],
+      "default_enabled": false,
+      "activation": "serpapi_free_enhancement.enabled",
+      "role": "discovery_only",
+      "authoritative_for_final_rating": false,
+      "shared_account_and_budget_provider": "serpapi_google_patents",
+      "max_combined_queries_per_task": 3,
+      "local_image_upload_enabled": false,
+      "adapter_status": "authenticated_live_acceptance_pending",
+      "allow_paid": false,
+      "allow_overage": false
     }
   }
 }

@@ -7,7 +7,7 @@ import argparse
 import re
 from pathlib import Path
 
-from common import ensure_object, load_json, normalize_text, skill_root
+from common import ensure_object, is_active_schema, load_json, normalize_text, skill_root
 from provider_utils import record_result
 
 
@@ -17,6 +17,8 @@ def main() -> None:
     args = parser.parse_args()
     task_dir = args.task_dir.resolve()
     task = ensure_object(load_json(task_dir / "task.json"), "task.json")
+    if not is_active_schema(task):
+        raise SystemExit("LEGACY_TASK_READ_ONLY: 2.1/2.2 derived evidence cannot be changed")
     evidence = ensure_object(load_json(task_dir / "evidence.json"), "evidence.json")
     source = load_json(skill_root() / "assets" / "high-risk-ip.json")
     browser = evidence.get("collections", {}).get("browser", [])
@@ -41,7 +43,7 @@ def main() -> None:
                 aliases.append(alias)
         if aliases:
             hits.append({"id": entry.get("id"), "owner": entry.get("owner"), "type": entry.get("type"), "matched_aliases": aliases, "escalation_only": True})
-    run = record_result(task_dir, provider="local_high_risk_ip", operation="alias_check", query=task.get("product", {}).get("actual_asin", ""),
+    run = record_result(task_dir, provider="local_high_risk_ip", operation="blacklist_check", query=task.get("product", {}).get("actual_asin", ""),
         jurisdiction=",".join(task.get("target_jurisdictions", [])), evidence_type="blacklist",
         status="success" if hits else "no_result", normalized={"hits": hits}, mandatory=False)
     print(run["status"])

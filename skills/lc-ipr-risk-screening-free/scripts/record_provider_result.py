@@ -5,10 +5,9 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from urllib.parse import urlparse
 
-from common import SOURCE_STATUSES, ensure_object, load_json, path_within, sha256_file
-from provider_utils import record_result
+from common import SOURCE_STATUSES, ensure_object, is_active_schema, load_json
+from provider_utils import ProviderError, require_provider_operation, record_result
 
 
 def main() -> None:
@@ -31,9 +30,14 @@ def main() -> None:
     args = parser.parse_args()
     task_dir = args.task_dir.resolve()
     task = ensure_object(load_json(task_dir / "task.json"), "task.json")
-    allowed = set(task.get("required_sources", [])) | set(task.get("optional_sources", [])) | set(task.get("low_risk_gate_sources", [])) | {"local_high_risk_ip"}
-    if args.provider not in allowed:
-        raise SystemExit(f"Provider is not configured for this task: {args.provider}")
+    if not is_active_schema(task):
+        raise SystemExit("LEGACY_TASK_READ_ONLY: 2.1/2.2 provider evidence cannot be changed")
+    try:
+        derived_mandatory = require_provider_operation(
+            task, args.provider, args.operation, jurisdiction=args.jurisdiction,
+        )
+    except ProviderError as exc:
+        raise SystemExit(f"{exc.code}: {exc.detail}") from None
     normalized = None
     if args.normalized_json:
         normalized = ensure_object(load_json(args.normalized_json), "normalized JSON")
@@ -44,21 +48,14 @@ def main() -> None:
         raise SystemExit("Successful statuses cannot include an error code")
     request_params = {"q": args.query}
     if args.evidence_type == "official_verification":
-        parsed = urlparse(args.source_url)
-        if parsed.scheme != "https" or not parsed.hostname:
-            raise SystemExit("Official verification requires an HTTPS --source-url")
-        if not args.screenshot:
-            raise SystemExit("Official verification requires --screenshot")
-        screenshot = args.screenshot.expanduser().resolve()
-        if not screenshot.is_file() or not path_within(screenshot, task_dir / "screenshots"):
-            raise SystemExit("Official verification screenshot must exist inside task screenshots/")
-        request_params.update({"source_url": args.source_url, "screenshot_sha256": sha256_file(screenshot)})
-        if isinstance(normalized, dict):
-            normalized.setdefault("browser_evidence", {}).update({"screenshot_path": str(screenshot), "screenshot_sha256": sha256_file(screenshot)})
+        raise SystemExit(
+            "TYPED_OFFICIAL_RECORDER_REQUIRED: use the provider-specific API or official-registry recorder"
+        )
     run = record_result(task_dir, provider=args.provider, operation=args.operation, query=args.query,
         jurisdiction=args.jurisdiction, evidence_type=args.evidence_type, status=args.status,
         normalized=normalized, raw_body=raw_body, raw_suffix=args.raw.suffix.lstrip(".") if args.raw else "json",
-        error_code=args.error_code, detail=args.detail, data_date=args.data_date, mandatory=not args.optional,
+        error_code=args.error_code, detail=args.detail, data_date=args.data_date,
+        mandatory=derived_mandatory if task.get("schema_version") == "2.3-free" else not args.optional,
         request_params=request_params)
     print(run["run_id"])
 

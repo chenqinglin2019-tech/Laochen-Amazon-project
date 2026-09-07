@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from common import atomic_write_json, ensure_object, load_json, now_iso, sha256_file, sha256_json
+from common import assert_active_free_policy, atomic_write_json, ensure_object, load_json, now_iso, sha256_file, sha256_json
+from runtime_timing import timed_cli
 
 
 REPORT_SCHEMA_VERSION = "1.0"
@@ -354,18 +355,69 @@ def html_report(
 </main></div></body></html>"""
 
 
+@timed_cli("report_build")
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build fixed-format Markdown and HTML IPR reports.")
     parser.add_argument("--task-dir", type=Path, required=True)
+    parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--report-content", type=Path)
     args = parser.parse_args()
     task_dir = args.task_dir.resolve()
+    output_dir = args.output_dir.resolve() if args.output_dir else task_dir
     task = ensure_object(load_json(task_dir / "task.json"), "task.json")
+    assessment = ensure_object(load_json(output_dir / "assessment.json"), "assessment.json")
+    policy = assessment.get("assessment_policy") or task.get("assessment_policy")
+    if policy:
+        if policy != "evidence-estimate-v1":
+            raise SystemExit("Unsupported assessment_policy: " + str(policy))
+        from assessment_estimate import report_input_context
+        task_dir, task = report_input_context(task_dir, task, output_dir)
     evidence = ensure_object(load_json(task_dir / "evidence.json"), "evidence.json")
-    assessment = ensure_object(load_json(task_dir / "assessment.json"), "assessment.json")
     candidate_path = task_dir / "normalized-candidates.json"
     candidates = ensure_object(load_json(candidate_path), "normalized-candidates.json") if candidate_path.exists() else {"patents": [], "trademarks": []}
     journal_path = task_dir / "browser-candidate-journal.json"
     journal = ensure_object(load_json(journal_path), "browser-candidate-journal.json") if journal_path.exists() else {"schema_version": "1.0", "task_id": task.get("task_id"), "entries": []}
+    if policy:
+        from report_estimate import build_bundle
+        plan = ensure_object(load_json(task_dir / "search-plan.json"), "search-plan.json")
+        content = ensure_object(load_json(args.report_content), "report content") if args.report_content else None
+        build_bundle(task_dir, task, evidence, assessment, candidates, journal, plan,
+                     output_dir=output_dir, report_content=content)
+        print(output_dir / "report.html")
+        return
+    if args.output_dir or args.report_content:
+        parser.error("Output/content options require evidence-estimate-v1")
+    if str(task.get("schema_version") or "") in {"2.3-free", "2.4-free"}:
+        assert_active_free_policy(task)
+        from report_v2 import REPORT_SCHEMA_VERSION as V2_REPORT_SCHEMA_VERSION, build_v2_bundle
+        if task.get("schema_version") == "2.4-free":
+            from report_v24 import build_v24_bundle as build_v2_bundle
+
+        plan_path = task_dir / "search-plan.json"
+        if not plan_path.is_file():
+            raise FileNotFoundError(f"Missing {plan_path}")
+        search_plan = ensure_object(load_json(plan_path), "search-plan.json")
+        report_data, manifest = build_v2_bundle(
+            task_dir, task, evidence, assessment, candidates, journal, search_plan,
+        )
+        task.setdefault("outputs", {}).update({
+            "report_data": str(task_dir / "report-data.json"),
+            "report_md": str(task_dir / "report.md"),
+            "report_html": str(task_dir / "report.html"),
+            "report_findings_csv": str(task_dir / "report-findings.csv"),
+            "report_manifest": str(task_dir / "report-manifest.json"),
+            "report_schema_version": V2_REPORT_SCHEMA_VERSION,
+            "report_mode": report_data["report_mode"],
+            "generated_at": manifest["generated_at"],
+            "input_digests": manifest["input_digests"],
+            "artifact_digests": {
+                name: metadata["sha256"] for name, metadata in manifest["artifacts"].items()
+            },
+            "report_manifest_sha256": sha256_file(task_dir / "report-manifest.json"),
+        })
+        atomic_write_json(task_dir / "task.json", task)
+        print(task_dir / "report.html")
+        return
     manifest = fixed_manifest(task_dir, task, evidence, assessment, candidates, journal)
     markdown_text = markdown(task, evidence, assessment, candidates, journal, manifest)
     html_text = html_report(task, evidence, assessment, candidates, journal, manifest)

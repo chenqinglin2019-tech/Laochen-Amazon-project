@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="report-schema" content="IPR-EVIDENCE-DOSSIER/2.0">
+  <meta name="report-mode" content="@@REPORT_MODE@@">
+  <title>@@DOCUMENT_TITLE@@</title>
+  <style>
+    :root {
+      --ink: #18242e;
+      --muted: #62717f;
+      --line: #d6dee4;
+      --canvas: #eef2f4;
+      --paper: #ffffff;
+      --navy: #132c3e;
+      --navy-2: #1d4158;
+      --signal: #d66a26;
+      --danger: #ad2f2a;
+      --safe: #237253;
+      --info: #236b9b;
+      --quiet: #f5f7f8;
+      --display: "Iowan Old Style", "Songti SC", "STSong", serif;
+      --body: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+      --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; overflow-x: hidden; background: var(--canvas); color: var(--ink); font: 14px/1.58 var(--body); }
+    a { color: var(--info); text-underline-offset: 3px; overflow-wrap: anywhere; }
+    a:focus-visible, summary:focus-visible { outline: 3px solid #58a9d8; outline-offset: 3px; }
+    code { font-family: var(--mono); overflow-wrap: anywhere; }
+    .shell { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100vh; }
+    .rail { position: sticky; top: 0; height: 100vh; padding: 28px 20px; background: var(--navy); color: #fff; overflow-y: auto; }
+    .rail::after { content: ""; position: absolute; inset: 0 0 0 auto; width: 5px; background: var(--signal); }
+    .rail-kicker { color: #9fc0d2; font: 700 10px/1.3 var(--mono); letter-spacing: .15em; text-transform: uppercase; }
+    .rail-brand { margin: 7px 0 3px; font: 700 22px/1.15 var(--display); }
+    .rail-case { color: #c5d6df; font-size: 11px; overflow-wrap: anywhere; }
+    .rail nav { display: grid; gap: 3px; margin-top: 28px; counter-reset: nav; }
+    .rail nav a { counter-increment: nav; display: grid; grid-template-columns: 26px 1fr; gap: 8px; padding: 9px 8px; border-left: 2px solid transparent; color: #dbe8ee; text-decoration: none; }
+    .rail nav a::before { content: counter(nav, decimal-leading-zero); color: #81aabd; font: 700 10px/1.9 var(--mono); }
+    .rail nav a:hover { border-color: var(--signal); background: #ffffff0c; }
+    .rail-gate { margin-top: 30px; padding: 12px; border: 1px solid #ffffff2c; }
+    .rail-gate span { display: block; color: #9fc0d2; font: 700 10px var(--mono); letter-spacing: .1em; }
+    .rail-gate strong { display: block; margin-top: 3px; font: 800 21px var(--display); }
+    .main { min-width: 0; padding: 34px; }
+    .wrap { max-width: 1180px; min-width: 0; margin: auto; }
+    .report-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: start; padding: 2px 2px 14px; }
+    .report-head h1 { margin: 3px 0 4px; font: 700 clamp(28px, 4vw, 42px)/1.06 var(--display); letter-spacing: -.025em; }
+    .eyebrow { color: var(--info); font: 700 10px/1.4 var(--mono); letter-spacing: .16em; text-transform: uppercase; }
+    .head-meta { color: var(--muted); overflow-wrap: anywhere; }
+    .mode-badge { min-width: 112px; padding: 13px 15px; border: 1px solid currentColor; text-align: center; font: 800 15px var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+    .mode-badge.formal { color: var(--safe); background: #edf8f2; }
+    .mode-badge.draft { color: var(--signal); background: #fff5ec; }
+    .panel { min-width: 0; margin-top: 15px; padding: 22px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); }
+    .section-head { display: flex; justify-content: space-between; gap: 18px; align-items: baseline; margin-bottom: 16px; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+    .section-head h2 { margin: 0; font: 700 20px/1.2 var(--display); }
+    .section-head span { color: var(--muted); font: 700 10px var(--mono); letter-spacing: .12em; text-transform: uppercase; }
+    .product-layout { display: grid; grid-template-columns: minmax(300px, 1.1fr) minmax(260px, .9fr); gap: 24px; align-items: start; }
+    .product-image { margin: 0; border: 1px solid var(--line); background: var(--quiet); }
+    .product-image img { display: block; width: 100%; height: 390px; object-fit: contain; background: #fff; }
+    .product-image figcaption { display: flex; justify-content: space-between; gap: 12px; padding: 9px 11px; border-top: 1px solid var(--line); color: var(--muted); font: 11px var(--mono); }
+    .product-copy h3 { margin: 4px 0 6px; font: 700 23px/1.22 var(--display); }
+    .frozen { display: inline-flex; padding: 4px 8px; color: #24465a; background: #e7f0f4; font-weight: 750; }
+    .facts { display: grid; margin-top: 17px; border-top: 1px solid var(--line); }
+    .fact { display: grid; grid-template-columns: 102px minmax(0, 1fr); gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+    .fact span, .meta { color: var(--muted); }
+    .decision-layout { display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 22px; align-items: start; }
+    .risk-seal { aspect-ratio: 1; display: grid; place-content: center; padding: 12px; border-radius: 50%; color: #fff; text-align: center; background: #6b7280; box-shadow: inset 0 0 0 7px #ffffff24; }
+    .risk-seal small { font: 700 9px var(--mono); letter-spacing: .08em; }
+    .risk-seal strong { margin: 3px 0; font: 800 31px/1 var(--display); }
+    .risk-seal.critical, .risk-seal.high, .risk-pill.critical, .risk-pill.high { background: var(--danger); }
+    .risk-seal.medium, .risk-pill.medium { background: #b7611c; }
+    .risk-seal.low, .risk-pill.low { background: var(--info); }
+    .risk-seal.very-low, .risk-pill.very-low { background: var(--safe); }
+    .metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .metric { min-width: 0; padding: 14px; border: 1px solid var(--line); background: var(--quiet); }
+    .metric span { display: block; color: var(--muted); }
+    .metric strong { display: block; margin-top: 4px; font-size: 17px; overflow-wrap: anywhere; }
+    .decision-copy { margin: 15px 0 0; }
+    .legal-note { margin-top: 15px; padding: 14px 16px; border-left: 4px solid var(--signal); background: #fff7ef; }
+    .progress { height: 9px; margin: 12px 0 18px; overflow: hidden; border-radius: 2px; background: #e9edf0; }
+    .progress i { display: block; height: 100%; background: var(--info); }
+    .source-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+    .source-card { padding: 11px 12px; border: 1px solid var(--line); background: #fff; }
+    .source-card strong { display: block; overflow-wrap: anywhere; }
+    .source-card span { color: var(--muted); font-size: 12px; }
+    .gap-list { display: grid; gap: 9px; }
+    .gap { padding: 11px 13px; border-left: 3px solid var(--signal); background: #fff8f1; overflow-wrap: anywhere; }
+    .gap code { color: #8a4618; font-size: 11px; }
+    .gap.clear { border-color: var(--safe); background: #eef8f3; color: var(--safe); }
+    .module-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; }
+    .module-card { min-width: 0; padding: 17px; border: 1px solid var(--line); background: #fff; }
+    .module-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .module-head h3 { margin: 0; font-size: 16px; overflow-wrap: anywhere; }
+    .risk-pill { display: inline-flex; padding: 4px 9px; border-radius: 3px; color: #fff; font-weight: 750; white-space: nowrap; background: #6b7280; }
+    .module-card p { color: #3e4e5b; overflow-wrap: anywhere; }
+    .module-card ul { margin: 9px 0 0; padding-left: 18px; }
+    .module-card li + li { margin-top: 6px; }
+    .visual-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
+    .visual-card { min-width: 0; margin: 0; border: 1px solid var(--line); background: #fff; }
+    .visual-card img { display: block; width: 100%; height: 230px; object-fit: contain; background: var(--quiet); border-bottom: 1px solid var(--line); }
+    .visual-card figcaption { padding: 12px; }
+    .visual-card strong { display: block; overflow-wrap: anywhere; }
+    .visual-card code { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; }
+    .table-wrap { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; overscroll-behavior-inline: contain; border: 1px solid var(--line); }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { padding: 9px 8px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+    th { color: #526372; background: var(--quiet); font-size: 11px; }
+    td { font-size: 12px; }
+    details.fold { margin-top: 13px; border: 1px solid var(--line); background: var(--quiet); }
+    details.fold summary { cursor: pointer; padding: 11px 13px; font-weight: 750; }
+    details.fold .table-wrap { width: calc(100% - 24px); margin: 0 12px 12px; background: #fff; }
+    .trace-list { display: grid; gap: 8px; }
+    .trace-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+    .trace-row span { color: var(--muted); }
+    .trace-row code { font-size: 11px; }
+    .empty { color: var(--muted); font-style: italic; }
+    .print-only { display: none; }
+    @media (max-width: 900px) {
+      .shell { grid-template-columns: 1fr; }
+      .rail { position: relative; height: auto; }
+      .rail nav { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+      .rail-gate { max-width: 240px; }
+      .main { padding: 22px; }
+      .product-layout, .decision-layout { grid-template-columns: 1fr; }
+      .risk-seal { width: 128px; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .source-grid, .visual-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 580px) {
+      .rail nav, .metrics, .source-grid, .module-grid, .visual-grid { grid-template-columns: 1fr; }
+      .main { padding: 12px; }
+      .panel { padding: 16px; }
+      .report-head { grid-template-columns: 1fr; }
+      .mode-badge { justify-self: start; }
+      .product-image img { height: 280px; }
+      .fact, .trace-row { grid-template-columns: 1fr; gap: 3px; }
+      .table-wrap { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      table { min-width: 780px; }
+    }
+    @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+    @media print {
+      @page { size: A4; margin: 12mm; }
+      body { background: #fff; color: #000; font-size: 10.5pt; }
+      .shell { display: block; min-height: 0; }
+      .rail { display: none; }
+      .main { padding: 0; }
+      .wrap { max-width: none; }
+      .report-head { break-after: avoid; }
+      .panel { margin-top: 8mm; padding: 5mm; border-color: #999; box-shadow: none; }
+      .module-card, .visual-card, .metric, .source-card, .gap { break-inside: avoid; }
+      .table-wrap { overflow: visible; border-color: #999; }
+      table { table-layout: auto; }
+      thead { display: table-header-group; }
+      tr { break-inside: avoid; }
+      a { color: inherit; text-decoration: none; }
+      .print-hidden { display: none !important; }
+      .print-only { display: block; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail" aria-label="报告导航">
+      <div class="rail-kicker">Offline evidence dossier</div>
+      <div class="rail-brand">LC IPR Screening</div>
+      <div class="rail-case">@@TASK_ID@@</div>
+      <nav>
+        <a href="#product">产品快照</a>
+        <a href="#decision">筛查结论</a>
+        <a href="#coverage">覆盖情况</a>
+        <a href="#gaps">发布阻断项</a>
+        <a href="#modules">知识产权模块</a>
+        <a href="#visual">视觉证据</a>
+        <a href="#candidates">候选追溯</a>
+        <a href="#trace">数据绑定</a>
+      </nav>
+      <div class="rail-gate"><span>RELEASE GATE</span><strong>@@REPORT_MODE@@</strong></div>
+    </aside>
+    <main class="main">
+      <div class="wrap">
+        <header class="report-head">
+          <div>
+            <div class="eyebrow">IPR Evidence Dossier · v2.0</div>
+            <h1>知识产权风险筛查报告</h1>
+            <div class="head-meta">@@HEADER_META@@</div>
+          </div>
+          <div class="mode-badge @@MODE_CLASS@@">@@REPORT_MODE@@</div>
+        </header>
+        <section id="product" class="panel">@@PRODUCT_HTML@@</section>
+        <section id="decision" class="panel">@@DECISION_HTML@@</section>
+        <section id="coverage" class="panel" data-query-count="@@QUERY_COUNT@@" data-candidate-count="@@CANDIDATE_COUNT@@">@@COVERAGE_HTML@@</section>
+        <section id="gaps" class="panel" data-gap-count="@@GAP_COUNT@@">@@GAPS_HTML@@</section>
+        <section id="modules" class="panel" data-module-count="@@MODULE_COUNT@@">@@MODULES_HTML@@</section>
+        <section id="visual" class="panel" data-visual-count="@@VISUAL_COUNT@@">@@VISUAL_HTML@@</section>
+        <section id="candidates" class="panel" data-candidate-count="@@CANDIDATE_COUNT@@">@@CANDIDATES_HTML@@</section>
+        <section id="trace" class="panel">@@TRACE_HTML@@</section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>
