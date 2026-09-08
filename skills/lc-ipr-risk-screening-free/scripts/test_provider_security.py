@@ -139,8 +139,17 @@ class TransportTests(unittest.TestCase):
     def setUp(self):
         self.env = patch.dict(os.environ, {'LC_IPR_TEST_MODE': '', 'LC_IPR_OFFLINE_TESTS': '', 'LC_IPR_OPERATION_DEADLINE_EPOCH': ''})
         self.env.start()
+        # These transport-only tests intentionally disable offline network
+        # blocking and mock the socket layer.  Keep their User-Agent lookup
+        # independent of an installed private config.json so the published
+        # package remains verifiable before a user configures credentials.
+        self.runtime_config = patch.object(
+            transport, 'load_skill_config', return_value={'http': {'user_agent': 'offline-transport-test'}},
+        )
+        self.runtime_config.start()
 
     def tearDown(self):
+        self.runtime_config.stop()
         self.env.stop()
 
     def test_cross_origin_and_downgrade_are_rejected_before_following(self):

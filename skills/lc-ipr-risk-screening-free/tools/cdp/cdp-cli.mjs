@@ -691,8 +691,18 @@ export async function updateCandidateJournal(taskDir, entry) {
   return journalPath;
 }
 
-async function loadConfig() {
-  return readJson(path.join(SKILL_DIR, "config.json"));
+export async function loadConfig(skillDir = SKILL_DIR) {
+  // Browser routes need runtime settings only; never open local credentials.
+  let config;
+  try {
+    config = await readJson(path.join(skillDir, "references", "runtime-config.json"));
+  } catch {
+    throw new Error("RUNTIME_CONFIG_INVALID: references/runtime-config.json is missing, unreadable, or invalid JSON");
+  }
+  if (!config || typeof config !== "object" || Array.isArray(config)) {
+    throw new Error("RUNTIME_CONFIG_INVALID: references/runtime-config.json must contain an object");
+  }
+  return config;
 }
 
 function sanitizedSession(version, sessionId) {

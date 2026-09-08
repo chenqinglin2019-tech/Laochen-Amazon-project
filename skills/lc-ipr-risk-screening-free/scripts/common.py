@@ -6,11 +6,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import platform
 import re
 import stat
 import struct
-import subprocess
 import tempfile
 import unicodedata
 from datetime import datetime, timezone
@@ -282,16 +280,19 @@ def skill_root() -> Path:
 
 
 def load_skill_config() -> dict[str, Any]:
-    """Load non-secret settings only.
-
-    `config.json` and `config.local.json` are never credential sources.  A
-    stale secret field may still be detected by preflight for migration and
-    rotation, but it is intentionally ignored here.
-    """
-    config = dict(ensure_object(load_json(skill_root() / "config.json"), "config.json"))
+    """Return runtime settings and the backend URL, never credential values."""
+    config = dict(ensure_object(
+        load_json(skill_root() / "references" / "runtime-config.json"), "runtime-config.json",
+    ))
     for name in ENV_CREDENTIALS:
         config.pop(name, None)
     config.pop("credentials", None)
+    if offline_credentials_disabled():
+        # Offline checks must not even open the installed credential file.
+        backend = ensure_object(load_json(skill_root() / "config.example.json"), "config.example.json")
+    else:
+        backend = _backend_config()
+    config["backend_url"] = backend.get("backend_url", "")
     return config
 
 
@@ -311,80 +312,129 @@ ENV_CREDENTIALS = {
     "inpi_password": "INPI_PASSWORD",
 }
 
-KEYCHAIN_SERVICE = "com.laochen.codex.lc-ipr-risk-screening-free"
-KEYCHAIN_ACCOUNTS = dict(ENV_CREDENTIALS)
-KEYCHAIN_SECURITY_COMMAND = "/usr/bin/security"
-LOCAL_ENV_CREDENTIALS = {"signa_api_key", "serpapi_api_key"}
+# These names are file keys; the historical mapping name is retained for callers.
+LOCAL_ENV_CREDENTIALS = set(ENV_CREDENTIALS) - {"backend_token"}
 LOCAL_ENV_MAX_BYTES = 16 * 1024
 
 
-def _keychain_credential(account: str) -> str:
-    """Read one fixed-account macOS Keychain value without logging it."""
-    if platform.system() != "Darwin" or not account:
-        return ""
-    try:
-        result = subprocess.run(
-            [
-                KEYCHAIN_SECURITY_COMMAND, "find-generic-password",
-                "-s", KEYCHAIN_SERVICE, "-a", account, "-w",
-            ],
-            text=True,
-            capture_output=True,
-            check=False,
-            timeout=10,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return ""
-    if result.returncode != 0:
-        return ""
-    return result.stdout.rstrip("\r\n")
+def offline_credentials_disabled() -> bool:
+    return any(os.environ.get(name) == "1" for name in ("LC_IPR_TEST_MODE", "LC_IPR_OFFLINE_TESTS"))
 
 
-def _local_env_credential(name: str, env_name: str) -> str:
-    """Read explicitly allowed provider keys from a private Skill-root .env file.
+class CredentialFileError(ValueError):
+    """A fixed, value-free error suitable for preflight and auth diagnostics."""
 
-    The file is deliberately not a general configuration or shell parser: it
-    accepts only exact NAME=value rows for the two opt-in discovery providers,
-    rejects symlinks and files readable by group/other users, and never alters
-    the process environment. Cloud authorization and all other credentials keep
-    their existing environment/Keychain-only policy.
-    """
-    if name not in LOCAL_ENV_CREDENTIALS or os.environ.get("LC_IPR_TEST_MODE") == "1":
-        return ""
-    path = skill_root() / ".env"
+
+def _private_credential_text(filename: str) -> str:
+    path = skill_root() / filename
     try:
         metadata = path.lstat()
-        if not stat.S_ISREG(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) & 0o077:
-            return ""
-        if metadata.st_size > LOCAL_ENV_MAX_BYTES:
-            return ""
-        contents = path.read_text(encoding="utf-8")
+        if not stat.S_ISREG(metadata.st_mode):
+            raise CredentialFileError(f"{filename}:NOT_REGULAR_FILE")
+        mode = stat.S_IMODE(metadata.st_mode)
+        if os.name == "posix" and (mode & 0o077 or not mode & 0o400):
+            raise CredentialFileError(f"{filename}:PRIVATE_PERMISSIONS_REQUIRED")
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with os.fdopen(fd, "rb") as handle:
+            metadata = os.fstat(handle.fileno())
+            if not stat.S_ISREG(metadata.st_mode):
+                raise CredentialFileError(f"{filename}:NOT_REGULAR_FILE")
+            mode = stat.S_IMODE(metadata.st_mode)
+            if os.name == "posix" and (mode & 0o077 or not mode & 0o400):
+                raise CredentialFileError(f"{filename}:PRIVATE_PERMISSIONS_REQUIRED")
+            contents = handle.read(LOCAL_ENV_MAX_BYTES + 1)
+        if len(contents) > LOCAL_ENV_MAX_BYTES:
+            raise CredentialFileError(f"{filename}:FILE_TOO_LARGE")
+        return contents.decode("utf-8-sig")
+    except FileNotFoundError:
+        raise CredentialFileError(f"{filename}:FILE_MISSING") from None
     except (OSError, UnicodeDecodeError):
-        return ""
-    pattern = re.compile(r"^([A-Z][A-Z0-9_]*)=(.*)$")
-    for raw_line in contents.splitlines():
-        match = pattern.fullmatch(raw_line.strip())
-        if not match or match.group(1) != env_name:
+        raise CredentialFileError(f"{filename}:FILE_UNREADABLE") from None
+
+
+def _backend_config() -> dict[str, str]:
+    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise CredentialFileError("config.json:DUPLICATE_FIELD")
+            result[key] = value
+        return result
+
+    try:
+        value = json.loads(_private_credential_text("config.json"), object_pairs_hook=unique)
+    except json.JSONDecodeError:
+        raise CredentialFileError("config.json:INVALID_JSON") from None
+    if not isinstance(value, dict) or set(value) != {"backend_url", "backend_token"}:
+        raise CredentialFileError("config.json:EXPECTED_BACKEND_FIELDS")
+    if any(not isinstance(item, str) for item in value.values()):
+        raise CredentialFileError("config.json:EXPECTED_STRING_VALUES")
+    return value
+
+
+def _local_env_values() -> tuple[dict[str, str], dict[str, str]]:
+    """Parse literal NAME=value rows; no shell execution or interpolation."""
+    values: dict[str, str] = {}
+    errors: dict[str, str] = {}
+    allowed = {ENV_CREDENTIALS[name] for name in LOCAL_ENV_CREDENTIALS}
+    for raw_line in _private_credential_text(".env").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
             continue
-        value = match.group(2).strip()
-        if len(value) >= 2 and value[:1] == value[-1:] and value[:1] in {"'", '"'}:
+        match = re.fullmatch(r"([A-Z][A-Z0-9_]*)\s*=\s*(.*)", line)
+        if not match:
+            raise CredentialFileError(".env:INVALID_ASSIGNMENT")
+        key, value = match.groups()
+        if key not in allowed:
+            continue
+        if key in values or key in errors:
+            errors[key] = ".env:DUPLICATE_KEY"
+            values.pop(key, None)
+            continue
+        if value[:1] in {"'", '"'}:
+            if len(value) < 2 or value[-1:] != value[:1]:
+                errors[key] = ".env:UNMATCHED_QUOTE"
+                continue
             value = value[1:-1]
-        return value
-    return ""
+        if "\x00" in value:
+            errors[key] = ".env:INVALID_VALUE"
+            continue
+        values[key] = value
+    return values, errors
+
+
+def _credential_result(name: str) -> tuple[str, str]:
+    if name not in ENV_CREDENTIALS:
+        return "", "UNKNOWN_CREDENTIAL"
+    if offline_credentials_disabled():
+        return "", "OFFLINE_CREDENTIALS_DISABLED"
+    try:
+        if name == "backend_token":
+            value = _backend_config()["backend_token"]
+        else:
+            values, errors = _local_env_values()
+            key = ENV_CREDENTIALS[name]
+            if key in errors:
+                return "", errors[key]
+            value = values.get(key, "")
+    except CredentialFileError as exc:
+        return "", str(exc)
+    return (value, "") if value.strip() else ("", "CREDENTIAL_MISSING")
 
 
 def credential(config: dict[str, Any], name: str) -> str:
-    """Resolve a credential from env, the approved private .env, or Keychain."""
-    del config  # Non-secret configuration files are never credential sources.
-    env_name = ENV_CREDENTIALS.get(name)
-    if not env_name:
-        return ""
-    if os.environ.get(env_name):
-        return os.environ[env_name]
-    local_value = _local_env_credential(name, env_name)
-    if local_value:
-        return local_value
-    return _keychain_credential(KEYCHAIN_ACCOUNTS[name])
+    """Resolve only from this Skill's config.json or .env; never env/Keychain."""
+    del config
+    return _credential_result(name)[0]
+
+
+def credential_issue(name: str) -> str:
+    return _credential_result(name)[1]
+
+
+def configured_credential_values() -> list[str]:
+    """Known local secrets for leak detection; disabled during offline checks."""
+    return list(dict.fromkeys(value for name in ENV_CREDENTIALS if (value := credential({}, name))))
 
 
 def schema_of(task_or_schema: dict[str, Any] | str) -> str:

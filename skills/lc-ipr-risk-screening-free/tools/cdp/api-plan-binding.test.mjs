@@ -8,6 +8,10 @@ import { fileURLToPath } from "node:url";
 
 const TOOL_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_DIR = path.resolve(TOOL_DIR, "..", "..", "scripts");
+const PYTHON_ENV = {
+  ...process.env, PYTHONPATH: SCRIPTS_DIR,
+  LC_IPR_OFFLINE_TESTS: "1", PYTHONDONTWRITEBYTECODE: "1",
+};
 
 function check(taskDir, values) {
   const script = `
@@ -29,7 +33,7 @@ except ProviderError as exc:
 print(row["query_id"])
 `;
   return spawnSync("python3", ["-c", script, taskDir, JSON.stringify(values)], {
-    encoding: "utf8", env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
+    encoding: "utf8", env: PYTHON_ENV,
   });
 }
 

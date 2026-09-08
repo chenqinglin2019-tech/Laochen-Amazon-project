@@ -38,6 +38,19 @@ def browser_provider(provider: str) -> bool:
     return provider.endswith("_browser") or provider == "uspto_tsdr"
 
 
+def browser_implementation_digest(task: dict) -> str:
+    """Invalidate browser reuse for implementation/settings changes, never credentials."""
+    files = [CDP, *sorted((ROOT / "tools" / "cdp").glob("*adapter*.mjs")),
+             ROOT / "references" / "runtime-config.json"]
+    digest = canonical_digest({str(p.relative_to(ROOT)): sha256_file(p)
+                               for p in files if p.is_file()})
+    if correction_enabled(task):
+        digest = canonical_digest({"browser": digest,
+            "python": {name: sha256_file(ROOT / "scripts" / name) for name in
+                ("workflow_v24.py", "run_browser_plan.py", "provider_utils.py", "record_uspto_patent_chrome_verification.py")}})
+    return digest
+
+
 def _rate_limited(value: dict) -> bool:
     coverage = value.get("result_coverage") or {}
     return (value.get("error_code") == "BROWSER_RATE_LIMITED"
@@ -274,12 +287,8 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
     config = load_skill_config()
     cdp_budget = min(165, max(1, float(config.get("cdp", {}).get("operation_timeout_ms", 165000)) / 1000))
     capability_cache, access_wait = {}, set()
-    implementation_digest = canonical_digest({str(p.relative_to(ROOT)): sha256_file(p) for p in [CDP, *sorted((ROOT / "tools" / "cdp").glob("*adapter*.mjs")), ROOT / "config.json", ROOT / "config.local.json"] if p.is_file()})
+    implementation_digest = browser_implementation_digest(task)
     static_errors = {"INTERNAL_ROUTE_CONTRACT_ERROR", "AUTOMATION_NOT_VALIDATED", "AUTOMATIC_QUERY_FIELD_UNSUPPORTED", "AUTOMATIC_QUERY_FILTER_UNSUPPORTED", "AUTOMATIC_QUERY_LANGUAGE_UNSUPPORTED", "BROWSER_QUERY_SEMANTICS_UNSUPPORTED", "UNSUPPORTED_QUERY_SEMANTICS", "CURRENT_STATUS_ROUTE_UNAVAILABLE"}
-    if correction_enabled(task):
-        implementation_digest = canonical_digest({"browser": implementation_digest,
-            "python": {name: sha256_file(ROOT / "scripts" / name) for name in
-                ("workflow_v24.py", "run_browser_plan.py", "provider_utils.py", "record_uspto_patent_chrome_verification.py")}})
     batch = _BatchInputs(task_dir)
     batch_ids = set()
     report["selected_query_ids"] = sorted(selected_ids)

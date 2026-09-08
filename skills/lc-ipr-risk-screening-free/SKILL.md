@@ -29,7 +29,7 @@ description: 使用免费或免费额度数据源，对单个 Amazon 商品在�
 ## 执行流程
 
 1. 读取 [workflow-business-logic.md](references/workflow-business-logic.md)，记录产品身份、目标国家和销售情景。仅给竞品链接时默认“采用参考物可见结构与用途”的同结构选品假设，不假定实际实施或复制品牌素材；品牌沿用条件情景另列，正品转售仅显式启用。EU 层仅补充适用的欧盟权利，GB 单独处理。
-2. 创建任务，运行凭据预检。按实际可用免费能力推进，缺失来源记录为具体缺口；`SERPAPI_API_KEY` 与 `SIGNA_API_KEY` 可由用户明确授权后存于 Skill 根目录权限为 `0600` 的 `.env`，其他凭据仍只从环境变量或固定 macOS Keychain 读取。
+2. 创建任务，运行凭据预检。Skill 根目录 `config.json` 仅保留 `backend_url`、`backend_token`；全部第三方凭据只从同目录 `.env` 读取，macOS/Unix 上两文件权限均为 `0600`，无凭据环境变量或 Keychain 回退。非秘密运行参数统一存于 `references/runtime-config.json`。按实际可用免费能力推进，缺失来源记录为具体缺口；初始化与分发规则见 [INSTRUCTIONS.md](INSTRUCTIONS.md#2-本地配置与凭据)。
 3. 按 [browser-product-capture.md](references/browser-product-capture.md) 由 Agent 采集当前 ASIN/变体、产品多视图和文字资料。产品资料不足时可以询问用户缺失的自身产品事实或授权资料；不能把检索工作交给用户。
 4. Agent 拆解结构、功能、标识、外观和素材清单，写入 `product.structure`、`product.assets`、带来源和语言的 `query_terms`，确认与本次产品身份绑定的 `product.analysis`。原始采集不能以缺失字段抹掉已确认分析。严格任务不从整段标题、营销 bullet 或类目面包屑自动生成召回；按用途与可见形状提供短词组、同义词组合、适用分类及主体线索。USPTO 关键词组合、短语、号码直查分别编译，不能一律给完整文本加引号。生成前检查分析、语言及路由契约，再执行两类计划；单源故障继续其他来源。
 5. 官网、包装或原始文献已给出准确案号时，按 [可信案号入库契约](references/evidence-schema.md#可信外部案号入库) 用 `record_candidate_lead.py` 接入待审候选。对全部去重候选做轻量分流，在 `annotate_materiality.py` 台账记录入选、未入选或待补充及实际依据。未入选不是法律排除；待补充只取下一步必要资料，入选者才进入深入核验和主体／分类扩展。自动同名、来源分数及已核验状态都不是入选决定。完整规则见业务流程；同族关系或 EP 原文不证明目标国现行效力。

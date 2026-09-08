@@ -29,6 +29,7 @@ from provider_utils import (
 
 
 OFFICIAL_BASE_URL = "https://google.serper.dev"
+TEST_CREDENTIAL = "offline-serper-test-credential"
 LOCAL_LIMIT_CODE = "SERPER_TASK_QUERY_LIMIT_REACHED"
 PERSISTENT_STOP_CODES = {
     "AUTH_FAILED", "FREE_QUOTA_EXHAUSTED", "FREE_QUOTA_STOP_THRESHOLD",
@@ -116,7 +117,8 @@ def settings() -> tuple[dict[str, Any], str, str]:
             "SERPER_FREE_POLICY_INVALID", "access_limited",
             "Serper free-balance configuration violates the explicit task opt-in bounded discovery contract",
         )
-    return config, _resolved_base(config), credential(config, "serper_api_key")
+    key = TEST_CREDENTIAL if os.environ.get("LC_IPR_TEST_MODE") == "1" else credential(config, "serper_api_key")
+    return config, _resolved_base(config), key
 
 
 @contextmanager

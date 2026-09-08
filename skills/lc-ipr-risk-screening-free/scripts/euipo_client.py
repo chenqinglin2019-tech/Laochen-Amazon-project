@@ -88,6 +88,8 @@ def _resolved_endpoints(cfg: dict, environment: str) -> dict[str, str]:
 
 def settings() -> tuple[dict, dict, str, str]:
     config = load_skill_config()
+    if os.environ.get("LC_IPR_TEST_MODE") == "1":
+        return config, config["providers"]["euipo"], "offline-euipo-client", "offline-euipo-secret"
     return config, config["providers"]["euipo"], credential(config, "euipo_client_id"), credential(config, "euipo_client_secret")
 
 

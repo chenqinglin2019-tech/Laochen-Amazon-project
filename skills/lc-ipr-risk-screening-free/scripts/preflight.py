@@ -10,7 +10,8 @@ from typing import Any, Callable
 from auth_gate import SAFE_FAILURE, require_auth
 from common import (
     add_gap, add_history, assert_active_free_policy, atomic_write_json, coverage_routes, ensure_object,
-    credential, image_info, is_active_schema, load_json, load_skill_config, now_iso,
+    ENV_CREDENTIALS, credential, credential_issue, offline_credentials_disabled,
+    image_info, is_active_schema, load_json, load_skill_config, now_iso,
     parse_iso, serpapi_free_enabled, serper_free_enabled, sha256_file,
     signa_free_enabled, skill_root,
 )
@@ -19,17 +20,14 @@ from euipo_client import probe as probe_euipo
 from provider_utils import ProviderError, record_error, record_result, require_provider_operation
 
 
-LOCAL_CREDENTIAL_FIELDS = {
-    "backend_token", "epo_consumer_key", "epo_consumer_secret",
-    "euipo_client_id", "euipo_client_secret", "jpo_api_username",
-    "jpo_api_password", "serpapi_api_key", "serper_api_key",
-    "signa_api_key", "rapidapi_key",
-}
+LOCAL_CREDENTIAL_FIELDS = set(ENV_CREDENTIALS) | set(ENV_CREDENTIALS.values())
 
 
 def local_secret_findings(root: Path | None = None) -> list[str]:
     """Return only file/field labels for stale local secrets, never their values."""
     selected_root = root or skill_root()
+    if root is None and offline_credentials_disabled():
+        return []
     findings: list[str] = []
 
     def inspect(filename: str, value: Any, path: tuple[str, ...] = ()) -> None:
@@ -38,12 +36,16 @@ def local_secret_findings(root: Path | None = None) -> list[str]:
         for raw_name, item in value.items():
             name = str(raw_name)
             item_path = (*path, name)
-            if name in LOCAL_CREDENTIAL_FIELDS and item not in (None, ""):
+            allowed = filename == "config.json" and item_path == ("backend_token",)
+            if name in LOCAL_CREDENTIAL_FIELDS and item not in (None, "") and not allowed:
                 findings.append(f"{filename}:{'.'.join(item_path)}")
             if isinstance(item, dict):
                 inspect(filename, item, item_path)
+            elif isinstance(item, list):
+                for index, member in enumerate(item):
+                    inspect(filename, member, (*item_path, str(index)))
 
-    for filename in ("config.json", "config.local.json"):
+    for filename in ("config.json", "config.local.json", "references/runtime-config.json"):
         path = selected_root / filename
         if not path.is_file():
             continue
@@ -66,16 +68,21 @@ def credential_storage_checkpoint() -> dict[str, Any]:
     local_secrets = local_secret_findings()
     local_query_secrets = any(not finding.endswith("backend_token") for finding in local_secrets)
     local_backend_token = any(finding.endswith("backend_token") for finding in local_secrets)
+    issues = {name: issue for name in ENV_CREDENTIALS
+              if (issue := credential_issue(name)) and issue != "OFFLINE_CREDENTIALS_DISABLED"}
+    malformed = any(issue != "CREDENTIAL_MISSING" and issue != ".env:FILE_MISSING" for issue in issues.values())
     return {
-        "status": "rotation_required" if local_secrets else "environment_or_keychain_only",
+        "status": ("offline_credentials_disabled" if offline_credentials_disabled() else
+                   "configuration_error" if local_secrets or malformed else "local_files_only"),
         "at": now_iso(),
         "provider_credentials_in_local_file": local_query_secrets,
         "backend_token_in_local_file": local_backend_token,
         "local_secret_fields": local_secrets,
+        "credential_issues": issues,
         "detail": (
-            "Remove local credential fields and rotate exposed values; runtime ignores all config-file credentials"
+            "Move misplaced third-party credentials to .env; config.json permits only backend_url/backend_token"
             if local_secrets else
-            "Credentials are read only from environment variables or fixed macOS Keychain accounts"
+            "Backend token is read only from config.json; third-party credentials only from .env"
         ),
     }
 
@@ -266,7 +273,9 @@ def phase_credentials(task_dir: Path) -> str:
         enabled = selected_optional[provider]
         optional_credentials[provider] = {
             "enabled": enabled,
-            "credential_env": env_name,
+            "credential_file": ".env",
+            "credential_key": env_name,
+            "credential_issue": credential_issue(credential_name),
             "credential_available": available,
             "status": (
                 "configured_pending_provider_check" if enabled and available else

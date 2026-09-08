@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 import re
 import shutil
@@ -16,12 +15,14 @@ import subprocess
 import sys
 import time
 
+from offline_test_support import isolated_test_environment, offline_environment
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def run_check(name, command, output, *, cwd=ROOT, env=None, timeout=180):
     started = time.monotonic()
-    env = {**(env or os.environ), "LC_IPR_FREE_SEARCH_LEDGER_DIR": str(output / (name + "-test-ledger"))}
+    env = {**offline_environment(env), "LC_IPR_FREE_SEARCH_LEDGER_DIR": str(output / (name + "-test-ledger"))}
     try:
         process = subprocess.run(command, cwd=cwd, env=env, capture_output=True,
                                  text=True, timeout=timeout, check=False)
@@ -109,7 +110,7 @@ def generate_estimate_fixture(output, *, scenario=False):
     return directory
 
 
-def main():
+def _main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("fast", "release"), default="fast")
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -119,11 +120,9 @@ def main():
     if output.exists() and any(output.iterdir()):
         parser.error("Use a new or empty --output-dir; existing verification is read-only")
     output.mkdir(parents=True, exist_ok=True)
-    env = dict(os.environ)
+    env = offline_environment()
     env.pop("REPORT_V2_HTML", None)
     env.pop("REPORT_ESTIMATE_HTML", None)
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["LC_IPR_OFFLINE_TESTS"] = "1"
     env["LC_IPR_RELEASE_CHECK"] = "1" if args.mode == "release" else "0"
     results = []
     for directory in ("scripts", "tests"):
@@ -186,6 +185,11 @@ def main():
     (output / "verification.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
     print(str(output / "verification.json"), flush=True)
     return 0 if complete else 1
+
+
+def main():
+    with isolated_test_environment():
+        return _main()
 
 
 if __name__ == "__main__":

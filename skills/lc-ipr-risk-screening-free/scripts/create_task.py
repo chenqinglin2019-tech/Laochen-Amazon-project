@@ -140,15 +140,15 @@ def main() -> None:
                 "providers": {
                     "serper": {
                         "enabled": args.enable_serper_free,
-                        "credential_env": "SERPER_API_KEY",
+                        "credential_file": ".env", "credential_key": "SERPER_API_KEY",
                     },
                     "signa": {
                         "enabled": args.enable_signa_free,
-                        "credential_env": "SIGNA_API_KEY",
+                        "credential_file": ".env", "credential_key": "SIGNA_API_KEY",
                     },
                     "serpapi": {
                         "enabled": args.enable_serpapi_free,
-                        "credential_env": "SERPAPI_API_KEY",
+                        "credential_file": ".env", "credential_key": "SERPAPI_API_KEY",
                     },
                 },
                 "detail": (

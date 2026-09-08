@@ -34,7 +34,7 @@ class SerperEntitlementTests(unittest.TestCase):
             atomic_write_json(path / 'task.json', task)
             plan = generate_plan(path)
             query = plan['queries']['serper_patents'][0]
-            with patch.dict(os.environ, {'SERPER_API_KEY': 'configured-fixture-key'}), patch.object(serper, 'call') as call, patch.object(serper, 'http_json') as network:
+            with patch.object(serper, 'credential', return_value='configured-fixture-key'), patch.object(serper, 'call') as call, patch.object(serper, 'http_json') as network:
                 result = serper.execute(path, query['query_id'])
             call.assert_not_called()
             network.assert_not_called()

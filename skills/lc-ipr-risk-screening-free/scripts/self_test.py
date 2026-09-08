@@ -19,6 +19,9 @@ from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
+
+from offline_test_support import isolated_test_environment, offline_environment
 
 from common import (
     AUTHORIZED_FREE_COMMERCIAL_PROVIDERS, COMMERCIAL_PROVIDERS,
@@ -109,7 +112,7 @@ def command(
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
         [sys.executable, *arguments], text=True, capture_output=True,
-        env=env or os.environ.copy(), check=False, timeout=30,
+        env=offline_environment(env), check=False, timeout=30,
     )
     output = f"{result.stdout}\n{result.stderr}"
     if succeeds and result.returncode:
@@ -127,7 +130,7 @@ def report_browser_acceptance(report_path: Path) -> None:
     if not node:
         print("SKIP report browser acceptance: node is unavailable")
         return
-    env = os.environ.copy()
+    env = offline_environment()
     env["REPORT_V2_HTML"] = str(report_path)
     test_path = SKILL_ROOT / "tools" / "cdp" / "report-v2-layout.test.mjs"
     result = subprocess.run(
@@ -322,9 +325,9 @@ def test_routing(root: Path) -> None:
     assert optional_selection["status"] == "not_selected"
     assert optional_selection["required_for_minimum"] is False
     assert optional_selection["providers"] == {
-        "serper": {"enabled": False, "credential_env": "SERPER_API_KEY"},
-        "signa": {"enabled": False, "credential_env": "SIGNA_API_KEY"},
-        "serpapi": {"enabled": False, "credential_env": "SERPAPI_API_KEY"},
+        "serper": {"enabled": False, "credential_file": ".env", "credential_key": "SERPER_API_KEY"},
+        "signa": {"enabled": False, "credential_file": ".env", "credential_key": "SIGNA_API_KEY"},
+        "serpapi": {"enabled": False, "credential_file": ".env", "credential_key": "SERPAPI_API_KEY"},
     }
     initial_ledger = json.loads(
         (unsupported / "materiality-annotations.json").read_text(encoding="utf-8")
@@ -598,9 +601,7 @@ def test_no_paid_or_wipo_network(root: Path) -> None:
 
     env = os.environ.copy()
     env.update({
-        "LC_IPR_TEST_MODE": "1", "SERPAPI_API_KEY": "configured-but-disabled",
-        "SERPER_API_KEY": "configured-but-disabled", "SIGNA_API_KEY": "configured-but-disabled",
-        "RAPIDAPI_KEY": "configured-but-disabled", "SERPAPI_BASE_URL": "http://127.0.0.1:9",
+        "LC_IPR_TEST_MODE": "1", "SERPAPI_BASE_URL": "http://127.0.0.1:9",
         "SERPER_BASE_URL": "http://127.0.0.1:9", "SIGNA_BASE_URL": "http://127.0.0.1:9",
         "RAPIDAPI_USPTO_BASE_URL": "http://127.0.0.1:9",
     })
@@ -617,10 +618,6 @@ def test_no_paid_or_wipo_network(root: Path) -> None:
         "--provider", "wipo_patentscope_browser", "--capture", str(root / "absent.json"),
         succeeds=False, contains="WIPO_PROVIDER_DISABLED",
     )
-
-    local = json.loads((SKILL_ROOT / "config.local.json").read_text(encoding="utf-8"))
-    assert set(local) <= {"backend_url"}
-
 
 def test_legacy_23_policy_without_revision(root: Path) -> None:
     """A frozen pre-revision 2.3 task stays readable/plannable without migration."""
@@ -720,7 +717,7 @@ def test_optional_signa_discovery_contract(root: Path) -> None:
     assert optional_selection["status"] == "selected"
     assert optional_selection["required_for_minimum"] is False
     assert optional_selection["providers"]["signa"] == {
-        "enabled": True, "credential_env": "SIGNA_API_KEY",
+        "enabled": True, "credential_file": ".env", "credential_key": "SIGNA_API_KEY",
     }
     assert not any(
         provider == SIGNA_PROVIDER
@@ -796,7 +793,7 @@ def test_optional_signa_discovery_contract(root: Path) -> None:
     else:
         raise AssertionError("Signa must remain bounded to three searches")
 
-    controlled_env = ("LC_IPR_TEST_MODE", "SIGNA_BASE_URL", "SIGNA_API_KEY")
+    controlled_env = ("LC_IPR_TEST_MODE", "SIGNA_BASE_URL")
     previous_env = {name: os.environ.pop(name, None) for name in controlled_env}
     original_credential = signa_runtime.credential
     try:
@@ -907,7 +904,7 @@ def test_optional_serper_discovery(root: Path) -> None:
         (missing_key_dir / "search-plan.json").read_text(encoding="utf-8")
     )
     missing_item = missing_key_plan["queries"]["serper_patents"][0]
-    controlled_env = ("LC_IPR_TEST_MODE", "SERPER_BASE_URL", "SERPER_API_KEY")
+    controlled_env = ("LC_IPR_TEST_MODE", "SERPER_BASE_URL")
     previous_env = {name: os.environ.pop(name, None) for name in controlled_env}
     original_credential = serper_runtime.credential
     try:
@@ -989,7 +986,6 @@ def test_optional_serper_discovery(root: Path) -> None:
     env.update({
         "LC_IPR_TEST_MODE": "1",
         "SERPER_BASE_URL": f"http://127.0.0.1:{server.server_port}",
-        "SERPER_API_KEY": secret,
     })
     try:
         selected = {provider: entries[0] for provider, entries in serper_entries.items()}
@@ -1021,7 +1017,7 @@ def test_optional_serper_discovery(root: Path) -> None:
         assert {item["returncode"] for item in runner_payload["results"]} == {0}
         assert len(received) == 3
         assert {item["path"] for item in received} == {"/patents", "/search", "/images"}
-        assert all(item["key"] == secret for item in received)
+        assert all(item["key"] == serper_runtime.TEST_CREDENTIAL for item in received)
         assert all(set(item["payload"]) == {"q", "num"} for item in received)
         for provider, item in selected.items():
             built = api_command_for(SCRIPTS, task_dir, provider, item)
@@ -1244,7 +1240,7 @@ def test_serpapi_free_opt_in_and_fallback(root: Path) -> None:
         (missing_key_dir / "search-plan.json").read_text(encoding="utf-8")
     )
     missing_item = missing_key_plan["queries"][SERPAPI_PROVIDER][0]
-    controlled_env = ("LC_IPR_TEST_MODE", "SERPAPI_BASE_URL", "SERPAPI_API_KEY")
+    controlled_env = ("LC_IPR_TEST_MODE", "SERPAPI_BASE_URL")
     previous_env = {name: os.environ.pop(name, None) for name in controlled_env}
     original_credential = serpapi_runtime.credential
     try:
@@ -1323,7 +1319,6 @@ def test_serpapi_free_opt_in_and_fallback(root: Path) -> None:
     env.update({
         "LC_IPR_TEST_MODE": "1",
         "SERPAPI_BASE_URL": f"http://127.0.0.1:{server.server_port}",
-        "SERPAPI_API_KEY": secret,
     })
     try:
         selected = entries[0]
@@ -2263,8 +2258,7 @@ def test_epo_candidate_detail_contracts(root: Path) -> None:
     write_json(task_dir / "task.json", blocked_task)
     blocked_env = os.environ.copy()
     blocked_env.update({
-        "LC_IPR_TEST_MODE": "1", "EPO_OPS_CONSUMER_KEY": "unused",
-        "EPO_OPS_CONSUMER_SECRET": "unused", "EPO_OPS_BASE_URL": "http://127.0.0.1:9",
+        "LC_IPR_TEST_MODE": "1", "EPO_OPS_BASE_URL": "http://127.0.0.1:9",
         "EPO_OPS_AUTH_URL": "http://127.0.0.1:9/token",
     })
     command(
@@ -2535,7 +2529,7 @@ def test_euipo_110_contract() -> None:
 def test_euipo_probe_is_oauth_only() -> None:
     controlled_names = (
         "EUIPO_TOKEN_URL", "EUIPO_TRADEMARK_BASE_URL", "EUIPO_DESIGN_BASE_URL",
-        "EUIPO_ENVIRONMENT", "EUIPO_CLIENT_ID", "EUIPO_CLIENT_SECRET",
+        "EUIPO_ENVIRONMENT",
         "EUIPO_AUTHORITATIVE_FOR_FINAL_RATING", "LC_IPR_TEST_MODE",
     )
     previous = {name: os.environ.pop(name, None) for name in controlled_names}
@@ -2556,12 +2550,11 @@ def test_euipo_probe_is_oauth_only() -> None:
             "EUIPO_TOKEN_URL": "http://127.0.0.1:18081/token",
             "EUIPO_TRADEMARK_BASE_URL": "http://127.0.0.1:18081/trademark-search",
             "EUIPO_DESIGN_BASE_URL": "http://127.0.0.1:18081/design-search",
-            "EUIPO_CLIENT_ID": "fixture-client",
-            "EUIPO_CLIENT_SECRET": "fixture-secret",
         })
         euipo_runtime.http_json = fake_http_json
         euipo_runtime._TOKEN_CACHE.update({"access_token": "", "expires_at": 0.0})
-        result = euipo_runtime.probe()
+        with patch.object(euipo_runtime, "credential", return_value="fixture-credential"):
+            result = euipo_runtime.probe()
 
         assert calls == [("POST", "http://127.0.0.1:18081/token")]
         assert result["oauth_ready"] is True
@@ -3064,7 +3057,6 @@ def test_eu_candidate_verification_actions(root: Path) -> None:
         "EUIPO_TOKEN_URL": f"http://127.0.0.1:{port}/token",
         "EUIPO_TRADEMARK_BASE_URL": f"http://127.0.0.1:{port}/trademark-search",
         "EUIPO_DESIGN_BASE_URL": f"http://127.0.0.1:{port}/design-search",
-        "EUIPO_CLIENT_ID": "fixture-client", "EUIPO_CLIENT_SECRET": "fixture-secret",
     })
     try:
         result = command(*built[1:], env=env, contains="access_limited")
@@ -3957,7 +3949,7 @@ def test_legacy_21_espacenet_gate(root: Path) -> None:
     ).read_text(encoding="utf-8")
 
 
-def main() -> None:
+def _main() -> None:
     with tempfile.TemporaryDirectory(prefix="lc-ipr-2.3-self-test-") as temporary:
         root = Path(temporary)
         test_routing(root)
@@ -3995,6 +3987,11 @@ def main() -> None:
         test_legacy_report(root)
         test_legacy_21_espacenet_gate(root)
     print("self-test passed: schema/optional-discovery/routing/cost/JPO/CDP-report/legacy")
+
+
+def main() -> None:
+    with isolated_test_environment():
+        _main()
 
 
 if __name__ == "__main__":
