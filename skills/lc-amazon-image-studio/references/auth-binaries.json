@@ -1,0 +1,9 @@
+{
+  "schema": "LC-AUTH-BINARIES/1.0",
+  "sha256": {
+    "lc-auth-check-darwin-amd64": "9d218f624ad547725062ba381aa523f46b9b0b1ab830ead6eaae2644656dfa73",
+    "lc-auth-check-darwin-arm64": "0c50813cd3a482aea81b94141a5109256487d20351c4b31272de60b7aac1b559",
+    "lc-auth-check-linux-amd64": "9dde60a8ad7908473df3fdd65f8695e407a9f8b0263c4f56625f2b841ff1a9f1",
+    "lc-auth-check-windows-amd64.exe": "e1e639a282595744f80c2f3fec2bc814b116c357252b611068c2dd1c18cd5783"
+  }
+}
