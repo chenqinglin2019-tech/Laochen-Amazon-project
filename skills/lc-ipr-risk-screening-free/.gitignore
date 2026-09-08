@@ -1,3 +1,4 @@
+config.json
 config.local.json
 .env
 __pycache__/

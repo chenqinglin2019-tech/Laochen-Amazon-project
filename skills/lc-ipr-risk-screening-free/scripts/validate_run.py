@@ -10,13 +10,12 @@ import hashlib
 import html as html_module
 import io
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
 
 from common import (
-    ENV_CREDENTIALS, MODULE_IDS, SOURCE_STATUSES, SUPPORTED_SCHEMA_VERSIONS,
+    configured_credential_values, MODULE_IDS, SOURCE_STATUSES, SUPPORTED_SCHEMA_VERSIONS,
     SERPAPI_PROVIDER, SERPER_PROVIDERS, SIGNA_PROVIDER,
     canonical_coverage_requirements_match, default_discovery_plan_error,
     ensure_object, load_json,
@@ -60,19 +59,11 @@ from finalize_assessment import (
 
 
 def configured_secrets(config: dict[str, Any]) -> list[str]:
-    values: list[str] = []
-    for value in config.get("credentials", {}).values() if isinstance(config.get("credentials"), dict) else []:
-        if isinstance(value, str) and len(value) >= 8:
-            values.append(value)
-    for key in ("backend_token", "euipo_client_secret"):
-        value = config.get(key)
-        if isinstance(value, str) and len(value) >= 8:
-            values.append(value)
-    for env_name in ENV_CREDENTIALS.values():
-        value = os.environ.get(env_name, "")
-        if len(value) >= 8:
-            values.append(value)
-    return list(dict.fromkeys(values))
+    del config
+    # Keep the existing substring-detection threshold: short account names can
+    # also be ordinary evidence words. Structured credential fields are checked
+    # separately by the evidence sanitizers.
+    return [value for value in configured_credential_values() if len(value) >= 8]
 
 
 def validate_v2_bundle(

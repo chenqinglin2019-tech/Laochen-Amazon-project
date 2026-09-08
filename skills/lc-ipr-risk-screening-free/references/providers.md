@@ -15,9 +15,9 @@
 
 客户端从 `--task-dir` 和 `--query-id` 指向的全局唯一计划行取得参数，校验任务策略、来源、操作、国家、权利类型、候选和参数绑定。任务中的元数据 `search_dimension/search_language/execution_phase/publication_scope` 不发送给外部接口。run 与 evidence 保留同一 `plan_entry_sha256`。SerpApi Patents/Lens 与 Signa 另支持下面的显式重试参数。
 
-凭据默认从环境变量或 macOS 固定 Keychain service `com.laochen.codex.lc-ipr-risk-screening-free` 读取，account 为环境变量名；`config.json/config.local.json` 不是凭据来源。用户明确授权时，Skill 根目录权限为 `0600` 的 `.env` 仅可保存 `SERPAPI_API_KEY` 与 `SIGNA_API_KEY`；环境变量优先，`.env` 不支持云端授权或其他来源凭据。Token、Cookie 仅存内存，不写入任务、原始响应、报表或命令参数。
+全部第三方凭据只从 Skill 根目录 `.env` 读取，无环境变量或 Keychain 回退；后台授权只读取同目录 `config.json` 的 `backend_token`，该文件严格只含 `backend_url/backend_token`。macOS/Unix 上两文件权限均为 `0600`，缺失、格式或权限问题输出脱敏原因；可选凭据不可用只影响对应来源。`.env` 不执行 shell、不展开变量、不修改进程环境。会话 Token、Cookie 仅存内存；凭据不写入任务、原始响应、报表或命令参数。初始化与分发见 [本地配置与凭据](../INSTRUCTIONS.md#2-本地配置与凭据)。
 
-可选凭据名：`EPO_OPS_CONSUMER_KEY/SECRET`、`EUIPO_CLIENT_ID/SECRET`、`JPO_API_USERNAME/PASSWORD`、`INPI_USERNAME/PASSWORD`、`SERPER_API_KEY`、`SIGNA_API_KEY`、`SERPAPI_API_KEY`。云端 Skill 授权的 `LAOCHEN_BACKEND_TOKEN` 与知识产权数据源账号独立。
+`.env` 沿用 12 个既有字段名：`EPO_OPS_CONSUMER_KEY`、`EPO_OPS_CONSUMER_SECRET`、`EUIPO_CLIENT_ID`、`EUIPO_CLIENT_SECRET`、`JPO_API_USERNAME`、`JPO_API_PASSWORD`、`INPI_USERNAME`、`INPI_PASSWORD`、`SERPER_API_KEY`、`SIGNA_API_KEY`、`SERPAPI_API_KEY`、`RAPIDAPI_KEY`。空值表示未配置；保留 `RAPIDAPI_KEY` 字段不代表启用新来源。云端 Skill 授权与知识产权数据源账号独立，后台 Token 不存入 `.env`。
 
 ### 请求与重试安全
 
@@ -25,7 +25,7 @@
 - SerpApi 与 Signa 在每次计量请求前，用本机跨进程账本原子预留一份免费搜索额度；SerpApi Patents/Lens 共用余额。账本只保存凭据指纹、计划/尝试指纹与计数，不保存 key。范围是本机同一凭据；其他设备及同账号的另一把 key 无法由此观察，服务端账户检查和拒绝仍优先。
 - 默认 `attempt_id=initial`，相同 task/query/plan hash/attempt 不重复占额。响应丢失、原文哈希损坏、动态证据过期或已记录的条件变化需要新请求时，使用新的 `--attempt-id ID --retry-reason '具体原因'`；Agent 先持久记录这次修复或重试身份。新 attempt 重新预留额度，旧超时/崩溃的未知消耗不退款；任务次数上限和实时 Free-plan 校验仍生效，不因换 ID 放宽。
 - 远端余额升高不能直接冲销本地预留。SerpApi 仅在真实账号响应给出更晚的续期日期、旧日期已到且新日期尚未到时切换周期；没有可信周期的来源（当前 Signa）不自行推算月初回补。相关本地额度停止应明确说明需要核查周期事实，不能删账本绕过。
-- `LC_IPR_TEST_MODE=1` 下 SerpApi 必须显式 loopback HTTP 地址并使用固定 dummy key；不读取真实环境/Keychain key。`LC_IPR_OFFLINE_TESTS=1` 另在各 HTTP 入口禁止非 loopback 实际请求，不改变生产配置/来源标记测试。单元模拟不代表线上执行能力。
+- `LC_IPR_TEST_MODE=1` 下 SerpApi 必须显式 loopback HTTP 地址并使用固定 dummy key；不读取真实本地 key。`LC_IPR_OFFLINE_TESTS=1` 下父子进程只使用临时虚拟凭据，均不得读取真实 `config.json/.env`，各 HTTP 入口禁止非 loopback 实际请求，不改变生产配置/来源标记测试。单元模拟不代表线上执行能力。
 - SerpApi 的零结果需要成功 envelope；唯一精确零结果提示也必须配合 `search_metadata.status=Success`。包含 “no results” 的超时、额度等错误不再转换成零命中。
 - 2.4 的 Serper→SerpApi 回退在调度器与客户端两层统一检查当前计划 hash、原始文件完整性及动态时效；旧成功但原文缺失、哈希变化或过期不能阻止可用替代来源。2.3 的历史回退规则保留。
 - `identity-discovery-v1` 的备用策略另支持显式召回不足补搜：`task.discovery_followups[]` 每项包含备用 `query_id、plan_entry_sha256`、已完成 Serper 的 `source_run_id、evidence_ids[]`、`reason_code=zero_results|insufficient_relevant_candidates`、`reason、reviewer`。Agent 必须先审阅实际结果再作决定；调度与客户端共同验证原始证据、时效及计划绑定。只执行既有未消费备用行，不启用未选来源、不增加任务预算、不退款旧消费、不放宽账户门禁。决定随请求及审阅摘要留存。
@@ -37,7 +37,7 @@
 
 先处理身份、主体和核心结构，再补缺失维度；宽泛查询按有证据的用途/分类拆分，原截断与未处理候选保留，不以命中一件专利终止必要召回。PDF/已登记页图/TSDR合格事实复用，不重复下载或为显示用途重查。双审可并行读取同一冻结快照，主审等两方完成；证据实质变化重开受影响项。fast/release仅在Skill修改时执行，商品排查仍运行鉴权、输入/证据/报告验证。阶段计时分别记录调度、网站、合并、评估、渲染与验证，不将来源时间字段或离线提速外推整轮速度。
 
-`config.json.performance.max_api_concurrency` 默认 3，调度器限定 1–3，单来源 lane 内仍串行；共享 SerpApi/Serper 及 EUIPO 路线分别共用 lane。`dynamic_evidence_max_age_hours` 默认 48，必须为正的有限数；动态查询/状态证据超过该时长不直接复用，原始文件与 hash 也必须完整。EPS 静态已公开文献按文件完整性复用，不能把其当成新状态查询。
+`references/runtime-config.json` 中的 `performance.max_api_concurrency` 默认 3，调度器限定 1–3，单来源 lane 内仍串行；共享 SerpApi/Serper 及 EUIPO 路线分别共用 lane。`dynamic_evidence_max_age_hours` 默认 48，必须为正的有限数；动态查询/状态证据超过该时长不直接复用，原始文件与 hash 也必须完整。EPS 静态已公开文献按文件完整性复用，不能把其当成新状态查询。
 
 `performance.api_operation_timeout_seconds` 默认 180，API 调度器限制为 1–180 秒；`cdp.operation_timeout_ms` 默认 165000，浏览器计划调度中的有效操作预算限制为 1–165 秒，单条总预算 180 秒。降低这些值可能增加超时缺口，提高配置不能突破调度上限、免费额度或计划次数。来源 CLI 保持独立子进程；本次没有增加跨任务缓存或常驻 Token 复用。
 

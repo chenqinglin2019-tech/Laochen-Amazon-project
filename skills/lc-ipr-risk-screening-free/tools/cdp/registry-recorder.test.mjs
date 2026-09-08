@@ -10,6 +10,10 @@ import { registryPageBindingDigest } from "./cdp-cli.mjs";
 const TOOL_DIR = path.dirname(fileURLToPath(import.meta.url));
 const RECORDER = path.resolve(TOOL_DIR, "..", "..", "scripts", "record_registry_browser.py");
 const SCRIPTS_DIR = path.dirname(RECORDER);
+const PYTHON_ENV = {
+  ...process.env, PYTHONPATH: SCRIPTS_DIR,
+  LC_IPR_OFFLINE_TESTS: "1", PYTHONDONTWRITEBYTECODE: "1",
+};
 
 test("registry recorder rejects missing or non-official terms review", () => {
   const script = `
@@ -22,7 +26,7 @@ except ValueError as exc:
     raise SystemExit(3)
 `;
   const missing = spawnSync("python3", ["-c", script, JSON.stringify({})], {
-    encoding: "utf8", env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
+    encoding: "utf8", env: PYTHON_ENV,
   });
   assert.equal(missing.status, 3);
   assert.match(missing.stdout, /REGISTRY_TERMS_REVIEW_REQUIRED/);
@@ -32,7 +36,7 @@ except ValueError as exc:
       decision: "cdp_assisted_single_action_confirmed",
       terms_url: "https://example.com/terms", checked_at: new Date().toISOString(),
     },
-  })], { encoding: "utf8", env: { ...process.env, PYTHONPATH: SCRIPTS_DIR } });
+  })], { encoding: "utf8", env: PYTHON_ENV });
   assert.equal(invalid.status, 3);
   assert.match(invalid.stdout, /allowlisted official HTTPS host/);
 });
@@ -46,7 +50,7 @@ test("registry recorder skips before reading capture when JPO already completed 
       "import json; from common import build_coverage_requirements; print(json.dumps(build_coverage_requirements(['JP'])))",
     ], {
       encoding: "utf8",
-      env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
+      env: PYTHON_ENV,
     });
     assert.equal(coverageResult.status, 0, coverageResult.stderr);
     const coverageRequirements = JSON.parse(coverageResult.stdout);
@@ -67,7 +71,7 @@ test("registry recorder skips before reading capture when JPO already completed 
       JSON.stringify(jpoPlanEntry),
     ], {
       encoding: "utf8",
-      env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
+      env: PYTHON_ENV,
     });
     assert.equal(digestResult.status, 0, digestResult.stderr);
     const jpoPlanDigest = digestResult.stdout.trim();
@@ -170,7 +174,7 @@ test("registry recorder skips before reading capture when JPO already completed 
       "--record", "2020008423",
       "--candidate-id", "CAND-SKIP",
       "--query-id", "QRY-JP-SKIP",
-    ], { encoding: "utf8" });
+    ], { encoding: "utf8", env: PYTHON_ENV });
     assert.equal(result.status, 0, result.stderr);
     const output = JSON.parse(result.stdout);
     assert.equal(output.status, "not_applicable");
@@ -201,7 +205,7 @@ test("registry evidence binds each local image to hash, bytes, and MIME type", a
       taskDir,
     ], {
       encoding: "utf8",
-      env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
+      env: PYTHON_ENV,
     });
     assert.equal(result.status, 0, result.stderr);
     const [recordedPath, digest, byteCount, mimeType] = JSON.parse(result.stdout);
@@ -254,7 +258,7 @@ print(result[0])
       page_record_number: planned.record_number,
     };
     const valid = spawnSync("python3", ["-c", script, taskDir, JSON.stringify(validCapture)], {
-      encoding: "utf8", env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
+      encoding: "utf8", env: PYTHON_ENV,
     });
     assert.equal(valid.status, 0, valid.stderr);
     assert.match(valid.stdout, /QRY-DE-DESIGN-VERIFY/);
@@ -267,7 +271,7 @@ print(result[0])
     ]) {
       const invalid = spawnSync("python3", [
         "-c", script, taskDir, JSON.stringify({ ...validCapture, ...mutation }),
-      ], { encoding: "utf8", env: { ...process.env, PYTHONPATH: SCRIPTS_DIR } });
+      ], { encoding: "utf8", env: PYTHON_ENV });
       assert.equal(invalid.status, 3, invalid.stderr);
     }
     const boundNoResult = spawnSync("python3", [
@@ -275,7 +279,7 @@ print(result[0])
         ...validCapture, status: "no_result", page_record_number: "",
         page_query_record: planned.record_number,
       }),
-    ], { encoding: "utf8", env: { ...process.env, PYTHONPATH: SCRIPTS_DIR } });
+    ], { encoding: "utf8", env: PYTHON_ENV });
     assert.equal(boundNoResult.status, 0, boundNoResult.stderr);
   } finally {
     await fs.rm(taskDir, { recursive: true, force: true });
@@ -330,7 +334,7 @@ print(result[0])
     };
     const valid = spawnSync("python3", [
       "-c", script, taskDir, planned.record_number, JSON.stringify(capture),
-    ], { encoding: "utf8", env: { ...process.env, PYTHONPATH: SCRIPTS_DIR } });
+    ], { encoding: "utf8", env: PYTHON_ENV });
     assert.equal(valid.status, 0, valid.stderr);
     for (const [record, mutation] of [
       [planned.record_number, { source_key: "ttabvue" }],
@@ -338,7 +342,7 @@ print(result[0])
     ]) {
       const invalid = spawnSync("python3", [
         "-c", script, taskDir, record, JSON.stringify({ ...capture, ...mutation }),
-      ], { encoding: "utf8", env: { ...process.env, PYTHONPATH: SCRIPTS_DIR } });
+      ], { encoding: "utf8", env: PYTHON_ENV });
       assert.equal(invalid.status, 3, invalid.stderr);
     }
   } finally {
@@ -380,13 +384,13 @@ print(result[0])
       ["patent", patentCapture, patent.query_id], ["trademark", trademarkCapture, trademark.query_id],
     ]) {
       const valid = spawnSync("python3", ["-c", script, kind, taskDir, JSON.stringify(capture)], {
-        encoding: "utf8", env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
+        encoding: "utf8", env: PYTHON_ENV,
       });
       assert.equal(valid.status, 0, valid.stderr);
       assert.match(valid.stdout, new RegExp(expected));
       const stale = spawnSync("python3", [
         "-c", script, kind, taskDir, JSON.stringify({ ...capture, candidate_id: "CAND-STALE" }),
-      ], { encoding: "utf8", env: { ...process.env, PYTHONPATH: SCRIPTS_DIR } });
+      ], { encoding: "utf8", env: PYTHON_ENV });
       assert.notEqual(stale.status, 0);
       assert.match(stale.stderr, /candidate_id.*does not match/i);
     }
@@ -417,7 +421,7 @@ print("accepted")
     JSON.stringify(browserEvidence),
   ], {
     encoding: "utf8",
-    env: { ...process.env, PYTHONPATH: SCRIPTS_DIR },
+    env: PYTHON_ENV,
   });
 }
 

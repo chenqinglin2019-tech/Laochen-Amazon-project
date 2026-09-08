@@ -1,8 +1,8 @@
 # LC IPR Risk Screening Free 启动门禁
 
-本文件只规定老陈云端鉴权。鉴权通过后，严格按 `SKILL.md` 执行原有知识产权排查流程，不改变其业务规则。
+本文件规定本地配置初始化与老陈云端鉴权。鉴权通过后，严格按 `SKILL.md` 执行原有知识产权排查流程，不改变其业务规则。
 
-这里的调用指实际商品排查业务。开发、审计、测试或恢复 Skill 文件不执行业务鉴权；离线测试须使用模拟或 loopback 来源，不借测试模式访问真实账号。
+这里的调用指实际商品排查业务。开发、审计、测试或恢复 Skill 文件不执行业务鉴权；离线测试须使用模拟或 loopback 来源及临时虚拟凭据，父子进程均不得读取真实本地凭据文件，不借测试模式访问真实账号。
 
 ## 1. 强制第一步
 
@@ -37,23 +37,25 @@ python scripts/auth_gate.py
 python scripts\auth_gate.py
 ```
 
-`scripts/auth_gate.py` 会选择当前平台的专用 Go 二进制，并按 `config.json` 中的 SHA-256 校验后执行。
+`scripts/auth_gate.py` 会选择当前平台的专用 Go 二进制，并按 `references/runtime-config.json` 中的 SHA-256 校验后执行。
 
-## 2. Token 读取顺序
+## 2. 本地配置与凭据
 
-1. 当前进程已有 `LAOCHEN_BACKEND_TOKEN` 时直接使用。
-2. macOS 上否则读取固定 Keychain 项：service `com.laochen.codex.lc-ipr-risk-screening-free`、account `LAOCHEN_BACKEND_TOKEN`。
-3. 非 macOS 不使用本地文件回退，只允许环境变量。两处都没有 Token，或 Token 无效、账户停用、余额不足、服务不可用、二进制缺失/损坏时，鉴权失败。
+运行时只从 Skill 根目录的本地文件读取配置和凭据：
 
-`config.json` 与 `config.local.json` 都不是凭据来源；即使其中残留非空 `backend_token`，运行时也必须忽略并由预检报告。运行时非秘密设置仅加载 `config.json`；`config.local.json` 中兼容保留的 `backend_url` 不构成生效覆盖。在 macOS 中录入时使用末尾无明文参数的交互式命令：
+- `config.json` 严格只包含 `backend_url`、`backend_token` 两个字符串字段。后台 Token 只读取这里的 `backend_token`。
+- `.env` 保存第三方 API Key、Client ID、Secret、用户名和密码；完整的 12 个字段见 [.env.example](.env.example)。缺少或留空的可选凭据仅影响对应来源。
+- `references/runtime-config.json` 保存版本、来源规则、浏览器参数、执行限制和鉴权组件 SHA-256 等非秘密设置。Python 与浏览器端共用该文件；`load_skill_config()` 返回运行设置及后台地址，不携带 Token。
 
-```bash
-security add-generic-password -U -s com.laochen.codex.lc-ipr-risk-screening-free -a LAOCHEN_BACKEND_TOKEN -w
-```
+`credential(config, name)` 按凭据类型读取对应文件，不从进程环境变量、Keychain 或 `config.local.json` 回退。测试开关、超时等非凭据环境变量仍有效；`.env` 作为文本解析，不执行 shell、不展开变量，也不修改进程环境。
 
-不要把密码追加在 `-w` 后面。任何曾写入配置文件、日志或命令参数的后台 Token 都应在后台管理端轮换；本 Skill 不能代替用户轮换外部凭据。
+首次安装时从 [config.example.json](config.example.json) 初始化 `config.json`，填写本 Skill 的后台地址和 Token；从 `.env.example` 初始化 `.env`，仅填写已有且获授权使用的凭据。已有文件不得被模板覆盖；不可复用其他 Skill 的 Token。
 
-不得把完整 Token 写入命令行、运行目录、日志、报告或回复，不得猜测或复用其它 Skill 的 Token。
+macOS/Unix 上将 `config.json` 与 `.env` 权限设为 `0600`。文件缺失、格式错误、重复键、字段类型错误或权限不符须输出脱敏原因；后台配置不可用则停止业务鉴权，可选来源凭据不可用则保留相应来源缺口。
+
+迁移本 Skill 旧安装时，仅一次性将既有固定 Keychain 项中的后台 Token 写入 `config.json`，保留已有 `.env` 值；缺失值留空。完成迁移后删除只含重复后台地址的 `config.local.json`，运行时不再访问 Keychain，也没有双配置覆盖机制。
+
+本地 `config.json`、`.env` 均排除出版本控制和分发包。分发时保留空 Token 的 `config.example.json`、空值的 `.env.example` 与不含凭据的 `references/runtime-config.json`；打包前显式排除两个本地凭据文件，不能仅依赖 `.gitignore`。不得把完整 Token、Key、用户名、密码或会话 Cookie 写入命令行、运行目录、日志、报告或回复。
 
 ## 3. 失败与成功
 

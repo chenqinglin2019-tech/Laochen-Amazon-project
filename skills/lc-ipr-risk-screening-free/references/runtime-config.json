@@ -1,6 +1,5 @@
 {
   "schema_version": "2.4-free",
-  "backend_url": "https://mcp.yixunkuajing.com",
   "auth": {
     "timeout_seconds": 20,
     "binary_sha256": {

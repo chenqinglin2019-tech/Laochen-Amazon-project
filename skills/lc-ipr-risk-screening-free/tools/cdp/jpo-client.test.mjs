@@ -19,11 +19,20 @@ import time
 import urllib.parse
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import jpo_api_client as jpo
 import run_api_plan as runner
 from common import build_coverage_requirements
 from provider_utils import ProviderError
+
+
+# Credential fixtures stay inside this offline child; production readers are
+# never pointed at a test credential path or enabled through environment values.
+credential_fixture = patch.object(jpo, "credential", side_effect=lambda config, name: {
+    "jpo_api_username": "test-user", "jpo_api_password": "test-password",
+}.get(name, ""))
+credential_fixture.start()
 
 
 def response(result):
@@ -368,6 +377,7 @@ with tempfile.TemporaryDirectory() as temporary:
     ]
     assert len(jpo_commands) == 2, "execute_by_default optional JPO actions must be scheduled"
     assert max_active_jpo == 1, "JPO subprocesses must be sequential"
+credential_fixture.stop()
 print("ok")
 `;
 
@@ -378,8 +388,8 @@ test("JPO client enforces completeness, no-data fallback, quota stop, and one re
     env: {
       ...process.env,
       PYTHONPATH: SCRIPTS_DIR,
-      JPO_API_USERNAME: "test-user",
-      JPO_API_PASSWORD: "test-password",
+      LC_IPR_OFFLINE_TESTS: "1",
+      PYTHONDONTWRITEBYTECODE: "1",
     },
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);

@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from common import atomic_write_json, credential, load_skill_config, sha256_file
+from common import ENV_CREDENTIALS, atomic_write_json, credential, credential_issue, load_skill_config, sha256_file
 
 
 SAFE_FAILURE = "云端鉴权未通过，本轮不继续执行。"
@@ -78,6 +78,8 @@ def require_auth() -> None:
     backend_token = credential(config, "backend_token")
     backend_url = str(config.get("backend_url") or "").strip()
     if not backend_token:
+        if credential_issue("backend_token") not in {"CREDENTIAL_MISSING", "OFFLINE_CREDENTIALS_DISABLED"}:
+            stop("configuration_error")
         stop("missing_token")
     if not backend_url:
         stop("configuration_error")
@@ -91,6 +93,8 @@ def require_auth() -> None:
                 [str(binary), "--config", str(auth_config)],
                 text=True, capture_output=True, check=False,
                 timeout=timeout,
+                env={key: value for key, value in os.environ.items()
+                     if key not in {*ENV_CREDENTIALS.values(), "LAOCHEN_BACKEND_URL"}},
             )
     except subprocess.TimeoutExpired:
         stop("service_unavailable")

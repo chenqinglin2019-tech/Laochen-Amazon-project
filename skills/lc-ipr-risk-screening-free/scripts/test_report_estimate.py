@@ -5,6 +5,7 @@ import copy
 import csv
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -419,6 +420,44 @@ class EstimateReportTests(unittest.TestCase):
             self.assertNotIn(simulated_secret, str(errors))
             (self.out / 'report.html').write_text(original + '&quot;cookies&quot;: &quot;session-data&quot;')
             self.assertEqual(report.validate_run(self.root, self.task, output_dir=self.out), ['FORBIDDEN_BROWSER_SESSION_FIELDS'])
+
+    def test_local_backend_and_third_party_credentials_block_report_without_exposing_values(self):
+        import common
+
+        skill_dir = self.root / 'fixture-skill'
+        runtime_dir = skill_dir / 'references'
+        runtime_dir.mkdir(parents=True)
+        # Read only public runtime settings from the installed Skill. All secret
+        # reads below are redirected to these private, temporary fixture files.
+        runtime_source = Path(__file__).resolve().parents[1] / 'references' / 'runtime-config.json'
+        (runtime_dir / 'runtime-config.json').write_bytes(runtime_source.read_bytes())
+        backend_secret = 'FIXTURE-BACKEND-TOKEN-DO-NOT-PUBLISH'
+        third_party_secret = 'FIXTURE-SERPAPI-KEY-DO-NOT-PUBLISH'
+        config_path = skill_dir / 'config.json'
+        config_path.write_text(json.dumps({
+            'backend_url': 'https://fixture.invalid', 'backend_token': backend_secret,
+        }))
+        config_path.chmod(0o600)
+        env_path = skill_dir / '.env'
+        env_path.write_text('SERPAPI_API_KEY=' + third_party_secret + '\n')
+        env_path.chmod(0o600)
+
+        with patch('common.skill_root', return_value=skill_dir), patch.dict(os.environ, {
+            'LC_IPR_OFFLINE_TESTS': '', 'LC_IPR_TEST_MODE': '',
+        }):
+            self.assertEqual(common.credential({}, 'backend_token'), backend_secret)
+            self.assertEqual(common.credential({}, 'serpapi_api_key'), third_party_secret)
+            for source, secret in [('config.json', backend_secret), ('.env', third_party_secret)]:
+                with self.subTest(source=source):
+                    self.evidence['extra_note'] = secret
+                    with self.assertRaises(ValueError) as captured:
+                        self.build()
+                    self.assertEqual(str(captured.exception), 'CONFIGURED_SECRET_IN_REPORT_OR_EVIDENCE')
+                    for configured_secret in (backend_secret, third_party_secret):
+                        self.assertNotIn(configured_secret, str(captured.exception))
+                    self.assertFalse(self.out.exists())
+                    self.assertEqual(self.evidence['extra_note'], secret)
+            del self.evidence['extra_note']
 
     def test_human_checks_prioritize_p1_and_preserve_unprioritized_visibility(self):
         original = copy.deepcopy(self.assessment['assessments'][0])

@@ -10,7 +10,7 @@ import {
   publicRegistryCatalog,
 } from "./registry-adapters.mjs";
 
-const REAL_CONFIG = JSON.parse(readFileSync(new URL("../../config.json", import.meta.url), "utf8"));
+const REAL_CONFIG = JSON.parse(readFileSync(new URL("../../references/runtime-config.json", import.meta.url), "utf8"));
 
 test("all registry adapters are assisted, user-triggered, and single-action", () => {
   for (const [provider, jurisdiction, rightType, operation] of [

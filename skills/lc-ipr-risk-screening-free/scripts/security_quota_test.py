@@ -18,8 +18,7 @@ import common
 import epo_ops_client
 import run_api_plan
 from epo_quota_ledger import EpoQuotaLedger, account_fingerprint
-import preflight
-from preflight import credential_storage_checkpoint, local_secret_findings
+from offline_test_support import isolated_test_environment
 from provider_utils import ProviderError
 
 
@@ -62,66 +61,39 @@ def _reserve_worker(
 
 
 def test_credentials() -> None:
-    hostile_config = {"backend_token": "must-never-be-read"}
-    env_name = "LAOCHEN_BACKEND_TOKEN"
-    previous = os.environ.get(env_name)
-    try:
-        os.environ[env_name] = "environment-value"
-        assert common.credential(hostile_config, "backend_token") == "environment-value"
-        del os.environ[env_name]
-        with patch.object(common.platform, "system", return_value="Linux"):
-            assert common.credential(hostile_config, "backend_token") == ""
-
-        observed: dict[str, object] = {}
-
-        def fake_security(arguments: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
-            observed["arguments"] = list(arguments)
-            observed["kwargs"] = dict(kwargs)
-            return subprocess.CompletedProcess(arguments, 0, "keychain-value\n", "")
-
-        with (
-            patch.object(common.platform, "system", return_value="Darwin"),
-            patch.object(common.subprocess, "run", side_effect=fake_security),
-        ):
-            assert common.credential(hostile_config, "backend_token") == "keychain-value"
-        assert observed["arguments"] == [
-            common.KEYCHAIN_SECURITY_COMMAND, "find-generic-password", "-s", common.KEYCHAIN_SERVICE,
-            "-a", "LAOCHEN_BACKEND_TOKEN", "-w",
-        ]
-        assert observed["kwargs"] == {
-            "text": True, "capture_output": True, "check": False, "timeout": 10,
-        }
-        assert "keychain-value" not in " ".join(observed["arguments"])
-    finally:
-        if previous is None:
-            os.environ.pop(env_name, None)
-        else:
-            os.environ[env_name] = previous
-
-    with tempfile.TemporaryDirectory(prefix="ipr-local-secret-scan-") as raw:
+    """Use only temporary local credentials, never the installed Skill files."""
+    with tempfile.TemporaryDirectory(prefix="ipr-local-credentials-") as raw:
         root = Path(raw)
         (root / "config.json").write_text(
-            json.dumps({"backend_token": "stale", "credentials": {"epo_consumer_key": "stale"}}),
+            json.dumps({"backend_url": "https://backend.example.test", "backend_token": "local-backend-fixture"}),
             encoding="utf-8",
         )
-        (root / "config.local.json").write_text(
-            json.dumps({"euipo_client_secret": "stale"}), encoding="utf-8",
-        )
-        assert local_secret_findings(root) == [
-            "config.json:backend_token",
-            "config.json:credentials.epo_consumer_key",
-            "config.local.json:euipo_client_secret",
-        ]
-        with patch.object(preflight, "skill_root", return_value=root):
-            checkpoint = credential_storage_checkpoint()
-        assert checkpoint["status"] == "rotation_required"
-        assert checkpoint["backend_token_in_local_file"] is True
-        assert checkpoint["provider_credentials_in_local_file"] is True
-        assert checkpoint["local_secret_fields"] == local_secret_findings(root)
-        with patch.object(common, "skill_root", return_value=root):
-            sanitized_config = common.load_skill_config()
-        assert "backend_token" not in sanitized_config
-        assert "credentials" not in sanitized_config
+        (root / "config.json").chmod(0o600)
+        (root / ".env").write_text("EPO_OPS_CONSUMER_KEY=local-epo-fixture\n", encoding="utf-8")
+        (root / ".env").chmod(0o600)
+        environment = {
+            "LC_IPR_TEST_MODE": "", "LC_IPR_OFFLINE_TESTS": "",
+            "LAOCHEN_BACKEND_TOKEN": "ignored-environment-fixture",
+            "EPO_OPS_CONSUMER_KEY": "ignored-environment-fixture",
+        }
+        with (
+            patch.object(common, "skill_root", return_value=root),
+            patch.dict(os.environ, environment),
+            patch.object(subprocess, "run", side_effect=AssertionError("Credential lookup must not run Keychain")),
+        ):
+            assert common.credential({}, "backend_token") == "local-backend-fixture"
+            assert common.credential({}, "epo_consumer_key") == "local-epo-fixture"
+            (root / "config.json").unlink()
+            (root / ".env").unlink()
+            assert common.credential({}, "backend_token") == ""
+            assert common.credential({}, "epo_consumer_key") == ""
+        for marker in ("LC_IPR_TEST_MODE", "LC_IPR_OFFLINE_TESTS"):
+            with (
+                patch.dict(os.environ, {marker: "1"}),
+                patch.object(common, "skill_root", side_effect=AssertionError("Offline lookup must not open local files")),
+            ):
+                assert common.credential({}, "backend_token") == ""
+                assert common.credential({}, "epo_consumer_key") == ""
 
 
 def test_cross_process_reservation_and_restart() -> None:
@@ -262,35 +234,26 @@ def test_plan_runner_reads_shared_account_state() -> None:
     with tempfile.TemporaryDirectory(prefix="ipr-epo-runner-ledger-") as raw:
         root = Path(raw)
         EpoQuotaLedger(config, key, ledger_dir=root).reserve("other-task")
-        previous = {
-            name: os.environ.get(name)
-            for name in ("LC_IPR_TEST_MODE", "LC_IPR_EPO_LEDGER_DIR", "EPO_OPS_CONSUMER_KEY")
-        }
-        try:
-            os.environ.update({
+        with (
+            patch.dict(os.environ, {
                 "LC_IPR_TEST_MODE": "1",
                 "LC_IPR_EPO_LEDGER_DIR": str(root),
-                "EPO_OPS_CONSUMER_KEY": key,
-            })
+            }),
+            patch.object(run_api_plan, "credential", return_value=key),
+        ):
             reason = run_api_plan.epo_free_quota_block_reason(
                 root, {"source_runs": []}, config, 2,
             )
-        finally:
-            for name, value in previous.items():
-                if value is None:
-                    os.environ.pop(name, None)
-                else:
-                    os.environ[name] = value
         assert reason == "EPO_SHARED_FREE_QUOTA_NEAR_LIMIT"
 
 
 def main() -> None:
-    test_credentials()
-    test_cross_process_reservation_and_restart()
-    test_paid_header_and_week_window()
-    test_ops_client_reserves_before_offline_http()
-    test_plan_runner_reads_shared_account_state()
-    assert local_secret_findings() == [], "distributed config files must contain no credential values"
+    with isolated_test_environment():
+        test_credentials()
+        test_cross_process_reservation_and_restart()
+        test_paid_header_and_week_window()
+        test_ops_client_reserves_before_offline_http()
+        test_plan_runner_reads_shared_account_state()
     print("security/quota offline tests passed")
 
 
