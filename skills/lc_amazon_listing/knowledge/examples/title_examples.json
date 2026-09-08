@@ -1,0 +1,24 @@
+{
+  "version": "0.2",
+  "domain": "title",
+  "examples": [
+    {
+      "category": ["phone_stand", "desk_accessories"],
+      "good": "Adjustable Phone Stand for Desk, Foldable Aluminum Holder",
+      "bad": "Best Phone Stand Ever - Amazing Quality Premium Holder for All Phones ★★★",
+      "note": "好：75字符内保留核心品类、属性和场景。兼容性、材质细节放 Item Highlight。差：极限词 + 装饰符号 + 无具体信息"
+    },
+    {
+      "category": ["kitchen", "organizer"],
+      "good": "Clear Stackable Pantry Bins 4 Pack for Kitchen Cabinet",
+      "bad": "Premium Multifunctional Stackable Storage Bins for Various Uses in Home",
+      "note": "好：短标题保留品类、数量、材质和核心场景。差：堆形容词、场景模糊"
+    },
+    {
+      "category": ["*"],
+      "good": "Bluetooth Earbuds Noise Cancelling, 40H Playtime for Running",
+      "bad": "AMAZING Earbuds!! Best Sound Quality #1 Seller Cheap Price Free Shipping",
+      "note": "好：75字符内保留核心词、关键功能和核心场景。差：促销词+极限词+违规"
+    }
+  ]
+}

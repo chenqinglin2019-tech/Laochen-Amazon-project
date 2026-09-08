@@ -1,0 +1,24 @@
+{
+  "version": "0.1",
+  "domain": "bullets",
+  "examples": [
+    {
+      "category": ["phone_stand", "desk_accessories"],
+      "good": [
+        "【STABLE & SECURE】Weighted non-slip silicone base keeps your phone steady during video calls, no more worrying about it tipping over",
+        "【ADJUSTABLE VIEWING ANGLE】270° rotation lets you find the right angle for video calls, recipe following, or watching videos hands-free",
+        "【UNIVERSAL COMPATIBILITY】Fits most 4-10 inch phones, including large models with thick cases up to 12mm",
+        "【FOLDABLE & PORTABLE】Collapses flat to slip into your bag - perfect for travel, coffee shops, or switching between home and office",
+        "【PREMIUM BUILD QUALITY】Aluminum alloy body weighs just 3.5oz but supports phones up to 1.5lbs without wobbling"
+      ],
+      "bad": [
+        "Made of high quality material",
+        "Can be used for many purposes",
+        "Good phone stand for desk use very stable and secure with adjustable angle compatible with all phones",
+        "Buy now best price free shipping",
+        "Phone stand phone holder cell phone stand desk phone stand office phone stand"
+      ],
+      "note": "好：每条有大写卖点+具体数据+场景收益。差：模糊/堆词/促销/无结构"
+    }
+  ]
+}
