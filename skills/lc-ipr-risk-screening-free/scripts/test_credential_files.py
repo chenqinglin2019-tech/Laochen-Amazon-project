@@ -166,6 +166,8 @@ class CredentialFilesTests(unittest.TestCase):
         observed = {}
 
         def run(command, **kwargs):
+            if command[0] == "/usr/bin/xattr":
+                return subprocess.CompletedProcess(command, 0, "", "")
             path = Path(command[2])
             observed["path"] = path
             self.assertEqual(json.loads(path.read_text()), self.config)
