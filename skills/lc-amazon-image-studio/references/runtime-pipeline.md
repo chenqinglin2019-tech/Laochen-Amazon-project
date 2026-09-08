@@ -1,6 +1,6 @@
 # V6 运行流程
 
-本地入口为 `scripts/lc_image_pipeline.py`；负责预检、提示编译、状态与缓存、内置排版、元数据及验收，不直接调用图像模型。实际生产先按 [SKILL.md](../SKILL.md) 鉴权，再使用内置 `image_gen`；用户明确要求其他后端时才改变。
+本地入口为 `scripts/lc_image_pipeline.py`；负责预检、提示编译、状态与缓存、内置排版、元数据及验收，不直接调用图像模型。实际生产先执行 `python3 <skill-root>/scripts/auth_gate.py`，完成所选程序哈希校验、macOS 启动预处理及云端鉴权；成功后再运行本地入口、使用内置 `image_gen`。鉴权规则见 [SKILL.md](../SKILL.md)；用户明确要求其他生图后端时才改变。
 
 ## 环境与项目初始化
 

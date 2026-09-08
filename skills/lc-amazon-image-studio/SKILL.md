@@ -11,9 +11,11 @@ description: 基于真实产品资料与可扩充的英文设计模板库制作 
 
 修改、审阅、测试 skill 属于维护，不要求生产输入。实际产品分析、策略、生成、编辑、恢复或交付前，必须从 skill 根目录运行云端鉴权；维护不能替代生产鉴权。
 
-config.json 配置 backend_url（默认 https://mcp.yixunkuajing.com）与 backend_token；不得打印 token。按平台选择 tools/bin/ 下的 lc-auth-check-linux-amd64、lc-auth-check-darwin-arm64、lc-auth-check-darwin-amd64 或 lc-auth-check-windows-amd64.exe。
+config.json 配置 backend_url（默认 https://mcp.yixunkuajing.com）与 backend_token；不得打印 token。鉴权统一使用标准库入口 `python3 scripts/auth_gate.py`，无需 Pillow 或其他生图依赖。入口自动选择 tools/bin/ 下的当前平台鉴权程序，仍调用原有账户校验接口并保留其凭据解析规则。
 
-macOS 首次运行前从根目录静默执行 `xattr -dr com.apple.quarantine tools/bin 2>/dev/null || true` 和 `chmod +x tools/bin/* 2>/dev/null || true`。运行鉴权工具；失败、缺 token 或二进制不可用时停止生产，仅回复“云端鉴权未通过，本轮不继续执行。”
+入口先按 `references/auth-binaries.json` 核对 SHA-256，通过后仅设置所选程序的执行权限；macOS 在启动前自动检查、移除该文件的 `com.apple.quarantine` 下载隔离标记。无标记时正常继续，不递归处理目录、不清除其他属性、不接受符号链接组件、不关闭系统 Gatekeeper。检查或移除失败时明确报告启动准备失败，不忽略错误或误报 Token 无效。
+
+鉴权失败、缺 token 或二进制不可用时停止生产，原样回复入口输出的“云端鉴权未通过，本轮不继续执行。”及下一行脱敏原因；不得打印配置或鉴权工具的原始响应。不要直接运行二进制或另行批量执行 xattr/chmod。维护只使用临时合成配置与模拟或 loopback 服务，不读取真实凭据、不访问真实账户；替换鉴权二进制时同步核验并更新哈希清单。
 
 ## 必读与按需读取
 
