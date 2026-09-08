@@ -46,6 +46,8 @@ description: 使用免费或免费额度数据源，对单个 Amazon 商品在�
 
 以下全部由 Agent 执行，路径替换成实际任务目录。
 
+macOS 首次运行直接使用 `scripts/auth_gate.py`：入口在哈希校验通过后，自动设置当前平台鉴权程序的执行权限，并在启动前移除其下载隔离标记；无标记时正常继续。无需另行递归处理 Skill 目录，启动准备失败按 `INSTRUCTIONS.md` 报告。
+
 ```bash
 python scripts/auth_gate.py
 python scripts/create_task.py --url 'https://www.amazon.com/dp/B012345678' --jurisdictions US,GB,FR,DE,IT,ES,JP

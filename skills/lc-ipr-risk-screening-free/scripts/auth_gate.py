@@ -24,6 +24,7 @@ SAFE_REASONS = {
     "invalid_response": "鉴权服务返回异常。",
     "configuration_error": "鉴权配置无效。",
     "auth_component_invalid": "鉴权组件缺失或校验失败。",
+    "auth_component_prepare_failed": "鉴权组件启动准备失败，请检查文件权限或 macOS 隔离标记。",
     "auth_failed": "鉴权失败。",
 }
 
@@ -73,7 +74,7 @@ def require_auth() -> None:
         stop("configuration_error")
     if timeout <= 0:
         stop("configuration_error")
-    if not binary.is_file() or not expected or sha256_file(binary) != expected:
+    if binary.is_symlink() or not binary.is_file() or not expected or sha256_file(binary) != expected:
         stop("auth_component_invalid")
     backend_token = credential(config, "backend_token")
     backend_url = str(config.get("backend_url") or "").strip()
@@ -83,8 +84,24 @@ def require_auth() -> None:
         stop("missing_token")
     if not backend_url:
         stop("configuration_error")
+    child_env = {key: value for key, value in os.environ.items()
+                 if key not in {*ENV_CREDENTIALS.values(), "LAOCHEN_BACKEND_URL"}}
     try:
         binary.chmod(binary.stat().st_mode | 0o111)
+        if platform.system().lower() == "darwin":
+            # Only prepare the selected, hash-verified component before launch.
+            attributes = subprocess.run(
+                ["/usr/bin/xattr", str(binary)],
+                text=True, capture_output=True, check=True, timeout=10, env=child_env,
+            )
+            if "com.apple.quarantine" in attributes.stdout.splitlines():
+                subprocess.run(
+                    ["/usr/bin/xattr", "-d", "com.apple.quarantine", str(binary)],
+                    text=True, capture_output=True, check=True, timeout=10, env=child_env,
+                )
+    except (OSError, subprocess.SubprocessError):
+        stop("auth_component_prepare_failed")
+    try:
         with tempfile.TemporaryDirectory(prefix="lc-ipr-auth-") as temp_dir:
             auth_config = Path(temp_dir) / "auth.json"
             atomic_write_json(auth_config, {"backend_url": backend_url, "backend_token": backend_token})
@@ -93,8 +110,7 @@ def require_auth() -> None:
                 [str(binary), "--config", str(auth_config)],
                 text=True, capture_output=True, check=False,
                 timeout=timeout,
-                env={key: value for key, value in os.environ.items()
-                     if key not in {*ENV_CREDENTIALS.values(), "LAOCHEN_BACKEND_URL"}},
+                env=child_env,
             )
     except subprocess.TimeoutExpired:
         stop("service_unavailable")
