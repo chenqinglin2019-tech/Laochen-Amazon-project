@@ -1,0 +1,109 @@
+{
+  "description": "合成筛词回归示例。用于说明期望判断，不代表截图中朋友的真实产品已核验，也不提供虚构流量。",
+  "product_facts": {
+    "identity": "Black Cat Door Corner Decor",
+    "confirmed": [
+      "black cat silhouette",
+      "metal",
+      "decorative topper on an indoor door frame"
+    ],
+    "unknown": [
+      "specific iron composition",
+      "outdoor exposure suitability",
+      "weather resistance",
+      "weight",
+      "explicit Halloween positioning"
+    ]
+  },
+  "cases": [
+    {
+      "keyword": "nosy black cat bathroom door topper",
+      "expected": "eligible",
+      "reason": "完整短语寻找猫造型门顶装饰；bathroom 是房间场景，不是 bat。不能因此推导防水能力。"
+    },
+    {
+      "keyword": "black cat door corner",
+      "expected": "eligible",
+      "reason": "corner 改变完整对象，指向门角装饰；不能按 cat door 片段归为宠物通道。"
+    },
+    {
+      "keyword": "topper corner door",
+      "expected": "eligible",
+      "reason": "虽词序不自然，但完整意图仍为门角装饰；与 door corner topper 使用一致依据，正文用自然语序。"
+    },
+    {
+      "keyword": "metal black cat silhouette",
+      "expected": "eligible",
+      "reason": "猫轮廓及金属已有依据；相关候选并不要求进入标题。"
+    },
+    {
+      "keyword": "black cat door sign",
+      "expected": "deferred",
+      "reason": "sign 可能指带文字的牌，也可能是装饰轮廓，不直接删，先核对完整购买对象。",
+      "promotion_condition": "确认买家搜索对象与无文字轮廓装饰是否相符。"
+    },
+    {
+      "keyword": "cat iron wall decoration",
+      "expected": "deferred",
+      "reason": "已确认 metal，未确认 iron；材质未知不等于已证实材质冲突。",
+      "promotion_condition": "确认铁材质及墙面装饰方式。"
+    },
+    {
+      "keyword": "courtyard decoration black cat",
+      "expected": "deferred",
+      "reason": "仅有室内门框用途依据，庭院用途仍未知。",
+      "promotion_condition": "取得真实户外用途说明及限制；不凭词语推导耐候。"
+    },
+    {
+      "keyword": "halloween black cat decor",
+      "expected": "deferred",
+      "reason": "黑猫可以让人联想到万圣节，但不能自动推导整条季节查询都有依据。",
+      "promotion_condition": "确认本品节日定位及完整词的装饰意图；证实后可晋级。"
+    },
+    {
+      "keyword": "lightweight cat decor",
+      "expected": "deferred",
+      "reason": "lightweight 表示轻量，不能因 light 被判照明；实际重量未提供。",
+      "promotion_condition": "补充可靠重量或轻量设计依据。"
+    },
+    {
+      "keyword": "microchip cat door",
+      "expected": "excluded",
+      "reason": "完整对象为带芯片识别的宠物通道，本品为门框装饰，按具体商品意图不符剔除并记录依据。"
+    },
+    {
+      "keyword": "bat wall decor",
+      "expected": "excluded",
+      "reason": "完整对象为蝙蝠造型装饰，与已确认猫轮廓不同；不是因 bathroom 内部片段而判定。"
+    },
+    {
+      "keyword": "猫咪门角装饰",
+      "expected": "eligible",
+      "reason": "语义直接对应本品，非 ASCII 不是剔除依据；目标站点最终用词另按本地语言判断。"
+    }
+  ],
+  "context_changes": [
+    {
+      "change": "用户资料新增明确 Halloween 装饰定位",
+      "keyword": "halloween black cat decor",
+      "expected": "eligible",
+      "reason": "只在完整词匹配且有真实用途依据时晋级；不自动救回所有季节词。"
+    },
+    {
+      "change": "同系列有红色与蓝色子体",
+      "keyword": "blue cat door topper",
+      "expected": "eligible_for_blue_only",
+      "reason": "不能投放到父体、全系列共用正文或红色子体。"
+    }
+  ],
+  "classification_correction_example": {
+    "initial_decision": "excluded",
+    "initial_reason": "错误按 cat door 片段判断为宠物通道（此错误只能留在初次记录中，不能作为最终依据）。",
+    "keyword": "black cat door corner",
+    "resolution": "发现cat door的片段判断有误；依据完整短语修正当前分类与理由，保留原初次判断。",
+    "decision": "eligible",
+    "reason_code": "identity",
+    "reason": "corner限定完整对象为猫造型门角装饰，与已确认本品一致。",
+    "evidence": "已确认black cat silhouette和door-frame ornament。"
+  }
+}

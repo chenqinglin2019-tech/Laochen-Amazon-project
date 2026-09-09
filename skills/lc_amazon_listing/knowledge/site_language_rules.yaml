@@ -1,27 +1,41 @@
-supported_marketplaces:
-  US: {language: English, language_code: en}
-  JP: {language: Japanese, language_code: ja}
-  UK: {language: English, language_code: en}
-  DE: {language: German, language_code: de}
-  FR: {language: French, language_code: fr}
-  IT: {language: Italian, language_code: it}
-  ES: {language: Spanish, language_code: es}
-  CA:
-    language: English
-    language_code: en
-    note: Use French only when the user explicitly requests a French Canadian listing.
-  IN: {language: English, language_code: en}
-
+version: '2.0'
+policy_ref: quality_policy.json
+contract_ref: data_contract.md
+sources_ref: sources.json
+site_configuration: 语言、语言代码、长度单位和 qa_enabled 的唯一机器配置为 quality_policy.json 的 sites；本文不重复配置。
 rules:
-  - Determine the marketplace before product profiling. Never silently default to US when the user has not supplied a marketplace.
-  - Store site, listing_language, and listing_language_code in 01_product_profile.json.
-  - Write title, item highlight, bullet points, description, and search terms in the target marketplace language.
-  - Preserve brand names, model numbers, measurements, and technical terms when translation would change their meaning.
-  - Use marketplace keywords in their original language. Do not translate non-English keywords into English for the final listing.
-  - Chinese keyword translations are comprehension aids only and must not replace original marketplace keywords.
-  - Image planning and A+ planning remain Chinese unless the user explicitly requests another planning language.
-  - Before validation and report generation, verify that every customer-facing listing field matches listing_language. Rewrite mismatched fields first.
-
-rufus:
-  enabled_sites: [US]
-  non_us_behavior: Write a skipped 06_qa.json with reason_code rufus_us_only and continue without calling qa.
+- id: site_required
+  type: required
+  source_id: skill_tool_scope
+  prompt_fragment: 用户未给站点时先确认，不静默默认 US。把 site、listing_language、listing_language_code 写入画像及 Listing。
+- id: site_language
+  type: required
+  source_id: skill_tool_scope
+  prompt_fragment: 按 quality_policy.json.sites 决定默认语言；CA 仅在用户明确要求加拿大法语时使用 French/fr，并在产品资料记录该要求。前台文本、后台搜索词和上图文案使用同一目标语言；品牌、型号和真实技术词不硬翻译。
+- id: site_units
+  type: required
+  source_id: user_unit_localization
+  prompt_fragment: US 普通物理长度由 normalize 转为英寸并全字段复用。非 US 首版保留已提供单位；行业公称、尺码及数值来源范围遵循 product_facts_rules.yaml，不凭站点猜缺失单位。
+- id: site_keywords
+  type: editorial
+  source_id: skill_editorial_v2
+  prompt_fragment: 保留真实目标站点关键词用语；中文释义只帮助理解，不能取代目标语言关键词。其他语言词需符合用户明确的双语需求并核验目标类目要求，不机械翻译成英语交付。
+- id: site_media
+  type: required
+  source_id: user_image_planning
+  prompt_fragment: 策划说明默认中文，image_plan/aplus_plan 的 overlay_text 和 native_text 使用目标语言。overlay_text 为图片嵌字，native_text
+    为 A+ 原生文字；主图两者都为空。移动端与自然语序按目标语言复审。
+- id: site_qa_scope
+  type: required
+  source_id: skill_tool_scope
+  prompt_fragment: 现有后端 qa 仅支持 US。其他站点保存 status=skipped、reason_code=rufus_us_only、qa_pairs=[] 并继续；这是工具范围，不等于禁止其他站点采用清晰、准确的
+    AI 问答友好表达。
+- id: site_ai_naming
+  type: editorial
+  source_id: amazon_alexa_shopping
+  prompt_fragment: 面对用户使用 Alexa for Shopping（原 Rufus）等已核验名称；继续保留现有 qa 命令、rufus_us_only 兼容字段，不凭更名更改后端接口或站点支持范围。
+- id: site_final_review
+  type: required
+  source_id: skill_editorial_v2
+  prompt_fragment: 每个父子标题、Highlight、继承后完整正文和上图文案逐项复审语言与参数；不得只检查父体或第一个子体。所有字符/字节预算从 quality_policy.json
+    读取。

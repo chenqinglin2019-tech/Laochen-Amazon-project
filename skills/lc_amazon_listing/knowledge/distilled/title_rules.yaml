@@ -1,62 +1,32 @@
-# 标题写作规则
-# 来源：Amazon 平台规范 + SEO 最佳实践 + COSMO 场景模型
-# 待后续论文蒸馏后补充精确出处
-
-version: 0.2
+version: '2.0'
 domain: title
-applies_to:
-  category: ["*"]
+contract_ref: ../data_contract.md
+policy_ref: ../quality_policy.json
+sources_ref: ../sources.json
 rules:
-  - id: title_capitalization
-    type: soft
-    prompt_fragment: |
-      遵循目标站点语言的自然大小写和标点习惯。英语站点使用 Title Case：
-      介词(for/in/on/with)、连词(and/or)、冠词(a/an/the)通常小写，标题首词除外。
-      日语、德语、法语、意大利语、西班牙语不得强套英语 Title Case。
-    source: "Amazon Style Guide"
-
-  - id: title_structure
-    type: soft
-    prompt_fragment: |
-      标题结构：核心品类词 + 1-2 个最关键属性词 + 必要规格/适用范围。
-      2026-07-27 起标题空间只有 75 字符，材料、更多场景、详细规格转移到
-      Item Highlight，不要在标题里堆完整长尾词。
-      示例：Adjustable Phone Stand for Desk, Foldable Aluminum Holder
-    source: "Amazon SEO best practice"
-
-  - id: title_cosmo_scene
-    type: soft
-    prompt_fragment: |
-      标题中最多融入 1 个最重要的 COSMO 场景词，让买家能想象使用画面。
-      场景词来自产品画像的 scenes 字段。
-      如：for Desk, for Kitchen, for Travel。次要场景写入 Item Highlight。
-    source: "COSMO model (待论文补充)"
-
-  - id: title_short_mobile_priority
-    type: soft
-    prompt_fragment: |
-      标题整体必须在 75 字符内。前 60 字符必须包含最核心的关键词和卖点，
-      移动端搜索结果依赖短标题完整展示。
-    source: "Amazon mobile search UX"
-
-  - id: title_no_promotional
-    type: soft
-    prompt_fragment: |
-      禁止促销词(Sale/Discount/Free Shipping)、
-      装饰字符(★/♥/【】)、
-      主观极限词(Best/Perfect/#1/Amazing)、
-      未授权品牌词。
-    source: "Amazon listing policy"
-
-  - id: title_numbers
-    type: soft
-    prompt_fragment: |
-      数字用阿拉伯数字而非目标语言的文字拼写。英语示例："5 Pack" 而非 "Five Pack"。
-      数字更醒目，节省字符。
-    source: "Amazon SEO best practice"
-
-  - id: title_max_chars
-    type: hard
-    enforced_by: "POST /validate (backend)"
-    note: "自 2026-07-27 起，除媒介类商品外，标题硬上限为 75 字符（含空格）"
-    source: "Amazon Seller Central announcement, 2026-06"
+- id: title_identity_first
+  type: required
+  source_id: user_product_identity
+  prompt_fragment: 标题必须保留 product_identity.protected_terms 的完整短语。即使核心名称没有出现在用户表格中或流量未知，也不得降级、拆散或换成后台类目枚举。原始商品是配件时必须保留配件身份，不能写成主机或完整套装。
+- id: title_budget
+  type: required
+  source_id: amazon_title_2026
+  prompt_fragment: 从统一政策读取标题字符预算及适用范围；含空格计数。先为完整品名、必要规格和子体识别值预留空间，再加入最有价值的共同差异。超长时移走次要卖点，不截断品名、单位或变体值。
+  limit_ref: default_limits.title_max_chars
+- id: title_natural_structure
+  type: editorial
+  source_id: skill_editorial_v2
+  prompt_fragment: 品牌已知时可放品牌，然后用完整商品名称说明卖的是什么，再加主要差异与必要规格。每个字段承担清楚的信息任务；不要求候选池全部进标题，不用多组近义品名拼接。写完脱离关键词表重读，确认语序自然、重点明确。
+- id: title_localization
+  type: required
+  source_id: user_unit_localization
+  prompt_fragment: 遵循目标语言的大小写、标点和自然语序；英语通常使用自然 Title Case，其他语言不套英语规则。普通尺寸必须使用规范化后的 display_text，保持 height/width/length
+    等维度对应。型号与真实品牌保持原样。
+- id: title_family
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: family 模式遵循 variation_rules.yaml：父标题只用系列共性；子标题由一个 title_template 按用户输入顺序生成。按最长子体组合统一压缩共同部分，所有子体保留相同词序。
+- id: title_verified_claims
+  type: editorial
+  source_id: skill_editorial_v2
+  prompt_fragment: 只用有来源的本品事实，不写促销、极限评价、未经证实的兼容性或健康效果。场景仅在有助于识别和购买判断时使用，数量不机械固定。不要为了流量加入无关场景或第三方品牌。

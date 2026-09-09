@@ -343,6 +343,11 @@ body{
   .chapter{animation:none;opacity:1;transform:none}
   *{scroll-behavior:auto}
 }
+/* Keep long product names readable at mobile widths. */
+.listing-doc p,.listing-doc li,.listing-doc h2,.listing-doc h3,.listing-doc h4{overflow-wrap:anywhere}
+.collapse-btn[hidden]{display:none}
+#pendingDetail .kw-item{flex-wrap:wrap}
+#pendingDetail .reason{flex-basis:100%}
 </style>
 </head>
 <body>
@@ -357,6 +362,7 @@ body{
     <div class="meta-bar">
       <span><b>生成时间</b> <span id="reportTime">—</span></span>
       <span id="metaSummary"></span>
+      <span id="validationSection" data-validation-status="__VALIDATION_STATUS__">__VALIDATION_LABEL__</span>
     </div>
   </header>
 
@@ -374,11 +380,11 @@ body{
     </div>
   </section>
 
-  <!-- ============ 02 扩词结果 ============ -->
+  <!-- ============ 02 关键词表格导入 ============ -->
   <section class="chapter">
-    <div class="chapter-rail"><div class="idx">0<span>2</span></div><div class="tick">Expand</div></div>
+    <div class="chapter-rail"><div class="idx">0<span>2</span></div><div class="tick">Import</div></div>
     <div>
-      <div class="chapter-head"><h2>扩词结果</h2><div class="sub">关键词反查解析后的原始词池</div></div>
+      <div class="chapter-head"><h2>关键词表格导入</h2><div class="sub">用户表格完整导入后的原始词池</div></div>
       <div class="card">
         <div class="stats-row" id="expandStats"></div>
         <button class="collapse-btn" data-target="expandDetail"><span class="chev">▾</span> 展开词表 · Top 50</button>
@@ -391,9 +397,13 @@ body{
   <section class="chapter">
     <div class="chapter-rail"><div class="idx">0<span>3</span></div><div class="tick">Filter</div></div>
     <div>
-      <div class="chapter-head"><h2>关键词过滤</h2><div class="sub">剔除无关 / 低质词，保留有效流量词</div></div>
+      <div class="chapter-head"><h2>关键词过滤</h2><div class="sub">完整意图判断 · 可用 / 待评估 / 确认剔除</div></div>
       <div class="card">
         <div id="filterStats"></div>
+        <button class="collapse-btn" data-target="eligibleDetail"><span class="chev">▾</span> 查看可用词</button>
+        <div id="eligibleDetail" class="kw-list collapsible"></div>
+        <button class="collapse-btn" data-target="pendingDetail" id="pendingToggle" hidden><span class="chev">▾</span> 查看待评估词</button>
+        <div id="pendingDetail" class="kw-list collapsible"></div>
         <button class="collapse-btn" data-target="removedDetail"><span class="chev">▾</span> 查看被剔除的词</button>
         <div id="removedDetail" class="kw-list collapsible"></div>
       </div>
@@ -436,7 +446,7 @@ body{
     <div class="chapter-rail"><div class="idx">0<span>7</span></div><div class="tick">Output</div></div>
     <div>
       <div class="chapter-head"><h2>最终 Listing</h2><div class="sub">标题 / 商品亮点 / 五点 / 长描 / 后台搜索词</div></div>
-      <div class="listing-doc" id="listingSection"></div>
+      <div class="listing-doc" id="listingSection">__LISTING_HTML__</div>
     </div>
   </section>
 
@@ -458,21 +468,28 @@ body{
 <script id="data-kw-raw" type="application/json">__DATA_KW_RAW__</script>
 <script id="data-kw-removed" type="application/json">__DATA_KW_REMOVED__</script>
 <script id="data-kw-filtered" type="application/json">__DATA_KW_FILTERED__</script>
+<script id="data-kw-pending" type="application/json">__DATA_KW_PENDING__</script>
+<script id="data-keyword-audit" type="application/json">__DATA_KEYWORD_AUDIT__</script>
 <script id="data-kw-tagged" type="application/json">__DATA_KW_TAGGED__</script>
 <script id="data-title-keywords" type="application/json">__DATA_TITLE_KEYWORDS__</script>
 <script id="data-qa" type="application/json">__DATA_QA__</script>
-<script id="data-listing" type="text/plain">__DATA_LISTING_MD__</script>
+<script id="data-listing" type="application/json">__DATA_LISTING__</script>
+<script id="data-meta" type="application/json">__DATA_META__</script>
+<script id="data-validation" type="application/json">__DATA_VALIDATION__</script>
+<script id="data-evidence" type="application/json">__DATA_EVIDENCE__</script>
 
 <script>
 /* ---------- 工具 ---------- */
 function loadData(id){
-  try{
-    const el=document.getElementById(id);
-    const text=(el?el.textContent:'').trim();
-    if(!text||text.startsWith('__DATA_'))return null;
-    return JSON.parse(text);
-  }catch(e){return null;}
+  const el=document.getElementById(id);
+  if(!el)throw new Error(`缺少报告数据节点：${id}`);
+  const text=el.textContent.trim();
+  if(!text||text.startsWith('__DATA_'))throw new Error(`报告数据未填入：${id}`);
+  try{return JSON.parse(text);}
+  catch(error){throw new Error(`报告 JSON 损坏：${id}（${error.message}）`);}
 }
+function displayValue(value){if(value==null)return '未提供';if(Array.isArray(value))return value.map(displayValue).join('、');if(typeof value==='object')return Object.entries(value).map(([key,item])=>({costume:'服装',statue:'雕像本体'}[key]||key)+'：'+displayValue(item)).join('；');return String(value);}
+function listValue(value){return Array.isArray(value)?value.map(displayValue).join('、'):displayValue(value);}
 function formatNum(n){
   n=Number(n)||0;
   if(n>=1000000)return (n/1000000).toFixed(1).replace(/\.0$/,'')+'M';
@@ -497,37 +514,14 @@ const toTop=document.getElementById('toTop');
 window.addEventListener('scroll',()=>{toTop.classList.toggle('show',window.scrollY>520);},{passive:true});
 toTop.addEventListener('click',()=>window.scrollTo({top:0,behavior:'smooth'}));
 
-/* ---------- 简易 Markdown → HTML ---------- */
-function formatInline(text){
-  text=esc(text);
-  text=text.replace(/\*\*(.+?)\*\*/g,'<strong class="k1">$1</strong>');
-  text=text.replace(/【(.+?)】/g,'<strong class="k2">【$1】</strong>');
-  return text;
-}
-function renderMarkdown(md){
-  const lines=md.split('\n');let html='';let inList=false;let section='';
-  const closeList=()=>{if(inList){html+='</ul>';inList=false;}};
-  for(let line of lines){
-    if(line.startsWith('## ')){closeList();section=line.slice(3).trim().toLowerCase();html+=`<div class="listing-title">${formatInline(line.slice(3))}</div>`;}
-    else if(line.startsWith('### ')){closeList();html+=`<div class="listing-h3">${formatInline(line.slice(4))}</div>`;}
-    else if(line.startsWith('- ')||line.startsWith('* ')){if(!inList){html+='<ul>';inList=true;}html+=`<li>${formatInline(line.slice(2))}</li>`;}
-    else if(line.trim()===''){closeList();}
-    else if(section==='search terms'){
-      closeList();
-      const terms=line.trim().split(/\s+/).filter(Boolean);
-      html+=`<div class="search-terms-list">${terms.map(term=>`<span class="search-term">${esc(term)}</span>`).join('')}</div>`;
-    }
-    else{closeList();html+=`<p>${formatInline(line)}</p>`;}
-  }
-  closeList();return html;
-}
-
 /* ---------- 主渲染 ---------- */
 function render(){
   const profile=loadData('data-profile');
   const kwRaw=loadData('data-kw-raw');
   const kwRemoved=loadData('data-kw-removed');
   const kwFiltered=loadData('data-kw-filtered');
+  const kwPending=loadData('data-kw-pending');
+  const keywordAudit=loadData('data-keyword-audit');
   const kwTagged=loadData('data-kw-tagged');
   const titleKw=loadData('data-title-keywords');
   const qa=loadData('data-qa');
@@ -535,38 +529,43 @@ function render(){
   const siteLabel=site==='未识别'?'站点未识别':`${site} 站`;
   const language=(profile&&profile.listing_language)||({US:'English',JP:'Japanese',UK:'English',DE:'German',FR:'French',IT:'Italian',ES:'Spanish',CA:'English',IN:'English'}[site]||'—');
 
-  /* 时间 */
-  const now=new Date();
-  const ts=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0')+
-           ' '+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
-  document.getElementById('reportTime').textContent=ts;
-  document.getElementById('colophonTime').textContent=ts;
+  /* 时间固定为文件生成时间，打开报告不会改写。 */
+  const meta=loadData('data-meta');
+  const ts=meta.generated_at||'未记录';
+  const displayTs=/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(ts)?ts.slice(0,16).replace('T',' '):ts;
+  document.getElementById('reportTime').textContent=displayTs;
+  document.getElementById('colophonTime').textContent=displayTs;
 
-  /* 扩词数据归一化：CLI 实际输出 keywords=字符串数组，明细在 raw.keyword_data；
-     兼容未来若 keywords 直接是对象数组的情况 */
+  /* 原始词是词表来源；部分缺流量明细时也必须展示，不能只显示有指标的词。 */
   let kwData=[];
   if(kwRaw){
-    if(kwRaw.raw&&Array.isArray(kwRaw.raw.keyword_data)){
-      kwData=kwRaw.raw.keyword_data;
-    }else if(Array.isArray(kwRaw.keywords)){
-      kwData=kwRaw.keywords.map(k=>typeof k==='string'?{keyword:k}:k);
-    }
+    const metricRows=kwRaw.raw&&Array.isArray(kwRaw.raw.keyword_data)?kwRaw.raw.keyword_data:[];
+    const metrics=new Map(metricRows.filter(k=>k&&typeof k.keyword==='string').map(k=>[k.keyword,k]));
+    const ledger=loadData('data-evidence').keyword_decisions;
+    const entries=keywordAudit&&keywordAudit.status==='passed'&&ledger&&Array.isArray(ledger.records)?ledger.records:(kwRaw.source_kind==='user_spreadsheets'?metricRows:(Array.isArray(kwRaw.keywords)?kwRaw.keywords:metricRows));
+    kwData=entries.map(item=>{
+      const word=typeof item==='string'?item:item.keyword;
+      const forms=item&&Array.isArray(item.original_forms)?item.original_forms:[word];
+      const metric=forms.map(form=>metrics.get(form)).find(Boolean)||{};
+      return {...metric,...(typeof item==='object'&&item?item:{}),keyword:word};
+    });
   }
   const kwName=k=>(k&&(k.keyword!=null?k.keyword:k))||'';
-  const kwSearch=k=>Number((k&&(k.searches!=null?k.searches:k.monthly_searches))||0);
+  const kwSearch=k=>{const value=k&&(k.searches!=null?k.searches:k.monthly_searches);return value!=null&&value!==''&&Number.isFinite(Number(value))?Number(value):null;};
 
   /* 漏斗 */
-  const rawCount=kwData.length;
+  const auditedCounts=keywordAudit&&keywordAudit.counts;
+  const rawCount=auditedCounts?auditedCounts.unique:kwData.length;
   const removedCount=kwRemoved?kwRemoved.length:0;
   const filteredCount=kwFiltered?kwFiltered.length:(kwTagged?kwTagged.length:0);
-  const highCount=kwTagged?kwTagged.filter(k=>k.label==='high').length:0;
+  const highCount=kwTagged?kwTagged.filter(k=>k.label==='high'&&k.origin!=='product').length:0;
   const tk0=titleKw&&titleKw.title_keywords?titleKw.title_keywords:{};
   const titleCount=((tk0.high||[]).length)+((tk0.relevant||[]).length);
 
   const stages=[
     {num:rawCount,label:'原始词',cls:''},
     {num:'-'+removedCount,label:'剔除',cls:'cut',p:pct(removedCount,rawCount)},
-    {num:filteredCount,label:'保留',cls:'keep',p:pct(filteredCount,rawCount)},
+    {num:filteredCount,label:'可用',cls:'keep',p:pct(filteredCount,rawCount)},
     {num:highCount,label:'高相关',cls:'',p:pct(highCount,filteredCount)},
     {num:titleCount,label:'标题核心词',cls:'peak'},
   ];
@@ -578,7 +577,7 @@ function render(){
      </div>`).join('');
 
   document.getElementById('metaSummary').innerHTML=
-    `<b>${siteLabel}</b> · <b>${esc(language)}</b> · <b>${rawCount}</b> 原始词 · 保留 <b>${filteredCount}</b> · 标题核心 <b>${titleCount}</b>`;
+    `<b>${esc(siteLabel)}</b> · <b>${esc(language)}</b> · <b>${rawCount}</b> 原始词 · 保留 <b>${filteredCount}</b> · 标题核心 <b>${titleCount}</b>`;
 
   /* 01 画像 */
   if(profile){
@@ -586,12 +585,12 @@ function render(){
       {label:'目标站点',value:site},
       {label:'文案语言',value:language},
       {label:'品类',value:profile.category},
-      {label:'人群',value:(profile.audience&&profile.audience.identity||[]).join('、')},
-      {label:'材质',value:(profile.materials||[]).join('、')},
-      {label:'功能',value:(profile.functions||[]).join('、')},
-      {label:'场景',value:(profile.scenes||[]).join('、')},
-      {label:'痛点',value:(profile.pain_points||[]).join('、')},
-      {label:'限制',value:(profile.limitations||[]).join('、')},
+      {label:'人群',value:listValue(Array.isArray(profile.audience)?profile.audience:profile.audience&&profile.audience.identity||[])},
+      {label:'材质',value:listValue(profile.materials||[])},
+      {label:'功能',value:listValue(profile.functions||[])},
+      {label:'场景',value:listValue(profile.scenes||[])},
+      {label:'痛点',value:listValue(profile.pain_points||[])},
+      {label:'限制',value:listValue(profile.limitations||[])},
     ];
     document.getElementById('profileGrid').innerHTML=items.map(i=>{
       const v=i.value&&String(i.value).trim();
@@ -602,35 +601,41 @@ function render(){
     document.getElementById('profileGrid').innerHTML='<div class="empty-note">暂无画像数据</div>';
   }
 
-  /* 02 扩词 */
+  /* 02 本地表格导入；保留原七章节 DOM 结构 */
   if(kwRaw){
-    const totalSearches=kwData.reduce((s,k)=>s+kwSearch(k),0);
-    /* ASIN 列表实际在 01_product_profile.json 的 asins；兼容旧 source_asins */
-    const asinCount=(profile&&Array.isArray(profile.asins)?profile.asins:(kwRaw.source_asins||[])).length;
+    const knownSearches=kwData.map(kwSearch).filter(n=>n!==null);
+    const totalSearches=knownSearches.reduce((sum,n)=>sum+n,0);
+    const fileCount=Array.isArray(kwRaw.source_files)?kwRaw.source_files.length:null;
     document.getElementById('expandStats').innerHTML=`
       <div class="stat"><div class="num">${rawCount}</div><div class="label">总词数</div></div>
-      <div class="stat s-teal"><div class="num teal">${asinCount}</div><div class="label">来源 ASIN</div></div>
-      <div class="stat"><div class="num">${formatNum(totalSearches)}</div><div class="label">总月搜索量</div></div>`;
-    const topKw=[...kwData].sort((a,b)=>kwSearch(b)-kwSearch(a)).slice(0,50);
+      <div class="stat s-teal"><div class="num teal">${fileCount??'未记录'}</div><div class="label">来源表格</div></div>
+      <div class="stat"><div class="num">${knownSearches.length?formatNum(totalSearches):'未知'}</div><div class="label">${knownSearches.length===kwData.length?'总月搜索量':'已知月搜索量'}</div></div>`;
+    const topKw=[...kwData].sort((a,b)=>(kwSearch(b)??-1)-(kwSearch(a)??-1)).slice(0,50);
     document.getElementById('expandDetail').innerHTML=topKw.map(k=>
-      `<span class="kw-item">${esc(kwName(k))}<span class="traffic">${formatNum(kwSearch(k))}</span></span>`
+      `<span class="kw-item">${esc(kwName(k))}<span class="traffic">${kwSearch(k)===null?'未知':formatNum(kwSearch(k))}</span></span>`
     ).join('')||'<div class="empty-note">无</div>';
   }else{
-    document.getElementById('expandStats').innerHTML='<div class="empty-note">暂无扩词数据</div>';
+    document.getElementById('expandStats').innerHTML='<div class="empty-note">暂无表格导入数据</div>';
   }
 
   /* 03 过滤 */
   if(kwRemoved){
-    const reasons={};
-    kwRemoved.forEach(k=>{const r=(k.reason||'其他').split(':')[0].split('：')[0].trim();reasons[r]=(reasons[r]||0)+1;});
+    const pendingCount=kwPending?kwPending.length:0;
+    const reasons=Object.create(null);
+    const reasonLabels={product_mismatch:'完整商品意图不符',fact_conflict:'已确认事实冲突',user_restriction:'用户明确禁用',unusable_query:'不可用查询'};
+    kwRemoved.forEach(k=>{const r=reasonLabels[k.reason_code]||(k.reason||'其他').split(':')[0].split('：')[0].trim();reasons[r]=(reasons[r]||0)+1;});
     document.getElementById('filterStats').innerHTML=`
       <div class="stats-row">
-        <div class="stat s-cut"><div class="num cut">${removedCount}</div><div class="label">剔除</div></div>
-        <div class="stat s-keep"><div class="num keep">${filteredCount}</div><div class="label">保留</div></div>
-        <div class="stat"><div class="num">${pct(filteredCount,rawCount)||'—'}</div><div class="label">保留率</div></div>
+        <div class="stat s-keep"><div class="num keep">${filteredCount}</div><div class="label">可用词</div></div>
+        <div class="stat s-teal"><div class="num teal">${kwPending?pendingCount:'—'}</div><div class="label">待评估</div></div>
+        <div class="stat s-cut"><div class="num cut">${removedCount}</div><div class="label">剔除词</div></div>
       </div>
+      <div class="empty-note" style="margin-top:14px">${auditedCounts?`原始记录 ${auditedCounts.raw_records} · 唯一词 ${auditedCounts.unique} · 重复记录 ${auditedCounts.duplicates} · 本品补充词 ${auditedCounts.supplemental}。`:'历史筛词记录，尚未完成新版审查。'} ${keywordAudit&&keywordAudit.status==='passed'?'分类检查通过。':'筛词审查尚未通过。'}</div>
       <div style="margin-top:14px">${Object.entries(reasons).sort((a,b)=>b[1]-a[1]).map(([r,c])=>`<span class="tag tag-reason">${esc(r)} · ${c}</span>`).join('')}</div>`;
-    document.getElementById('removedDetail').innerHTML=kwRemoved.slice(0,120).map(k=>
+    document.getElementById('eligibleDetail').innerHTML=(kwFiltered||[]).map(word=>`<span class="kw-item">${esc(word)}</span>`).join('')||'<div class="empty-note">无</div>';
+    document.getElementById('pendingToggle').hidden=!kwPending;
+    document.getElementById('pendingDetail').innerHTML=(kwPending||[]).map(k=>`<span class="kw-item">${esc(k.keyword)}<span class="traffic reason">${esc(k.reason||'')} · 晋级条件：${esc(k.promotion_condition||'未填写')}</span></span>`).join('')||'<div class="empty-note">无</div>';
+    document.getElementById('removedDetail').innerHTML=kwRemoved.map(k=>
       `<span class="kw-item">${esc(k.keyword)}<span class="traffic reason">${esc(k.reason||'')}</span></span>`
     ).join('')||'<div class="empty-note">无</div>';
   }else{
@@ -648,9 +653,9 @@ function render(){
       </div>`;
     document.getElementById('tagDetail').innerHTML=
       `<div class="tag-group-label">高相关核心词</div>`+
-      (highKws.slice(0,40).map(k=>`<span class="tag tag-high">${esc(k.keyword)}</span>`).join('')||'<span class="empty-note">无</span>')+
+      (highKws.map(k=>`<span class="tag tag-high">${esc(k.keyword)}</span>`).join('')||'<span class="empty-note">无</span>')+
       `<div class="tag-group-label">泛流量词</div>`+
-      (relKws.slice(0,30).map(k=>`<span class="tag tag-relevant">${esc(k.keyword)}</span>`).join('')||'<span class="empty-note">无</span>');
+      (relKws.map(k=>`<span class="tag tag-relevant">${esc(k.keyword)}</span>`).join('')||'<span class="empty-note">无</span>');
   }else{
     document.getElementById('tagStats').innerHTML='<div class="empty-note">暂无标注数据</div>';
   }
@@ -667,15 +672,16 @@ function render(){
     document.getElementById('titleKeywords').innerHTML='<div class="empty-note">暂无标题核心词</div>';
   }
 
+
   /* 06 QA */
   if(qa&&qa.status==='skipped'){
     document.getElementById('qaTick').textContent='Skipped';
     document.getElementById('qaTitle').textContent='买家问题（未启用）';
-    document.getElementById('qaSubtitle').textContent=`${site} 站不调用仅面向 US 的 Rufus 问答服务`;
-    document.getElementById('qaSection').innerHTML=`<div class="empty-note">已按站点规则跳过 Rufus，不影响 ${site} 站 Listing 生成。</div>`;
+    document.getElementById('qaSubtitle').textContent=`当前连接器仅接 US 的购物问答；${site} 站已跳过`;
+    document.getElementById('qaSection').innerHTML=`<div class="empty-note">已按站点规则跳过后端问答，不影响 ${esc(site)} 站 Listing 生成。</div>`;
   }else if(qa&&qa.status==='unavailable'){
     document.getElementById('qaTick').textContent='Unavailable';
-    document.getElementById('qaSubtitle').textContent='Rufus 问答服务本次不可用，报告保留其余完整产物';
+    document.getElementById('qaSubtitle').textContent='本次未取得购物问答；其他内容与验收状态见报告';
     document.getElementById('qaSection').innerHTML='<div class="empty-note">本次未取得买家问题。</div>';
   }else if(qa){
     const pairs=qa.qa_pairs||(Array.isArray(qa)?qa:[]);
@@ -690,16 +696,14 @@ function render(){
     document.getElementById('qaSection').innerHTML='<div class="empty-note">暂无买家问题</div>';
   }
 
-  /* 07 Listing */
-  let listingMd=(document.getElementById('data-listing').textContent||'').trim();
-  if(listingMd&&!listingMd.includes('\n')&&listingMd.includes('\\n')){listingMd=listingMd.replace(/\\n/g,'\n');}
-  if(listingMd&&!listingMd.startsWith('__DATA_')){
-    document.getElementById('listingSection').innerHTML=renderMarkdown(listingMd);
-  }else{
-    document.getElementById('listingSection').innerHTML='<div class="empty-note">暂无最终 Listing</div>';
-  }
+  /* Listing 与验收状态已在生成时安全渲染；禁用脚本仍可阅读全部内容。 */
 }
-render();
+try{render();}catch(error){
+  const status=document.getElementById('validationSection');
+  status.dataset.validationStatus='incomplete';
+  status.textContent='报告数据异常，尚未完成验收';
+  status.title=error.message;
+}
 </script>
 </body>
 </html>

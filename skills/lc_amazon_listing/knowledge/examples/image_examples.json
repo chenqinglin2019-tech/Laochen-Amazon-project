@@ -1,0 +1,3584 @@
+{
+  "version": "2.1",
+  "domain": "media",
+  "contract_ref": "../data_contract.md",
+  "policy_ref": "../quality_policy.json",
+  "note": "事实驱动的教学夹具；示例中的产品、用户资料及来源定位是明确提供的演示输入，不是真实商品声明。good_listing 使用完整 v2.1 契约；bad_cases.listing_patch 仅展示待替换字段。参数均应经 normalize 复算；本示例没有后端或语义验收记录，不可宣称交付已通过。 bad_cases.expected_failure 是审查类别，不是工具错误码。",
+  "examples": [
+    {
+      "case_id": "media_scope_and_text_sync",
+      "input_profile": {
+        "schema_version": "2.1",
+        "listing_mode": "family",
+        "site": "US",
+        "listing_language": "English",
+        "listing_language_code": "en",
+        "brand": null,
+        "category": "Decorative bud vase",
+        "audience": {
+          "identity": [
+            "home decorators"
+          ]
+        },
+        "materials": [
+          "glass"
+        ],
+        "functions": [
+          "display a single flower stem"
+        ],
+        "scenes": [
+          "shelf",
+          "desk"
+        ],
+        "specs": {},
+        "limitations": [],
+        "pain_points": [
+          "choose a color and height for a display space"
+        ],
+        "product_identity": {
+          "original_name": "玻璃单枝花瓶",
+          "canonical_name": "Glass Bud Vase",
+          "protected_terms": [
+            "Glass Bud Vase"
+          ]
+        },
+        "facts": [
+          {
+            "fact_id": "family_identity",
+            "field": "product_type",
+            "value": "Glass Bud Vase",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          },
+          {
+            "fact_id": "family_material",
+            "field": "material",
+            "value": "glass",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          },
+          {
+            "fact_id": "family_use",
+            "field": "intended_use",
+            "value": "display a single fresh or dried flower stem on a shelf or desk",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          },
+          {
+            "fact_id": "family_care",
+            "field": "care",
+            "value": "hand wash",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          }
+        ],
+        "measurements": [],
+        "images": [
+          {
+            "image_id": "variant_01_front",
+            "source": "example:media_scope_and_text_sync:variant_01_front",
+            "applies_to": [
+              "variant_01"
+            ]
+          },
+          {
+            "image_id": "variant_01_detail",
+            "source": "example:media_scope_and_text_sync:variant_01_detail",
+            "applies_to": [
+              "variant_01"
+            ]
+          },
+          {
+            "image_id": "variant_02_front",
+            "source": "example:media_scope_and_text_sync:variant_02_front",
+            "applies_to": [
+              "variant_02"
+            ]
+          },
+          {
+            "image_id": "variant_02_detail",
+            "source": "example:media_scope_and_text_sync:variant_02_detail",
+            "applies_to": [
+              "variant_02"
+            ]
+          },
+          {
+            "image_id": "variant_03_front",
+            "source": "example:media_scope_and_text_sync:variant_03_front",
+            "applies_to": [
+              "variant_03"
+            ]
+          },
+          {
+            "image_id": "variant_03_detail",
+            "source": "example:media_scope_and_text_sync:variant_03_detail",
+            "applies_to": [
+              "variant_03"
+            ]
+          }
+        ],
+        "forbidden_terms": [],
+        "parent_sku": null,
+        "variation_dimensions": [
+          "color",
+          "size"
+        ],
+        "variation_theme": {
+          "name": "Color/Size",
+          "source_ref": "example:user_provided_category_template_for_this_fixture",
+          "status": "confirmed"
+        },
+        "variants": [
+          {
+            "variant_id": "variant_01",
+            "sku": "VASE-BLUE-S",
+            "asin": null,
+            "attributes": {
+              "color": {
+                "value": "Blue",
+                "display": "Blue",
+                "title_value": "Blue"
+              },
+              "size": {
+                "value": "10.16 cm",
+                "display": "4 in",
+                "title_value": "4 in",
+                "measurement_id": "variant_01_height"
+              }
+            },
+            "facts": [
+              {
+                "fact_id": "variant_01_color",
+                "field": "color",
+                "value": "Blue",
+                "source_ref": "example:user_supplied_product_brief",
+                "status": "confirmed"
+              }
+            ],
+            "measurements": [
+              {
+                "measurement_id": "variant_01_height",
+                "kind": "length",
+                "subject": "product",
+                "label": "height",
+                "value": "10.16",
+                "unit": "cm",
+                "source_ref": "example:user_supplied_measurement_sheet",
+                "display_value": "4",
+                "display_unit": "in",
+                "display_text": "4 in",
+                "approximate": false
+              }
+            ],
+            "image_ids": [
+              "variant_01_front",
+              "variant_01_detail"
+            ]
+          },
+          {
+            "variant_id": "variant_02",
+            "sku": null,
+            "asin": null,
+            "attributes": {
+              "color": {
+                "value": "Blue",
+                "display": "Blue",
+                "title_value": "Blue"
+              },
+              "size": {
+                "value": "15.24 cm",
+                "display": "6 in",
+                "title_value": "6 in",
+                "measurement_id": "variant_02_height"
+              }
+            },
+            "facts": [
+              {
+                "fact_id": "variant_02_color",
+                "field": "color",
+                "value": "Blue",
+                "source_ref": "example:user_supplied_product_brief",
+                "status": "confirmed"
+              }
+            ],
+            "measurements": [
+              {
+                "measurement_id": "variant_02_height",
+                "kind": "length",
+                "subject": "product",
+                "label": "height",
+                "value": "15.24",
+                "unit": "cm",
+                "source_ref": "example:user_supplied_measurement_sheet",
+                "display_value": "6",
+                "display_unit": "in",
+                "display_text": "6 in",
+                "approximate": false
+              }
+            ],
+            "image_ids": [
+              "variant_02_front",
+              "variant_02_detail"
+            ]
+          },
+          {
+            "variant_id": "variant_03",
+            "sku": "VASE-CLEAR-L",
+            "asin": null,
+            "attributes": {
+              "color": {
+                "value": "Clear",
+                "display": "Clear",
+                "title_value": "Clear"
+              },
+              "size": {
+                "value": "15.24 cm",
+                "display": "6 in",
+                "title_value": "6 in",
+                "measurement_id": "variant_03_height"
+              }
+            },
+            "facts": [
+              {
+                "fact_id": "variant_03_color",
+                "field": "color",
+                "value": "Clear",
+                "source_ref": "example:user_supplied_product_brief",
+                "status": "confirmed"
+              }
+            ],
+            "measurements": [
+              {
+                "measurement_id": "variant_03_height",
+                "kind": "length",
+                "subject": "product",
+                "label": "height",
+                "value": "15.24",
+                "unit": "cm",
+                "source_ref": "example:user_supplied_measurement_sheet",
+                "display_value": "6",
+                "display_unit": "in",
+                "display_text": "6 in",
+                "approximate": false
+              }
+            ],
+            "image_ids": [
+              "variant_03_front",
+              "variant_03_detail"
+            ]
+          }
+        ],
+        "appearance_assessment": {
+          "status": "different",
+          "differences_only_size_or_quantity": false,
+          "source_ref": "example:user_supplied_Blue_and_Clear_reference_images"
+        }
+      },
+      "good_listing": {
+        "schema_version": "2.1",
+        "listing_mode": "family",
+        "site": "US",
+        "listing_language": "English",
+        "listing_language_code": "en",
+        "parent": {
+          "sku": null,
+          "title": "Glass Bud Vase for Single Stems",
+          "item_highlight": "Glass vase for displaying an individual fresh or dried stem on a shelf or desk",
+          "claims": [
+            {
+              "field": "title",
+              "fact_ids": [
+                "family_identity",
+                "family_use"
+              ],
+              "measurement_ids": []
+            },
+            {
+              "field": "item_highlight",
+              "fact_ids": [
+                "family_material",
+                "family_use"
+              ],
+              "measurement_ids": []
+            }
+          ]
+        },
+        "title_template": "Glass Bud Vase, {color}, {size}",
+        "shared_content": {
+          "bullets": [
+            "【SINGLE-STEM DISPLAY】A glass bud vase for an individual fresh or dried flower stem.",
+            "【GLASS BODY】A simple vessel that keeps attention on the flower arrangement.",
+            "【FOR SHELVES OR DESKS】Choose a color and size to suit your display space.",
+            "【CHOOSE YOUR VARIANT】Review the color and height shown for the selected vase.",
+            "【CARE】Hand wash the glass vase."
+          ],
+          "description": "This Glass Bud Vase displays an individual fresh or dried flower stem on a shelf or desk. Choose the color and height for your arrangement. Hand wash the glass vase.",
+          "search_terms": "floral vessel tabletop decor"
+        },
+        "variants": [
+          {
+            "variant_id": "variant_01",
+            "sku": "VASE-BLUE-S",
+            "attributes": {
+              "color": "Blue",
+              "size": "4 in"
+            },
+            "title": "Glass Bud Vase, Blue, 4 in",
+            "item_highlight": "Glass vase for an individual fresh or dried stem on a shelf or desk",
+            "content_overrides": {
+              "bullets": [
+                "【SINGLE-STEM DISPLAY】A glass bud vase for an individual fresh or dried flower stem.",
+                "【GLASS BODY】A simple vessel that keeps attention on the flower arrangement.",
+                "【FOR SHELVES OR DESKS】Choose a color and size to suit your display space.",
+                "【SELECTED VARIANT】Blue glass; height 4 in. Check your display space before choosing.",
+                "【CARE】Hand wash the glass vase."
+              ],
+              "description": "This Blue Glass Bud Vase displays an individual fresh or dried flower stem on a shelf or desk. Its height is 4 in. Hand wash the glass vase."
+            },
+            "claims": [
+              {
+                "field": "title",
+                "fact_ids": [
+                  "family_identity",
+                  "variant_01_color"
+                ],
+                "measurement_ids": [
+                  "variant_01_height"
+                ]
+              },
+              {
+                "field": "item_highlight",
+                "fact_ids": [
+                  "family_material",
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[0]",
+                "fact_ids": [
+                  "family_identity",
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[1]",
+                "fact_ids": [
+                  "family_material"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[2]",
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[3]",
+                "fact_ids": [
+                  "variant_01_color"
+                ],
+                "measurement_ids": [
+                  "variant_01_height"
+                ]
+              },
+              {
+                "field": "bullets[4]",
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "description",
+                "fact_ids": [
+                  "family_identity",
+                  "family_use",
+                  "family_care",
+                  "variant_01_color"
+                ],
+                "measurement_ids": [
+                  "variant_01_height"
+                ]
+              }
+            ]
+          },
+          {
+            "variant_id": "variant_02",
+            "sku": null,
+            "attributes": {
+              "color": "Blue",
+              "size": "6 in"
+            },
+            "title": "Glass Bud Vase, Blue, 6 in",
+            "item_highlight": "Glass vase for an individual fresh or dried stem on a shelf or desk",
+            "content_overrides": {
+              "bullets": [
+                "【SINGLE-STEM DISPLAY】A glass bud vase for an individual fresh or dried flower stem.",
+                "【GLASS BODY】A simple vessel that keeps attention on the flower arrangement.",
+                "【FOR SHELVES OR DESKS】Choose a color and size to suit your display space.",
+                "【SELECTED VARIANT】Blue glass; height 6 in. Check your display space before choosing.",
+                "【CARE】Hand wash the glass vase."
+              ],
+              "description": "This Blue Glass Bud Vase displays an individual fresh or dried flower stem on a shelf or desk. Its height is 6 in. Hand wash the glass vase."
+            },
+            "claims": [
+              {
+                "field": "title",
+                "fact_ids": [
+                  "family_identity",
+                  "variant_02_color"
+                ],
+                "measurement_ids": [
+                  "variant_02_height"
+                ]
+              },
+              {
+                "field": "item_highlight",
+                "fact_ids": [
+                  "family_material",
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[0]",
+                "fact_ids": [
+                  "family_identity",
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[1]",
+                "fact_ids": [
+                  "family_material"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[2]",
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[3]",
+                "fact_ids": [
+                  "variant_02_color"
+                ],
+                "measurement_ids": [
+                  "variant_02_height"
+                ]
+              },
+              {
+                "field": "bullets[4]",
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "description",
+                "fact_ids": [
+                  "family_identity",
+                  "family_use",
+                  "family_care",
+                  "variant_02_color"
+                ],
+                "measurement_ids": [
+                  "variant_02_height"
+                ]
+              }
+            ]
+          },
+          {
+            "variant_id": "variant_03",
+            "sku": "VASE-CLEAR-L",
+            "attributes": {
+              "color": "Clear",
+              "size": "6 in"
+            },
+            "title": "Glass Bud Vase, Clear, 6 in",
+            "item_highlight": "Glass vase for an individual fresh or dried stem on a shelf or desk",
+            "content_overrides": {
+              "bullets": [
+                "【SINGLE-STEM DISPLAY】A glass bud vase for an individual fresh or dried flower stem.",
+                "【GLASS BODY】A simple vessel that keeps attention on the flower arrangement.",
+                "【FOR SHELVES OR DESKS】Choose a color and size to suit your display space.",
+                "【SELECTED VARIANT】Clear glass; height 6 in. Check your display space before choosing.",
+                "【CARE】Hand wash the glass vase."
+              ],
+              "description": "This Clear Glass Bud Vase displays an individual fresh or dried flower stem on a shelf or desk. Its height is 6 in. Hand wash the glass vase."
+            },
+            "claims": [
+              {
+                "field": "title",
+                "fact_ids": [
+                  "family_identity",
+                  "variant_03_color"
+                ],
+                "measurement_ids": [
+                  "variant_03_height"
+                ]
+              },
+              {
+                "field": "item_highlight",
+                "fact_ids": [
+                  "family_material",
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[0]",
+                "fact_ids": [
+                  "family_identity",
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[1]",
+                "fact_ids": [
+                  "family_material"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[2]",
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[3]",
+                "fact_ids": [
+                  "variant_03_color"
+                ],
+                "measurement_ids": [
+                  "variant_03_height"
+                ]
+              },
+              {
+                "field": "bullets[4]",
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "description",
+                "fact_ids": [
+                  "family_identity",
+                  "family_use",
+                  "family_care",
+                  "variant_03_color"
+                ],
+                "measurement_ids": [
+                  "variant_03_height"
+                ]
+              }
+            ]
+          }
+        ],
+        "image_plan": [
+          {
+            "plan_id": "family_main",
+            "role": "main",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。",
+            "buyer_question": "我买到的是什么产品？",
+            "selling_point": "真实玻璃单枝花瓶及造型",
+            "visual_evidence": "主图只出现本次购买的单只花瓶，真实轮廓可与产品资料核对。",
+            "scene_intent": "寻找玻璃单枝花瓶，先确认商品身份",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "title"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图1（主图）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material",
+                  "variant_01_color"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "title"
+                ],
+                "overlay_text": "",
+                "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material",
+                  "variant_02_color"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "title"
+                ],
+                "overlay_text": "",
+                "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_front"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material",
+                  "variant_03_color"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "title"
+                ],
+                "overlay_text": "",
+                "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_1",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。",
+            "buyer_question": "近看花瓶是什么造型？",
+            "selling_point": "清楚展示轮廓与瓶口",
+            "visual_evidence": "轮廓与瓶口近景直接对应实物参考图，不以文字代替结构展示。",
+            "scene_intent": "比较花瓶轮廓与瓶口外观",
+            "overlay_text": "Glass Bud Vase",
+            "fact_ids": [
+              "family_identity",
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[0]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图2（造型特写）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_detail"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[0]"
+                ],
+                "overlay_text": "Glass Bud Vase",
+                "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_detail"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[0]"
+                ],
+                "overlay_text": "Glass Bud Vase",
+                "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_detail"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[0]"
+                ],
+                "overlay_text": "Glass Bud Vase",
+                "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_2",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。",
+            "buyer_question": "鲜花和干花都可以展示吗？",
+            "selling_point": "单枝鲜花或干花展示用途",
+            "visual_evidence": "两种花材的单枝摆放示例说明已确认的用途；道具范围标识清楚。",
+            "scene_intent": "寻找适合单枝鲜花或干花的花瓶",
+            "overlay_text": "For a Single Fresh or Dried Stem",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图3（花材展示）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "For a Single Fresh or Dried Stem",
+                "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "For a Single Fresh or Dried Stem",
+                "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "For a Single Fresh or Dried Stem",
+                "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_3",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。",
+            "buyer_question": "花瓶本体是什么材质？",
+            "selling_point": "实物玻璃材质可判断",
+            "visual_evidence": "实物表面与边缘特写支持玻璃材质判断，不能证明抗摔或耐热性能。",
+            "scene_intent": "确认花瓶的玻璃材质",
+            "overlay_text": "Glass Body",
+            "fact_ids": [
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图4（材质细节）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_detail"
+                ],
+                "fact_ids": [
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "Glass Body",
+                "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_detail"
+                ],
+                "fact_ids": [
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "Glass Body",
+                "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_detail"
+                ],
+                "fact_ids": [
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "Glass Body",
+                "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_4",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。",
+            "buyer_question": "适合摆在怎样的位置？",
+            "selling_point": "桌面和置物架上的单枝装饰",
+            "visual_evidence": "桌面与置物架的实际摆放画面展示已确认场景，花瓶大小保持实物比例。",
+            "scene_intent": "寻找桌面或置物架装饰花瓶",
+            "overlay_text": "For a Shelf or Desk",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图5（桌面场景）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "For a Shelf or Desk",
+                "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "For a Shelf or Desk",
+                "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "For a Shelf or Desk",
+                "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_5",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。",
+            "buyer_question": "高度和宽度能否适合我的位置？",
+            "selling_point": "购买前核对实际尺寸",
+            "visual_evidence": "箭头方向与高度/宽度标签一致，数值取自对应本品或子体的测量记录。",
+            "scene_intent": "按实际尺寸选择适合展示空间的花瓶",
+            "overlay_text": "Check Your Display Space",
+            "fact_ids": [],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[3]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图6（尺寸适配）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [],
+                "measurement_ids": [
+                  "variant_01_height"
+                ],
+                "body_refs": [
+                  "bullets[3]"
+                ],
+                "overlay_text": "Height 4 in",
+                "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [],
+                "measurement_ids": [
+                  "variant_02_height"
+                ],
+                "body_refs": [
+                  "bullets[3]"
+                ],
+                "overlay_text": "Height 6 in",
+                "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_front"
+                ],
+                "fact_ids": [],
+                "measurement_ids": [
+                  "variant_03_height"
+                ],
+                "body_refs": [
+                  "bullets[3]"
+                ],
+                "overlay_text": "Height 6 in",
+                "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_6",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。",
+            "buyer_question": "使用后怎样清洗？",
+            "selling_point": "清楚的手洗要求",
+            "visual_evidence": "手洗动作和简短文字共同表达资料给出的护理方式。",
+            "scene_intent": "了解玻璃花瓶的清洗方法",
+            "overlay_text": "Hand Wash",
+            "fact_ids": [
+              "family_care"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[4]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图7（手洗护理）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_detail"
+                ],
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[4]"
+                ],
+                "overlay_text": "Hand Wash",
+                "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_detail"
+                ],
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[4]"
+                ],
+                "overlay_text": "Hand Wash",
+                "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_detail"
+                ],
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[4]"
+                ],
+                "overlay_text": "Hand Wash",
+                "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "variant_01_main",
+            "role": "main",
+            "applies_to": [
+              "variant_01"
+            ],
+            "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "我买到的是什么产品？",
+            "selling_point": "真实玻璃单枝花瓶及造型",
+            "visual_evidence": "主图只出现本次购买的单只花瓶，真实轮廓可与产品资料核对。",
+            "scene_intent": "寻找玻璃单枝花瓶，先确认商品身份",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_material",
+              "variant_01_color"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_01_front"
+            ],
+            "body_refs": [
+              "title"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图1（主图）"
+          },
+          {
+            "plan_id": "variant_01_secondary_1",
+            "role": "secondary",
+            "applies_to": [
+              "variant_01"
+            ],
+            "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "近看花瓶是什么造型？",
+            "selling_point": "清楚展示轮廓与瓶口",
+            "visual_evidence": "轮廓与瓶口近景直接对应实物参考图，不以文字代替结构展示。",
+            "scene_intent": "比较花瓶轮廓与瓶口外观",
+            "overlay_text": "Glass Bud Vase",
+            "fact_ids": [
+              "family_identity",
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_01_detail"
+            ],
+            "body_refs": [
+              "bullets[0]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图2（造型特写）"
+          },
+          {
+            "plan_id": "variant_01_secondary_2",
+            "role": "secondary",
+            "applies_to": [
+              "variant_01"
+            ],
+            "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "鲜花和干花都可以展示吗？",
+            "selling_point": "单枝鲜花或干花展示用途",
+            "visual_evidence": "两种花材的单枝摆放示例说明已确认的用途；道具范围标识清楚。",
+            "scene_intent": "寻找适合单枝鲜花或干花的花瓶",
+            "overlay_text": "For a Single Fresh or Dried Stem",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_01_front"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图3（花材展示）"
+          },
+          {
+            "plan_id": "variant_01_secondary_3",
+            "role": "secondary",
+            "applies_to": [
+              "variant_01"
+            ],
+            "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "花瓶本体是什么材质？",
+            "selling_point": "实物玻璃材质可判断",
+            "visual_evidence": "实物表面与边缘特写支持玻璃材质判断，不能证明抗摔或耐热性能。",
+            "scene_intent": "确认花瓶的玻璃材质",
+            "overlay_text": "Glass Body",
+            "fact_ids": [
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_01_detail"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图4（材质细节）"
+          },
+          {
+            "plan_id": "variant_01_secondary_4",
+            "role": "secondary",
+            "applies_to": [
+              "variant_01"
+            ],
+            "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "适合摆在怎样的位置？",
+            "selling_point": "桌面和置物架上的单枝装饰",
+            "visual_evidence": "桌面与置物架的实际摆放画面展示已确认场景，花瓶大小保持实物比例。",
+            "scene_intent": "寻找桌面或置物架装饰花瓶",
+            "overlay_text": "For a Shelf or Desk",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_01_front"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图5（桌面场景）"
+          },
+          {
+            "plan_id": "variant_01_secondary_5",
+            "role": "secondary",
+            "applies_to": [
+              "variant_01"
+            ],
+            "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "高度和宽度能否适合我的位置？",
+            "selling_point": "购买前核对实际尺寸",
+            "visual_evidence": "箭头方向与高度/宽度标签一致，数值取自对应本品或子体的测量记录。",
+            "scene_intent": "按实际尺寸选择适合展示空间的花瓶",
+            "overlay_text": "Height 4 in",
+            "fact_ids": [],
+            "measurement_ids": [
+              "variant_01_height"
+            ],
+            "source_image_ids": [
+              "variant_01_front"
+            ],
+            "body_refs": [
+              "bullets[3]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图6（尺寸适配）"
+          },
+          {
+            "plan_id": "variant_01_secondary_6",
+            "role": "secondary",
+            "applies_to": [
+              "variant_01"
+            ],
+            "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "使用后怎样清洗？",
+            "selling_point": "清楚的手洗要求",
+            "visual_evidence": "手洗动作和简短文字共同表达资料给出的护理方式。",
+            "scene_intent": "了解玻璃花瓶的清洗方法",
+            "overlay_text": "Hand Wash",
+            "fact_ids": [
+              "family_care"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_01_detail"
+            ],
+            "body_refs": [
+              "bullets[4]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图7（手洗护理）"
+          },
+          {
+            "plan_id": "variant_02_main",
+            "role": "main",
+            "applies_to": [
+              "variant_02"
+            ],
+            "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "我买到的是什么产品？",
+            "selling_point": "真实玻璃单枝花瓶及造型",
+            "visual_evidence": "主图只出现本次购买的单只花瓶，真实轮廓可与产品资料核对。",
+            "scene_intent": "寻找玻璃单枝花瓶，先确认商品身份",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_material",
+              "variant_02_color"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_02_front"
+            ],
+            "body_refs": [
+              "title"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图1（主图）"
+          },
+          {
+            "plan_id": "variant_02_secondary_1",
+            "role": "secondary",
+            "applies_to": [
+              "variant_02"
+            ],
+            "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "近看花瓶是什么造型？",
+            "selling_point": "清楚展示轮廓与瓶口",
+            "visual_evidence": "轮廓与瓶口近景直接对应实物参考图，不以文字代替结构展示。",
+            "scene_intent": "比较花瓶轮廓与瓶口外观",
+            "overlay_text": "Glass Bud Vase",
+            "fact_ids": [
+              "family_identity",
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_02_detail"
+            ],
+            "body_refs": [
+              "bullets[0]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图2（造型特写）"
+          },
+          {
+            "plan_id": "variant_02_secondary_2",
+            "role": "secondary",
+            "applies_to": [
+              "variant_02"
+            ],
+            "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "鲜花和干花都可以展示吗？",
+            "selling_point": "单枝鲜花或干花展示用途",
+            "visual_evidence": "两种花材的单枝摆放示例说明已确认的用途；道具范围标识清楚。",
+            "scene_intent": "寻找适合单枝鲜花或干花的花瓶",
+            "overlay_text": "For a Single Fresh or Dried Stem",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_02_front"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图3（花材展示）"
+          },
+          {
+            "plan_id": "variant_02_secondary_3",
+            "role": "secondary",
+            "applies_to": [
+              "variant_02"
+            ],
+            "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "花瓶本体是什么材质？",
+            "selling_point": "实物玻璃材质可判断",
+            "visual_evidence": "实物表面与边缘特写支持玻璃材质判断，不能证明抗摔或耐热性能。",
+            "scene_intent": "确认花瓶的玻璃材质",
+            "overlay_text": "Glass Body",
+            "fact_ids": [
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_02_detail"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图4（材质细节）"
+          },
+          {
+            "plan_id": "variant_02_secondary_4",
+            "role": "secondary",
+            "applies_to": [
+              "variant_02"
+            ],
+            "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "适合摆在怎样的位置？",
+            "selling_point": "桌面和置物架上的单枝装饰",
+            "visual_evidence": "桌面与置物架的实际摆放画面展示已确认场景，花瓶大小保持实物比例。",
+            "scene_intent": "寻找桌面或置物架装饰花瓶",
+            "overlay_text": "For a Shelf or Desk",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_02_front"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图5（桌面场景）"
+          },
+          {
+            "plan_id": "variant_02_secondary_5",
+            "role": "secondary",
+            "applies_to": [
+              "variant_02"
+            ],
+            "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "高度和宽度能否适合我的位置？",
+            "selling_point": "购买前核对实际尺寸",
+            "visual_evidence": "箭头方向与高度/宽度标签一致，数值取自对应本品或子体的测量记录。",
+            "scene_intent": "按实际尺寸选择适合展示空间的花瓶",
+            "overlay_text": "Height 6 in",
+            "fact_ids": [],
+            "measurement_ids": [
+              "variant_02_height"
+            ],
+            "source_image_ids": [
+              "variant_02_front"
+            ],
+            "body_refs": [
+              "bullets[3]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图6（尺寸适配）"
+          },
+          {
+            "plan_id": "variant_02_secondary_6",
+            "role": "secondary",
+            "applies_to": [
+              "variant_02"
+            ],
+            "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "使用后怎样清洗？",
+            "selling_point": "清楚的手洗要求",
+            "visual_evidence": "手洗动作和简短文字共同表达资料给出的护理方式。",
+            "scene_intent": "了解玻璃花瓶的清洗方法",
+            "overlay_text": "Hand Wash",
+            "fact_ids": [
+              "family_care"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_02_detail"
+            ],
+            "body_refs": [
+              "bullets[4]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图7（手洗护理）"
+          },
+          {
+            "plan_id": "variant_03_main",
+            "role": "main",
+            "applies_to": [
+              "variant_03"
+            ],
+            "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "我买到的是什么产品？",
+            "selling_point": "真实玻璃单枝花瓶及造型",
+            "visual_evidence": "主图只出现本次购买的单只花瓶，真实轮廓可与产品资料核对。",
+            "scene_intent": "寻找玻璃单枝花瓶，先确认商品身份",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_material",
+              "variant_03_color"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_03_front"
+            ],
+            "body_refs": [
+              "title"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图1（主图）"
+          },
+          {
+            "plan_id": "variant_03_secondary_1",
+            "role": "secondary",
+            "applies_to": [
+              "variant_03"
+            ],
+            "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "近看花瓶是什么造型？",
+            "selling_point": "清楚展示轮廓与瓶口",
+            "visual_evidence": "轮廓与瓶口近景直接对应实物参考图，不以文字代替结构展示。",
+            "scene_intent": "比较花瓶轮廓与瓶口外观",
+            "overlay_text": "Glass Bud Vase",
+            "fact_ids": [
+              "family_identity",
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_03_detail"
+            ],
+            "body_refs": [
+              "bullets[0]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图2（造型特写）"
+          },
+          {
+            "plan_id": "variant_03_secondary_2",
+            "role": "secondary",
+            "applies_to": [
+              "variant_03"
+            ],
+            "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "鲜花和干花都可以展示吗？",
+            "selling_point": "单枝鲜花或干花展示用途",
+            "visual_evidence": "两种花材的单枝摆放示例说明已确认的用途；道具范围标识清楚。",
+            "scene_intent": "寻找适合单枝鲜花或干花的花瓶",
+            "overlay_text": "For a Single Fresh or Dried Stem",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_03_front"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图3（花材展示）"
+          },
+          {
+            "plan_id": "variant_03_secondary_3",
+            "role": "secondary",
+            "applies_to": [
+              "variant_03"
+            ],
+            "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "花瓶本体是什么材质？",
+            "selling_point": "实物玻璃材质可判断",
+            "visual_evidence": "实物表面与边缘特写支持玻璃材质判断，不能证明抗摔或耐热性能。",
+            "scene_intent": "确认花瓶的玻璃材质",
+            "overlay_text": "Glass Body",
+            "fact_ids": [
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_03_detail"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图4（材质细节）"
+          },
+          {
+            "plan_id": "variant_03_secondary_4",
+            "role": "secondary",
+            "applies_to": [
+              "variant_03"
+            ],
+            "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "适合摆在怎样的位置？",
+            "selling_point": "桌面和置物架上的单枝装饰",
+            "visual_evidence": "桌面与置物架的实际摆放画面展示已确认场景，花瓶大小保持实物比例。",
+            "scene_intent": "寻找桌面或置物架装饰花瓶",
+            "overlay_text": "For a Shelf or Desk",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_03_front"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图5（桌面场景）"
+          },
+          {
+            "plan_id": "variant_03_secondary_5",
+            "role": "secondary",
+            "applies_to": [
+              "variant_03"
+            ],
+            "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "高度和宽度能否适合我的位置？",
+            "selling_point": "购买前核对实际尺寸",
+            "visual_evidence": "箭头方向与高度/宽度标签一致，数值取自对应本品或子体的测量记录。",
+            "scene_intent": "按实际尺寸选择适合展示空间的花瓶",
+            "overlay_text": "Height 6 in",
+            "fact_ids": [],
+            "measurement_ids": [
+              "variant_03_height"
+            ],
+            "source_image_ids": [
+              "variant_03_front"
+            ],
+            "body_refs": [
+              "bullets[3]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图6（尺寸适配）"
+          },
+          {
+            "plan_id": "variant_03_secondary_6",
+            "role": "secondary",
+            "applies_to": [
+              "variant_03"
+            ],
+            "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "使用后怎样清洗？",
+            "selling_point": "清楚的手洗要求",
+            "visual_evidence": "手洗动作和简短文字共同表达资料给出的护理方式。",
+            "scene_intent": "了解玻璃花瓶的清洗方法",
+            "overlay_text": "Hand Wash",
+            "fact_ids": [
+              "family_care"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_03_detail"
+            ],
+            "body_refs": [
+              "bullets[4]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图7（手洗护理）"
+          }
+        ],
+        "brand_name": null,
+        "media_strategy": "per_variant_full",
+        "a_plus_plan": [
+          {
+            "plan_id": "family_aplus_1",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "宽幅展示桌面与单只花瓶，留足原生文字区域；花枝仅用于演示用途。",
+            "buyer_question": "花瓶怎样构成桌面的一处装饰？",
+            "selling_point": "玻璃花瓶与单枝花材组合",
+            "visual_evidence": "单只花瓶与单枝花材的整体场景说明用途，避免多件随售误解。",
+            "scene_intent": "寻找能展示单枝花材的桌面装饰",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块1：装饰概览",
+            "asset_type": "image",
+            "native_text": "A Glass Bud Vase for a Single Stem",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "",
+                "direction": "宽幅展示桌面与单只花瓶，留足原生文字区域；花枝仅用于演示用途。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "A Glass Bud Vase for a Single Stem"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "",
+                "direction": "宽幅展示桌面与单只花瓶，留足原生文字区域；花枝仅用于演示用途。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "A Glass Bud Vase for a Single Stem"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_front"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "",
+                "direction": "宽幅展示桌面与单只花瓶，留足原生文字区域；花枝仅用于演示用途。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "A Glass Bud Vase for a Single Stem"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_aplus_2",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "连续近景展示空花瓶和插入一枝花材的状态，避免暗示自带花枝。",
+            "buyer_question": "怎样开始单枝花材布置？",
+            "selling_point": "直观说明单枝插放方式",
+            "visual_evidence": "空瓶与插入单枝花材的连续画面对照说明使用方法。",
+            "scene_intent": "了解单枝花瓶怎样使用",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[0]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块2：摆放方式",
+            "asset_type": "image",
+            "native_text": "Display an Individual Fresh or Dried Stem",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[0]"
+                ],
+                "overlay_text": "",
+                "direction": "连续近景展示空花瓶和插入一枝花材的状态，避免暗示自带花枝。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Display an Individual Fresh or Dried Stem"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[0]"
+                ],
+                "overlay_text": "",
+                "direction": "连续近景展示空花瓶和插入一枝花材的状态，避免暗示自带花枝。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Display an Individual Fresh or Dried Stem"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[0]"
+                ],
+                "overlay_text": "",
+                "direction": "连续近景展示空花瓶和插入一枝花材的状态，避免暗示自带花枝。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Display an Individual Fresh or Dried Stem"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_aplus_3",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "配图展示瓶口、侧面与底部可见轮廓；保持真实结构，不添加防滑或防倾倒效果箭头。",
+            "buyer_question": "瓶身细节是什么样的？",
+            "selling_point": "让买家观察玻璃与轮廓",
+            "visual_evidence": "瓶口、侧面和底部的实物局部可查验造型，不暗示未给定防滑或稳定性能。",
+            "scene_intent": "近距离比较花瓶材质和结构",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块3：结构观察",
+            "asset_type": "image",
+            "native_text": "See the Glass Body and Vase Shape",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_detail"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "",
+                "direction": "配图展示瓶口、侧面与底部可见轮廓；保持真实结构，不添加防滑或防倾倒效果箭头。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "See the Glass Body and Vase Shape"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_detail"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "",
+                "direction": "配图展示瓶口、侧面与底部可见轮廓；保持真实结构，不添加防滑或防倾倒效果箭头。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "See the Glass Body and Vase Shape"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_detail"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "",
+                "direction": "配图展示瓶口、侧面与底部可见轮廓；保持真实结构，不添加防滑或防倾倒效果箭头。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "See the Glass Body and Vase Shape"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_aplus_4",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "配图使用本款轮廓和维度箭头，原生文字列尺寸并提醒核对摆放空间；不以手机等不确定物体代替尺寸。",
+            "buyer_question": "下单前如何核对展示空间？",
+            "selling_point": "把尺寸与选择步骤连起来",
+            "visual_evidence": "实际维度箭头与原生尺寸文字对应同一测量数据。",
+            "scene_intent": "下单前核对花瓶高度与摆放位置",
+            "overlay_text": "",
+            "fact_ids": [],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[3]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块4：空间选择",
+            "asset_type": "image",
+            "native_text": "Check the Height for Your Display Space",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [],
+                "measurement_ids": [
+                  "variant_01_height"
+                ],
+                "body_refs": [
+                  "bullets[3]"
+                ],
+                "overlay_text": "",
+                "direction": "配图使用本款轮廓和维度箭头，原生文字列尺寸并提醒核对摆放空间；不以手机等不确定物体代替尺寸。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Height 4 in"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [],
+                "measurement_ids": [
+                  "variant_02_height"
+                ],
+                "body_refs": [
+                  "bullets[3]"
+                ],
+                "overlay_text": "",
+                "direction": "配图使用本款轮廓和维度箭头，原生文字列尺寸并提醒核对摆放空间；不以手机等不确定物体代替尺寸。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Height 6 in"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_front"
+                ],
+                "fact_ids": [],
+                "measurement_ids": [
+                  "variant_03_height"
+                ],
+                "body_refs": [
+                  "bullets[3]"
+                ],
+                "overlay_text": "",
+                "direction": "配图使用本款轮廓和维度箭头，原生文字列尺寸并提醒核对摆放空间；不以手机等不确定物体代替尺寸。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Height 6 in"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_aplus_5",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "近景呈现手洗场景和擦净后单独摆放的花瓶；原生文字简明说明，不加入未给定的清洁方式。",
+            "buyer_question": "摆放后如何维护花瓶？",
+            "selling_point": "明确手洗而不扩张耐用承诺",
+            "visual_evidence": "手洗场景配原生护理文字，说明一致且不引入其他洗涤承诺。",
+            "scene_intent": "了解购买后的花瓶护理要求",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_care"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[4]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块5：日常护理",
+            "asset_type": "image",
+            "native_text": "Hand Wash the Glass Vase",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_detail"
+                ],
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[4]"
+                ],
+                "overlay_text": "",
+                "direction": "近景呈现手洗场景和擦净后单独摆放的花瓶；原生文字简明说明，不加入未给定的清洁方式。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Hand Wash the Glass Vase"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_detail"
+                ],
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[4]"
+                ],
+                "overlay_text": "",
+                "direction": "近景呈现手洗场景和擦净后单独摆放的花瓶；原生文字简明说明，不加入未给定的清洁方式。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Hand Wash the Glass Vase"
+              },
+              {
+                "variant_id": "variant_03",
+                "source_image_ids": [
+                  "variant_03_detail"
+                ],
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[4]"
+                ],
+                "overlay_text": "",
+                "direction": "近景呈现手洗场景和擦净后单独摆放的花瓶；原生文字简明说明，不加入未给定的清洁方式。 使用 VASE-CLEAR-L 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-CLEAR-L 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Hand Wash the Glass Vase"
+              }
+            ]
+          }
+        ],
+        "image_sets": {
+          "shared": {
+            "main": "family_main",
+            "secondary": [
+              "family_secondary_1",
+              "family_secondary_2",
+              "family_secondary_3",
+              "family_secondary_4",
+              "family_secondary_5",
+              "family_secondary_6"
+            ],
+            "a_plus": [
+              "family_aplus_1",
+              "family_aplus_2",
+              "family_aplus_3",
+              "family_aplus_4",
+              "family_aplus_5"
+            ]
+          },
+          "variants": [
+            {
+              "variant_id": "variant_01",
+              "main": "variant_01_main",
+              "secondary": [
+                "variant_01_secondary_1",
+                "variant_01_secondary_2",
+                "variant_01_secondary_3",
+                "variant_01_secondary_4",
+                "variant_01_secondary_5",
+                "variant_01_secondary_6"
+              ]
+            },
+            {
+              "variant_id": "variant_02",
+              "main": "variant_02_main",
+              "secondary": [
+                "variant_02_secondary_1",
+                "variant_02_secondary_2",
+                "variant_02_secondary_3",
+                "variant_02_secondary_4",
+                "variant_02_secondary_5",
+                "variant_02_secondary_6"
+              ]
+            },
+            {
+              "variant_id": "variant_03",
+              "main": "variant_03_main",
+              "secondary": [
+                "variant_03_secondary_1",
+                "variant_03_secondary_2",
+                "variant_03_secondary_3",
+                "variant_03_secondary_4",
+                "variant_03_secondary_5",
+                "variant_03_secondary_6"
+              ]
+            }
+          ]
+        },
+        "buyer_question_coverage": [
+          {
+            "question": "Can I use a fresh or dried stem?",
+            "status": "covered",
+            "location": "Description；附图花材展示；A+ 摆放方式",
+            "source": "local_editorial"
+          },
+          {
+            "question": "What are the vase dimensions?",
+            "status": "covered",
+            "location": "对应子体或单品第4点；尺寸图及 A+ 空间选择",
+            "source": "local_editorial"
+          },
+          {
+            "question": "How do I clean the vase?",
+            "status": "covered",
+            "location": "第5点、护理附图及 A+ 日常护理",
+            "source": "local_editorial"
+          },
+          {
+            "question": "Is the glass unbreakable?",
+            "status": "not_claimed",
+            "location": "资料无抗摔或防碎测试依据，未在文案或图片中主张",
+            "source": "local_editorial"
+          }
+        ],
+        "excluded_claims": [
+          "Unbreakable or shatterproof glass",
+          "Certified child safety",
+          "Guaranteed resistance to tipping",
+          "Dishwasher-safe care"
+        ]
+      },
+      "bad_cases": [
+        {
+          "listing_patch": {
+            "image_plan[5].variant_bindings[0].measurement_ids": [
+              "variant_02_height"
+            ]
+          },
+          "error": "把第二款高度引用绑定给第一款，引用范围和数值不同。",
+          "expected_failure": "measurement_scope"
+        },
+        {
+          "listing_patch": {
+            "image_plan[5].variant_bindings[1].overlay_text": "Height 15.24 cm"
+          },
+          "error": "第二款 US 尺寸图使用来源厘米，正文为英寸。",
+          "expected_failure": "measurement_consistency"
+        },
+        {
+          "listing_patch": {
+            "image_plan[0].overlay_text": "Best Vase - Buy Now"
+          },
+          "error": "共用主图模板加入营销嵌字。",
+          "expected_failure": "main_image_overlay"
+        },
+        {
+          "listing_patch": {
+            "a_plus_plan[0].selling_point": "所有款式均高 6 in，可作为防摔儿童花瓶。"
+          },
+          "error": "共同模块泄漏具体高度并补造防摔能力。",
+          "expected_failure": "image_truth"
+        },
+        {
+          "listing_patch": {
+            "image_sets.shared.secondary": [
+              "family_secondary_1"
+            ]
+          },
+          "error": "共用附图不足6张，不能用可渲染代替完整交付。",
+          "expected_failure": "media_count"
+        },
+        {
+          "listing_patch": {
+            "a_plus_plan[4].asset_type": "text"
+          },
+          "error": "纯文字模块不能凑足5张A+图片。",
+          "expected_failure": "aplus_image_count"
+        }
+      ],
+      "acceptance": [
+        "每张图有一个买家问题与主要卖点、明确适用范围及正文定位。",
+        "关键参数复用已规范化 display_text，并在 body_refs 正文中出现。",
+        "示例素材定位属于演示输入；缺失必需素材的反例必须保持未完成，不声称完成成图 QA。",
+        "通用模块只用共同事实；各子体的主图与尺寸图完整展开。",
+        "叙述视觉购物能力时，不声称嵌字必然被索引或加权。",
+        "新交付使用三份标准文件；共用/逐子体图片方案按 image_sets 完整计数并绑定事实与素材。"
+      ],
+      "input_brief": "演示用户资料：美国站玻璃单枝花瓶系列，鲜花或干花单枝展示，手洗；仅提供 Blue 高 10.16 cm（SKU VASE-BLUE-S）、Blue 高 15.24 cm（无 SKU）、Clear 高 15.24 cm（SKU VASE-CLEAR-L）三个子体，保持该顺序。此演示输入附有允许 Color/Size 的类目模板。没有 Clear 小号。 本例另明确提供各款正面、侧面及结构细节参考图；profile.images 的 example: 定位是此演示输入的素材标识，不是已采集的真实商品文件。"
+    },
+    {
+      "case_id": "same_appearance_size_only_reuse",
+      "input_profile": {
+        "schema_version": "2.1",
+        "listing_mode": "family",
+        "site": "US",
+        "listing_language": "English",
+        "listing_language_code": "en",
+        "brand": null,
+        "category": "Decorative bud vase",
+        "audience": {
+          "identity": [
+            "home decorators"
+          ]
+        },
+        "materials": [
+          "glass"
+        ],
+        "functions": [
+          "display a single flower stem"
+        ],
+        "scenes": [
+          "shelf",
+          "desk"
+        ],
+        "specs": {},
+        "limitations": [],
+        "pain_points": [
+          "choose the height for a display space"
+        ],
+        "product_identity": {
+          "original_name": "玻璃单枝花瓶",
+          "canonical_name": "Glass Bud Vase",
+          "protected_terms": [
+            "Glass Bud Vase"
+          ]
+        },
+        "facts": [
+          {
+            "fact_id": "family_identity",
+            "field": "product_type",
+            "value": "Glass Bud Vase",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          },
+          {
+            "fact_id": "family_material",
+            "field": "material",
+            "value": "glass",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          },
+          {
+            "fact_id": "family_use",
+            "field": "intended_use",
+            "value": "display a single fresh or dried flower stem on a shelf or desk",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          },
+          {
+            "fact_id": "family_care",
+            "field": "care",
+            "value": "hand wash",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          },
+          {
+            "fact_id": "family_color",
+            "field": "color",
+            "value": "Blue",
+            "source_ref": "example:user_confirmed_same_Blue_shape_only_height_differs",
+            "status": "confirmed"
+          }
+        ],
+        "measurements": [],
+        "images": [
+          {
+            "image_id": "variant_01_front",
+            "source": "example:same_appearance_size_only_reuse:variant_01_front",
+            "applies_to": [
+              "variant_01"
+            ]
+          },
+          {
+            "image_id": "variant_01_detail",
+            "source": "example:same_appearance_size_only_reuse:variant_01_detail",
+            "applies_to": [
+              "variant_01"
+            ]
+          },
+          {
+            "image_id": "variant_02_front",
+            "source": "example:same_appearance_size_only_reuse:variant_02_front",
+            "applies_to": [
+              "variant_02"
+            ]
+          },
+          {
+            "image_id": "variant_02_detail",
+            "source": "example:same_appearance_size_only_reuse:variant_02_detail",
+            "applies_to": [
+              "variant_02"
+            ]
+          }
+        ],
+        "forbidden_terms": [],
+        "parent_sku": null,
+        "variation_dimensions": [
+          "size"
+        ],
+        "variation_theme": {
+          "name": "Size",
+          "source_ref": "example:user_provided_category_template_for_this_fixture",
+          "status": "confirmed"
+        },
+        "variants": [
+          {
+            "variant_id": "variant_01",
+            "sku": "VASE-BLUE-S",
+            "asin": null,
+            "attributes": {
+              "size": {
+                "value": "10.16 cm",
+                "display": "4 in",
+                "title_value": "4 in",
+                "measurement_id": "variant_01_height"
+              }
+            },
+            "facts": [],
+            "measurements": [
+              {
+                "measurement_id": "variant_01_height",
+                "kind": "length",
+                "subject": "product",
+                "label": "height",
+                "value": "10.16",
+                "unit": "cm",
+                "source_ref": "example:user_supplied_measurement_sheet",
+                "display_value": "4",
+                "display_unit": "in",
+                "display_text": "4 in",
+                "approximate": false
+              }
+            ],
+            "image_ids": [
+              "variant_01_front",
+              "variant_01_detail"
+            ]
+          },
+          {
+            "variant_id": "variant_02",
+            "sku": null,
+            "asin": null,
+            "attributes": {
+              "size": {
+                "value": "15.24 cm",
+                "display": "6 in",
+                "title_value": "6 in",
+                "measurement_id": "variant_02_height"
+              }
+            },
+            "facts": [],
+            "measurements": [
+              {
+                "measurement_id": "variant_02_height",
+                "kind": "length",
+                "subject": "product",
+                "label": "height",
+                "value": "15.24",
+                "unit": "cm",
+                "source_ref": "example:user_supplied_measurement_sheet",
+                "display_value": "6",
+                "display_unit": "in",
+                "display_text": "6 in",
+                "approximate": false
+              }
+            ],
+            "image_ids": [
+              "variant_02_front",
+              "variant_02_detail"
+            ]
+          }
+        ],
+        "appearance_assessment": {
+          "status": "same",
+          "differences_only_size_or_quantity": true,
+          "source_ref": "example:user_confirmed_same_Blue_shape_only_height_differs"
+        }
+      },
+      "good_listing": {
+        "schema_version": "2.1",
+        "listing_mode": "family",
+        "site": "US",
+        "listing_language": "English",
+        "listing_language_code": "en",
+        "parent": {
+          "sku": null,
+          "title": "Glass Bud Vase for Single Stems",
+          "item_highlight": "Glass vase for displaying an individual fresh or dried stem on a shelf or desk",
+          "claims": [
+            {
+              "field": "title",
+              "fact_ids": [
+                "family_identity",
+                "family_use"
+              ],
+              "measurement_ids": []
+            },
+            {
+              "field": "item_highlight",
+              "fact_ids": [
+                "family_material",
+                "family_use"
+              ],
+              "measurement_ids": []
+            }
+          ]
+        },
+        "title_template": "Glass Bud Vase, {size}",
+        "shared_content": {
+          "bullets": [
+            "【SINGLE-STEM DISPLAY】A glass bud vase for an individual fresh or dried flower stem.",
+            "【GLASS BODY】A simple vessel that keeps attention on the flower arrangement.",
+            "【FOR SHELVES OR DESKS】Choose a height to suit your display space.",
+            "【CHOOSE YOUR HEIGHT】Review the height shown for the selected vase.",
+            "【CARE】Hand wash the glass vase."
+          ],
+          "description": "This Glass Bud Vase displays an individual fresh or dried flower stem on a shelf or desk. Choose the height for your arrangement. Hand wash the glass vase.",
+          "search_terms": "floral vessel tabletop decor"
+        },
+        "variants": [
+          {
+            "variant_id": "variant_01",
+            "sku": "VASE-BLUE-S",
+            "attributes": {
+              "size": "4 in"
+            },
+            "title": "Glass Bud Vase, 4 in",
+            "item_highlight": "Glass vase for an individual fresh or dried stem on a shelf or desk",
+            "content_overrides": {
+              "bullets": [
+                "【SINGLE-STEM DISPLAY】A glass bud vase for an individual fresh or dried flower stem.",
+                "【GLASS BODY】A simple vessel that keeps attention on the flower arrangement.",
+                "【FOR SHELVES OR DESKS】Choose a height to suit your display space.",
+                "【SELECTED VARIANT】Blue glass; height 4 in. Check your display space before choosing.",
+                "【CARE】Hand wash the glass vase."
+              ],
+              "description": "This Blue Glass Bud Vase displays an individual fresh or dried flower stem on a shelf or desk. Its height is 4 in. Hand wash the glass vase."
+            },
+            "claims": [
+              {
+                "field": "title",
+                "fact_ids": [
+                  "family_identity",
+                  "family_color"
+                ],
+                "measurement_ids": [
+                  "variant_01_height"
+                ]
+              },
+              {
+                "field": "item_highlight",
+                "fact_ids": [
+                  "family_material",
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[0]",
+                "fact_ids": [
+                  "family_identity",
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[1]",
+                "fact_ids": [
+                  "family_material"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[2]",
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[3]",
+                "fact_ids": [
+                  "family_color"
+                ],
+                "measurement_ids": [
+                  "variant_01_height"
+                ]
+              },
+              {
+                "field": "bullets[4]",
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "description",
+                "fact_ids": [
+                  "family_identity",
+                  "family_use",
+                  "family_care",
+                  "family_color"
+                ],
+                "measurement_ids": [
+                  "variant_01_height"
+                ]
+              }
+            ]
+          },
+          {
+            "variant_id": "variant_02",
+            "sku": null,
+            "attributes": {
+              "size": "6 in"
+            },
+            "title": "Glass Bud Vase, 6 in",
+            "item_highlight": "Glass vase for an individual fresh or dried stem on a shelf or desk",
+            "content_overrides": {
+              "bullets": [
+                "【SINGLE-STEM DISPLAY】A glass bud vase for an individual fresh or dried flower stem.",
+                "【GLASS BODY】A simple vessel that keeps attention on the flower arrangement.",
+                "【FOR SHELVES OR DESKS】Choose a height to suit your display space.",
+                "【SELECTED VARIANT】Blue glass; height 6 in. Check your display space before choosing.",
+                "【CARE】Hand wash the glass vase."
+              ],
+              "description": "This Blue Glass Bud Vase displays an individual fresh or dried flower stem on a shelf or desk. Its height is 6 in. Hand wash the glass vase."
+            },
+            "claims": [
+              {
+                "field": "title",
+                "fact_ids": [
+                  "family_identity",
+                  "family_color"
+                ],
+                "measurement_ids": [
+                  "variant_02_height"
+                ]
+              },
+              {
+                "field": "item_highlight",
+                "fact_ids": [
+                  "family_material",
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[0]",
+                "fact_ids": [
+                  "family_identity",
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[1]",
+                "fact_ids": [
+                  "family_material"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[2]",
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "bullets[3]",
+                "fact_ids": [
+                  "family_color"
+                ],
+                "measurement_ids": [
+                  "variant_02_height"
+                ]
+              },
+              {
+                "field": "bullets[4]",
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": []
+              },
+              {
+                "field": "description",
+                "fact_ids": [
+                  "family_identity",
+                  "family_use",
+                  "family_care",
+                  "family_color"
+                ],
+                "measurement_ids": [
+                  "variant_02_height"
+                ]
+              }
+            ]
+          }
+        ],
+        "image_plan": [
+          {
+            "plan_id": "family_main",
+            "role": "main",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。",
+            "buyer_question": "我买到的是什么产品？",
+            "selling_point": "真实玻璃单枝花瓶及造型",
+            "visual_evidence": "主图只出现本次购买的单只花瓶，真实轮廓可与产品资料核对。",
+            "scene_intent": "寻找玻璃单枝花瓶，先确认商品身份",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "title"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图1（主图）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material",
+                  "family_color"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "title"
+                ],
+                "overlay_text": "",
+                "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material",
+                  "family_color"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "title"
+                ],
+                "overlay_text": "",
+                "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_1",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。",
+            "buyer_question": "近看花瓶是什么造型？",
+            "selling_point": "清楚展示轮廓与瓶口",
+            "visual_evidence": "轮廓与瓶口近景直接对应实物参考图，不以文字代替结构展示。",
+            "scene_intent": "比较花瓶轮廓与瓶口外观",
+            "overlay_text": "Glass Bud Vase",
+            "fact_ids": [
+              "family_identity",
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[0]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图2（造型特写）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_detail"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[0]"
+                ],
+                "overlay_text": "Glass Bud Vase",
+                "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_detail"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[0]"
+                ],
+                "overlay_text": "Glass Bud Vase",
+                "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_2",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。",
+            "buyer_question": "鲜花和干花都可以展示吗？",
+            "selling_point": "单枝鲜花或干花展示用途",
+            "visual_evidence": "两种花材的单枝摆放示例说明已确认的用途；道具范围标识清楚。",
+            "scene_intent": "寻找适合单枝鲜花或干花的花瓶",
+            "overlay_text": "For a Single Fresh or Dried Stem",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图3（花材展示）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "For a Single Fresh or Dried Stem",
+                "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "For a Single Fresh or Dried Stem",
+                "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_3",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。",
+            "buyer_question": "花瓶本体是什么材质？",
+            "selling_point": "实物玻璃材质可判断",
+            "visual_evidence": "实物表面与边缘特写支持玻璃材质判断，不能证明抗摔或耐热性能。",
+            "scene_intent": "确认花瓶的玻璃材质",
+            "overlay_text": "Glass Body",
+            "fact_ids": [
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图4（材质细节）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_detail"
+                ],
+                "fact_ids": [
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "Glass Body",
+                "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_detail"
+                ],
+                "fact_ids": [
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "Glass Body",
+                "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_4",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。",
+            "buyer_question": "适合摆在怎样的位置？",
+            "selling_point": "桌面和置物架上的单枝装饰",
+            "visual_evidence": "桌面与置物架的实际摆放画面展示已确认场景，花瓶大小保持实物比例。",
+            "scene_intent": "寻找桌面或置物架装饰花瓶",
+            "overlay_text": "For a Shelf or Desk",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图5（桌面场景）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "For a Shelf or Desk",
+                "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "For a Shelf or Desk",
+                "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_5",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。",
+            "buyer_question": "高度和宽度能否适合我的位置？",
+            "selling_point": "购买前核对实际尺寸",
+            "visual_evidence": "箭头方向与高度/宽度标签一致，数值取自对应本品或子体的测量记录。",
+            "scene_intent": "按实际尺寸选择适合展示空间的花瓶",
+            "overlay_text": "Check Your Display Space",
+            "fact_ids": [],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[3]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图6（尺寸适配）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [],
+                "measurement_ids": [
+                  "variant_01_height"
+                ],
+                "body_refs": [
+                  "bullets[3]"
+                ],
+                "overlay_text": "Height 4 in",
+                "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [],
+                "measurement_ids": [
+                  "variant_02_height"
+                ],
+                "body_refs": [
+                  "bullets[3]"
+                ],
+                "overlay_text": "Height 6 in",
+                "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_secondary_6",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。",
+            "buyer_question": "使用后怎样清洗？",
+            "selling_point": "清楚的手洗要求",
+            "visual_evidence": "手洗动作和简短文字共同表达资料给出的护理方式。",
+            "scene_intent": "了解玻璃花瓶的清洗方法",
+            "overlay_text": "Hand Wash",
+            "fact_ids": [
+              "family_care"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[4]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图7（手洗护理）",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_detail"
+                ],
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[4]"
+                ],
+                "overlay_text": "Hand Wash",
+                "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_detail"
+                ],
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[4]"
+                ],
+                "overlay_text": "Hand Wash",
+                "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。"
+              }
+            ]
+          },
+          {
+            "plan_id": "variant_01_main",
+            "role": "main",
+            "applies_to": [
+              "variant_01"
+            ],
+            "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "我买到的是什么产品？",
+            "selling_point": "真实玻璃单枝花瓶及造型",
+            "visual_evidence": "主图只出现本次购买的单只花瓶，真实轮廓可与产品资料核对。",
+            "scene_intent": "寻找玻璃单枝花瓶，先确认商品身份",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_material",
+              "family_color"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_01_front"
+            ],
+            "body_refs": [
+              "title"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图1（主图）"
+          },
+          {
+            "plan_id": "variant_02_main",
+            "role": "main",
+            "applies_to": [
+              "variant_02"
+            ],
+            "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+            "buyer_question": "我买到的是什么产品？",
+            "selling_point": "真实玻璃单枝花瓶及造型",
+            "visual_evidence": "主图只出现本次购买的单只花瓶，真实轮廓可与产品资料核对。",
+            "scene_intent": "寻找玻璃单枝花瓶，先确认商品身份",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_material",
+              "family_color"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "variant_02_front"
+            ],
+            "body_refs": [
+              "title"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+            "status": "ready",
+            "image": "图1（主图）"
+          }
+        ],
+        "brand_name": null,
+        "media_strategy": "shared_secondary",
+        "a_plus_plan": [
+          {
+            "plan_id": "family_aplus_1",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "宽幅展示桌面与单只花瓶，留足原生文字区域；花枝仅用于演示用途。",
+            "buyer_question": "花瓶怎样构成桌面的一处装饰？",
+            "selling_point": "玻璃花瓶与单枝花材组合",
+            "visual_evidence": "单只花瓶与单枝花材的整体场景说明用途，避免多件随售误解。",
+            "scene_intent": "寻找能展示单枝花材的桌面装饰",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块1：装饰概览",
+            "asset_type": "image",
+            "native_text": "A Glass Bud Vase for a Single Stem",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "",
+                "direction": "宽幅展示桌面与单只花瓶，留足原生文字区域；花枝仅用于演示用途。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "A Glass Bud Vase for a Single Stem"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "",
+                "direction": "宽幅展示桌面与单只花瓶，留足原生文字区域；花枝仅用于演示用途。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "A Glass Bud Vase for a Single Stem"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_aplus_2",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "连续近景展示空花瓶和插入一枝花材的状态，避免暗示自带花枝。",
+            "buyer_question": "怎样开始单枝花材布置？",
+            "selling_point": "直观说明单枝插放方式",
+            "visual_evidence": "空瓶与插入单枝花材的连续画面对照说明使用方法。",
+            "scene_intent": "了解单枝花瓶怎样使用",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[0]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块2：摆放方式",
+            "asset_type": "image",
+            "native_text": "Display an Individual Fresh or Dried Stem",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[0]"
+                ],
+                "overlay_text": "",
+                "direction": "连续近景展示空花瓶和插入一枝花材的状态，避免暗示自带花枝。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Display an Individual Fresh or Dried Stem"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [
+                  "family_use"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[0]"
+                ],
+                "overlay_text": "",
+                "direction": "连续近景展示空花瓶和插入一枝花材的状态，避免暗示自带花枝。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Display an Individual Fresh or Dried Stem"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_aplus_3",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "配图展示瓶口、侧面与底部可见轮廓；保持真实结构，不添加防滑或防倾倒效果箭头。",
+            "buyer_question": "瓶身细节是什么样的？",
+            "selling_point": "让买家观察玻璃与轮廓",
+            "visual_evidence": "瓶口、侧面和底部的实物局部可查验造型，不暗示未给定防滑或稳定性能。",
+            "scene_intent": "近距离比较花瓶材质和结构",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_identity",
+              "family_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块3：结构观察",
+            "asset_type": "image",
+            "native_text": "See the Glass Body and Vase Shape",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_detail"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "",
+                "direction": "配图展示瓶口、侧面与底部可见轮廓；保持真实结构，不添加防滑或防倾倒效果箭头。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "See the Glass Body and Vase Shape"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_detail"
+                ],
+                "fact_ids": [
+                  "family_identity",
+                  "family_material"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "description"
+                ],
+                "overlay_text": "",
+                "direction": "配图展示瓶口、侧面与底部可见轮廓；保持真实结构，不添加防滑或防倾倒效果箭头。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "See the Glass Body and Vase Shape"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_aplus_4",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "配图使用本款轮廓和维度箭头，原生文字列尺寸并提醒核对摆放空间；不以手机等不确定物体代替尺寸。",
+            "buyer_question": "下单前如何核对展示空间？",
+            "selling_point": "把尺寸与选择步骤连起来",
+            "visual_evidence": "实际维度箭头与原生尺寸文字对应同一测量数据。",
+            "scene_intent": "下单前核对花瓶高度与摆放位置",
+            "overlay_text": "",
+            "fact_ids": [],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[3]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块4：空间选择",
+            "asset_type": "image",
+            "native_text": "Check the Height for Your Display Space",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_front"
+                ],
+                "fact_ids": [],
+                "measurement_ids": [
+                  "variant_01_height"
+                ],
+                "body_refs": [
+                  "bullets[3]"
+                ],
+                "overlay_text": "",
+                "direction": "配图使用本款轮廓和维度箭头，原生文字列尺寸并提醒核对摆放空间；不以手机等不确定物体代替尺寸。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Height 4 in"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_front"
+                ],
+                "fact_ids": [],
+                "measurement_ids": [
+                  "variant_02_height"
+                ],
+                "body_refs": [
+                  "bullets[3]"
+                ],
+                "overlay_text": "",
+                "direction": "配图使用本款轮廓和维度箭头，原生文字列尺寸并提醒核对摆放空间；不以手机等不确定物体代替尺寸。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Height 6 in"
+              }
+            ]
+          },
+          {
+            "plan_id": "family_aplus_5",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "近景呈现手洗场景和擦净后单独摆放的花瓶；原生文字简明说明，不加入未给定的清洁方式。",
+            "buyer_question": "摆放后如何维护花瓶？",
+            "selling_point": "明确手洗而不扩张耐用承诺",
+            "visual_evidence": "手洗场景配原生护理文字，说明一致且不引入其他洗涤承诺。",
+            "scene_intent": "了解购买后的花瓶护理要求",
+            "overlay_text": "",
+            "fact_ids": [
+              "family_care"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [],
+            "body_refs": [
+              "bullets[4]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块5：日常护理",
+            "asset_type": "image",
+            "native_text": "Hand Wash the Glass Vase",
+            "variant_bindings": [
+              {
+                "variant_id": "variant_01",
+                "source_image_ids": [
+                  "variant_01_detail"
+                ],
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[4]"
+                ],
+                "overlay_text": "",
+                "direction": "近景呈现手洗场景和擦净后单独摆放的花瓶；原生文字简明说明，不加入未给定的清洁方式。 使用 VASE-BLUE-S 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 VASE-BLUE-S 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Hand Wash the Glass Vase"
+              },
+              {
+                "variant_id": "variant_02",
+                "source_image_ids": [
+                  "variant_02_detail"
+                ],
+                "fact_ids": [
+                  "family_care"
+                ],
+                "measurement_ids": [],
+                "body_refs": [
+                  "bullets[4]"
+                ],
+                "overlay_text": "",
+                "direction": "近景呈现手洗场景和擦净后单独摆放的花瓶；原生文字简明说明，不加入未给定的清洁方式。 使用 variant_02 的对应实物，参数以该子体绑定值为准。",
+                "production_notes": "绑定 variant_02 的演示参考素材；颜色、尺寸及道具范围按该子体资料制作，不串用其他子体。",
+                "native_text": "Hand Wash the Glass Vase"
+              }
+            ]
+          }
+        ],
+        "image_sets": {
+          "shared": {
+            "main": "family_main",
+            "secondary": [
+              "family_secondary_1",
+              "family_secondary_2",
+              "family_secondary_3",
+              "family_secondary_4",
+              "family_secondary_5",
+              "family_secondary_6"
+            ],
+            "a_plus": [
+              "family_aplus_1",
+              "family_aplus_2",
+              "family_aplus_3",
+              "family_aplus_4",
+              "family_aplus_5"
+            ]
+          },
+          "variants": [
+            {
+              "variant_id": "variant_01",
+              "main": "variant_01_main",
+              "secondary": [
+                "family_secondary_1",
+                "family_secondary_2",
+                "family_secondary_3",
+                "family_secondary_4",
+                "family_secondary_5",
+                "family_secondary_6"
+              ]
+            },
+            {
+              "variant_id": "variant_02",
+              "main": "variant_02_main",
+              "secondary": [
+                "family_secondary_1",
+                "family_secondary_2",
+                "family_secondary_3",
+                "family_secondary_4",
+                "family_secondary_5",
+                "family_secondary_6"
+              ]
+            }
+          ]
+        },
+        "buyer_question_coverage": [
+          {
+            "question": "Can I use a fresh or dried stem?",
+            "status": "covered",
+            "location": "Description；附图花材展示；A+ 摆放方式",
+            "source": "local_editorial"
+          },
+          {
+            "question": "What are the vase dimensions?",
+            "status": "covered",
+            "location": "对应子体或单品第4点；尺寸图及 A+ 空间选择",
+            "source": "local_editorial"
+          },
+          {
+            "question": "How do I clean the vase?",
+            "status": "covered",
+            "location": "第5点、护理附图及 A+ 日常护理",
+            "source": "local_editorial"
+          },
+          {
+            "question": "Is the glass unbreakable?",
+            "status": "not_claimed",
+            "location": "资料无抗摔或防碎测试依据，未在文案或图片中主张",
+            "source": "local_editorial"
+          }
+        ],
+        "excluded_claims": [
+          "Unbreakable or shatterproof glass",
+          "Certified child safety",
+          "Guaranteed resistance to tipping",
+          "Dishwasher-safe care"
+        ]
+      },
+      "bad_cases": [
+        {
+          "listing_patch": {
+            "image_sets.variants[1].secondary": []
+          },
+          "error": "即使没有独立附图创意，也必须完整引用共用6张附图。",
+          "expected_failure": "media_count"
+        },
+        {
+          "listing_patch": {
+            "image_plan[5].variant_bindings[1].overlay_text": "Height 4 in"
+          },
+          "error": "第二子体应为6英寸，不能复用第一款参数。",
+          "expected_failure": "measurement_consistency"
+        },
+        {
+          "profile_patch": {
+            "appearance_assessment.status": "unknown"
+          },
+          "error": "缺少外观一致的明确依据，必须改为完整逐子体方案。",
+          "expected_failure": "media_strategy"
+        }
+      ],
+      "acceptance": [
+        "只保留两款真实组合和顺序，无SKU子体继续使用内部编号。",
+        "共同方案1+6+5完整，每子体仅一张独立主图创意，6附图引用同一套。",
+        "附图与A+逐项绑定两子体素材；尺寸图和A+空间选择分别使用4 in和6 in。",
+        "外观复用来自明确用户确认，不能仅凭同色猜测；无单独子体A+。"
+      ],
+      "input_brief": "演示用户资料：美国站蓝色玻璃单枝花瓶，两款外观颜色、轮廓、功能一致，仅高度不同：10.16 cm（SKU VASE-BLUE-S）、15.24 cm（无 SKU），只提供这两个子体。用途为桌面/置物架的单枝鲜花或干花展示，手洗；附演示 Size 类目模板与两款参考图。 本例另明确提供各款正面、侧面及结构细节参考图；profile.images 的 example: 定位是此演示输入的素材标识，不是已采集的真实商品文件。"
+    }
+  ]
+}

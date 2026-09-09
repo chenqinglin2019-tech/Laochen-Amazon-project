@@ -1,39 +1,31 @@
-# Item Highlight / 商品亮点写作规则
-# 来源：Amazon Seller Central 2026-06 标题更新通知
-
-version: 0.1
+version: '2.0'
 domain: item_highlight
-applies_to:
-  category: ["*"]
+contract_ref: ../data_contract.md
+policy_ref: ../quality_policy.json
+sources_ref: ../sources.json
 rules:
-  - id: ih_max_chars
-    type: hard
-    enforced_by: "POST /validate (backend)"
-    note: "Item Highlight / 商品亮点总长度 ≤ 125 字符（含空格）"
-    source: "Amazon Seller Central announcement, 2026-06"
-
-  - id: ih_role
-    type: soft
-    prompt_fragment: |
-      Item Highlight 是标题下方的可搜索补充信息，用来承接短标题放不下的
-      材质、建议使用场景、关键规格或比较点。不要重复标题原句。
-    source: "Amazon Seller Central announcement, 2026-06"
-
-  - id: ih_content_priority
-    type: soft
-    prompt_fragment: |
-      优先写 1-2 个买家最关心的信息：
-      - 材质或结构（如 aluminum, silicone, waterproof fabric）
-      - 推荐使用场景（如 desk, kitchen, travel, camping）
-      - 关键兼容性或规格（如 fits 4-10 inch phones）
-      - 已完成的 Rufus QA 中高频问题的直接答案（仅 US）
-      不要写促销词、极限词、无授权品牌词。
-    source: "Amazon title update best practice"
-
-  - id: ih_style
-    type: soft
-    prompt_fragment: |
-      使用目标站点语言，写成一句自然短句或短语，信息密度高但可读。
-      英语示例：Aluminum foldable design for desk, kitchen, travel and video calls
-      避免逗号堆词和 keyword stuffing。
-    source: "Amazon SEO best practice"
+- id: highlight_scalar
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: Item Highlight 始终是一个字符串，写为自然短句或短语。它与 bullets 独立；不创建重复的 subtitle 字段，不把多条五点塞入 Highlight。
+- id: highlight_budget
+  type: required
+  source_id: amazon_title_2026
+  prompt_fragment: 字符预算、适用范围与核验日期读取统一政策；计入空格。若目标类目未支持该字段，报告具体限制，不静默改成其他字段。
+  limit_ref: default_limits.item_highlight_max_chars
+- id: highlight_purchase_reason
+  type: editorial
+  source_id: skill_editorial_v2
+  prompt_fragment: 补充标题未表达的主要购买理由，如已确认的材质、结构、适配范围或使用方式。避免重复整句或同一卖点，但不禁止为清楚表达而自然重复必要名词。
+- id: highlight_parent_scope
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: 父 Highlight 只能用根级 confirmed 事实，不含具体子体属性值。多色可选、多种容量等文字必须由实际提供的不同属性值支持；不能从竞品系列推断本品系列。
+- id: highlight_variant_scope
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: 每个子体独立输出一条对应 Highlight。只含本子体有效事实与参数；仅颜色不同且没有证据支持其他差异时，允许主体表达相同，不编造性能或人群差异。
+- id: highlight_traceable_answers
+  type: editorial
+  source_id: skill_ai_answerability
+  prompt_fragment: 可以回答与本品相关且有事实支持的购买问题。参数引用本子体规范化 display_text；问题采集状态不能代替答案证据。
