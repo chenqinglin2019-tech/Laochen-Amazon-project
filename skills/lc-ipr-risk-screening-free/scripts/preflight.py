@@ -7,7 +7,7 @@ import argparse
 from pathlib import Path
 from typing import Any, Callable
 
-from auth_gate import SAFE_FAILURE, require_auth
+from auth_gate import SAFE_FAILURE, require_auth, safe_failure_message
 from common import (
     add_gap, add_history, assert_active_free_policy, atomic_write_json, coverage_routes, ensure_object,
     ENV_CREDENTIALS, credential, credential_issue, offline_credentials_disabled,
@@ -36,7 +36,7 @@ def local_secret_findings(root: Path | None = None) -> list[str]:
         for raw_name, item in value.items():
             name = str(raw_name)
             item_path = (*path, name)
-            allowed = filename == "config.json" and item_path == ("backend_token",)
+            allowed = filename in {"config.json", "config.local.json"} and item_path == ("backend_token",)
             if name in LOCAL_CREDENTIAL_FIELDS and item not in (None, "") and not allowed:
                 findings.append(f"{filename}:{'.'.join(item_path)}")
             if isinstance(item, dict):
@@ -80,9 +80,9 @@ def credential_storage_checkpoint() -> dict[str, Any]:
         "local_secret_fields": local_secrets,
         "credential_issues": issues,
         "detail": (
-            "Move misplaced third-party credentials to .env; config.json permits only backend_url/backend_token"
+            "Move misplaced third-party credentials to .env; backend config may retain legacy business settings"
             if local_secrets else
-            "Backend token is read only from config.json; third-party credentials only from .env"
+            "Backend token uses process environment then merged config files; third-party credentials only from .env"
         ),
     }
 
@@ -196,13 +196,14 @@ def phase_credentials(task_dir: Path) -> str:
     atomic_write_json(task_path, task)
     try:
         require_auth()
-    except SystemExit:
+    except SystemExit as exc:
+        auth_detail = safe_failure_message(exc)
         task = ensure_object(load_json(task_path), "task.json")
-        add_gap(task, "cloud_auth", "GLOBAL", "access_limited", "AUTH_FAILED", SAFE_FAILURE)
-        task.setdefault("errors", []).append({"at": now_iso(), "code": "AUTH_FAILED", "detail": SAFE_FAILURE})
-        add_history(task, "incomplete", SAFE_FAILURE)
+        add_gap(task, "cloud_auth", "GLOBAL", "access_limited", "AUTH_FAILED", auth_detail)
+        task.setdefault("errors", []).append({"at": now_iso(), "code": "AUTH_FAILED", "detail": auth_detail})
+        add_history(task, "incomplete", auth_detail)
         atomic_write_json(task_path, task)
-        raise SystemExit(SAFE_FAILURE) from None
+        raise SystemExit(auth_detail) from None
 
     jurisdictions = [str(value).upper() for value in task.get("target_jurisdictions", [])]
     route_providers = {str(route.get("provider") or "") for route in coverage_routes(task)}

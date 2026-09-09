@@ -50,6 +50,11 @@ class BrowserExecutionTests(unittest.TestCase):
         task.pop("recall_planning_revision", None)
         task.pop("specialty_workflow_revision", None)
         task.pop("workflow_correction_revision", None)  # This fixture explicitly tests the frozen pre-correction recorder.
+        task.pop("retrieval_workflow_revision", None)
+        task.pop("retrieval_policy", None)
+        from common import serper_free_enhancement, serpapi_free_enhancement
+        task["serper_free_enhancement"] = serper_free_enhancement(False)
+        task["serpapi_free_enhancement"] = serpapi_free_enhancement(False)
         from workflow_v24 import build_coverage_requirements_v24
         task["coverage_requirements"] = build_coverage_requirements_v24(task["target_jurisdictions"], screening_revision=task.get("screening_revision"))
         task["state"] = "incomplete"
@@ -198,6 +203,44 @@ class BrowserExecutionTests(unittest.TestCase):
         self.write_receipt()
         with self.assertRaisesRegex(ValueError, "viewport query differs"):
             self.validate()
+
+    def test_duplicate_row_coverage_is_recomputed_from_bound_pages_not_just_new_receipt_hashes(self):
+        from record_browser_execution import ppubs_row_coverage
+        from test_ppubs_row_counts import FIXTURE, coverage
+        self.prepare_strict_ppubs_recall()
+        self.capture["result_pages"] = deepcopy(FIXTURE["pages"])
+        for page in self.capture["result_pages"]:
+            page["result_set_id"] = "L1"
+            for view in page["viewports"]:
+                view.update(result_set_id="L1", editor_value=self.capture["query_semantics"]["rendered_query"],
+                            screenshot_path=str(self.screenshot), screenshot_sha256=sha256_file(self.screenshot))
+        self.capture["result_coverage"] = {**coverage(), "unretrieved_document_count": 0, "unretrieved_result_row_count": 0}
+        self.capture["candidates"] = [{"record_number": record} for record in sorted({pair[1] for pair in
+                                       self.capture["result_coverage"]["row_coverage"]["ordinal_records"]})]
+        self.receipt["events"][1]["total_hits"] = 37
+        def write_current():
+            self.receipt.update(result_pages_sha256=canonical_digest(self.capture["result_pages"]),
+                                result_coverage_sha256=canonical_digest(self.capture["result_coverage"]),
+                                result_sha256=canonical_digest(self.capture["candidates"]))
+            self.write_receipt()
+        write_current()
+        self.validate()
+        pristine = deepcopy(self.capture)
+        for mutation in ("proof", "missing", "unexpanded_family"):
+            self.capture = deepcopy(pristine)
+            if mutation == "proof":
+                self.capture["result_coverage"]["row_coverage"]["ordinal_records"][0][1] = "USD999999S"
+            elif mutation == "missing":
+                for page in self.capture["result_pages"]:
+                    for view in page["viewports"]:
+                        view["rows"] = [row for row in view["rows"] if row["rowNumber"] != "4"]
+                self.capture["result_coverage"]["row_coverage"] = ppubs_row_coverage(self.capture["result_pages"], 37)
+                self.capture["result_coverage"].update(unretrieved_result_row_count=1, unretrieved_document_count=None)
+            else:
+                self.capture["result_coverage"]["unconfirmed_family_member_count"] = 1
+            write_current()
+            with self.assertRaisesRegex(ValueError, "PPS result-row coverage"):
+                self.validate()
 
     def test_title_query_keeps_plan_submission_history_viewport_and_result_bindings(self):
         self.entry["filters"] = {"field": "title", "language": "en"}
@@ -379,6 +422,62 @@ console.log(JSON.stringify(JSON.parse(raw).map(({task,entry})=>{
     def test_complete_receipt_and_legacy(self):
         self.assertIn("query_execution", self.validate())
         self.assertEqual(validate_browser_execution({}, {"schema_version": "2.3-free"}, self.root, self.provider), {})
+
+    def test_rate_limit_original_page_identity_is_optional_but_digest_bound_when_present(self):
+        self.capture.update(status="access_limited", error_code="BROWSER_RATE_LIMITED", candidates=[])
+        self.receipt.update(outcome="access_limited", result_sha256=canonical_digest([]))
+        self.write_receipt()
+        self.validate()  # A historic capture without the optional field retains its receipt contract.
+        page_ref = {"target_id": "A" * 32, "url": self.capture["final_url"]}
+        self.capture["rate_limit_page"] = page_ref
+        with self.assertRaisesRegex(ValueError, "receipt does not match"):
+            self.validate()
+        self.receipt["rate_limit_page_sha256"] = canonical_digest(page_ref)
+        self.write_receipt()
+        self.validate()
+        self.capture["rate_limit_page"]["target_id"] = "B" * 32
+        with self.assertRaisesRegex(ValueError, "receipt does not match"):
+            self.validate()
+        self.capture["rate_limit_page"]["url"] = "https://example.test/"
+        with self.assertRaisesRegex(ValueError, "page identity"):
+            self.validate()
+
+    def test_headerless_tm_zero_is_bound_to_confirmed_submission_not_just_a_matching_input(self):
+        self._headerless_tm_zero_case()
+
+    def test_figurative_headerless_zero_accepts_empty_result_pages_with_confirmed_transition(self):
+        self._headerless_tm_zero_case(figurative=True)
+
+    def _headerless_tm_zero_case(self, figurative=False):
+        self.entry.update(strategy="phrase", query_compiler_revision="tm-field-tags-v1")
+        if figurative:
+            self.entry.update(right_type="trademark_figurative", query_compiler_revision="tm-figurative-fields-v1",
+                              filters={"field": "mark_description", "language": "en"}, derived_from=["product.mark_inventory[0]"])
+        (self.root / "search-plan.json").write_text(json.dumps({"queries": {self.provider: [self.entry]}}))
+        semantics = planned_browser_query(self.provider, self.entry, self.task)
+        query = semantics["rendered_query"]
+        baseline = {"url": "https://tmsearch.uspto.gov/", "zero_visible": False, "result_query": "", "card_count": 0}
+        final_url = "https://tmsearch.uspto.gov/search/search-results"
+        binding = {"query_bound": True, "input_value": query, "rendered_query": query, "search_mode": "Field tag and Search builder",
+                   "total_hits": 0, "result_query": "", "loading": False, "parsed_count": 0, "result_view": "list",
+                   "binding_method": "submitted_zero_transition_v1", "zero_result_transition": {
+                       "submission_id": "attempt-1", "rendered_query": query, "baseline": baseline,
+                       "method": "result_route", "final_url": final_url, "zero_visible": True, "observed_loading": False}}
+        coverage = {"total_hits": 0, "retrieved_hits": 0, "pages_retrieved": 1}
+        self.capture.update(status="no_result", candidates=[], final_url=final_url, query_binding=binding,
+                            query_semantics=semantics, rendered_query=query, result_coverage=coverage, result_pages=[])
+        self.receipt.update(outcome="no_result", result_sha256=canonical_digest([]), final_url=final_url,
+                            query_semantics=semantics, plan_entry_sha256=canonical_digest(self.entry),
+                            right_type=self.entry["right_type"], result_coverage_sha256=canonical_digest(coverage))
+        self.receipt["events"][0].update(rendered_query=query, input_value=query, search_mode="Field tag and Search builder",
+                                         submission_id="attempt-1", submission_confirmed=True, result_baseline=baseline)
+        self.receipt["events"][-1].update(query_binding=binding, observed_count=0)
+        self.write_receipt()
+        self.validate()
+        self.receipt["events"][0]["submission_id"] = "different-attempt"
+        self.write_receipt()
+        with self.assertRaisesRegex(ValueError, "confirmed transition"):
+            self.validate()
 
     def test_patent_recall_uses_the_same_quoted_ppubs_phrase_as_the_executor(self):
         entry = {"q": "silicone lid strap with oval holes", "operation": "patent_recall",

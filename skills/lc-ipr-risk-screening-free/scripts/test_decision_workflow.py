@@ -288,12 +288,17 @@ class DecisionWorkflowTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             args = ["create_task.py", "--url", "https://www.amazon.com/dp/B012345678", "--jurisdictions", "US", "--output-dir", str(root / "new")]
-            with patch.object(sys, "argv", args), patch.object(create_task, "load_skill_config", return_value={}):
+            runtime = json.loads((Path(__file__).resolve().parents[1] / "references/runtime-config.json").read_text())
+            with patch.object(sys, "argv", args), patch.object(create_task, "load_skill_config", return_value=runtime):
                 create_task.main()
             task = load_json(root / "new/task.json")
             self.assertEqual(task["product"]["input_role"], "reference_product")
             self.assertEqual(task["primary_scenario_id"], "product_entry")
             self.assertEqual(task["workflow_correction_revision"], workflow.CORRECTION_REVISION)
+            self.assertEqual(task["retrieval_workflow_revision"], "api-first-v1")
+            self.assertEqual(task["retrieval_policy"], runtime["api_first"])
+            self.assertEqual(task["serper_free_enhancement"]["max_queries_per_task"], 30)
+            self.assertEqual(task["serpapi_free_enhancement"]["max_queries_per_task"], 10)
             self.assertEqual(workflow.validate_decision_workflow(task), [])
             self.assertEqual(load_json(root / "new/materiality-annotations.json")["schema_version"], "2.0")
             args[-1] = str(root / "old")
@@ -303,6 +308,7 @@ class DecisionWorkflowTests(unittest.TestCase):
             old = load_json(root / "old/task.json")
             self.assertNotIn("decision_workflow_revision", old)
             self.assertNotIn("workflow_correction_revision", old)
+            self.assertNotIn("retrieval_workflow_revision", old)
             self.assertEqual(load_json(root / "old/materiality-annotations.json")["schema_version"], "1.0")
 
     def test_unknown_nonempty_revision_fails_instead_of_legacy_fallback(self):

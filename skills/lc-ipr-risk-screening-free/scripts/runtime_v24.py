@@ -50,7 +50,7 @@ def capabilities(task: dict, config: dict) -> list[dict]:
             state, reason, executable = "automatic", "free_public_document_or_agent_evidence", True
         elif provider in API_CLIENTS:
             state, reason, executable = ("unvalidated", "first_real_query_checks_free_account_and_contract", True) if present else ("unavailable", "optional_credentials_missing", False)
-            if provider.startswith("serper_") and present:
+            if provider.startswith("serper_") and present and task.get("retrieval_workflow_revision") != "api-first-v1":
                 state, reason, executable = "unvalidated", "free_entitlement_unvalidated", False
         elif provider in {"epo_register_browser", "jplatpat_browser", "euipo_esearch_browser", "tmview_browser", "designview_browser"} or provider.startswith("wipo"):
             state, reason, executable = "unavailable", "automation_policy_incompatible", False
@@ -64,7 +64,7 @@ def capabilities(task: dict, config: dict) -> list[dict]:
 
 
 def preflight_credentials(task_dir: Path) -> str:
-    from auth_gate import require_auth, SAFE_FAILURE
+    from auth_gate import require_auth, safe_failure_message
     from preflight import credential_storage_checkpoint
     task = load_json(task_dir / "task.json")
     assert_active_free_policy(task)
@@ -74,11 +74,12 @@ def preflight_credentials(task_dir: Path) -> str:
     atomic_write_json(task_dir / "task.json", task)
     try:
         require_auth()  # Existing skill licence; independent from IP data accounts.
-    except SystemExit:
-        add_gap(task, "cloud_auth", "GLOBAL", "access_limited", "AUTH_FAILED", SAFE_FAILURE)
-        add_history(task, "incomplete", SAFE_FAILURE)
+    except SystemExit as exc:
+        auth_detail = safe_failure_message(exc)
+        add_gap(task, "cloud_auth", "GLOBAL", "access_limited", "AUTH_FAILED", auth_detail)
+        add_history(task, "incomplete", auth_detail)
         atomic_write_json(task_dir / "task.json", task)
-        raise
+        raise SystemExit(auth_detail) from None
     source_capabilities = capabilities(task, load_skill_config())
     atomic_write_json(task_dir / "source-capabilities.json", {"schema_version": "2.4-free", "task_id": task["task_id"], "sources": source_capabilities})
     task["checkpoints"]["credential_preflight"] = {"status": "success", "at": now_iso(), "source_capabilities": "source-capabilities.json", "note": "Optional provider accounts are capabilities, not startup prerequisites"}
@@ -179,14 +180,14 @@ def _lane(provider: str) -> str:
 
 
 def execute_api_plan(task_dir: Path, *, wave: str = "all", include_optional: bool = False, max_workers: int = 0,
-                     query_ids_filter: list[str] | None = None) -> dict:
+                     query_ids_filter: list[str] | None = None, phase: str = "") -> dict:
     task_dir = task_dir.resolve()
     with api_execution_lock(task_dir):
-        return _execute_api_plan(task_dir, wave=wave, include_optional=include_optional, max_workers=max_workers, query_ids_filter=query_ids_filter)
+        return _execute_api_plan(task_dir, wave=wave, include_optional=include_optional, max_workers=max_workers, query_ids_filter=query_ids_filter, phase=phase)
 
 
 def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_workers: int,
-                      query_ids_filter: list[str] | None = None) -> dict:
+                      query_ids_filter: list[str] | None = None, phase: str = "") -> dict:
     from run_api_plan import command_for, completed_result
     from workflow_v24 import (validated_query_cancellation, assert_recall_planning_contract, validated_discovery_followup,
                              scenario_workflow_enabled, reconcile_scenario_actions, scenario_dispatch_block_from_dir,
@@ -195,6 +196,8 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
     from run_browser_plan import _BatchInputs
     from serpapi_patents_client import fallback_satisfied
     task, plan = load_json(task_dir / "task.json"), load_json(task_dir / "search-plan.json")
+    from retrieval_execution import selected_phase, in_phase
+    phase = selected_phase(task, phase, "api")
     assert_active_free_policy(task)
     if plan.get("task_id") != task["task_id"] or plan.get("schema_version") != "2.4-free" or not plan_free_policy_matches_task(task, plan):
         raise ValueError("Search plan identity or immutable policy mismatch")
@@ -224,6 +227,8 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
             or not set(query_ids_filter) <= {row["query_id"] for provider, row in rows if provider in API_CLIENTS}):
         raise ValueError("SEARCH_PLAN_INVALID: query-ids must be distinct exact API rows")
     selected_ids = set(query_ids_filter or [])
+    if selected_ids and any(row["query_id"] in selected_ids and not in_phase(row, phase) for _, row in rows):
+        raise ValueError("SELECTED_QUERY_PHASE_MISMATCH")
     if selected_ids and not include_optional and any(row["query_id"] in selected_ids and not row.get("execute_by_default", False) for _, row in rows):
         raise ValueError("SELECTED_QUERY_NOT_EXECUTABLE: optional API rows require --include-optional")
     results, browser_queue, lanes = [], [], {}
@@ -249,7 +254,9 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
     for provider, row in rows:
         if selected_ids and row["query_id"] not in selected_ids:
             continue
-        if wave != "all" and not selected_ids and int(row.get("wave", 1)) != int(wave):
+        if not in_phase(row, phase):
+            continue
+        if not phase and wave != "all" and not selected_ids and int(row.get("wave", 1)) != int(wave):
             continue
         if not row.get("execute_by_default", False) and not include_optional:
             continue
@@ -336,7 +343,8 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
                     deadline = min(time.time() + budget, inherited_deadline)
                     if not (0 < deadline - time.time() <= budget):
                         raise ValueError("OPERATION_DEADLINE_EXCEEDED: invalid or expired inherited deadline")
-                    environment = {**os.environ, "LC_IPR_OPERATION_DEADLINE_EPOCH": str(deadline)}
+                    environment = {**os.environ, "LC_IPR_OPERATION_DEADLINE_EPOCH": str(deadline),
+                                   "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
                     command = command_for(Path(__file__).parent, task_dir, provider, row)
                     old_success = next((r for r in reversed(previous) if r.get("status") in {"success", "no_result"}), None)
                     if provider in {"serpapi_google_patents", "serpapi_google_lens", "signa"} and old_success:
@@ -355,7 +363,8 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
                     with write_lock:
                         recovery = record_action_recovery(task_dir, provider, row)
                     process = subprocess.run(command, capture_output=True,
-                                             text=True, check=False, timeout=max(0.01, deadline - time.time()), env=environment)
+                                             text=True, encoding="utf-8", check=False,
+                                             timeout=max(0.01, deadline - time.time()), env=environment)
                     result = {**completed_result(provider, row, process), "dispatch": "executed"}
                     if recovery:
                         result["recovery_id"] = recovery["recovery_id"]

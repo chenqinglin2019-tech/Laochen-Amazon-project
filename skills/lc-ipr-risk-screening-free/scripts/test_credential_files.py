@@ -11,6 +11,7 @@ import auth_gate
 import common
 import preflight
 import validate_run
+from offline_test_support import offline_environment
 
 
 class CredentialFilesTests(unittest.TestCase):
@@ -21,7 +22,9 @@ class CredentialFilesTests(unittest.TestCase):
         self.addCleanup(patch.stopall)
         patch.object(common, "skill_root", return_value=self.root).start()
         patch.object(preflight, "skill_root", return_value=self.root).start()
-        patch.dict(os.environ, {"LC_IPR_TEST_MODE": "", "LC_IPR_OFFLINE_TESTS": ""}).start()
+        environment = offline_environment()
+        environment.update(LC_IPR_TEST_MODE="", LC_IPR_OFFLINE_TESTS="", LAOCHEN_BACKEND_TOKEN="")
+        patch.dict(os.environ, environment, clear=True).start()
         self.config = {"backend_url": "https://backend.example.test", "backend_token": "backend-fixture-secret"}
         self.write("config.json", json.dumps(self.config))
         self.write("config.example.json", json.dumps({**self.config, "backend_token": ""}))
@@ -46,7 +49,7 @@ class CredentialFilesTests(unittest.TestCase):
         self.write(".env", "\n".join(f"{common.ENV_CREDENTIALS[name]}={value}" for name, value in values.items()))
         with patch.dict(os.environ, {name: "ignored-environment" for name in common.ENV_CREDENTIALS.values()}), \
                 patch.object(subprocess, "run", side_effect=AssertionError("Keychain is forbidden")):
-            self.assertEqual(common.credential({}, "backend_token"), self.config["backend_token"])
+            self.assertEqual(common.credential({}, "backend_token"), "ignored-environment")
             for name, value in values.items():
                 with self.subTest(name=name):
                     self.assertEqual(common.credential({name: "ignored-config"}, name), value)
@@ -55,15 +58,37 @@ class CredentialFilesTests(unittest.TestCase):
             for name in values:
                 self.assertEqual(common.credential({name: "ignored-config"}, name), "")
             (self.root / "config.json").unlink()
-            self.assertEqual(common.credential({"backend_token": "ignored-config"}, "backend_token"), "")
+            self.assertEqual(common.credential({"backend_token": "ignored-config"}, "backend_token"), "ignored-environment")
 
     def test_missing_empty_and_unknown_credentials_are_not_filled_from_other_sources(self):
         self.write(".env", "SIGNA_API_KEY=\nLAOCHEN_BACKEND_TOKEN=wrong-place\n")
-        self.write("config.json", json.dumps({**self.config, "backend_token": "  "}))
+        self.write("config.json", json.dumps({**self.config, "backend_token": ""}))
         for name in ("backend_token", "signa_api_key", "serpapi_api_key"):
             self.assertEqual(common.credential({}, name), "")
             self.assertEqual(common.credential_issue(name), "CREDENTIAL_MISSING")
         self.assertEqual(common.credential_issue("unknown"), "UNKNOWN_CREDENTIAL")
+
+    def test_backend_package_precedence_and_legacy_config_compatibility(self):
+        self.write("config.json", json.dumps({**self.config, "business": {"enabled": True},
+                    "signa_api_key": "ignored-legacy-provider"}), mode=0o644)
+        self.write("config.local.json", json.dumps({"backend_token": "local-fixture", "business": {"limit": 2}}), mode=0o644)
+        self.assertEqual(common.credential({}, "backend_token"), "local-fixture")
+        self.assertEqual(common._backend_config()["business"], {"enabled": True, "limit": 2})
+        self.assertEqual(common.credential({}, "signa_api_key"), "signa-fixture-secret")
+        for value in ("process-fixture", "  "):
+            with patch.dict(os.environ, {"LAOCHEN_BACKEND_TOKEN": value}):
+                self.assertEqual(common.credential({}, "backend_token"), value)
+        with patch.dict(os.environ, {"LAOCHEN_BACKEND_TOKEN": ""}):
+            self.assertEqual(common.credential({}, "backend_token"), "local-fixture")
+        self.assertNotIn("config.local.json:backend_token", preflight.local_secret_findings())
+        self.assertIn("config.json:signa_api_key", preflight.local_secret_findings())
+
+    def test_backend_package_nonempty_conversion_is_not_provider_normalization(self):
+        for value in ("  ", None, 123):
+            self.write("config.json", json.dumps({**self.config, "backend_token": value}))
+            self.assertEqual(common.credential({}, "backend_token"), str(value))
+        self.write("config.json", '{"backend_token":"first","backend_token":"last"}')
+        self.assertEqual(common.credential({}, "backend_token"), "last")
 
     def test_dotenv_literals_preserve_special_characters_without_execution(self):
         for value in ("raw#hash=$HOME=$(never-run)=suffix", r"' spaces # $VALUE \path '", r'"double # ${VALUE} \t"'):
@@ -84,11 +109,7 @@ class CredentialFilesTests(unittest.TestCase):
     def test_backend_json_errors_never_expose_values(self):
         cases = [
             ('{"backend_token":"sensitive-unclosed', "INVALID_JSON"),
-            (json.dumps({**self.config, "backend_token": None}), "EXPECTED_STRING_VALUES"),
-            (json.dumps({**self.config, "backend_token": 123}), "EXPECTED_STRING_VALUES"),
-            (json.dumps({**self.config, "extra": "sensitive-value"}), "EXPECTED_BACKEND_FIELDS"),
-            ('{"backend_url":"https://example.test","backend_token":"one","backend_token":"two"}', "DUPLICATE_FIELD"),
-            ('[]', "EXPECTED_BACKEND_FIELDS"),
+            ('[]', "EXPECTED_OBJECT"),
         ]
         for text, code in cases:
             with self.subTest(code=code):
@@ -99,7 +120,7 @@ class CredentialFilesTests(unittest.TestCase):
                     common.load_skill_config()
 
     def test_file_failures_are_safe_and_do_not_fall_back(self):
-        for filename, name in (("config.json", "backend_token"), (".env", "signa_api_key")):
+        for filename, name in ((".env", "signa_api_key"),):
             original = (self.root / filename).read_text()
             with self.subTest(filename=filename):
                 self.write(filename, "x" * (common.LOCAL_ENV_MAX_BYTES + 1))
@@ -170,7 +191,7 @@ class CredentialFilesTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, "", "")
             path = Path(command[2])
             observed["path"] = path
-            self.assertEqual(json.loads(path.read_text()), self.config)
+            self.assertEqual(json.loads(path.read_text()), {**self.config, "backend_token": "synthetic-environment"})
             self.assertNotIn(self.config["backend_token"], " ".join(command))
             self.assertTrue(set(common.ENV_CREDENTIALS.values()).isdisjoint(kwargs["env"]))
             self.assertNotIn("LAOCHEN_BACKEND_URL", kwargs["env"])
@@ -179,7 +200,7 @@ class CredentialFilesTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0, "", "")
 
         with patch.object(auth_gate, "auth_binary", return_value=binary), patch.object(auth_gate.subprocess, "run", side_effect=run), \
-                patch.dict(os.environ, {"LAOCHEN_BACKEND_TOKEN": "ignored-env", "LAOCHEN_BACKEND_URL": "https://ignored.test"}):
+                patch.dict(os.environ, {"LAOCHEN_BACKEND_TOKEN": "synthetic-environment", "LAOCHEN_BACKEND_URL": "https://ignored.test"}):
             auth_gate.require_auth()
         self.assertFalse(observed["path"].exists())
 

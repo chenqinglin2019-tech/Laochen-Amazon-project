@@ -209,22 +209,35 @@ def query_coverage(evidence: dict[str, Any], candidates: dict[str, Any], plan: d
         if run.get("status") not in {"success", "no_result"}:
             continue
         if provider == "asset_provenance":
-            from record_asset_provenance import specialty_enabled, investigation_complete
+            from record_asset_provenance import specialty_enabled, investigation_complete, external_information_actions
             if specialty_enabled(task or {}):
                 entries = [entry for entry in evidence_index(evidence).values() if _entry_matches_run(entry, run)]
+                registry = {**evidence_index(evidence), **{item["evidence_id"]: item for item in (supplement or {}).get("evidence", [])}}
                 for entry in entries:
                     payload = entry.get("payload", {})
                     if isinstance(payload, dict):
                         output.update(outstanding_actions=payload.get("outstanding_actions", []), unresolved_facts=payload.get("unresolved", []))
+                    external = external_information_actions(task or {}, payload, query, scenario_id, registry)
+                    if external:
+                        output.update(complete=False, retrieval_complete=True, gap="USER_INFORMATION_REQUIRED",
+                            investigation_status="completed", external_information_actions=external,
+                            evidence_refs=[entry["evidence_id"]],
+                            reviewed_assets=len(payload["coverage_attestation"]["reviewed_asset_ids"]))
+                        return output  # A newer private dependency supersedes earlier completed research.
                     if (isinstance(payload, dict) and _retained_artifacts_complete(payload)
                             and investigation_complete(task, payload, query, scenario_id,
-                                {**evidence_index(evidence), **{item["evidence_id"]: item for item in (supplement or {}).get("evidence", [])}})):
+                                registry)):
                         output.update(complete=True, retrieval_complete=True, gap="",
                             investigation_status="completed", unresolved_facts=payload.get("unresolved", []),
                             evidence_refs=[entry["evidence_id"]],
                             reviewed_assets=len(payload["coverage_attestation"]["reviewed_asset_ids"]))
                         return output
                 output.update(gap="INVESTIGATION_STEPS_OR_SCOPE_INCOMPLETE", investigation_status="incomplete")
+                if (task or {}).get("completion_policy_revision") == "necessary-work-v1" and entries:
+                    # The current retained revision may reopen public work.
+                    # Invalid/mixed requests must remain Agent work, never be
+                    # hidden by an older completed payload for this same row.
+                    return output
                 continue
             inventories = (task or {}).get("product", {}).get("assets", [])
             expected_assets = {item.get("asset_id") for item in inventories if isinstance(item, dict) and item.get("asset_id")}
@@ -258,7 +271,12 @@ def query_coverage(evidence: dict[str, Any], candidates: dict[str, Any], plan: d
         if run.get("status") == "no_result" and (total != 0 or retrieved != 0 or candidates_for_query):
             output["gap"] = "ZERO_RESULT_CONTRADICTION"
             continue
-        if metadata.get("truncated") is not False or retrieved < total:
+        row_counting = (provider == "uspto_patent_browser"
+                        and metadata.get("coverage_counting_revision") == "ppubs-result-rows-v1")
+        if row_counting:
+            from record_browser_execution import ppubs_counting_complete
+        if (metadata.get("truncated") is not False
+                or (not ppubs_counting_complete(metadata) if row_counting else retrieved < total)):
             output["gap"] = "SEARCH_TRUNCATED"
             continue
         if not str(metadata.get("stop_reason") or "").strip():
@@ -267,6 +285,9 @@ def query_coverage(evidence: dict[str, Any], candidates: dict[str, Any], plan: d
         actual_records = _source_records(evidence, str(run.get("run_id") or ""))
         if actual_records is None or len(actual_records) != retrieved:
             output["gap"] = "SOURCE_RECORD_COUNT_MISMATCH"
+            continue
+        if row_counting and not ppubs_counting_complete(metadata, actual_records):
+            output["gap"] = "SOURCE_RECORD_IDENTITY_NOT_ACCOUNTED_FOR"
             continue
         if scenario_mode:
             if not _records_accounted_for(actual_records, candidates_for_query, lambda item: True):

@@ -3,13 +3,13 @@
   "auth": {
     "timeout_seconds": 20,
     "binary_sha256": {
-      "lc-ipr-auth-check-darwin-amd64": "d2915e2174895fa65838076626096bb9ca95f0264cef1522f693d810d2698c02",
-      "lc-ipr-auth-check-darwin-arm64": "06907e26166b7d6c0137a8b5ed929038ba094003b371ecd411494df07f9fa0da",
-      "lc-ipr-auth-check-linux-amd64": "e86ecbee568e858cbd0a3324c53133952d2aa76f0afbcb575ac8d4f8da4663f5",
-      "lc-ipr-auth-check-windows-amd64.exe": "1a79c560120dddd2cda3b8d885be3bf43e11225dc6409e3d5a1c6cc30ad0cda6"
+      "lc-ipr-auth-check-darwin-amd64": "b0a0bf7e7aa0b681bbcaeecc7651790e4e12773c65fbdd20b1bd95739bb4695a",
+      "lc-ipr-auth-check-darwin-arm64": "c048ab1c9740843a8b343231e712fffaaa810141d8674bf7c4b03519281bce01",
+      "lc-ipr-auth-check-linux-amd64": "6aeda1ed58fefe918f36c1dea6c067e7914d5dab4b6ef315bfb6365506b14f0c",
+      "lc-ipr-auth-check-windows-amd64.exe": "d3003ec2264be6e2a62698912afb0587ac7f9b7ce24c5ca348f622087eaf71e7"
     }
   },
-  "default_runs_dir": "/Users/laochen/Documents/产品专利等知识产权排查/runs-free",
+  "default_runs_dir": "~/Documents/知识产权排查/runs-free",
   "http": {
     "timeout_seconds": 30,
     "retries": 2,
@@ -46,6 +46,17 @@
     "dynamic_evidence_max_age_hours": 48,
     "api_operation_timeout_seconds": 180
   },
+  "api_first": {
+    "serper_max_requests": 30,
+    "serpapi_max_requests": 10,
+    "signa_max_requests": 3,
+    "discovery_results_per_query": 10,
+    "max_refinement_rounds": 2,
+    "max_pages_per_query": 8,
+    "browser_fallback_queries_per_scope": 2,
+    "browser_fallback_max_candidates": 50,
+    "entitlement_max_age_minutes": 30
+  },
   "limits": {
     "epo_search_queries_per_task": 6,
     "serper_free_max_queries_per_task": 10,
@@ -63,13 +74,17 @@
     "epo_search_queries_per_task_v24": 96
   },
   "cdp": {
-    "chrome_executable": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "chrome_executable": "",
     "profile_dir": "~/.codex/browser-profiles/lc-ipr-free-cdp",
     "runtime_dir": "~/.codex/runtime/lc-ipr-free-cdp",
     "navigation_timeout_ms": 45000,
     "action_timeout_ms": 15000,
     "semantic_poll_ms": 750,
     "semantic_stable_samples": 3,
+    "rate_limit_backoff_seconds": 900,
+    "max_recall_pages": 8,
+    "partial_resume_limit": 1,
+    "submitted_failure_resume_limit": 1,
     "headless": false,
     "operation_timeout_ms": 165000
   },

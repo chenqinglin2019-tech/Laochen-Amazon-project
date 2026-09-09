@@ -19,6 +19,8 @@ Save a UTF-8 JSON object with:
   "variant": {"label": "Color", "value": "Black", "confirmed": true},
   "title": "...",
   "brand": "...",
+  "brand_byline_raw": "Visit the … Store",
+  "brand_placeholder": false,
   "manufacturer": "...",
   "category": "...",
   "bullets": ["..."],
@@ -47,6 +49,8 @@ For a robot check, use `status: robot_check`, include the CDP provenance fields,
 
 For `screening_revision=recall-integrity-v1`, capture facts are stored in `product.raw_capture`; missing capture analysis fields must not erase the Agent's confirmed `structure`, assets or query terms. Confirm analysis separately using `product.analysis` and the current product identity digest. A changed ASIN, variant, material listing content or media identity makes prior analysis stale; capture timestamps alone do not.
 
+`brand_byline_raw` preserves the visible original byline; `brand` removes the anchored `Brand:` or `Visit the … Store` wrapper. `brand_placeholder` identifies a byline-sourced Generic/Unbranded placeholder. New completion-policy tasks do not generate trademark searches from that placeholder alone; an independently confirmed same-name mark in the image/mark inventory remains eligible. Legacy captures without these fields do not inherit a previous capture's placeholder flag. A changed byline-source fact reopens analysis and the affected trademark identity, while unchanged structural scopes retain their prior identity.
+
 Strict recaptures retain uniquely named screenshots/media/capture files and append separate original product evidence and source runs. Re-ingesting the identical capture is idempotent. Prior image hashes and raw captures remain valid; `task.images` and the browser-product checkpoint identify the current capture. Ratings, ranks and unrelated video controls are not product variant identity.
 
 Never place an endpoint, WebSocket URL, debugging port, profile path, cookies, local storage, or passwords in the capture. `cdp_session_id` is a random, non-secret correlation value and cannot encode the endpoint or profile.
@@ -60,6 +64,7 @@ Never place an endpoint, WebSocket URL, debugging port, profile path, cookies, l
 专利和商标浏览器计划统一执行：
 
 ```sh
+# 以下 wave 命令仅用于无 api-first-v1 标记历史任务；新任务见 API 优先契约的 --phase verification/fallback。
 python3 scripts/run_browser_plan.py --task-dir /absolute/run --wave 1
 python3 scripts/run_browser_plan.py --task-dir /absolute/run --wave 2
 ```
@@ -76,12 +81,22 @@ PPS 结果与查询绑定必须等待真实结果就绪，再按同一 L 号、�
 
 PPS 必须先读取初始可见行，再点击实际的 `+N` 同族按钮，恢复滚动锚点并等待虚拟行稳定，不能点击整格或把未取得数全部归因于同族。发现 `Too Many Requests` 时记录 `BROWSER_RATE_LIMITED`，保留页面并暂停该来源；本地 15 分钟退避不是网站承诺的恢复时间。不得关闭限制弹窗、换会话或反复提交以追求验收通过，其他免费来源可继续。
 
+错误、警告、可见弹窗和遮罩独立采集，不依赖可能截断的整页正文。在提交、同族展开、点击失败及封存结果时检查；`Query Error`、连续操作符或缺少操作数归类 `USPTO_QUERY_REJECTED`，不等待通用语义超时。限流始终使用大写 `BROWSER_RATE_LIMITED`，优先于通用点击超时。900 秒冷却、一次部分结果恢复、8 页上限统一取现有运行配置；冷却不消耗尝试，恢复前只读检查原页面，仍受限则不提交。
+
+限流恢复时原会话或页面缺失、不可读，记录 `BROWSER_RATE_LIMIT_RECOVERY_UNVERIFIED` 并保留暂停，不启动新会话推定恢复；一次恢复已耗尽时保留 `BROWSER_RATE_LIMIT_RECOVERY_EXHAUSTED`，等待外部来源状态变化。正常首次查询仍按原浏览器启动流程执行。
+
 新身份发现任务的美国文字商标计划逐行绑定 `query_compiler_revision=tm-field-tags-v1`。使用实际 `Field tag and Search builder` 控件及 `CM:"短词组"`；基础 Wordmark 多词输入并不等于精确短语。旧查询行不改写语义，升级时追加新 ID 并记录旧行被替代原因。依据：[USPTO 联邦商标检索指南](https://www.uspto.gov/trademarks/search/federal-trademark-searching)。
 
 TM 结果需同时验证输入、实际搜索模式、结果标题中的完整查询、真实计数和非加载状态。支持卡片列表与查询仅命中一件时自动进入的详情页；详情页还须绑定单件标题、序号与 URL 案号。按号码直接打开详情不算产品关键词召回。零结果与残留卡片矛盾、结果仍加载、解析或查询绑定失败均不得入库为零结果或网站访问受限；Python 录入层独立复核计数和查询。只读取当前页时保留截断标志，商品/服务省略文本须保留 `goods_services_truncated`，不得称完整商品范围已核对。
+
+没有数字查询标题的明确零结果页面，仅在本次成功提交、查询及模式一致、结果页面转换有证据、明确零结果且无卡片/加载、连续稳定采样时可绑定。`query_binding` 保存绑定方式及转换证据；没有可见查询标题时不填写虚构 `result_query`。JS 与 Python 同时验收，旧零结果页面只改输入框不得成为本次成功记录。
 
 `tm-figurative-fields-v1` 编译实际盘点来源的 `design_code` 为 DC、`mark_description` 为 DE；Python/JS 同时校验派生来源、字段与语法。最多八页的本轮读取逐页绑定查询、计数、范围及截图；中途失败保留已取得页面与截断，不丢失前页、不假装完整。图样比较与分类召回分开；没有适用图形代码的可读特殊字体依实际盘点与官方指引判定该轴不适用，不能编造代码。详见 [trademark-copyright.md](trademark-copyright.md)。
 
 TSDR 已知案号核验需按实际 key/value 读取 `US Serial Number`、当前状态，并展开 `Goods and Services` 与 `Current Owner(s) Information`。栏目标题或顶部结果提示不是持有人、商品或状态。严格任务的 capture、截图和标识媒体使用独立 query/UUID 名称；重跑不覆盖旧取证。录入沿用原计划的 `mode=agent`、`strategy=record_number` 等完整输入，不硬编码人工模式；解析失败保留具体错误及原始阶段记录，不伪装成网站拒绝访问。
 
 严格任务的 US design 使用 `design_recall`，patent 使用 `patent_recall`。内部路由冲突在提交前记录 `failed`，不是 USPTO 访问受限。查询编译和录入校验必须保持一致；布尔组、短语和号码直查分别处理，不能为规避保留字而给完整商品文案加引号。主体字段及分类以 [USPTO searchable indexes](https://www.uspto.gov/patents/search/patent-public-search/searchable-indexes) 为准；字段筛选本身不证明当前权属。真实非零结果、图纸读取及分页验收仍须单独留证，参见 [recall-acceptance.md](recall-acceptance.md)。
+
+新完成策略任务中新生成的文本 Boolean 行使用 `ppubs-boolean-v2`，号码读取继续 `ppubs-quoted-record-v1`；已执行行及历史无标记任务维持原修订。普通短词组可补 AND，已有引号、括号和 AND/OR/NOT 保持语义；尚不支持的裸露 WITH/SAME/ADJ/NEAR 等保留操作符提交前拒绝并转 `plan_repair`，不静默删除。Agent 根据产品结构追加修正查询、说明改写理由，原失败记录保留。三端编译以同一离线样例核对。
+
+修正时替换当前 `query_terms` 中有问题的表达，在 `clue_dispositions` 记录理由并绑定新的术语摘要，再追加有效计划行。不要继续把已知非法的当前词条送入每轮规划；已经执行的旧计划行及失败回执仍原样保留。

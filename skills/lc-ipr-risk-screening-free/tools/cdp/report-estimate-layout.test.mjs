@@ -1,3 +1,4 @@
+import { resolveChromeExecutable } from "./platform-runtime.mjs";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import fs from "node:fs";
@@ -15,18 +16,7 @@ test("five-level report keeps eight sections, seven modules, original images and
     return;
   }
   assert.ok(fs.existsSync(reportPath), "generated five-level report is missing");
-  const candidates = [process.env.CHROME_EXECUTABLE,
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-    "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"];
-  if (process.platform === "win32") {
-    for (const root of [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA]) {
-      if (root) candidates.push(path.join(root, "Google/Chrome/Application/chrome.exe"),
-        path.join(root, "Microsoft/Edge/Application/msedge.exe"));
-    }
-  }
-  const executablePath = candidates.find((candidate) => candidate && fs.existsSync(candidate));
+  const executablePath = resolveChromeExecutable();
   if (!executablePath) {
     assert.ok(!required, "release requires a supported system browser");
     t.skip("system browser unavailable");

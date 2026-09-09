@@ -1,0 +1,19 @@
+[
+  {"q": "layered ring rectangular openings", "expected": "layered AND ring AND rectangular AND openings"},
+  {"q": "layered AND ring AND rectangular AND openings", "expected": "layered AND ring AND rectangular AND openings"},
+  {"q": "(ring OR strap) AND NOT \"metal clasp\"", "expected": "(ring OR strap) AND NOT \"metal clasp\""},
+  {"q": "(ring or strap) and not \"metal clasp\"", "expected": "(ring OR strap) AND NOT \"metal clasp\""},
+  {"q": "\"with handle\" AND ring", "expected": "\"with handle\" AND ring"},
+  {"q": "layered ring with rectangular openings", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "ring AND WITH AND openings", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "ring SAME strap", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "ring ADJ strap", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "ring adj2 strap", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "ring NEAR strap", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "ring near5 strap", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "ring XOR strap", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "ring AND OR strap", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "ring AND (strap", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "ring.PN.", "error": "UNSUPPORTED_QUERY_SEMANTICS"},
+  {"q": "", "error": "UNSUPPORTED_QUERY_SEMANTICS"}
+]

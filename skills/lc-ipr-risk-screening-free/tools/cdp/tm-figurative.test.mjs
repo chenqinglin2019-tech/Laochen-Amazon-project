@@ -1,3 +1,4 @@
+import { requireChromeExecutable } from "./platform-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -38,7 +39,7 @@ test("nonverbal result is an identified record with an explicitly absent wordmar
 });
 
 async function fixture(mode, run) {
-  const browser = await chromium.launch({ executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true });
+  const browser = await chromium.launch({ executablePath: requireChromeExecutable(), headless: true });
   const taskDir = await fs.mkdtemp(path.join(os.tmpdir(), "tm-pages-test-"));
   try {
     const page = await browser.newPage();

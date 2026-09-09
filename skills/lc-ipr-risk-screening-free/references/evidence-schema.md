@@ -2,6 +2,8 @@
 
 新任务同时绑定 `workflow_correction_revision=workflow-correction-v1`；作用域摘要、统一补充加载、必要审阅、提交恢复以及 `core-risk-evidence-v2/compact-evidence-v1` 数据增量集中见[纠错契约](workflow-correction.md)。下文原修订用于兼容历史；新记录不得沿用失效的旧摘要或回执。
 
+新任务另绑定 `completion_policy_revision=necessary-work-v1`，发布模式、范围双审、`review_work` 与 `publication` 的冻结来源能力及待办绑定按[必要工作发布契约](workflow-correction.md#必要工作发布门禁necessary-work-v1)执行。无此字段的历史任务不原地迁移。
+
 采集流程使用 `task.schema_version=2.4-free`、`free_policy_revision=automation-first-v1`；评级另以 `assessment_policy` 分派。新任务默认 `evidence-estimate-v1`，历史任务缺少该字段时继续旧行为。`2.3-free` 的计划、来源选择和旧报告分支保留；新建仅 2.4，测试工具可创建 2.3 fixture，不能将历史任务改版本迁移。
 
 新任务另写 `screening_revision:recall-integrity-v1`。该修订绑定产品分析、路由和阶段性报告语义，审阅 digest 包含此字段；无修订历史任务使用原合同。不要给旧任务补标记后覆盖旧结果，重新排查创建新目录。

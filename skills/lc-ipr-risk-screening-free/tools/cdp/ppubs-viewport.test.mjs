@@ -1,3 +1,4 @@
+import { requireChromeExecutable } from "./platform-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -22,7 +23,7 @@ test("short padded PPS canvas is readable only with contiguous complete loaded r
 
 test("small folded PPS results retain six publications without counting family expansion as pages", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "ipr-small-pps-"));
-  const browser = await chromium.launch({ executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true });
+  const browser = await chromium.launch({ executablePath: requireChromeExecutable(), headless: true });
   try {
     const page = await browser.newPage();
     await page.setContent(`<trix-editor class="trix" aria-label="Enter query text">test AND strap</trix-editor>

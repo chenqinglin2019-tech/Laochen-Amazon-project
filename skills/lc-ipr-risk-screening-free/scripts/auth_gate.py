@@ -19,6 +19,10 @@ SAFE_REASONS = {
     "invalid_token": "访问 Token 无效或无权访问。",
     "user_disabled": "账户已停用。",
     "insufficient_balance": "账户余额不足。",
+    "unknown_skill": "后台尚未登记本 Skill。",
+    "skill_disabled": "本 Skill 已停用。",
+    "permission_disabled": "当前账户未开通本 Skill 权限。",
+    "permission_missing": "当前账户缺少本 Skill 权限。",
     "rate_limited": "鉴权服务请求过于频繁，请稍后重试。",
     "service_unavailable": "鉴权服务暂时不可用。",
     "invalid_response": "鉴权服务返回异常。",
@@ -44,6 +48,13 @@ def result_reason(*streams: str) -> str:
             if isinstance(payload, dict) and payload.get("reason") in SAFE_REASONS:
                 return payload["reason"]
     return "auth_failed"
+
+
+def safe_failure_message(error: BaseException) -> str:
+    """Carry only the gate's fixed messages through preflight diagnostics."""
+    message = str(error)
+    allowed = {f"{SAFE_FAILURE}\n原因：{detail}" for detail in SAFE_REASONS.values()}
+    return message if message in allowed else SAFE_FAILURE
 
 
 def skill_root() -> Path:
@@ -92,12 +103,12 @@ def require_auth() -> None:
             # Only prepare the selected, hash-verified component before launch.
             attributes = subprocess.run(
                 ["/usr/bin/xattr", str(binary)],
-                text=True, capture_output=True, check=True, timeout=10, env=child_env,
+                text=True, encoding="utf-8", capture_output=True, check=True, timeout=10, env=child_env,
             )
             if "com.apple.quarantine" in attributes.stdout.splitlines():
                 subprocess.run(
                     ["/usr/bin/xattr", "-d", "com.apple.quarantine", str(binary)],
-                    text=True, capture_output=True, check=True, timeout=10, env=child_env,
+                    text=True, encoding="utf-8", capture_output=True, check=True, timeout=10, env=child_env,
                 )
     except (OSError, subprocess.SubprocessError):
         stop("auth_component_prepare_failed")
@@ -108,7 +119,7 @@ def require_auth() -> None:
             auth_config.chmod(0o600)
             result = subprocess.run(
                 [str(binary), "--config", str(auth_config)],
-                text=True, capture_output=True, check=False,
+                text=True, encoding="utf-8", capture_output=True, check=False,
                 timeout=timeout,
                 env=child_env,
             )

@@ -194,6 +194,7 @@ def product_identity_content(value: Any) -> Any:
 
 
 _OBSERVED_FIELDS = ("requested_asin", "actual_asin", "variant", "selected_variant", "title", "brand",
+                    "brand_byline_raw", "brand_placeholder",
                     "manufacturer", "category", "bullets", "specifications", "visible_ip_claims",
                     "structure", "visual_features", "ocr_text", "media_identity")
 _STRUCTURAL_FIELDS = ("structure", "function", "functions", "visual_features", "dimensions", "materials",
@@ -237,7 +238,7 @@ def scoped_product_content(task: dict, scenario_id: str | None, right_type: str 
     common = {key: product[key] for key in _CONTEXT_FIELDS if key in product}
     if right_type in {"trademark_word", "trademark_figurative"}:
         common["marks"] = {key: product[key] for key in ("brand", "own_brand", "own_brand_name", "own_brand_logo",
-            "own_logo", "brand_role", "logo", "product_type", "category", "intended_goods") if key in product}
+            "own_logo", "brand_role", "brand_byline_raw", "brand_placeholder", "logo", "product_type", "category", "intended_goods") if key in product}
         common["mark_inventory"] = [row for row in (product.get("mark_inventory") or []) if isinstance(row, dict)
             and (scenario_id is None or scenario_id in (row.get("scenario_ids") or []))]
     elif right_type is not None:

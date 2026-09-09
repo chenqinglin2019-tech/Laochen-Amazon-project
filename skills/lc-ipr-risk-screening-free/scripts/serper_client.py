@@ -8,23 +8,22 @@ import json
 import os
 import re
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterator
 from urllib.parse import urlparse
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover - Windows runner remains sequential.
-    fcntl = None
 
 from common import (
     SERPER_FREE_MAX_QUERIES_PER_TASK, SERPER_PROVIDER_OPERATIONS,
     SERPER_PROVIDER_QUERY_CAPS, SERPER_PROVIDERS, active_free_policy,
     authorize_serper_free_plan_entry,
     credential, ensure_object, load_json, load_skill_config,
+    api_first_enabled, API_FIRST_REVISION, sha256_json, api_discovery_patent_right_type,
 )
+from free_search_budget import attempt_context, reserve_search
+from serper_entitlement import load_entitlement
 from provider_utils import (
-    ProviderError, authorize_current_scenario_action, http_json, json_body, quota_summary, record_result,
+    ProviderError, authorize_current_scenario_action, file_lock, http_json, json_body, quota_summary, record_result, sanitize_for_evidence,
 )
 
 
@@ -125,14 +124,8 @@ def settings() -> tuple[dict[str, Any], str, str]:
 def serper_budget_lock(task_dir: Path) -> Iterator[None]:
     """Serialize the pre-network budget check across concurrent plan runners."""
     lock_path = task_dir / ".serper-free.lock"
-    with lock_path.open("a+b") as handle:
-        if fcntl is not None:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            if fcntl is not None:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    with file_lock(lock_path):
+        yield
 
 
 def consumed_queries(evidence: dict[str, Any]) -> int:
@@ -162,13 +155,15 @@ def _persistent_stop_status(code: str, recorded_status: str = "") -> str:
     return "access_limited"
 
 
-def persisted_provider_block(evidence: dict[str, Any]) -> tuple[str, str, str] | None:
+def persisted_provider_block(evidence: dict[str, Any], *, entitlement_recheck: bool = False) -> tuple[str, str, str] | None:
     """Return the first recorded condition that permanently stops this task's Serper lane."""
     for run in evidence.get("source_runs", []):
         if run.get("provider") not in SERPER_PROVIDERS:
             continue
         code = str(run.get("error_code") or "")
         quota = run.get("quota") if isinstance(run.get("quota"), dict) else {}
+        if entitlement_recheck and code in {'FREE_ACCOUNT_UNVERIFIED', 'AUTH_FAILED'} and quota.get('network_request_attempted') is not True:
+            continue
         if code == "AUTH_FAILED" and quota.get("network_request_attempted") is not True:
             # A missing local credential consumed no free query and may be
             # repaired after the task's non-blocking reminder.
@@ -185,9 +180,11 @@ def persisted_provider_block(evidence: dict[str, Any]) -> tuple[str, str, str] |
             )
         for key, value in quota.items():
             lowered = str(key).casefold()
+            if lowered.endswith('sha256') or isinstance(value, (dict, list)):
+                continue  # Provenance hashes and authorization snapshots are not balances.
             remaining = _numeric(value)
-            if remaining is not None and remaining <= 0 and any(
-                marker in lowered for marker in ("credit", "quota", "balance", "remaining")
+            if remaining is not None and remaining <= 0 and not lowered.startswith(('paid_', 'reserved_')) and any(
+                marker in lowered for marker in ("balance", "remaining", "_left")
             ):
                 return (
                     "FREE_QUOTA_EXHAUSTED", "access_limited",
@@ -230,8 +227,9 @@ def _reports_zero_balance(payload: dict[str, Any]) -> bool:
 def call(
     operation: str, request_payload: dict[str, Any], *,
     attempt_state: dict[str, bool] | None = None,
+    connection: tuple | None = None,
 ) -> tuple[dict[str, Any], dict[str, str], bytes]:
-    config, base, key = settings()
+    config, base, key = connection if connection is not None else settings()
     if not key:
         raise ProviderError("AUTH_FAILED", "access_limited", "SERPER_API_KEY is missing")
     if attempt_state is not None:
@@ -274,12 +272,19 @@ def call(
 
 def normalize(
     provider: str, operation: str, payload: dict[str, Any],
+    *, retrieval_workflow_revision: str | None = None,
 ) -> list[dict[str, Any]]:
     raw_items = payload.get("images" if operation == "images" else "organic", [])
     candidates: list[dict[str, Any]] = []
     for item in raw_items:
         if not isinstance(item, dict):
+            if retrieval_workflow_revision == API_FIRST_REVISION:
+                raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'A returned discovery card is not an object; all original cards must be retained for review')
             continue
+        if retrieval_workflow_revision == API_FIRST_REVISION and not any(item.get(k) for k in ('title', 'link', 'url', 'imageUrl', 'image', 'publicationNumber', 'publication_number')):
+            raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'A returned discovery card has no readable identity fields')
+        if retrieval_workflow_revision == API_FIRST_REVISION:
+            item = sanitize_for_evidence(item)
         source_url = str(item.get("link") or item.get("url") or "")
         publication = ""
         if operation == "patents":
@@ -303,8 +308,54 @@ def normalize(
                 "status": "not_checked", "source": "", "url": "", "checked_at": "",
             },
         }
+        if retrieval_workflow_revision == API_FIRST_REVISION:
+            candidate['retrieval_workflow_revision'] = API_FIRST_REVISION
+            candidate.update(google_patent_fields(item) if operation == 'patents' else {
+                'thumbnail_url': str(item.get('thumbnailUrl') or ''),
+                'source_index': 'google_images' if operation == 'images' else 'google_search',
+            })
+            candidate.update(source_record_sha256=sha256_json(item), source_position=item.get('position'), source_record_hash_stage='retained-v1')
         candidates.append(candidate)
     return candidates
+
+
+def retained_source_records(evidence: dict, run: dict, task_dir: Path | None = None) -> list[dict]:
+    """Verify retained Images cards, including the legacy pre-sanitization shape."""
+    from retained_discovery import retained_records
+    if run.get('operation') != 'images':
+        raise ValueError('SERPER_IMAGES_RETAINED_NORMALIZATION_INVALID')
+    return retained_records(evidence, run, task_dir, provider='serper_images',
+        normalize_records=lambda raw: normalize('serper_images', 'images', raw,
+            retrieval_workflow_revision=API_FIRST_REVISION),
+        invalid='SERPER_IMAGES_RETAINED_NORMALIZATION_INVALID',
+        projection_revision='serper-images-retained-projection-v1')
+
+
+def google_patent_fields(item: dict[str, Any]) -> dict[str, Any]:
+    """Keep declared publication identity and source bibliographic facts distinct."""
+    item = sanitize_for_evidence(item)
+    url = str(item.get('patent_link') or item.get('link') or item.get('url') or '')
+    declared = str(item.get('publicationNumber') or item.get('publication_number') or '')
+    match = re.search(r'/patent/([A-Za-z]{2}[A-Za-z0-9-]+)', url)
+    from_url = re.sub(r'[^A-Za-z0-9]', '', match.group(1)).upper() if match else ''
+    publication = re.sub(r'[^A-Za-z0-9]', '', declared).upper() or from_url
+    result = {'publication_number': publication, 'jurisdiction': publication[:2], 'url': url,
+              'retrieval_workflow_revision': API_FIRST_REVISION,
+              'source_index': 'google_patents', 'source_record_sha256': sha256_json(item),
+              'source_record_hash_stage': 'retained-v1',
+              'source_position': item.get('position'), 'inventor': item.get('inventor') or '',
+              'assignee': item.get('assignee') or '', 'language': item.get('language') or '',
+              'figures': item.get('figures') if isinstance(item.get('figures'), list) else []}
+    for snake, camel in [('priority_date', 'priorityDate'), ('filing_date', 'filingDate'),
+                         ('grant_date', 'grantDate'), ('publication_date', 'publicationDate'),
+                         ('thumbnail_url', 'thumbnailUrl'), ('pdf_url', 'pdfUrl')]:
+        result[snake] = item.get(camel) or item.get(snake) or ''
+    if declared and from_url and publication != from_url:
+        result['source_identity_conflict'] = {'declared_publication': publication, 'url_publication': from_url}
+    actual_type = api_discovery_patent_right_type(publication, item.get('kind_code'))
+    result.update(right_type=actual_type or 'unknown',
+                  right_type_status='intrinsic_document_identifier' if actual_type else 'unresolved')
+    return result
 
 
 def _find_entry(plan: dict[str, Any], query_id: str) -> tuple[str, str]:
@@ -321,7 +372,7 @@ def _find_entry(plan: dict[str, Any], query_id: str) -> tuple[str, str]:
 
 def _record_failure(
     task_dir: Path, provider: str, operation: str, item: dict[str, Any],
-    error: ProviderError, *, network_attempted: bool,
+    error: ProviderError, *, network_attempted: bool, quota: dict | None = None, raw_body: bytes | None = None,
 ) -> dict[str, Any]:
     return record_result(
         task_dir, provider=provider, operation=operation,
@@ -332,12 +383,14 @@ def _record_failure(
             "enforcement" if operation == "search" else "copyright"
         ),
         status=error.source_status, normalized=None,
+        raw_body=raw_body, raw_suffix='json',
         error_code=error.code, detail=error.detail, mandatory=False,
         request_params={"q": item.get("q"), "num": item.get("num")},
         query_id=str(item.get("query_id") or ""),
-        quota={"network_request_attempted": network_attempted},
+        quota={**(quota or {}), "network_request_attempted": network_attempted},
         source_environment=(
             "test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1"
+            else "user_authorized_existing_balance" if (quota or {}).get('balance_authorization')
             else "free_entitlement_unvalidated" if error.code == "FREE_ACCOUNT_UNVERIFIED"
             else "commercial_freemium_free_balance"
         ),
@@ -345,7 +398,28 @@ def _record_failure(
     )
 
 
-def execute(task_dir: Path, query_id: str) -> dict[str, Any]:
+def existing_balance_authorization(task: dict[str, Any]) -> dict | None:
+    """A task-scoped user override does not claim any verified free balance."""
+    value = task.get('serper_existing_balance_authorization')
+    if value is None:
+        return None
+    fields = {'authorized', 'source', 'authorized_at', 'max_requests', 'allow_recharge', 'allow_new_purchase'}
+    valid = (api_first_enabled(task) and isinstance(value, dict) and set(value) == fields
+             and value.get('authorized') is True and value.get('source') == 'explicit_user_instruction'
+             and value.get('allow_recharge') is False and value.get('allow_new_purchase') is False
+             and type(value.get('max_requests')) is int and 1 <= value['max_requests'] <= 30
+             and value['max_requests'] == task.get('serper_free_enhancement', {}).get('max_queries_per_task'))
+    try:
+        timestamp = datetime.fromisoformat(str(value.get('authorized_at')).replace('Z', '+00:00')) if isinstance(value, dict) else None
+        valid = valid and timestamp is not None and timestamp.tzinfo is not None and timestamp <= datetime.now(timezone.utc) + timedelta(seconds=60)
+    except ValueError:
+        valid = False
+    if not valid:
+        raise ProviderError('SERPER_BALANCE_AUTHORIZATION_INVALID', 'access_limited', 'Existing-balance use requires a bounded explicit user authorization on this new task')
+    return dict(value)
+
+
+def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry_reason: str = '') -> dict[str, Any]:
     task_dir = task_dir.resolve()
     with serper_budget_lock(task_dir):
         task = ensure_object(load_json(task_dir / "task.json"), "task.json")
@@ -353,7 +427,11 @@ def execute(task_dir: Path, query_id: str) -> dict[str, Any]:
         provider, operation = _find_entry(plan, query_id)
         item = authorize_serper_free_plan_entry(task, plan, provider, operation, query_id)
         authorize_current_scenario_action(task_dir, task, provider, item)
-        if task.get("schema_version") == "2.4-free":
+        api_first = api_first_enabled(task)
+        authorization = existing_balance_authorization(task) if api_first else None
+        authorization_quota = {'balance_authorization': authorization, 'balance_authorization_sha256': sha256_json(authorization),
+                               'balance_verified': False} if authorization else {}
+        if task.get("schema_version") == "2.4-free" and not api_first:
             # A local allow_paid=False flag or the presence of a Key does not
             # reveal the account's actual credit type or automatic recharge.
             # No accepted account-page proof collector exists in this version.
@@ -365,12 +443,12 @@ def execute(task_dir: Path, query_id: str) -> dict[str, Any]:
                     "FREE_ACCOUNT_UNVERIFIED", "access_limited",
                     "Serper free entitlement, absence of paid credits, and disabled automatic recharge cannot yet be independently verified; no metered request sent",
                 ),
-                network_attempted=False,
+                network_attempted=False, quota=authorization_quota,
             )
         evidence = ensure_object(load_json(task_dir / "evidence.json"), "evidence.json")
         maximum = int(task["serper_free_enhancement"]["max_queries_per_task"])
         used = consumed_queries(evidence)
-        provider_stop = persisted_provider_block(evidence)
+        provider_stop = persisted_provider_block(evidence, entitlement_recheck=api_first)
         if used >= maximum:
             return _record_failure(
                 task_dir, provider, operation, item,
@@ -378,7 +456,7 @@ def execute(task_dir: Path, query_id: str) -> dict[str, Any]:
                     LOCAL_LIMIT_CODE, "access_limited",
                     f"Local Serper free-query cap reached: {used}/{maximum}; no network request sent",
                 ),
-                network_attempted=False,
+                network_attempted=False, quota=authorization_quota,
             )
         if provider_stop:
             stop_code, stop_status, stop_reason = provider_stop
@@ -388,17 +466,46 @@ def execute(task_dir: Path, query_id: str) -> dict[str, Any]:
                     stop_code, stop_status,
                     f"Serper task stop is already recorded ({stop_reason}); no network request sent",
                 ),
-                network_attempted=False,
+                network_attempted=False, quota=authorization_quota,
             )
 
         request_payload = {"q": item["q"], "num": item["num"]}
+        if api_first:
+            request_payload.update({k: item[k] for k in ('gl', 'hl', 'page') if k in item})
         attempt_state = {"network_request_attempted": False}
+        account = dict(authorization_quota)
+        connection = None
+        body = b''
         try:
+            if api_first:
+                attempt = attempt_context(attempt_id, retry_reason)
+                connection = settings()
+                _, base, key = connection
+                if not key:
+                    raise ProviderError('AUTH_FAILED', 'access_limited', 'SERPER_API_KEY is missing')
+                account.update(attempt)
+                if authorization:
+                    account.update(reserve_search('serper', key, base, remaining=None, credit_units=None,
+                        balance_verified=False, task_dir=task_dir, query_id=query_id,
+                        plan_entry_sha256=sha256_json(item), max_queries_per_task=maximum, **attempt))
+                else:
+                    proof = load_entitlement(key, operation)
+                    account.update(entitlement_sha256=proof['proof_sha256'],
+                                   entitlement_capture_sha256=proof['capture_sha256'],
+                                   entitlement_expires_at=proof['expires_at'])
+                    account.update(reserve_search('serper', key, base, remaining=proof['free_credit_units'],
+                        credit_units=proof['operation_credit_units'][operation], account_identity=proof['account_fingerprint'],
+                        task_dir=task_dir, query_id=query_id, plan_entry_sha256=sha256_json(item),
+                        max_queries_per_task=maximum, **attempt))
             payload, headers, body = call(
                 operation, request_payload, attempt_state=attempt_state,
+                **({'connection': connection} if api_first else {}),
             )
-            candidates = normalize(provider, operation, payload)
-            quota = quota_summary(headers, payload)
+            candidates = normalize(provider, operation, payload, retrieval_workflow_revision=task.get('retrieval_workflow_revision'))
+            quota = {**account, **quota_summary(headers, payload)}
+            if api_first:
+                units = payload.get('credits')
+                quota['reported_credit_units'] = units if type(units) in (int, float) and units >= 0 else None
             quota["network_request_attempted"] = True
             return record_result(
                 task_dir, provider=provider, operation=operation,
@@ -412,12 +519,16 @@ def execute(task_dir: Path, query_id: str) -> dict[str, Any]:
                     "candidates": candidates,
                     "role": "discovery_only",
                     "authoritative_for_final_rating": False,
+                    **({'source_index': candidates[0]['source_index'] if candidates else {
+                        'patents': 'google_patents', 'search': 'google_search', 'images': 'google_images'}[operation],
+                        'search_metadata': bounded_search_metadata(candidates)} if api_first else {}),
                 },
                 raw_body=body, raw_suffix="json", quota=quota,
                 mandatory=False, request_params=request_payload,
                 query_id=query_id,
                 source_environment=(
                     "test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1"
+                    else "user_authorized_existing_balance" if authorization
                     else "commercial_freemium_free_balance"
                 ),
                 authoritative_for_final_rating=False,
@@ -425,8 +536,14 @@ def execute(task_dir: Path, query_id: str) -> dict[str, Any]:
         except ProviderError as exc:
             return _record_failure(
                 task_dir, provider, operation, item, exc,
-                network_attempted=attempt_state["network_request_attempted"],
+                network_attempted=attempt_state["network_request_attempted"], quota=account, raw_body=body or None,
             )
+
+
+def bounded_search_metadata(candidates: list) -> dict:
+    return {'total_hits': None, 'retrieved_hits': len(candidates), 'reviewed_hits': None,
+            'truncated': True, 'stop_reason': 'bounded_discovery_total_unknown',
+            'source_updated_at': None, 'schema_valid': True}
 
 
 def main() -> None:
@@ -436,9 +553,11 @@ def main() -> None:
     )
     parser.add_argument("--task-dir", type=Path, required=True)
     parser.add_argument("--query-id", required=True)
+    parser.add_argument('--attempt-id', default='initial')
+    parser.add_argument('--retry-reason', default='')
     args = parser.parse_args()
     try:
-        run = execute(args.task_dir, args.query_id)
+        run = execute(args.task_dir, args.query_id, attempt_id=args.attempt_id, retry_reason=args.retry_reason)
     except (OSError, ValueError, KeyError) as exc:
         raise SystemExit(str(exc)) from None
     print(json.dumps({

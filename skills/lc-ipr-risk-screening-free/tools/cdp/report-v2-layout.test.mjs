@@ -1,3 +1,4 @@
+import { chromeCandidates as detectedChromeCandidates } from "./platform-runtime.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
@@ -8,33 +9,6 @@ import { pathToFileURL } from "node:url";
 import { chromium } from "playwright-core";
 
 
-function chromeCandidates() {
-  const candidates = [process.env.CHROME_EXECUTABLE];
-  if (process.platform === "darwin") {
-    candidates.push(
-      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-      "/Applications/Chromium.app/Contents/MacOS/Chromium",
-      "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-    );
-  } else if (process.platform === "win32") {
-    for (const root of [process.env.PROGRAMFILES, process.env["PROGRAMFILES(X86)"], process.env.LOCALAPPDATA]) {
-      if (!root) continue;
-      candidates.push(
-        path.join(root, "Google", "Chrome", "Application", "chrome.exe"),
-        path.join(root, "Microsoft", "Edge", "Application", "msedge.exe"),
-      );
-    }
-  } else {
-    candidates.push(
-      "/usr/bin/google-chrome",
-      "/usr/bin/google-chrome-stable",
-      "/usr/bin/chromium",
-      "/usr/bin/chromium-browser",
-      "/usr/bin/microsoft-edge",
-    );
-  }
-  return candidates.filter((candidate) => candidate && fs.existsSync(candidate));
-}
 
 
 test("report v2 has responsive viewports and printable excluded candidates", async (t) => {
@@ -46,7 +20,7 @@ test("report v2 has responsive viewports and printable excluded candidates", asy
     return;
   }
   assert.ok(fs.existsSync(reportPath), `missing generated report: ${reportPath}`);
-  const executablePath = chromeCandidates()[0];
+  const executablePath = detectedChromeCandidates().filter(candidate => fs.existsSync(candidate))[0];
   if (!executablePath) {
     assert.ok(!required, "release requires a supported system browser");
     t.skip(`no supported system Chrome executable on ${os.platform()}`);

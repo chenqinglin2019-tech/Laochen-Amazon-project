@@ -59,6 +59,8 @@ def main() -> None:
             "requires SERPER_API_KEY and never satisfies an official coverage gate."
         ),
     )
+    parser.add_argument("--use-serper-existing-balance", action="store_true",
+                        help="Only with explicit user authorization: use existing Serper credits without account-page inspection; never purchase or recharge")
     parser.add_argument(
         "--enable-signa-free", action="store_true",
         help=(
@@ -74,6 +76,10 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+    if args.use_serper_existing_balance and not args.enable_serper_free:
+        raise SystemExit("Existing Serper balance authorization requires --enable-serper-free")
+    if args.use_serper_existing_balance and args.schema_version != CURRENT_SCHEMA_VERSION:
+        raise SystemExit("Existing Serper balance authorization requires a new API-first task")
     if args.schema_version != CURRENT_SCHEMA_VERSION and os.environ.get("LC_IPR_TEST_MODE") != "1":
         raise SystemExit("New tasks use 2.4-free; 2.3 creation is reserved for frozen compatibility tests")
     schema_version = args.schema_version
@@ -202,6 +208,18 @@ def main() -> None:
         task["specialty_workflow_revision"] = "asset-scope-v1"
         task["decision_workflow_revision"] = DECISION_WORKFLOW_REVISION
         task["workflow_correction_revision"] = "workflow-correction-v1"
+        task["completion_policy_revision"] = "necessary-work-v1"
+        task["retrieval_workflow_revision"] = "api-first-v1"
+        retrieval = config["api_first"]
+        task["retrieval_policy"] = dict(retrieval)
+        task["serper_free_enhancement"]["max_queries_per_task"] = retrieval["serper_max_requests"]
+        task["serpapi_free_enhancement"]["max_queries_per_task"] = retrieval["serpapi_max_requests"]
+        task["serpapi_free_enhancement"]["fallback_only_when_serper_enabled"] = False
+        if args.use_serper_existing_balance:
+            task["serper_existing_balance_authorization"] = {
+                "authorized": True, "source": "explicit_user_instruction", "authorized_at": created,
+                "max_requests": retrieval["serper_max_requests"], "allow_recharge": False, "allow_new_purchase": False,
+            }
         task["assessment_scenarios"] = default_assessment_scenarios(genuine_resale=args.genuine_resale)
         task["primary_scenario_id"] = "product_entry"
         task["request"]["genuine_resale"] = args.genuine_resale
@@ -215,8 +233,8 @@ def main() -> None:
         }
         task["query_terms"] = []
         task["checkpoints"]["optional_discovery_selection"]["detail"] = (
-            "Selected free discovery sources broaden recall. Unconfigured official APIs do not block task startup; "
-            "unfulfilled search and verification capabilities remain explicit coverage gaps."
+            "Available selected free APIs perform bounded discovery before agent triage and targeted verification. "
+            "Missing capabilities remain explicit; browser discovery requires a reviewed bounded fallback."
         )
     evidence = {
         "schema_version": schema_version, "task_id": task_id,

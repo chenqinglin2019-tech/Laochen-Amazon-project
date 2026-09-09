@@ -26,6 +26,12 @@ class ScenarioPlanningTests(unittest.TestCase):
         subprocess.run([sys.executable, str(Path(__file__).with_name("create_task.py")), "--url", "https://www.amazon.com/dp/B012345678",
                         "--jurisdictions", "US", "--output-dir", str(self.path)], capture_output=True, check=True)
         self.task = load_json(self.path / "task.json")
+        self.task.pop("retrieval_workflow_revision", None)
+        self.task.pop("retrieval_policy", None)
+        from common import serper_free_enhancement, serpapi_free_enhancement
+        self.task["serper_free_enhancement"] = serper_free_enhancement(False)
+        self.task["serpapi_free_enhancement"] = serpapi_free_enhancement(False)
+        self.task.pop("completion_policy_revision", None)  # Frozen scenario routing/consumer compatibility fixture.
         self.task.pop("recall_planning_revision", None)  # This fixture isolates scenario routing from clue handoff.
         self.task["state"] = "collecting"
         self.task["product"].update(actual_asin="B012345678", variant={"confirmed": True, "value": "fixture"},

@@ -19,6 +19,7 @@ from common import (
     active_free_policy, authorize_serpapi_free_plan_entry, credential,
     ensure_object, load_json, load_skill_config, provider_execution_error,
     sha256_json,
+    API_FIRST_REVISION,
 )
 from provider_utils import ProviderError, authorize_current_scenario_action, file_lock, http_json, quota_summary, record_result
 from free_search_budget import attempt_context, reserve_search
@@ -277,11 +278,15 @@ def search(
     return payload, headers, body
 
 
-def normalize(payload: dict[str, Any]) -> list[dict[str, Any]]:
+def normalize(payload: dict[str, Any], *, retrieval_workflow_revision: str | None = None) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for item in payload.get("organic_results", []):
         if not isinstance(item, dict):
+            if retrieval_workflow_revision == API_FIRST_REVISION:
+                raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'A returned patent discovery card is not an object')
             continue
+        if retrieval_workflow_revision == API_FIRST_REVISION and not any(item.get(k) for k in ('title', 'patent_link', 'link', 'publication_number')):
+            raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'A returned patent discovery card has no readable identity fields')
         publication = re.sub(
             r"[^A-Za-z0-9]", "", str(item.get("publication_number") or ""),
         ).upper()
@@ -308,18 +313,22 @@ def normalize(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "status": "not_checked", "source": "", "url": "", "checked_at": "",
             },
         })
+        if retrieval_workflow_revision == API_FIRST_REVISION:
+            from serper_client import google_patent_fields
+            candidates[-1].update(google_patent_fields(item))
     return candidates
 
 
 def _record_failure(
     task_dir: Path, item: dict[str, Any], error: ProviderError,
-    *, network_attempted: bool, quota: dict[str, Any] | None = None,
+    *, network_attempted: bool, quota: dict[str, Any] | None = None, raw_body: bytes | None = None,
 ) -> dict[str, Any]:
     return record_result(
         task_dir, provider=SERPAPI_PROVIDER, operation=SERPAPI_OPERATION,
         query=str(item.get("q") or ""),
         jurisdiction=str(item.get("jurisdiction") or ""), evidence_type="patent",
         status=error.source_status, normalized=None,
+        raw_body=raw_body, raw_suffix='json',
         error_code=error.code, detail=error.detail, mandatory=False,
         request_params={
             "q": item.get("q"), "num": item.get("num"),
@@ -390,6 +399,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
             )
 
         metered_attempted = False
+        body = b''
         account = dict(attempt)
         if followup:
             account["discovery_followup"] = followup
@@ -409,7 +419,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
             ))
             metered_attempted = True
             payload, headers, body = search(base, key, timeout, item)
-            candidates = normalize(payload)
+            candidates = normalize(payload, retrieval_workflow_revision=task.get('retrieval_workflow_revision'))
             quota = {**account, **quota_summary(headers, payload)}
             quota["network_request_attempted"] = True
             return record_result(
@@ -419,6 +429,11 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
                 normalized={
                     "candidates": candidates, "role": "discovery_only",
                     "authoritative_for_final_rating": False,
+                    **({'source_index': 'google_patents', 'search_metadata': {
+                        'total_hits': None, 'retrieved_hits': len(candidates), 'reviewed_hits': None,
+                        'truncated': True, 'stop_reason': 'bounded_discovery_total_unknown',
+                        'source_updated_at': None, 'schema_valid': True,
+                    }} if task.get('retrieval_workflow_revision') == API_FIRST_REVISION else {}),
                 },
                 raw_body=body, raw_suffix="json", quota=quota, mandatory=False,
                 request_params={
@@ -435,7 +450,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
         except ProviderError as exc:
             # Account API calls are unmetered; only Google Patents search counts.
             return _record_failure(
-                task_dir, item, exc, network_attempted=metered_attempted, quota=account,
+                task_dir, item, exc, network_attempted=metered_attempted, quota=account, raw_body=body or None,
             )
 
 

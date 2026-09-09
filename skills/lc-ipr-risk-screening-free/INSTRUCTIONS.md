@@ -1,75 +1,45 @@
 # LC IPR Risk Screening Free 启动门禁
 
-本文件规定本地配置初始化与老陈云端鉴权。鉴权通过后，严格按 `SKILL.md` 执行原有知识产权排查流程，不改变其业务规则。
-
-这里的调用指实际商品排查业务。开发、审计、测试或恢复 Skill 文件不执行业务鉴权；离线测试须使用模拟或 loopback 来源及临时虚拟凭据，父子进程均不得读取真实本地凭据文件，不借测试模式访问真实账号。
+本 Skill 的云端鉴权以用户指定的原始 `lc-ipr-risk-screening-free-auth-gated-20260811(1).zip` 为唯一基准。协议、四个平台组件及验证基线见 [鉴权冻结契约](references/auth-contract.md)。API 优先检索、双审、发布门禁和报告内容及布局保持现有规则。
 
 ## 1. 强制第一步
 
-每次调用本 Skill，第一条业务命令必须执行云端鉴权。鉴权之前不得：
+每次实际商品排查，第一条业务命令必须执行 `scripts/auth_gate.py`。通过前不解析 ASIN、图片等业务输入，不打开 Amazon/CDP，不调用第三方来源，不创建业务任务。鉴权通过后按 [SKILL.md](SKILL.md) 执行；创建任务后的 `preflight.py --phase credentials` 仍再次鉴权，不因首次通过而跳过。
 
-- 解析或核对用户的 ASIN、Amazon URL、图片及其它业务输入。
-- 读取业务 reference、打开 Amazon、启动 Chrome/CDP 或调用第三方服务。
-- 创建任务目录、运行 `scripts/create_task.py` 或写入任何业务文件。
+安装准备、开发、审计、恢复文件和离线测试不属于商品排查，不要求先调用真实鉴权。离线测试使用临时假凭据及模拟／loopback 来源，父子进程不得读取真实凭据或访问真实账号。
 
-先进入 Skill 根目录，再按当前平台准备二进制：
-
-### Linux x64
-
-```bash
-chmod +x tools/bin/lc-ipr-auth-check-linux-amd64
-python scripts/auth_gate.py
-```
-
-### macOS Intel / Apple Silicon
-
-执行当前平台的鉴权入口；入口先核对二进制 SHA-256，再设置该文件执行权限，并在启动前自动检查、移除该文件的 `com.apple.quarantine` 下载隔离标记：
+先按 [安装与平台验收](references/installation.md) 准备本机依赖，再在 Skill 根目录使用同一 Python 环境运行：
 
 ```bash
 python scripts/auth_gate.py
 ```
 
-首次运行也直接执行上述入口，不要等系统弹窗后才处理。预处理仅针对哈希校验通过的当前平台组件，不递归处理目录、不清除其他扩展属性、不关闭系统 Gatekeeper；符号链接组件不接受。隔离标记不存在时正常继续，重复运行无需人工操作；权限设置、隔离标记检查或移除失败时停止并报告“鉴权组件启动准备失败”，不会将其当作 Token 无效。
-
-### Windows x64
-
-```powershell
-python scripts\auth_gate.py
-```
-
-`scripts/auth_gate.py` 会选择当前平台的专用 Go 二进制，并按 `references/runtime-config.json` 中的 SHA-256 校验后执行。
+这里的 `python` 指安装检查确认的解释器；macOS 通常为 `.venv/bin/python`，Windows 为 `.venv\Scripts\python.exe`。入口选择当前平台组件，核对 `references/runtime-config.json` 的 SHA-256 后执行。macOS 保留针对已校验当前组件的执行权限及下载隔离标记准备，不递归清理目录或关闭系统安全设置。
 
 ## 2. 本地配置与凭据
 
-运行时只从 Skill 根目录的本地文件读取配置和凭据：
+后台鉴权和第三方 API 凭据分开读取：
 
-- `config.json` 严格只包含 `backend_url`、`backend_token` 两个字符串字段。后台 Token 只读取这里的 `backend_token`。
-- `.env` 保存第三方 API Key、Client ID、Secret、用户名和密码；完整的 12 个字段见 [.env.example](.env.example)。缺少或留空的可选凭据仅影响对应来源。
-- `references/runtime-config.json` 保存版本、来源规则、浏览器参数、执行限制和鉴权组件 SHA-256 等非秘密设置。Python 与浏览器端共用该文件；`load_skill_config()` 返回运行设置及后台地址，不携带 Token。
+- 后台 Token 优先使用**非空进程环境变量 `LAOCHEN_BACKEND_TOKEN`**；否则使用 `config.json` 与 `config.local.json` 合并后的 `backend_token`。`config.local.json` 覆盖 `config.json` 的同名字段，保留原包行为。不要删除接收者已有覆盖文件。
+- 后台地址来自上述合并配置的 `backend_url`。初始化模板为 `https://mcp.yixunkuajing.com`，请求固定 `/auth/skill-check`，固定 `skill_id=ipr_risk_screening_free`。不改成账户余额接口，不调用业务接口代替鉴权。
+- 第三方 API Key、Client ID、Secret、用户名和密码只从本 Skill 根目录 `.env` 读取，沿用 [.env.example](.env.example) 的 12 个字段；不回退到其它 Skill、进程环境或 Keychain。缺少或留空只影响相应来源。
+- `references/runtime-config.json` 保存非秘密运行规则、额度、浏览器参数及组件哈希。旧后台配置中其它业务字段不覆盖这里的新检索规则。
 
-`credential(config, name)` 按凭据类型读取对应文件，不从进程环境变量、Keychain 或 `config.local.json` 回退。测试开关、超时等非凭据环境变量仍有效；`.env` 作为文本解析，不执行 shell、不展开变量，也不修改进程环境。
+分发包根目录已附带列出 12 个字段、值全部留空的 `.env`，接收者直接在等号后填写自己的凭据。Mac Finder 按 `⌘ + Shift + .` 显示该隐藏文件。用 `setup_skill.py --init` 仅补建缺失的空 `config.json` 和 `.env`；已有文件不覆盖、不搬迁、不自动更换权限。macOS/Unix 的新私密文件使用 `0600`；Windows 使用当前用户目录权限，不将 POSIX 位检查冒充 Windows ACL 校验。`.env` 作为 UTF-8 文本解析，支持 BOM、CRLF，不执行 shell、不展开变量或修改进程环境。
 
-首次安装时从 [config.example.json](config.example.json) 初始化 `config.json`，填写本 Skill 的后台地址和 Token；从 `.env.example` 初始化 `.env`，仅填写已有且获授权使用的凭据。已有文件不得被模板覆盖；不可复用其他 Skill 的 Token。
+接收者填写自己的后台 Token 和获准使用的第三方凭据。Key 已配置不代表来源获得授权、生产审批通过或仍有免费额度；创建任务时仍按来源规则明确选择。Serper 可以由接收者明确授权使用现有余额，不继承发送者的授权、余额证明或额度账本。EUIPO 本轮暂停，不自动测试或启用。
 
-macOS/Unix 上将 `config.json` 与 `.env` 权限设为 `0600`。文件缺失、格式错误、重复键、字段类型错误或权限不符须输出脱敏原因；后台配置不可用则停止业务鉴权，可选来源凭据不可用则保留相应来源缺口。
-
-迁移本 Skill 旧安装时，仅一次性将既有固定 Keychain 项中的后台 Token 写入 `config.json`，保留已有 `.env` 值；缺失值留空。完成迁移后删除只含重复后台地址的 `config.local.json`，运行时不再访问 Keychain，也没有双配置覆盖机制。
-
-本地 `config.json`、`.env` 均排除出版本控制和分发包。分发时保留空 Token 的 `config.example.json`、空值的 `.env.example` 与不含凭据的 `references/runtime-config.json`；打包前显式排除两个本地凭据文件，不能仅依赖 `.gitignore`。不得把完整 Token、Key、用户名、密码或会话 Cookie 写入命令行、运行目录、日志、报告或回复。
+禁止把完整 Token、Key、用户名、密码或 Cookie 写入命令行、任务、日志、报告或回复。发送者的 `config.json`、`config.local.json`、`.env` 不进入分发包；包内空 `.env` 仅由校验通过的 `.env.example` 在暂存目录生成，不能复制发送者现用文件。配置值不得用来生成公开调试信息。
 
 ## 3. 失败与成功
 
-鉴权失败时，`scripts/auth_gate.py` 会输出固定停止语和一条脱敏原因，例如：
+原包成功条件、超时和退出行为不改。鉴权失败时，Agent 原样展示入口已过滤的两行停止信息，不省略原因、不输出原始服务响应。例如：
 
 ```text
 云端鉴权未通过，本轮不继续执行。
-原因：账户余额不足。
+原因：当前账户缺少本 Skill 权限。
 ```
 
-Agent 必须把这两行原样告知用户，不得省略原因、改成含糊的“鉴权失败”，也不得自行猜测更具体的后台信息。安全原因仅限：未配置 Token、Token 无效或无权访问、账户停用、余额不足、服务限流/不可用、服务返回异常、配置无效、鉴权组件缺失或校验失败、鉴权组件启动准备失败。
+原因以程序实际输出为准，包含原包的 Skill 未登记、Skill 停用、权限缺失／未启用，以及 Token、账户、余额、限流、服务、配置和组件错误。立即停止本轮业务，不绕过或伪造成功；仍可执行不依赖业务鉴权的开发排错。
 
-告知原因后立即停止，不得尝试绕过、伪造成功或继续原有业务流程。
-
-鉴权通过后，从 [SKILL.md 的执行流程](SKILL.md#执行流程) 第 1 步继续。该鉴权只查询账户可用状态和余额，不扣除业务积分。
-
-此门禁约束官方分发包的正常执行流程，不是不可绕过的 DRM。
+本次恢复只改变前端调用与原包的对齐，不改变后端授权状态；有效 Token 仍须获得此 Skill 的后台权限。鉴权不扣业务积分，也不采用新增会话缓存。此门禁约束官方分发包正常执行流程，不是不可绕过的 DRM。

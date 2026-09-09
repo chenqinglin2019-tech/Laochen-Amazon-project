@@ -10,6 +10,9 @@ import { spawn } from "node:child_process";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chromium } from "playwright-core";
+import { recordRetrievalDiagnostics } from "./retrieval-diagnostics.mjs";
+import { captureSerperAccount } from "./serper-account-capture.mjs";
+import { expandUserPath, resolveChromeExecutable, resolvePythonExecutable } from "./platform-runtime.mjs";
 import {
   assertOfficialUrl,
   assertRegistryOperation,
@@ -228,13 +231,16 @@ export const PPUBS_FIELD_CODES = Object.freeze({ owner: "ASNM", assignee: "ASNM"
   inventor: "INV", uspc: "CCLS", cpc: "CPC", ipc: "CIPC", title: "TI" });
 const PPUBS_TEXT_FIELDS = new Set(["", "structural_feature", "category", "product", "function", "translation", "synonym", "english", "design", "brand"]);
 
-export function compilePpubsBoolean(value) {
+export function compilePpubsBoolean(value, revision = null) {
   const text = String(value).trim();
   const tokens = text.match(/"[^"\r\n]+"|\(|\)|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*/g) || [];
   if (!tokens.length || tokens.join("").replaceAll(" ", "") !== text.replace(/\s/g, "") || tokens.length > 80) {
     throw new Error("UNSUPPORTED_QUERY_SEMANTICS: unsupported Boolean token or excessive query");
   }
   const isOperator = (token) => /^(AND|OR|NOT)$/i.test(token);
+  if (revision === "ppubs-boolean-v2" && tokens.some(token => /^(?:WITH|SAME|ADJ\d*|NEAR\d*|XOR)$/i.test(token))) {
+    throw new Error("UNSUPPORTED_QUERY_SEMANTICS: unquoted PPS reserved operator; supply an explicit supported Boolean expression or revise the source terms");
+  }
   for (const token of tokens) if (token.startsWith('"')) validatePpubsPhrase(token.slice(1, -1));
   if (!tokens.some(isOperator) && !tokens.includes("(") && !tokens.includes(")")) {
     if (tokens.length > 12) throw new Error("UNSUPPORTED_QUERY_SEMANTICS: decompose long product text before querying");
@@ -292,7 +298,7 @@ export function compilePpubsQuery(entry, field = String(entry.filters?.field || 
     rendered = `${value.toUpperCase()}.${code}.`;
   } else {
     if (strategy === "phrase") { validatePpubsPhrase(value); rendered = `"${value}"`; }
-    else rendered = compilePpubsBoolean(value);
+    else rendered = compilePpubsBoolean(value, entry.query_compiler_revision);
     if (code) rendered = `(${rendered}).${code}.`;
   }
   // USPTO's CLM index guidance explicitly uses S.KD. for design patents.
@@ -315,6 +321,7 @@ export function executionReceipt(task, provider, entry, events, capture) {
     query_semantics: capture.query_semantics || null,
     ...(recallIntegrityEnabled(task) ? { result_pages_sha256: registryPageBindingDigest(capture.result_pages || []) } : {}),
     ...(capture.document_retrieval ? { document_retrieval_sha256: registryPageBindingDigest(capture.document_retrieval) } : {}),
+    ...(capture.rate_limit_page ? { rate_limit_page_sha256: registryPageBindingDigest(capture.rate_limit_page) } : {}),
     result_coverage_sha256: registryPageBindingDigest(capture.result_coverage || {}),
     media_coverage_sha256: registryPageBindingDigest(capture.media_coverage || {}),
     result_sha256: registryPageBindingDigest(capture.candidates || {
@@ -454,10 +461,10 @@ export async function assertScenarioActionDispatch(taskDir, task, provider, entr
   // Reuse the Python dispatch authority rather than maintaining a weaker JS
   // copy of triage hashes, current decisions, cancellation and substitution.
   const result = await new Promise((resolve, reject) => {
-    const child = spawn(process.env.LC_IPR_PYTHON || "python3", [
+    const child = spawn(resolvePythonExecutable(), [
       path.join(SKILL_DIR, "scripts", "authorize_scenario_action.py"),
       "--task-dir", taskDir, "--provider", provider, "--query-id", String(entry.query_id || ""),
-    ], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } });
+    ], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1", PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" } });
     let output = "";
     const timeout = setTimeout(() => {
       child.kill();
@@ -634,14 +641,11 @@ function parseArgs(argv) {
 }
 
 function expandHome(value) {
-  const text = String(value || "");
-  if (text === "~") return os.homedir();
-  if (text.startsWith("~/")) return path.join(os.homedir(), text.slice(2));
-  return path.resolve(text);
+  return expandUserPath(value);
 }
 
 async function readJson(filePath) {
-  return JSON.parse(await fs.readFile(filePath, "utf8"));
+  return JSON.parse((await fs.readFile(filePath, "utf8")).replace(/^\uFEFF/, ""));
 }
 
 async function writeJsonAtomic(filePath, value, mode = 0o600) {
@@ -772,15 +776,17 @@ async function waitForChromeEndpoint(child, timeoutMs = 20000) {
   });
 }
 
-async function ensureSession(config) {
+export async function ensureSession(config, { existingOnly = false } = {}) {
   const cdp = config.cdp || {};
   const runtimeDir = expandHome(cdp.runtime_dir || "~/.codex/runtime/lc-ipr-free-cdp");
   const profileDir = expandHome(cdp.profile_dir || "~/.codex/browser-profiles/lc-ipr-free-cdp");
   const descriptorPath = path.join(runtimeDir, "session.json");
-  await fs.mkdir(runtimeDir, { recursive: true, mode: 0o700 });
-  await fs.mkdir(profileDir, { recursive: true, mode: 0o700 });
-  await fs.chmod(runtimeDir, 0o700);
-  await fs.chmod(profileDir, 0o700);
+  if (!existingOnly) {
+    await fs.mkdir(runtimeDir, { recursive: true, mode: 0o700 });
+    await fs.mkdir(profileDir, { recursive: true, mode: 0o700 });
+    await fs.chmod(runtimeDir, 0o700);
+    await fs.chmod(profileDir, 0o700);
+  }
 
   let descriptor = null;
   try {
@@ -797,12 +803,13 @@ async function ensureSession(config) {
       launched: false,
     };
   } catch {
+    if (existingOnly) throw automaticQueryError("BROWSER_RATE_LIMIT_RECOVERY_UNVERIFIED");
     // A stale descriptor is replaced only after a fresh loopback Chrome starts.
   }
 
-  const executable = expandHome(cdp.chrome_executable || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
-  if (!fsSync.existsSync(executable)) {
-    throw new Error(`Chrome executable is missing: ${executable}`);
+  const executable = resolveChromeExecutable({ configured: cdp.chrome_executable || "" });
+  if (!executable) {
+    throw new Error("CHROME_EXECUTABLE_UNAVAILABLE: install Google Chrome or set the local runtime Chrome path");
   }
   const chromeArgs = [
     "--remote-debugging-address=127.0.0.1",
@@ -840,8 +847,8 @@ async function ensureSession(config) {
   };
 }
 
-async function connectSession(config) {
-  const session = await ensureSession(config);
+async function connectSession(config, options = {}) {
+  const session = await ensureSession(config, options);
   const browser = await chromium.connectOverCDP(session.endpoint);
   const context = browser.contexts()[0];
   if (!context) {
@@ -1219,7 +1226,60 @@ export function tmsearchResultBinding(bodyText, inputValue, mode, renderedQuery)
     input_value: inputValue, rendered_query: renderedQuery, search_mode: mode, result_query: resultQuery };
 }
 
-export async function collectTmRenderedResults(page, initial, taskDir, stem, config, { maxPages = 8 } = {}) {
+// In-memory submission context belongs to this Page and this attempt. Merely
+// changing the input above an old zero-result page cannot create a new binding.
+const tmSubmissionContexts = new WeakMap();
+const tmResultsUrl = value => {
+  try { const url = new URL(value); return url.origin === "https://tmsearch.uspto.gov" && url.pathname === "/search/search-results"; }
+  catch { return false; }
+};
+async function tmZeroVisible(page) {
+  const nodes = page.getByText("No results found", { exact: true });
+  for (let index = 0; index < await nodes.count(); index++) if (await nodes.nth(index).isVisible()) return true;
+  return false;
+}
+async function tmResultBaseline(page, renderedQuery) {
+  const state = await freshState(page);
+  const binding = tmsearchResultBinding(state.bodyText, renderedQuery, "Field tag and Search builder", renderedQuery);
+  return { url: state.url, zero_visible: await tmZeroVisible(page), result_query: binding.result_query,
+    card_count: parseTrademarkCards(state.bodyText).length };
+}
+async function bindSubmittedTmZero(page, binding, state, loading, candidates) {
+  const submission = tmSubmissionContexts.get(page);
+  if (!submission?.confirmed || submission.rendered_query !== binding.rendered_query
+      || binding.input_value !== binding.rendered_query || binding.search_mode !== "Field tag and Search builder") return binding;
+  if (loading) submission.observed_loading = true;
+  // Only a loading/zero transition inside the old result's own DOM container
+  // can refresh a headerless zero. A footer/chat spinner is not query evidence.
+  let resultTransition = null;
+  if (submission.result_container) {
+    resultTransition = await submission.result_container.evaluate(root => {
+      const visible = node => { const r = node.getBoundingClientRect(); return node.isConnected && r.width > 0 && r.height > 0 && getComputedStyle(node).visibility !== "hidden"; };
+      if (!root?.isConnected || !visible(root)) return null;
+      const nodes = [root, ...root.querySelectorAll("*")];
+      return { zero_visible: nodes.some(node => visible(node) && (node.textContent || "").trim() === "No results found"),
+        loading: nodes.some(node => visible(node) && (node.matches('[aria-busy="true"],mat-spinner,mat-progress-spinner,mat-progress-bar,[role="progressbar"]')
+          || /^(?:loading|searching)(?:\.{3}|…)?$/i.test((node.textContent || "").trim()))) };
+    }).catch(() => null);
+    if (resultTransition?.loading && !resultTransition.zero_visible) submission.observed_result_transition = true;
+  }
+  if (binding.result_query || loading || candidates.length || !tmResultsUrl(state.url) || !await tmZeroVisible(page)) return binding;
+  const before = submission.baseline;
+  let method = "";
+  try {
+    const url = new URL(before.url);
+    if (url.origin === "https://tmsearch.uspto.gov" && !url.pathname.startsWith("/search/search-results") && !before.zero_visible) method = "result_route";
+  } catch {}
+  if (!method && !before.zero_visible && (before.card_count > 0 || before.result_query)) method = "result_replaced";
+  if (!method && before.zero_visible && submission.observed_result_transition && resultTransition?.zero_visible) method = "loading_cycle";
+  if (!method) return binding;
+  return { ...binding, total_hits: 0, query_bound: true, binding_method: "submitted_zero_transition_v1",
+    zero_result_transition: { submission_id: submission.submission_id, rendered_query: submission.rendered_query,
+      baseline: before, method, final_url: state.url, zero_visible: true, observed_loading: Boolean(submission.observed_loading),
+      ...(method === "loading_cycle" ? { result_container_transition: { prior_zero_disappeared: true, result_loading_observed: true, result_zero_reappeared: true } } : {}) } };
+}
+
+export async function collectTmRenderedResults(page, initial, taskDir, stem, config, { maxPages = 8, maxCandidates = Infinity } = {}) {
   // Each page retains its own query binding and pixels. Unvisited pages are
   // never treated as an empty search, and no new query is submitted here.
   const pages = [], found = new Map();
@@ -1234,6 +1294,7 @@ export async function collectTmRenderedResults(page, initial, taskDir, stem, con
   const limit = Math.min(8, Math.max(1, Number(maxPages) || 8));
   for (let index = 1; index <= limit; index++) {
     if (!current.stable || !current.query_bound || current.tmsearch_binding?.total_hits !== total || !current.candidates?.length) break;
+    if (found.size + current.candidates.length > maxCandidates) { stop = "bounded_sample_limit"; break; }
     const serials = current.candidates.map(row => row.serial_number);
     if (serials.some(serial => found.has(serial)) || new Set(serials).size !== serials.length) { stop = "browser_repeated_page"; break; }
     const screenshotPath = path.join(taskDir, "screenshots", `${stem}-tm-page-${index}.png`);
@@ -1243,6 +1304,7 @@ export async function collectTmRenderedResults(page, initial, taskDir, stem, con
       screenshot_sha256: crypto.createHash("sha256").update(await fs.readFile(screenshotPath)).digest("hex") });
     current.candidates.forEach(row => found.set(row.serial_number, row));
     if (found.size === total) { stop = "browser_results_exhausted"; break; }
+    if (found.size >= maxCandidates) { stop = "bounded_sample_limit"; break; }
     if (index === limit) { stop = "browser_page_limit"; break; }
     if (!observedRange || observedRange.total !== total || observedRange.end - observedRange.start + 1 !== serials.length
         || index === 1 && observedRange.start !== 1) { stop = "browser_pagination_range_unavailable"; break; }
@@ -1347,6 +1409,8 @@ export async function ppubsRenderedSnapshot(page) {
       loading: [...(root?.querySelectorAll("*") || [])].some(node => !node.children.length && visible(node)
         && /^loading(?:\.{3}|…)?$/i.test((node.textContent || "").trim())),
       result_text: resultText, filter_text: text(".srFilterSection"),
+      query_error: [...(root?.querySelectorAll("*") || [])].find(node => visible(node)
+        && /^(?:Query\s+Error\b|Cannot have consecutive operators\b|(?:AND|OR|NOT|WITH|SAME|ADJ\d*|NEAR\d*) at position \d+ is missing term\(s\)|Missing (?:operand|term)\b)/i.test((node.textContent || "").trim()))?.textContent?.trim().slice(0, 2000) || "",
       displayed_start: range ? Number(range[1].replaceAll(",", "")) : null,
       displayed_end: range ? Number(range[2].replaceAll(",", "")) : /currently displaying all results/i.test(resultText)
         ? Number(families?.[1].replaceAll(",", "") || count) || null : null,
@@ -1401,7 +1465,7 @@ async function searchSemanticSnapshot(page, provider, options = {}) {
   const ppubs = provider === "uspto_patent_browser" && options.strict ? await ppubsRenderedSnapshot(page) : null;
   const rows = ppubs?.rows || await tableRows(page);
   const tmCards = provider === "uspto_tmsearch_browser" && options.tmsearchQuery ? parseTrademarkCards(state.bodyText, options) : [];
-  const tmBinding = provider === "uspto_tmsearch_browser" && options.tmsearchQuery
+  let tmBinding = provider === "uspto_tmsearch_browser" && options.tmsearchQuery
     ? tmsearchResultBinding(state.bodyText,
       await page.locator("#searchbar").inputValue().catch(() => ""),
       (await page.locator("mat-select[formcontrolname='searchRefinement']").innerText().catch(() => "")).trim(), options.tmsearchQuery) : null;
@@ -1416,14 +1480,18 @@ async function searchSemanticSnapshot(page, provider, options = {}) {
     ? tmBinding ? tmBinding.result_view === "detail" ? parseTrademarkDetail(state.bodyText, state.url, options) : tmCards
       : parseTrademarkRows(rows)
     : ppubs ? parsePpubsGridRows(rows) : parsePatentRows(rows);
-  if (tmBinding) Object.assign(tmBinding, { loading: tmLoading, parsed_count: candidates.length });
+  if (tmBinding) {
+    tmBinding = await bindSubmittedTmZero(page, tmBinding, state, tmLoading, candidates);
+    Object.assign(tmBinding, { loading: tmLoading, parsed_count: candidates.length });
+  }
   const challenge = detectChallenge(state.url, state.title, state.bodyText);
   const rateLimited = browserRateLimited(state.bodyText);
   const binding = tmBinding ? tmBinding.query_bound : !ppubs || Boolean(ppubs.result_set_id && options.historyBinding?.result_set_id === ppubs.result_set_id
     && options.historyBinding?.query === options.renderedQuery && options.historyBinding?.total_hits === ppubs.total_hits
     && ppubs.editor_value === options.renderedQuery);
   const noResult = tmBinding ? binding && !tmLoading && tmBinding.total_hits === 0 && !candidates.length : ppubs ? binding && ppubs.total_hits === 0 && /results found/i.test(ppubs.result_text) : explicitNoResult(state.bodyText);
-  const queryError = /(?:error status|please enter only one word per text box|invalid search query)/i.test(state.bodyText);
+  const queryError = ppubs ? Boolean(ppubs.query_error)
+    : /(?:error status|please enter only one word per text box|invalid search query)/i.test(state.bodyText);
   return {
     ready: challenge || rateLimited || queryError || binding && !ppubs?.loading && !tmLoading
       && (noResult || candidates.length > 0 && (!tmBinding || tmBinding.total_hits >= candidates.length)),
@@ -1442,11 +1510,12 @@ async function searchSemanticSnapshot(page, provider, options = {}) {
     }),
     state,
     rows,
-    candidates,
+    candidates: queryError ? [] : candidates,
     challenge,
     rateLimited,
     noResult,
     queryError,
+    query_error_text: ppubs?.query_error || "",
     ...(ppubs ? { ppubs, query_bound: binding } : {}),
     ...(tmBinding ? { tmsearch_binding: tmBinding, query_bound: binding } : {}),
   };
@@ -1456,13 +1525,17 @@ export async function waitForSearchSemanticState(page, provider, timeoutMs, conf
   const options = { ...(config.ppubs_query_binding || {}), ...(config.tmsearch_query_binding || {}) };
   const deadline = Date.now() + operationTimeout(timeoutMs);
   const bindingAttempts = [];
+  let sawLoading = false;
   return waitForStableSemanticState(
     async () => {
       let snapshot = await searchSemanticSnapshot(page, provider, options);
+      sawLoading ||= Boolean(snapshot.ppubs?.loading);
+      const transitioned = !Object.hasOwn(options, "previousResultSetId") || sawLoading
+        || snapshot.ppubs?.result_set_id && snapshot.ppubs.result_set_id !== options.previousResultSetId;
       // PPS can publish the L-number/count long before its grid and history
       // become ready. Do not freeze a one-time null binding into every later
       // poll, or switch away while the result grid is still Loading.
-      if (options.strict && options.historyScreenshotPath && !snapshot.query_bound
+      if (options.strict && transitioned && options.historyScreenshotPath && !snapshot.query_bound
           && !snapshot.challenge && !snapshot.rateLimited && !snapshot.queryError && !snapshot.ppubs?.loading
           && snapshot.ppubs?.result_set_id && snapshot.ppubs.total_hits !== null
           && (snapshot.ppubs.total_hits === 0 || snapshot.candidates.length)) {
@@ -1476,13 +1549,14 @@ export async function waitForSearchSemanticState(page, provider, timeoutMs, conf
             options.historyBinding = null;
             errorCode = sanitizeSensitiveText(error.code || error.message).slice(0, 150);
           }
-          bindingAttempts.push({ at: nowIso(), result_set_id: snapshot.ppubs.result_set_id,
+          bindingAttempts.push({ at: nowIso(), observed_result_set_id: snapshot.ppubs.result_set_id,
+            result_set_id: options.historyBinding?.result_set_id || snapshot.ppubs.result_set_id,
             bound: Boolean(options.historyBinding), ...(errorCode ? { error_code: errorCode } : {}) });
           snapshot = await searchSemanticSnapshot(page, provider, options);
         }
       }
       return { ...snapshot, ...(options.strict ? { history_binding: options.historyBinding || null,
-        history_binding_attempts: bindingAttempts } : {}) };
+        history_binding_attempts: bindingAttempts, submission_transition_observed: Boolean(transitioned) } : {}) };
     },
     {
       timeoutMs,
@@ -1492,7 +1566,7 @@ export async function waitForSearchSemanticState(page, provider, timeoutMs, conf
   );
 }
 
-async function freshState(page) {
+export async function freshState(page) {
   const state = { url: page.url(), title: "", bodyText: "" };
   try {
     state.title = await page.title();
@@ -1500,7 +1574,58 @@ async function freshState(page) {
   try {
     state.bodyText = (await page.locator("body").innerText()).slice(0, 200000);
   } catch {}
+  // Blocking UI can occur after hundreds of pages of patent text in DOM order.
+  // Read it independently before any truncation; never dismiss it here.
+  try {
+    state.ui_alert_text = await page.locator('[role="dialog"], [role="alert"], [aria-modal="true"], .modal').evaluateAll(nodes => {
+      const visible = node => { const r = node.getBoundingClientRect(); return r.width > 0 && r.height > 0 && getComputedStyle(node).visibility !== "hidden"; };
+      return [...new Set(nodes.filter(visible).map(node => (node.innerText || "").trim()).filter(Boolean))].join("\n").slice(0, 16000);
+    });
+    // PPS variants do not all expose a dialog role. Its exact session notice
+    // together with its exact title also identifies the visible blocking UI.
+    const titles = page.getByText("Too Many Requests", { exact: true });
+    const notices = page.getByText(/^There are too many requests in your user session\./);
+    let visibleTitle = false, visibleNotice = "";
+    for (let i = 0; i < await titles.count(); i++) if (await titles.nth(i).isVisible()) visibleTitle = true;
+    for (let i = 0; i < await notices.count(); i++) if (await notices.nth(i).isVisible()) visibleNotice = await notices.nth(i).innerText();
+    if (visibleTitle && visibleNotice) state.ui_alert_text += `\nToo Many Requests\n${visibleNotice.slice(0, 2000)}`;
+    if (state.ui_alert_text) state.bodyText = `${state.ui_alert_text}\n${state.bodyText}`;
+  } catch {}
   return state;
+}
+
+export async function rateLimitPageRef(page) {
+  let session;
+  try {
+    session = await page.context().newCDPSession(page);
+    const { targetInfo } = await session.send("Target.getTargetInfo");
+    return { target_id: targetInfo.targetId, url: sanitizeEvidenceUrl(page.url()) };
+  } catch { return null; }
+  finally { await session?.detach().catch(() => {}); }
+}
+
+export async function existingProviderRateLimit(context, provider, pageRef) {
+  const unverified = () => ({ status: "access_limited", error_code: "BROWSER_RATE_LIMIT_RECOVERY_UNVERIFIED",
+    phase: "await_source_retry", submission_state: "not_submitted",
+    detail: "The original rate-limited page is absent, changed or unreadable; source recovery could not be verified without navigation. The provider remains paused." });
+  const host = { uspto_patent_browser: "ppubs.uspto.gov", uspto_tmsearch_browser: "tmsearch.uspto.gov", uspto_tsdr: "tsdr.uspto.gov" }[provider];
+  if (!pageRef || !/^[a-f0-9]{16,64}$/i.test(pageRef.target_id || "")) return unverified();
+  let expected;
+  try { expected = new URL(pageRef.url); } catch { return unverified(); }
+  if (expected.protocol !== "https:" || ![host, ...(provider === "uspto_tsdr" ? ["tsdrsec.uspto.gov"] : [])].includes(expected.hostname)) return unverified();
+  for (const page of context.pages()) {
+    // A same-host help tab cannot stand in for the page that raised the limit.
+    if (sanitizeEvidenceUrl(page.url()) !== pageRef.url) continue;
+    const actual = await rateLimitPageRef(page);
+    if (actual?.target_id !== pageRef.target_id) continue;
+    const state = await freshState(page);
+    if (!state.bodyText.trim()) return unverified();
+    if (browserRateLimited(state.bodyText)) return { status: "access_limited", error_code: "BROWSER_RATE_LIMITED",
+      phase: "await_source_retry", submission_state: "not_submitted", final_url: sanitizeEvidenceUrl(state.url), rate_limit_page: pageRef,
+      detail: "The original official page still reports Too Many Requests. Only visible state was read; no navigation, dialog dismissal or query was performed." };
+    return null;
+  }
+  return unverified();
 }
 
 async function navigateAndRefresh(page, url, timeoutMs) {
@@ -1607,9 +1732,15 @@ export async function extractAmazonProduct(page, { strict = false } = {}) {
     const selectedVariants = strict ? [...new Set(list(
       "[id^='variation_'] .selection, #twister .selection, [id^='variation_'] .swatchSelect, #twister .swatchSelect, [id^='variation_'] .variation_selected, #twister .variation_selected"
     ))] : list("[aria-checked='true'], .a-button-selected, .swatchSelect, .variation_selected");
+    const brandByline = visibleText("#bylineInfo");
+    const brand = (/^Visit the\s+/i.test(brandByline)
+      ? brandByline.replace(/^Visit the\s+/i, "").replace(/\s+Store$/i, "")
+      : brandByline.replace(/^Brand\s*:\s*/i, "")).trim();
     return {
       title: visibleText("#productTitle"),
-      brand: visibleText("#bylineInfo").replace(/^Visit the | Store$/g, "").trim(),
+      brand,
+      brand_byline_raw: brandByline,
+      brand_placeholder: /^(?:generic|unbranded)$/i.test(brand),
       category: list("#wayfinding-breadcrumbs_feature_div a").join(" > "),
       bullets: list("#feature-bullets li span.a-list-item"),
       specifications: specs,
@@ -1794,6 +1925,8 @@ async function captureAmazon(args, config) {
     },
     title: product.title,
     brand: product.brand,
+    brand_byline_raw: product.brand_byline_raw,
+    brand_placeholder: product.brand_placeholder,
     manufacturer,
     category: product.category,
     bullets: product.bullets,
@@ -1881,6 +2014,7 @@ async function submitPpubsAdvancedSearch(page, renderedQuery, { strict = false }
   } catch (error) {
     error.submission_state = "uncertain";
     error.phase = "submit";
+    error.previous_result_set_id = previousResultSet;
     throw error;
   }
   return {
@@ -1929,7 +2063,11 @@ async function openPpubsAdvancedWorkspace(session, page, startUrl, timeout) {
 
 export async function submitSearch(page, renderedQuery, provider = "", options = {}) {
   let submitting = false;
+  let tmSubmission = null;
   try {
+    const previousTmSubmission = tmSubmissionContexts.get(page);
+    await previousTmSubmission?.result_container?.dispose().catch(() => {});
+    tmSubmissionContexts.delete(page);
     if (options.strict && browserRateLimited((await freshState(page)).bodyText)) {
       throw automaticQueryError("BROWSER_RATE_LIMITED");
     }
@@ -1957,13 +2095,33 @@ export async function submitSearch(page, renderedQuery, provider = "", options =
     await input.fill(renderedQuery, { timeout: operationTimeout(15000) });
     const actualValue = await input.inputValue();
     if (actualValue !== renderedQuery) throw new Error("AUTOMATIC_QUERY_INPUT_MISMATCH");
+    if (provider === "uspto_tmsearch_browser" && options.tmsearchFieldTags) {
+      tmSubmission = { submission_id: crypto.randomUUID(), rendered_query: renderedQuery,
+        baseline: await tmResultBaseline(page, renderedQuery), confirmed: false, observed_loading: false };
+      if (tmSubmission.baseline.zero_visible) {
+        const zeros = await page.getByText("No results found", { exact: true }).elementHandles();
+        for (const zero of zeros) {
+          if (!tmSubmission.result_container && await zero.isVisible()) {
+            tmSubmission.result_container = await zero.evaluateHandle(node => {
+              const parent = node.parentElement;
+              return parent && !["BODY", "HTML"].includes(parent.tagName) ? parent : node;
+            });
+          }
+          await zero.dispose();
+        }
+      }
+      tmSubmissionContexts.set(page, tmSubmission);
+    }
     const button = await firstVisible(page, ["button:has-text('Search')", "input[type='submit']", "button[type='submit']"]);
     submitting = true; // A timed-out click/Enter can already have reached the server.
     if (button) await button.click({ timeout: operationTimeout(15000) });
     else await input.press("Enter", { timeout: operationTimeout(15000) });
+    if (tmSubmission) tmSubmission.confirmed = true;
     return { action: "submit_query", actor: "agent", at: nowIso(), rendered_query: renderedQuery,
       input_value: actualValue, submit_method: button ? "click" : "enter", url: sanitizeEvidenceUrl(page.url()),
-      ...(options.tmsearchFieldTags ? { search_mode: "Field tag and Search builder" } : {}) };
+      ...(options.tmsearchFieldTags ? { search_mode: "Field tag and Search builder" } : {}),
+      ...(tmSubmission ? { submission_id: tmSubmission.submission_id, result_baseline: tmSubmission.baseline,
+        submission_confirmed: true } : {}) };
   } catch (error) {
     error.submission_state ||= submitting ? "uncertain" : "not_submitted";
     error.phase ||= submitting ? "submit" : "prepare_input";
@@ -2017,12 +2175,48 @@ export async function expandPpubsVisibleFamily(page, expected, attempted, { time
   return { ...target, expanded: Boolean(expanded.stable), reason: expanded.stable ? "family_control_expanded" : "family_expansion_not_confirmed" };
 }
 
-export async function collectPpubsRenderedResults(page, expected, taskDir, stem, { maxPages = 8, maxViewports = 128, incrementalTimeoutMs = 10000, familyTimeoutMs = 8000 } = {}) {
+// PPS can display USPAT/USOCR variants as separate numbered rows for one exact
+// publication. Preserve both units: source row coverage and unique candidates.
+export function ppubsRowCoverage(pages, total) {
+  const ordinals = new Map(), conflicts = new Set(), familyLabels = new Map();
+  let invalid = 0, last = null, duplicateRows = false;
+  for (const batch of pages) for (const view of batch.viewports || []) {
+    last = view;
+    const snapshotRecords = new Map();
+    if (view.total_hits !== total || view.loading !== false) invalid++;
+    for (const row of view.rows || []) {
+      const record = cleanNumber(row.documentId), raw = String(row.rowNumber || "");
+      const ordinal = /^\d+$/.test(raw) ? Number(raw) : 0;
+      if (!Number.isSafeInteger(ordinal) || ordinal < 1 || ordinal > total
+          || !/^US(?:(?:D|RE|PP)?\d{5,11})(?:[A-Z]\d?)?$/.test(record)) { invalid++; continue; }
+      if (snapshotRecords.has(record) && snapshotRecords.get(record) !== ordinal) duplicateRows = true;
+      snapshotRecords.set(record, ordinal);
+      if (ordinals.has(ordinal) && ordinals.get(ordinal) !== record) conflicts.add(ordinal);
+      else ordinals.set(ordinal, record);
+      const label = String(row.familyGroup || "").trim();
+      if (/^[+\u2212-]\s*\d*$/.test(label)) familyLabels.set(record, label);
+    }
+  }
+  const mappings = [...ordinals].sort((a, b) => a[0] - b[0]);
+  const unique = new Set(mappings.map(item => item[1]));
+  const position = last?.viewport;
+  const bottom = Boolean(position && [position.top, position.height, position.scroll_height].every(Number.isFinite) && position.top >= 0 && position.height > 0
+    && position.scroll_height >= position.height && position.top + position.height >= position.scroll_height - 1);
+  const collapsed = [...familyLabels].filter(([, label]) => /^\+\s*\d+$/.test(label)).map(([record]) => record).sort();
+  return { reported_rows: total, retrieved_rows: mappings.length, unique_publications: unique.size,
+    ordinal_records: mappings, duplicate_rows_observed: duplicateRows,
+    invalid_observations: invalid, conflicting_ordinals: [...conflicts].sort((a, b) => a - b),
+    unexpanded_family_records: collapsed, bottom_confirmed: bottom,
+    complete: Number.isSafeInteger(total) && total > 0 && mappings.length === total
+      && mappings.every(([ordinal], index) => ordinal === index + 1) && !invalid && !conflicts.size && !collapsed.length && bottom };
+}
+
+export async function collectPpubsRenderedResults(page, expected, taskDir, stem, { maxPages = 8, maxViewports = 128, incrementalTimeoutMs = 10000, familyTimeoutMs = 8000, maxCandidates = Infinity } = {}) {
   const candidates = new Map();
   const pages = [];
   const familyAttempts = new Set(), familyActions = [], familyGaps = [];
   let latest = null, stopReason = "browser_result_unconfirmed", exhausted = false;
-  const pageLimit = Math.max(1, Math.min(8, maxPages));
+  const pageLimit = Number.isInteger(maxPages) && maxPages > 0 ? Math.min(8, maxPages) : 8;
   const unsettledGaps = [];
   async function settledSnapshot() {
     const result = await waitForStableSemanticState(async () => {
@@ -2039,11 +2233,19 @@ export async function collectPpubsRenderedResults(page, expected, taskDir, stem,
     if (value.result_set_id !== expected.result_set_id || value.editor_value !== expected.rendered_query) throw new Error("query_binding_changed");
     const parsed = parsePpubsGridRows(value.rows);
     if (value.rows.length && parsed.length !== value.rows.length) throw new Error("result_grid_parse_incomplete");
+    const retained = [], retainedRows = [];
+    const available = new Set(candidates.keys());
+    for (let i = 0; i < parsed.length; i++) {
+      if (!available.has(parsed[i].record_number) && available.size >= maxCandidates) continue;
+      available.add(parsed[i].record_number);
+      retained.push(parsed[i]); retainedRows.push(value.rows[i]);
+    }
     const screenshot = path.join(taskDir, "screenshots", `${stem}-page-${pageEvidence.page_index}-view-${pageEvidence.viewports.length + 1}.png`);
     await safeScreenshot(page, screenshot);
-    pageEvidence.viewports.push({ ...value, screenshot_path: screenshot,
+    pageEvidence.viewports.push({ ...value, rows: retainedRows,
+      ...(retainedRows.length < value.rows.length ? { omitted_visible_row_count: value.rows.length - retainedRows.length } : {}), screenshot_path: screenshot,
       screenshot_sha256: crypto.createHash("sha256").update(await fs.readFile(screenshot)).digest("hex"), observed_at: nowIso() });
-    for (const candidate of parsed) candidates.set(candidate.record_number, { ...candidates.get(candidate.record_number), ...candidate });
+    for (const candidate of retained) candidates.set(candidate.record_number, { ...candidates.get(candidate.record_number), ...candidate });
   }
   try {
     const viewport = page.locator("#search-results-table .slick-viewport");
@@ -2054,7 +2256,7 @@ export async function collectPpubsRenderedResults(page, expected, taskDir, stem,
       let lastTop = -1, incrementDetected = false;
       for (let viewIndex = 1; viewIndex <= maxViewports; viewIndex++) {
         if (currentOperationDeadline() - Date.now() < 15000) { stopReason = "operation_deadline_truncated"; return finish(); }
-        if (browserRateLimited((await freshState(page)).bodyText)) { stopReason = "browser_rate_limited"; return finish(); }
+        if (browserRateLimited((await freshState(page)).bodyText)) { stopReason = "BROWSER_RATE_LIMITED"; return finish(); }
         latest = await settledSnapshot();
         if (latest.result_set_id !== expected.result_set_id || latest.editor_value !== expected.rendered_query) {
           stopReason = "query_binding_changed"; return finish();
@@ -2069,15 +2271,17 @@ export async function collectPpubsRenderedResults(page, expected, taskDir, stem,
         // scroll/recycle it. Restore that anchor after each expansion so the
         // subsequent forward sweep cannot silently skip leading/middle rows.
         await recordViewport(pageEvidence, latest);
+        if (candidates.size >= maxCandidates) { stopReason = "bounded_sample_limit"; return finish(); }
         const anchorTop = latest.viewport?.top || 0;
         for (let group = 0; group < 32; group++) {
-          if (browserRateLimited((await freshState(page)).bodyText)) { stopReason = "browser_rate_limited"; return finish(); }
+          if (browserRateLimited((await freshState(page)).bodyText)) { stopReason = "BROWSER_RATE_LIMITED"; return finish(); }
           const action = await expandPpubsVisibleFamily(page, expected, familyAttempts, { timeoutMs: familyTimeoutMs });
           if (!action) break;
           familyActions.push(action);
           if (!action.expanded) familyGaps.push(action);
           latest = await settledSnapshot();
           await recordViewport(pageEvidence, latest);
+          if (candidates.size >= maxCandidates) { stopReason = "bounded_sample_limit"; return finish(); }
           // Family expansion grows the displayed row count without fetching a
           // new 500-document batch. Keep this batch's baseline in sync.
           pageEvidence.loaded_range_end = Math.max(pageEvidence.loaded_range_end || 0, latest.displayed_end || 0);
@@ -2097,7 +2301,10 @@ export async function collectPpubsRenderedResults(page, expected, taskDir, stem,
         if (viewIndex === maxViewports) { stopReason = "virtual_viewport_limit"; return finish(); }
         await viewport.evaluate((node) => { node.scrollTop += Math.max(1, Math.floor(node.clientHeight * 0.8)); });
       }
-      if (latest.total_hits !== null && candidates.size === latest.total_hits && !familyGaps.length) { exhausted = true; stopReason = "browser_results_exhausted"; return finish(); }
+      const rowCoverage = ppubsRowCoverage(pages, latest.total_hits);
+      const duplicateRows = rowCoverage.duplicate_rows_observed;
+      if ((duplicateRows ? rowCoverage.complete : latest.total_hits !== null && candidates.size === latest.total_hits)
+          && !familyGaps.length && !unsettledGaps.length) { exhausted = true; stopReason = "browser_results_exhausted"; return finish(); }
       if (pageIndex === pageLimit) { stopReason = "browser_page_limit_8"; return finish(); }
       if (incrementDetected) continue;
       const before = latest;
@@ -2116,13 +2323,17 @@ export async function collectPpubsRenderedResults(page, expected, taskDir, stem,
       if (!changed.stable) { stopReason = familyGaps.length ? "family_members_unretrieved" : "incremental_load_not_confirmed"; return finish(); }
     }
   } catch (error) {
-    stopReason = ["query_binding_changed", "virtual_render_not_stable", "result_grid_parse_incomplete"].includes(error.message)
-      ? error.message : `pagination_failed:${String(error.code || error.message).slice(0,100)}`;
+    stopReason = browserRateLimited((await freshState(page)).bodyText) ? "BROWSER_RATE_LIMITED"
+      : ["query_binding_changed", "virtual_render_not_stable", "result_grid_parse_incomplete"].includes(error.message)
+        ? error.message : `pagination_failed:${String(error.code || error.message).slice(0,100)}`;
     if (stopReason === "virtual_render_not_stable") unsettledGaps.push({ reason: stopReason, viewport: latest?.viewport || null });
   }
   return finish();
   function finish() {
-    const missingCount = latest?.total_hits === null || latest?.total_hits === undefined ? null : Math.max(0, latest.total_hits - candidates.size);
+    const rowCoverage = ppubsRowCoverage(pages, latest?.total_hits ?? null);
+    const duplicateRows = rowCoverage.duplicate_rows_observed;
+    const missingCount = duplicateRows ? rowCoverage.complete ? 0 : null
+      : latest?.total_hits === null || latest?.total_hits === undefined ? null : Math.max(0, latest.total_hits - candidates.size);
     const unconfirmedFamilyCount = familyGaps.reduce((count, gap) => count + Number(String(gap.label || "").replace(/\D/g, "")), 0);
     if (stopReason === "family_members_unretrieved" && missingCount > unconfirmedFamilyCount) {
       stopReason = "result_rows_and_family_members_unretrieved";
@@ -2140,6 +2351,8 @@ export async function collectPpubsRenderedResults(page, expected, taskDir, stem,
         source_updated_at: null, truncated: !exhausted, completeness: exhausted ? "result_set_complete" : "partial",
         stop_reason: stopReason, reason: "Coverage refers only to this bound query's displayed result set, not exhaustive IP recall.",
         result_set_id: expected.result_set_id, max_pages: pageLimit, pagination_mode: "incremental_scroll",
+        ...(duplicateRows ? { coverage_counting_revision: "ppubs-result-rows-v1", row_coverage: rowCoverage,
+          unretrieved_result_row_count: Math.max(0, rowCoverage.reported_rows - rowCoverage.retrieved_rows) } : {}),
         viewport_gaps: unsettledGaps,
         unretrieved_document_count: missingCount, unconfirmed_family_member_count: unconfirmedFamilyCount,
         family_expansion: { attempted: familyActions.length, expanded: familyActions.filter(item => item.expanded).length, gaps: familyGaps } } };
@@ -2205,6 +2418,18 @@ async function runPlannedQuery(args, config) {
     || await acceptedBrowserRoute(taskDir, task, provider, query));
   if (gate) return gate;
 
+  if (args.check_existing_rate_limit === true) {
+    let existing;
+    try { existing = await connectSession(config, { existingOnly: true }); }
+    catch { return { status: "access_limited", error_code: "BROWSER_RATE_LIMIT_RECOVERY_UNVERIFIED",
+      phase: "await_source_retry", submission_state: "not_submitted",
+      detail: "The previous browser session is unavailable. No new session was started for rate-limit recovery." }; }
+    const previous = await readJson(path.join(taskDir, "browser-execution-status.json")).catch(() => null);
+    const pageRef = previous?.task_id === task.task_id ? previous.provider_pauses?.[provider]?.rate_limit_page : null;
+    const blocked = await existingProviderRateLimit(existing.context, provider, pageRef);
+    if (blocked) return blocked;
+  }
+
   if (query.operation === "candidate_verification") {
     const candidateInputs = candidatePlanInputs(provider, query);
     const command = candidateCdpCommand(provider);
@@ -2260,6 +2485,7 @@ async function runPlannedQuery(args, config) {
   let submitError = null;
   const executionEvents = [];
   const { screenshotPath, capturePath } = plannedQueryCapturePaths(taskDir, provider, queryId);
+  const diagnostics = recordRetrievalDiagnostics(page);
   try {
     executionEvents.push(await submitSearch(page, renderedQuery, provider, { strict: recallIntegrityEnabled(task),
       tmsearchFieldTags: plannedExecution?.search_mode === "field_tag" }));
@@ -2270,6 +2496,7 @@ async function runPlannedQuery(args, config) {
   }
   const strictPpubs = recallIntegrityEnabled(task) && provider === "uspto_patent_browser";
   const semanticConfig = strictPpubs ? { ...config, ppubs_query_binding: { strict: true, renderedQuery,
+    previousResultSetId: executionEvents.find(event => event.action === "submit_query")?.previous_result_set_id ?? submitError?.previous_result_set_id ?? "",
     historyScreenshotPath: screenshotPath.replace(/\.png$/, "-history.png") } } : plannedExecution?.search_mode === "field_tag"
       ? { ...config, tmsearch_query_binding: { tmsearchQuery: renderedQuery,
         allowNonverbal: plannedExecution?.query_compiler_revision === "tm-figurative-fields-v1" } } : config;
@@ -2283,16 +2510,20 @@ async function runPlannedQuery(args, config) {
   // evidence must remain immutable because earlier evidence records bind the
   // screenshot hash, rather than being silently overwritten by the retry.
   let collection = null;
+  const sampleLimit = task.retrieval_workflow_revision === "api-first-v1" && query.execution_phase === "discovery_fallback"
+    ? Math.min(50, Number(task.retrieval_policy?.browser_fallback_max_candidates || 50)) : Infinity;
   if (strictPpubs && !actionError && semantic.stable && semantic.query_bound && semantic.candidates?.length) {
     collection = await collectPpubsRenderedResults(page, { result_set_id: semantic.ppubs.result_set_id, rendered_query: renderedQuery },
-      taskDir, path.basename(screenshotPath, ".png"));
+      taskDir, path.basename(screenshotPath, ".png"), { maxPages: config.cdp?.max_recall_pages ?? 8, maxCandidates: sampleLimit });
     state = await freshState(page);
   }
   const figurativeTm = plannedExecution?.query_compiler_revision === "tm-figurative-fields-v1";
   if (figurativeTm && !actionError && semantic.stable && semantic.query_bound && semantic.candidates?.length) {
-    collection = await collectTmRenderedResults(page, semantic, taskDir, path.basename(screenshotPath, ".png"), semanticConfig);
+    collection = await collectTmRenderedResults(page, semantic, taskDir, path.basename(screenshotPath, ".png"), semanticConfig,
+      { maxPages: config.cdp?.max_recall_pages ?? 8, maxCandidates: sampleLimit });
     state = collection.last_state;
   }
+  const retrievalDiagnostics = diagnostics.stop();
   if (figurativeTm && collection?.last_screenshot_path) await fs.copyFile(collection.last_screenshot_path, screenshotPath);
   else await safeScreenshot(page, screenshotPath, { fullPage: false });
   const candidates = collection?.candidates || semantic.candidates || [];
@@ -2307,13 +2538,13 @@ async function runPlannedQuery(args, config) {
     status = paginationAccess === "needs_user_action" ? paginationAccess : accessStatus;
     detail = status === "needs_user_action" ? "The official USPTO page requires access verification in visible Chrome."
       : "The official page denied access without a supported login or CAPTCHA recovery step.";
+  } else if (!actionError && !semantic.timed_out && semantic.queryError) {
+    detail = `The official USPTO page rejected the submitted query: ${semantic.query_error_text || "invalid query"}`;
   } else if (!actionError && !semantic.timed_out && candidates.length && (!collection || collection.result_coverage.schema_valid)) {
     status = "success";
   } else if (!actionError && !semantic.timed_out && semantic.noResult) {
     status = "no_result";
     resultMessage = "The rendered official page explicitly reported zero results.";
-  } else if (!actionError && !semantic.timed_out && semantic.queryError) {
-    detail = "The official USPTO page rejected the submitted query; it was not treated as a zero-result search.";
   } else {
     detail = actionError
       ? `Search completion could not be confirmed after refreshing page state: ${actionError.slice(0, 300)}`
@@ -2322,6 +2553,10 @@ async function runPlannedQuery(args, config) {
         : "The rendered page did not expose validated candidates or an explicit zero-result message.";
   }
   if (strictPpubs && !["success", "no_result", "needs_user_action"].includes(status) && !accessStatus) status = "failed";
+  // A later limit does not invalidate already bound positive result evidence.
+  // Its incomplete coverage and limit code still pause the scheduler.
+  if (collection?.result_coverage.schema_valid && candidates.length
+      && (browserRateLimited(state.bodyText) || collection.result_coverage.stop_reason === "BROWSER_RATE_LIMITED")) status = "success";
   if (semantic.tmsearch_binding && !["success", "no_result", "needs_user_action"].includes(status) && !accessStatus) status = "failed";
   const tmCoverage = semantic.tmsearch_binding ? {
     total_hits: semantic.tmsearch_binding.total_hits, retrieved_hits: candidates.length, reviewed_hits: null,
@@ -2350,7 +2585,7 @@ async function runPlannedQuery(args, config) {
     } : {}),
     ...(strictPpubs ? { result_pages: collection?.result_pages || [], result_set_id: semantic.ppubs?.result_set_id || "",
       history_binding: historyBinding,
-      history_binding_attempts: semantic.history_binding_attempts || [],
+      history_binding_attempts: semantic.history_binding_attempts || [], retrieval_diagnostics: retrievalDiagnostics,
       source_result_reused: executionEvents.find(e => e.action === "submit_query")?.previous_result_set_id === semantic.ppubs?.result_set_id } : {}),
     ...(figurativeTm ? { result_pages: collection?.result_pages || [] } : {}),
     ...(provider === "uspto_tmsearch_browser"
@@ -2363,14 +2598,16 @@ async function runPlannedQuery(args, config) {
     ...(plannedExecution ? { query_semantics: plannedExecution } : {}),
     ...(resultMessage ? { result_message: resultMessage } : {}),
     ...(detail ? { detail } : {}),
+    ...(semantic.query_error_text ? { query_error_text: semantic.query_error_text } : {}),
     ...(browserRateLimited(state.bodyText) ? { error_code: "BROWSER_RATE_LIMITED",
       detail: "The official page reports Too Many Requests. This provider is paused; the dialog is not dismissed and no automatic resubmission is attempted." } : {}),
-    ...(status === "failed" && !submitError && semantic.tmsearch_binding ? {
+    ...(status === "failed" && !submitError && semantic.tmsearch_binding && !browserRateLimited(state.bodyText) ? {
       error_code: semantic.tmsearch_binding.query_bound ? "BROWSER_RESULT_PARSE_FAILED" : "BROWSER_QUERY_BINDING_FAILED",
       detail: "TM Search result cards or field-tag query binding were not validated; no zero result or website-access denial is claimed." } : {}),
   };
   if (collection?.result_coverage.stop_reason === "BROWSER_RATE_LIMITED") Object.assign(capture, {
     error_code: "BROWSER_RATE_LIMITED", detail: "Earlier pages were retained; pagination reached a rate limit and no further pages were submitted." });
+  if (capture.error_code === "BROWSER_RATE_LIMITED") capture.rate_limit_page = await rateLimitPageRef(page);
   executionEvents.push({ action: "observe_result", actor: "agent", at: nowIso(),
     stable: Boolean(semantic.stable), observed_count: candidates.length,
     ...(strictPpubs ? { result_set_id: semantic.ppubs?.result_set_id || "", query_bound: semantic.query_bound === true } : {}),
@@ -2817,6 +3054,7 @@ async function verifyPpubsPublishedDocument(args, config, resolved) {
     ...(browserRateLimited(state.bodyText) ? { error_code: "BROWSER_RATE_LIMITED",
       detail: "The official page reports Too Many Requests. This provider is paused; available publication evidence does not establish current legal status." } : {}),
   };
+  if (capture.error_code === "BROWSER_RATE_LIMITED") capture.rate_limit_page = await rateLimitPageRef(page);
   events.push({ action: "observe_result", actor: "agent", at: nowIso(), stable: Boolean(document || noResult),
     identity: document?.page_record_number || "", final_url: capture.final_url,
     screenshot_sha256: crypto.createHash("sha256").update(await fs.readFile(screenshotPath)).digest("hex") });
@@ -3154,6 +3392,7 @@ async function verifyCandidate(args, config) {
     ...(strictTsdr && status === "failed" ? { error_code: "TSDR_EVIDENCE_INCOMPLETE", phase: "verify_record", submission_state: "submitted" } : {}),
     ...(strictTsdr && browserRateLimited(state.bodyText) ? { error_code: "BROWSER_RATE_LIMITED", phase: "verify_record", submission_state: "submitted" } : {}),
   };
+  if (capture.error_code === "BROWSER_RATE_LIMITED") capture.rate_limit_page = await rateLimitPageRef(page);
   if (resolved.task.schema_version === "2.4-free") {
     capture.media_coverage = { retrieved_count: evidenceImages.length + Number(Boolean(candidate.mark_image_path)),
       expected_count: null, completeness: rightType === "design" ? "unknown" : "not_assessed",
@@ -3167,7 +3406,7 @@ async function verifyCandidate(args, config) {
   assertNoSensitiveKeys(capture);
   const capturePath = candidatePaths.capturePath;
   await writeJsonAtomic(capturePath, capture);
-  ownedAutomaticPages.set(page, status === "needs_user_action" ? "preserve" : "close");
+  ownedAutomaticPages.set(page, status === "needs_user_action" || capture.error_code === "BROWSER_RATE_LIMITED" ? "preserve" : "close");
   if (provider === "uspto_patent_browser" && detailOpened) {
     await updateCandidateJournal(taskDir, {
       provider,
@@ -4237,9 +4476,31 @@ async function doctor(config) {
   return result;
 }
 
+async function captureSerperEntitlement(args, config) {
+  if (!args.output) throw new Error("SERPER_CAPTURE_OUTPUT_REQUIRED");
+  const fingerprint = await new Promise((resolve, reject) => {
+    const child = spawn(resolvePythonExecutable(), ["-c",
+      "import hashlib,sys;sys.path.insert(0,sys.argv[1]);from common import credential,load_skill_config;k=credential(load_skill_config(),'serper_api_key');print(hashlib.sha256(k.encode()).hexdigest() if k else '')",
+      path.join(SKILL_DIR, "scripts")], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" } });
+    let output = "";
+    child.stdout.on("data", chunk => { output += chunk.toString(); if (output.length > 128) child.kill(); });
+    child.stderr.resume();
+    child.once("error", () => reject(new Error("SERPER_CREDENTIAL_CHECK_UNAVAILABLE")));
+    child.once("close", code => code === 0 && /^[a-f0-9]{64}$/.test(output.trim())
+      ? resolve(output.trim()) : reject(new Error("SERPER_CREDENTIAL_MISSING_OR_INVALID")));
+  });
+  const session = await connectSession(config);
+  const capture = await captureSerperAccount({ context: session.context, credentialFingerprint: fingerprint,
+    outputPath: path.resolve(args.output) });
+  return { status: capture.status, capture_path: path.resolve(args.output),
+    ...(capture.error_code ? { error_code: capture.error_code } : {}),
+    ...(capture.detail ? { detail: capture.detail } : {}) };
+}
+
 function printHelp() {
   process.stdout.write(`Usage:
   node cdp-cli.mjs doctor
+  node cdp-cli.mjs capture-serper-account --output /absolute/serper-account-capture.json
   node cdp-cli.mjs capture-amazon --task-dir /absolute/run
   node cdp-cli.mjs run-planned-query --task-dir /absolute/run --query-id QRY-... [--acceptance-probe]
   node cdp-cli.mjs automation-capability --provider PROVIDER --jurisdiction CC --right-type TYPE --operation OP
@@ -4279,6 +4540,7 @@ async function main() {
       result = await withOperationDeadline(async () => {
         let result;
         if (args.command === "doctor") result = await doctor(config);
+        else if (args.command === "capture-serper-account") result = await captureSerperEntitlement(args, config);
         else if (args.command === "capture-amazon") result = await captureAmazon(args, config);
         else if (args.command === "run-planned-query") result = await runPlannedQuery(args, config);
         else if (args.command === "verify-candidate") result = await verifyCandidate(args, config);

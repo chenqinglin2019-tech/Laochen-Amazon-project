@@ -696,7 +696,11 @@ def _canonical(task_dir, task, evidence, assessment, candidates, plan):
     from assessment_estimate import compute_assessment
     task_dir = Path(task.get("outputs", {}).get("assessment_input_dir") or task_dir)
     reviews = assessment.get("review", {}).get("input_reviews", {})
-    expected = compute_assessment(task, evidence, candidates, plan, load_materiality_ledger(task_dir, task["task_id"], task=task), reviews.get("first", {}), reviews.get("second"), reviews.get("adjudication"), supplement=assessment.get("supplement"), evidence_root=assessment.get("review", {}).get("evidence_root") or task_dir, generated_at=assessment.get("generated_at"), task_dir=task_dir)
+    ledger = load_materiality_ledger(task_dir, task["task_id"], task=task)
+    root = assessment.get("review", {}).get("evidence_root") or task_dir
+    expected = compute_assessment(task, evidence, candidates, plan, ledger, reviews.get("first", {}), reviews.get("second"), reviews.get("adjudication"), supplement=assessment.get("supplement"), evidence_root=root, generated_at=assessment.get("generated_at"), task_dir=task_dir)
+    from necessary_completion import restore_publication
+    restore_publication(task, evidence, candidates, plan, ledger, expected, assessment, task_dir=task_dir, evidence_root=root)
     if expected != assessment:
         raise ValueError("ASSESSMENT_STALE_OR_TAMPERED")
 
@@ -870,6 +874,22 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
     if visual_policy_revision:
         result["visual_policy_revision"] = visual_policy_revision
         result["visual_gaps"] = visual_gaps
+    from necessary_completion import enabled as completion_enabled
+    if completion_enabled(task):
+        publication = assessment.get("publication")
+        if not isinstance(publication, dict):
+            raise ValueError("PUBLICATION_CONTEXT_REQUIRED")
+        result["completion_policy_revision"] = task["completion_policy_revision"]
+        result["publication"] = deepcopy(publication)
+        if assessment.get("coverage", {}).get("triage", {}).get("counts", {}).get("selected") == 0:
+            result["coverage_notes"].append("当前没有入选候选；核验队列为空不表示全部候选已经全面核验，也不构成低风险依据。")
+        if publication.get("mode") == "stage":
+            result["coverage_notes"].append("阶段报告停止原因：" + publication["stop_reason"])
+        # Present provenance metadata in the existing explanation column; keep
+        # the source notes verbatim in coverage and the frozen evidence.
+        for raw, label in (("kind=provenance_document", "资料类型：来源文件"),
+                           ("document_type=published_license_terms", "文档类型：公开许可条款")):
+            result["coverage_notes"] = [note.replace(raw, label) for note in result["coverage_notes"]]
     if task.get("workflow_correction_revision") == "workflow-correction-v1":
         result["workflow_correction_revision"] = task["workflow_correction_revision"]
         result = _compact_report_data(result)
@@ -1240,6 +1260,10 @@ def _manifest(data: dict, payloads: dict[str, bytes]) -> dict:
             completion["queue_counts"] = {key: len(value) for key, value in completion.pop("queues", {}).items()}
         manifest["decision_records"] = {"path": "report-data.json", "json_pointer": "/decision_records",
             "count": len(data["decision_records"]), "sha256": _digest(data["decision_records"])}
+    if data.get("completion_policy_revision"):
+        manifest["completion_policy_revision"] = data["completion_policy_revision"]
+        manifest["publication"] = {"path": "report-data.json", "json_pointer": "/publication",
+            "sha256": _digest(data["publication"])}
     manifest['content_digest'] = _digest(manifest)
     return manifest
 

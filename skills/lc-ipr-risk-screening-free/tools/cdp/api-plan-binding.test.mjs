@@ -1,3 +1,4 @@
+import { resolvePythonExecutable } from "./platform-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -32,7 +33,7 @@ except ProviderError as exc:
     raise SystemExit(3)
 print(row["query_id"])
 `;
-  return spawnSync("python3", ["-c", script, taskDir, JSON.stringify(values)], {
+  return spawnSync(resolvePythonExecutable(), ["-c", script, taskDir, JSON.stringify(values)], {
     encoding: "utf8", env: PYTHON_ENV,
   });
 }

@@ -32,6 +32,7 @@ REQUIRED_FACTS = frozenset({"abstract", "representative_figures", "protection_co
 TEMPORARY_DISPATCH_CODES = frozenset({"TRIAGE_BOUNDED_ACTION_ALREADY_ATTEMPTED",
     "TRIAGE_ATTEMPT_STATE_UNKNOWN", "TRIAGE_REVIEW_REQUIRED"})
 RECALL_PLANNING_REVISION = "identity-discovery-v1"
+RETRIEVAL_WORKFLOW_REVISION = "api-first-v1"
 AXES = {
     "patent": ["text", "classification"], "utility_model": ["text", "classification"],
     "design": ["text", "classification", "image"],
@@ -42,6 +43,11 @@ AXES = {
 
 def identity_discovery_enabled(task: dict) -> bool:
     return recall_integrity_enabled(task) and task.get("recall_planning_revision") == RECALL_PLANNING_REVISION
+
+
+def api_first_enabled(task: dict) -> bool:
+    return (scenario_workflow_enabled(task) and correction_enabled(task)
+            and task.get("retrieval_workflow_revision") == RETRIEVAL_WORKFLOW_REVISION)
 
 
 def scenario_workflow_enabled(task: dict) -> bool:
@@ -207,6 +213,122 @@ def record_action_recovery(task_dir: Path, provider: str, row: dict, *, implemen
     return recovery
 
 
+def browser_submitted_failure_state(task: dict, evidence: dict, provider: str, row: dict) -> dict | None:
+    """Bound ordinary failed submissions for one immutable new-policy row.
+
+    Successful/partial retrieval, source limits, syntax repair and unsubmitted
+    actions retain their existing policies. The append-only source runs are the
+    counter; changing a status file or browser implementation cannot reset it.
+    """
+    if (task.get("completion_policy_revision") != "necessary-work-v1"
+            or not (provider.endswith("_browser") or provider == "uspto_tsdr")):
+        return None
+    digest = sha256_json(row)
+    runs = [run for run in evidence.get("source_runs", []) if isinstance(run, dict)
+        and run.get("provider") == provider and run.get("query_id") == row.get("query_id")
+        and run.get("plan_entry_sha256") == digest and run.get("status") not in {"cancelled", "not_applicable"}]
+    reviewed = {item["source_run_id"] for item in action_attempt_state(evidence, provider, row).get("submission_reviews", [])}
+    unknown = [run for run in runs if run.get("submission_state") not in {"submitted", "not_submitted"}
+        and run.get("run_id") not in reviewed]
+    if unknown:
+        return {"state": "submission_unknown", "reason": "VERIFY_PRIOR_SUBMISSION_BEFORE_RETRY",
+            "plan_entry_sha256": digest,
+            "source_run_refs": [{"run_id": run.get("run_id"), "sha256": sha256_json(run)} for run in unknown]}
+    # A qualified success belongs to normal completion/partial recovery. Never
+    # turn retained positive evidence into a failed ordinary search budget.
+    if any(run.get("status") in {"success", "no_result"} for run in runs):
+        return None
+    excluded = {"USPTO_QUERY_REJECTED", "UNSUPPORTED_QUERY_SEMANTICS", "BROWSER_QUERY_SEMANTICS_UNSUPPORTED",
+        "INTERNAL_ROUTE_CONTRACT_ERROR", "AUTOMATION_NOT_VALIDATED", "AUTOMATION_PROHIBITED",
+        "AUTOMATIC_QUERY_FIELD_UNSUPPORTED", "AUTOMATIC_QUERY_FILTER_UNSUPPORTED", "AUTOMATIC_QUERY_LANGUAGE_UNSUPPORTED",
+        "CURRENT_STATUS_ROUTE_UNAVAILABLE", "AUTH_REQUIRED", "LOGIN_REQUIRED", "CAPTCHA_REQUIRED", "MFA_REQUIRED",
+        "CONSENT_REQUIRED", "QR_REQUIRED", "QUOTA_EXHAUSTED", "FREE_QUOTA_EXHAUSTED", "RATE_LIMITED"}
+    failures = []
+    for run in runs:
+        coverage = (run.get("metadata") or {}).get("search_coverage") or {}
+        codes = {str(value or "").upper() for value in (run.get("error_code"), coverage.get("error_code"), coverage.get("stop_reason"))}
+        if (run.get("status") in {"failed", "access_limited"} and run.get("submission_state") == "submitted"
+                and not codes & excluded and not any(code.startswith(("BROWSER_RATE_LIMIT", "BROWSER_PARTIAL_")) for code in codes)):
+            failures.append(run)
+    if not failures:
+        return None
+    # The sole runtime settings file is shared by dispatch and publication;
+    # neither backend credentials nor caller/status overrides alter this cap.
+    config = load_json(Path(__file__).resolve().parents[1] / "references" / "runtime-config.json")
+    limit = config.get("cdp", {}).get("submitted_failure_resume_limit", 1)
+    limit = limit if type(limit) is int and 0 <= limit <= 1 else 1
+    maximum = 1 + limit
+    exhausted = len(failures) >= maximum
+    return {"state": "blocked" if exhausted else "ready",
+        "reason": "BROWSER_SUBMITTED_FAILURE_RECOVERY_EXHAUSTED" if exhausted else "BROWSER_SUBMITTED_FAILURE_RECOVERY_AVAILABLE",
+        "plan_entry_sha256": digest, "failure_count": len(failures), "max_submitted_failures": maximum,
+        "remaining_attempts": max(0, maximum - len(failures)), "last_error_code": failures[-1].get("error_code"),
+        "detail": ("The exact browser plan row has exhausted its bounded recovery after submitted failures."
+            if exhausted else "One bounded recovery remains for the exact browser plan row after a submitted failure."),
+        "source_run_refs": [{"run_id": run.get("run_id"), "sha256": sha256_json(run)} for run in failures]}
+
+
+def browser_partial_recovery_state(task: dict, evidence: dict, provider: str, row: dict,
+                                   current: dict | None = None) -> dict | None:
+    """Project a bounded partial recovery from retained runs, never static access.
+
+    Runs survive a missing status file. The snapshot retains the configured
+    limit, but it cannot erase already recorded attempts. No local credential
+    or implementation lookup is involved in offline publication validation.
+    """
+    if (task.get("completion_policy_revision") != "necessary-work-v1"
+            or not (provider.endswith("_browser") or provider == "uspto_tsdr")):
+        return None
+    from assessment_v24 import bound_runs, NON_PRODUCTION
+    runs = [run for run in bound_runs(evidence, {"queries": {provider: [row]}}, provider, row)
+            if str(run.get("source_environment") or "").casefold() not in NON_PRODUCTION
+            and run.get("authoritative_for_final_rating") is not False]
+    current = current if isinstance(current, dict) and current.get("plan_entry_sha256") == sha256_json(row) else {}
+    reviewed = {item["source_run_id"] for item in action_attempt_state(evidence, provider, row)["submission_reviews"]}
+    if any(run.get("submission_state") not in {"submitted", "not_submitted"}
+           and run.get("run_id") not in reviewed for run in runs):
+        return None
+    def coverage(run):
+        value = (run.get("metadata") or {}).get("search_coverage") or {}
+        return value if isinstance(value, dict) else {}
+    def codes(value, cov):
+        return {str(item or "").upper() for item in
+            (value.get("error_code"), value.get("source_error_code"), cov.get("error_code"), cov.get("stop_reason"))}
+    latest = runs[-1] if runs else {}
+    latest_codes = codes(latest, coverage(latest)) | codes(current, {})
+    if (any(code.startswith("BROWSER_RATE_LIMIT") for code in latest_codes)
+            or latest_codes & {"USPTO_QUERY_REJECTED", "UNSUPPORTED_QUERY_SEMANTICS",
+                "INTERNAL_ROUTE_CONTRACT_ERROR", "AUTOMATION_NOT_VALIDATED", "AUTOMATION_PROHIBITED",
+                "AUTOMATIC_QUERY_FIELD_UNSUPPORTED", "AUTOMATIC_QUERY_FILTER_UNSUPPORTED",
+                "AUTH_REQUIRED", "LOGIN_REQUIRED", "CAPTCHA_REQUIRED", "MFA_REQUIRED", "CONSENT_REQUIRED", "QR_REQUIRED"}):
+        return None  # Source access and Agent-repair work keep their own policy.
+    partial = []
+    for index, run in enumerate(runs):
+        cov = coverage(run)
+        if run.get("status") not in {"success", "no_result"} or cov.get("schema_valid") is not True:
+            continue
+        if cov.get("truncated") is False:
+            partial = []  # A later complete capture supersedes older partial evidence.
+        elif cov.get("truncated") is True and not any(code.startswith("BROWSER_RATE_LIMIT") for code in codes(run, cov)):
+            partial.append((index, run))
+    if not partial:
+        return None
+    first_index = partial[0][0]
+    attempted = [run for run in runs[first_index:] if run.get("submission_state") == "submitted"]
+    attempts = max(0, len(attempted) - 1)
+    limit = current.get("partial_resume_limit", 1)
+    limit = limit if type(limit) is int and 0 <= limit <= 1 else 1
+    exhausted = attempts >= limit
+    cov = coverage(partial[-1][1])
+    return {"state": "blocked" if exhausted else "ready",
+        "reason": "BROWSER_PARTIAL_RESUME_LIMIT" if exhausted else "BROWSER_PARTIAL_RESUME_AVAILABLE",
+        "partial_resume_attempts": attempts, "partial_resume_limit": limit,
+        "source_stop_reason": cov.get("stop_reason") or "coverage incomplete",
+        "detail": "Retained partial results exhausted their bounded automatic recovery; candidate review remains required."
+            if exhausted else "One bounded recovery of the retained partial result remains.",
+        "source_run_refs": [{"run_id": run["run_id"], "sha256": sha256_json(run)} for run in runs[first_index:]]}
+
+
 def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, ledger: dict, *,
                      supplement=None, evidence_root=None, task_dir=None, coverage=None,
                      browser_status=None, source_capabilities=None) -> dict:
@@ -255,8 +377,22 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                 current = browser_rows.get(query_id, {})
                 if current.get("plan_entry_sha256") != sha256_json(row):
                     current = {}
+                failed_submission = browser_submitted_failure_state(task, evidence, provider, row)
+                partial_recovery = browser_partial_recovery_state(task, evidence, provider, row, current)
                 material = scenario_reading_material(task, plan, evidence, candidates, ledger, provider, row,
                     supplement=supplement, evidence_root=evidence_root, task_dir=task_dir) if not block or block.get("reason") in TEMPORARY_DISPATCH_CODES else None
+                external_actions = result.get("external_information_actions")
+                if (task.get("completion_policy_revision") == "necessary-work-v1" and provider == "asset_provenance"
+                        and not block and result.get("investigation_status") == "completed"
+                        and result.get("retrieval_complete") is True and isinstance(external_actions, list) and external_actions):
+                    # query_coverage validates the completed public investigation
+                    # and each supplier-only question before exposing these.
+                    for action in external_actions:
+                        add({**base, "kind": "user_information", "state": "awaiting_user",
+                            "reason": "EXTERNAL_INFORMATION_REQUIRED", "action_id": action["action_id"], "action": deepcopy(action),
+                            **{key: action[key] for key in ("question", "owner", "evidence_needed", "reasoning")},
+                            "evidence_refs": list(dict.fromkeys([*result.get("evidence_refs", []), *action["evidence_refs"]]))})
+                    continue
                 if material is not None:
                     base.update(kind="agent_read", reading_material=material, evidence_refs=material.get("evidence_refs", []))
                     state, reason = "awaiting_review", "RETAINED_ORIGINAL_REQUIRES_READING"
@@ -268,12 +404,29 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                 elif provider == "asset_provenance":
                     state, reason = "ready", "AGENT_INVESTIGATION_REQUIRED"
                 else:
-                    if current.get("dispatch") == "partial_deferred" or result.get("gap") == "RETRIEVAL_TRUNCATED":
+                    if (task.get("completion_policy_revision") == "necessary-work-v1"
+                            and (current.get("dispatch") == "rate_limit_deferred" or current.get("phase") == "await_source_retry")
+                            and str(current.get("error_code") or current.get("source_error_code") or "").upper()
+                                in {"BROWSER_RATE_LIMITED", "BROWSER_RATE_LIMIT_COOLDOWN", "BROWSER_RATE_LIMIT_RECOVERY_EXHAUSTED",
+                                    "BROWSER_RATE_LIMIT_RECOVERY_UNVERIFIED"}):
+                        state, reason = "awaiting_access", str(current.get("error_code") or current["source_error_code"]).upper()
+                    elif partial_recovery:
+                        base.update({key: value for key, value in partial_recovery.items() if key not in {"state", "reason"}})
+                        state, reason = partial_recovery["state"], partial_recovery["reason"]
+                    elif current.get("dispatch") == "partial_deferred" or result.get("gap") == "RETRIEVAL_TRUNCATED":
                         state, reason = "awaiting_review", "RETRIEVAL_TRUNCATED_REPLAN_REQUIRED"
                     elif run.get("status") == "needs_user_action" or current.get("status") == "needs_user_action":
                         state, reason = "awaiting_access", run.get("error_code") or current.get("error_code") or "ACCESS_INTERACTION_REQUIRED"
+                    elif failed_submission and failed_submission["state"] == "submission_unknown":
+                        base.update({key: value for key, value in failed_submission.items() if key not in {"state", "reason"}})
+                        state, reason = failed_submission["state"], failed_submission["reason"]
                     elif attempt["attempted"] and attempt["state"] == "unknown":
                         state, reason = "submission_unknown", "VERIFY_PRIOR_SUBMISSION_BEFORE_RETRY"
+                    elif run.get("error_code") in {"USPTO_QUERY_REJECTED", "UNSUPPORTED_QUERY_SEMANTICS"}:
+                        state, reason = "ready", run["error_code"]
+                    elif failed_submission:
+                        base.update({key: value for key, value in failed_submission.items() if key not in {"state", "reason"}})
+                        state, reason = failed_submission["state"], failed_submission["reason"]
                     elif run.get("error_code") in {"CURRENT_STATUS_ROUTE_UNAVAILABLE", "AUTOMATION_NOT_VALIDATED", "AUTOMATION_PROHIBITED", "INTERNAL_ROUTE_CONTRACT_ERROR"}:
                         state, reason = "blocked", run["error_code"]
                     elif current.get("dispatch") == "blocked_reused":
@@ -339,18 +492,43 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                 "completion_meaning": "necessary_investigation_and_triage_only; independent risk reviews remain separate"}
 
 
-def work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabilities=None) -> dict:
+def work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabilities=None,
+                       first_review=None, second_review=None) -> dict:
     from decision_workflow import decision_snapshot
     task, plan = load_json(task_dir / "task.json"), load_json(task_dir / "search-plan.json")
     candidates, ledger, evidence = _scenario_context(task_dir, task)
     supplement = scenario_supplement(task_dir, task=task, evidence=evidence)
     if browser_status is None and (task_dir / "browser-execution-status.json").is_file():
         browser_status = load_json(task_dir / "browser-execution-status.json")
+    from necessary_completion import enabled as completion_enabled, capability_map, refine_work_view, review_work
+    strict_completion = completion_enabled(task)
+    if source_capabilities is None and strict_completion:
+        saved = task_dir / "source-capabilities.json"
+        source_capabilities = capability_map(task, load_json(saved) if saved.is_file() else None)
     if source_capabilities is None and correction_enabled(task):
         from runtime_v24 import capabilities
         source_capabilities = {row["provider"]: row for row in capabilities(task, load_skill_config())}
-    return derive_work_view(task, evidence, candidates, plan, ledger, supplement=supplement, task_dir=task_dir,
-                            browser_status=browser_status, source_capabilities=source_capabilities)
+    scopes = None
+    if strict_completion:
+        from assessment_v24 import scenario_coverage_by_scope
+        scopes = scenario_coverage_by_scope(task, evidence, candidates, plan, ledger=ledger,
+            supplement=supplement, evidence_root=task_dir)
+    result = derive_work_view(task, evidence, candidates, plan, ledger, supplement=supplement, task_dir=task_dir,
+        coverage=scopes, browser_status=browser_status, source_capabilities=source_capabilities)
+    if strict_completion:
+        result = refine_work_view(task, result, plan, source_capabilities or {})
+        result["review_work"] = review_work(task, evidence, candidates, plan, ledger, scopes,
+            first_review, second_review, supplement=supplement, evidence_root=task_dir)
+    if api_first_enabled(task):
+        from api_first_planning import next_work_entries
+        additions = next_work_entries(task, plan, evidence, candidates, ledger, supplement, task_dir=task_dir)
+        seen = {sha256_json(item) for item in result["entries"]}
+        result["entries"].extend(item for item in additions if sha256_json(item) not in seen)
+        result["counts"] = {state: sum(item["state"] == state for item in result["entries"])
+            for state in ("ready", "awaiting_review", "awaiting_access", "awaiting_user", "submission_unknown", "blocked")}
+        if result["entries"]:
+            result["status"] = "incomplete"
+    return result
 
 
 def scenario_row_bindings(task: dict, row: dict) -> list[dict]:
@@ -575,6 +753,11 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
         return blocked("SCENARIO_ACTION_NOT_NECESSARY")
     if correction_enabled(task) and for_dispatch and action_attempt_state(evidence, provider, row)["state"] == "unknown":
         return blocked("TRIAGE_ATTEMPT_STATE_UNKNOWN")
+    if api_first_enabled(task) and for_dispatch:
+        from api_first_planning import dispatch_block
+        api_block = dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supplement)
+        if api_block:
+            return blocked(api_block)
     if (task.get("specialty_workflow_revision") == "asset-scope-v1"
             and provider == "uspto_tmsearch_browser" and row.get("jurisdiction") == "US"
             and row.get("right_type") == "trademark_figurative"
@@ -597,7 +780,8 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
                           or row.get("action_purpose") not in {"recall", "provenance", "discovery"}
                           or row.get("execution_phase") in {"verification", "enrichment", "needs_info"}
                           or any(str(ref).startswith("candidate:") for ref in row.get("derived_from", []))
-                          or (row.get("execution_phase") == "expansion" and row.get("search_dimension") in {"owner", "classification"}))
+                          or (row.get("execution_phase") == "expansion" and row.get("search_dimension") in {"owner", "classification"}
+                              and not (api_first_enabled(task) and row.get("action_purpose") == "discovery")))
     if requires_candidate and (not candidate_id or not row.get("triage_decision_id") or not row.get("triage_decision_sha256")
                                or not row.get("triage_jurisdiction") or not row.get("scenario_id") or row.get("scenario_bindings")):
         return blocked("TRIAGE_ACTION_BINDING_REQUIRED")
@@ -660,8 +844,19 @@ def scenario_dispatch_block_from_dir(task_dir: Path, provider: str, row: dict) -
     if len(matches) != 1 or sha256_json(matches[0]) != sha256_json(row):
         return {"code": "SCENARIO_PLAN_ROW_CHANGED", "reason": "SCENARIO_PLAN_ROW_CHANGED", "status": "cancelled"}
     candidates, ledger, evidence = _scenario_context(task_dir, task)
-    return scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence,
+    blocked = scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence,
                                    supplement=scenario_supplement(task_dir, task=task, evidence=evidence))
+    if blocked:
+        return blocked
+    if api_first_enabled(task):
+        from api_first_planning import followup_source_files_error
+        source_error = followup_source_files_error(task_dir, task, evidence, row)
+        if source_error:
+            return {"code": source_error, "reason": source_error, "status": "cancelled", "submission_state": "not_submitted"}
+    failure = browser_submitted_failure_state(task, evidence, provider, row)
+    if failure and failure["state"] in {"blocked", "submission_unknown"}:
+        return {**failure, "code": failure["reason"], "status": "access_limited", "submission_state": "not_submitted"}
+    return None
 
 
 def reconcile_scenario_actions(task_dir: Path, task: dict, plan: dict,
@@ -692,6 +887,15 @@ def reconcile_scenario_actions(task_dir: Path, task: dict, plan: dict,
 
 def assert_recall_planning_contract(task: dict, plan: dict | None = None) -> None:
     correction_enabled(task)
+    retrieval_revision = task.get("retrieval_workflow_revision")
+    if retrieval_revision is not None and (retrieval_revision != RETRIEVAL_WORKFLOW_REVISION or not api_first_enabled(task)):
+        raise ValueError("RETRIEVAL_WORKFLOW_REVISION_INVALID")
+    if plan is not None and plan.get("retrieval_workflow_revision") != retrieval_revision:
+        raise ValueError("RETRIEVAL_WORKFLOW_REVISION_MISMATCH")
+    if api_first_enabled(task) and plan is not None:
+        if (plan.get("retrieval_policy") != task.get("retrieval_policy")
+                or plan.get("retrieval_policy_sha256") != sha256_json(task.get("retrieval_policy"))):
+            raise ValueError("RETRIEVAL_POLICY_CHANGED")
     if plan is not None and plan.get("workflow_correction_revision") != task.get("workflow_correction_revision"):
         raise ValueError("WORKFLOW_CORRECTION_REVISION_MISMATCH")
     specialty = task.get("specialty_workflow_revision")
@@ -709,7 +913,7 @@ def assert_recall_planning_contract(task: dict, plan: dict | None = None) -> Non
         raise ValueError("RECALL_PLANNING_REVISION_INVALID")
     if plan is not None and plan.get("recall_planning_revision") != revision:
         raise ValueError("RECALL_PLANNING_REVISION_MISMATCH")
-    if plan is not None and identity_discovery_enabled(task):
+    if plan is not None and identity_discovery_enabled(task) and not api_first_enabled(task):
         followups = task.get("discovery_followups", [])
         target_ids = {r.get("query_id") for r in plan.get("queries", {}).get("serpapi_google_patents", []) if isinstance(r, dict)}
         if (not isinstance(followups, list) or any(not isinstance(d, dict) or not isinstance(d.get("query_id"), str) or not d["query_id"]
@@ -775,6 +979,16 @@ def validated_discovery_followup(task_dir: Path, task: dict, plan: dict, evidenc
     This cannot retry an already-consumed query, add queries, enable a provider,
     increase a budget, or replace the client's account/credit validation.
     """
+    if api_first_enabled(task):
+        from api_first_planning import followup_validation
+        candidates, ledger, _ = _scenario_context(task_dir, task)
+        if row.get("discovery_role") == "primary":
+            return None
+        error = followup_validation(task, plan, evidence, candidates, ledger, row,
+            scenario_supplement(task_dir, task=task, evidence=evidence))
+        if error:
+            raise ValueError(error)
+        return next(d for d in task.get("discovery_followups", []) if d.get("query_id") == row.get("query_id"))
     if not identity_discovery_enabled(task) or not serpapi_free_enabled(task):
         return None
     assert_recall_planning_contract(task, plan)
@@ -868,8 +1082,14 @@ def product_analysis_readiness(task: dict[str, Any]) -> dict[str, Any]:
             "patent_claim_followup": {"required": required, "status": "completed" if complete else "pending" if required else "not_required"}}
 
 
-def boolean_tokens(value: str) -> list[str]:
+def boolean_tokens(value: str, revision: str | None = None) -> list[str]:
     """A bounded Boolean grammar, not an arbitrary provider query language."""
+    if revision == "ppubs-boolean-v2":
+        # Share the accepted PPS grammar with receipt validation. The resulting
+        # token list retains the planner's existing spaced-parenthesis format.
+        from record_browser_execution import compile_ppubs_boolean
+        value = compile_ppubs_boolean(value, revision)
+        return re.findall(r'''"[^"\r\n]+"|\(|\)|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*''', value)
     pattern = r'"[^"\n]+"|\(|\)|[^\W_]+(?:[-\x27][^\W_]+)*\*?'
     matches = list(re.finditer(pattern, value, re.UNICODE))
     cursor = 0
@@ -904,6 +1124,29 @@ def boolean_tokens(value: str) -> list[str]:
     if expect_operand or depth:
         raise ValueError("Unbalanced or incomplete Boolean query")
     return tokens
+
+
+def brand_byline_disposition(task: dict[str, Any]) -> dict[str, Any] | None:
+    """An Amazon byline placeholder is not an observed word mark.
+
+    Only the new completion contract uses this filtering. Keep the original
+    byline and a derived reason in the plan; independently observed marks with
+    the same spelling never inherit this source-specific disposition.
+    """
+    if task.get("completion_policy_revision") != "necessary-work-v1":
+        return None
+    product = task.get("product") or {}
+    raw = product.get("brand_byline_raw")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    brand = re.sub(r"^Brand\s*:\s*", "", raw.strip(), flags=re.I)
+    brand = re.sub(r"^Visit\s+the\s+(.+?)\s+Store$", r"\1", brand, flags=re.I).strip()
+    if brand.casefold() not in {"generic", "unbranded"}:
+        return None
+    return {"derived_from": "product.brand", "source_path": "product.brand_byline_raw",
+            "raw_value": raw, "value": brand, "disposition": "excluded",
+            "code": "AMAZON_BRAND_BYLINE_PLACEHOLDER",
+            "reason": "Amazon brand byline identifies a Generic/Unbranded placeholder, not an independently observed mark"}
 
 
 def validated_query_cancellation(task: dict, plan: dict, row: dict) -> dict | None:
@@ -1161,6 +1404,7 @@ def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
     """Use actual features first and retain only their evidenced language."""
     product = task.get("product", {})
     strict = recall_integrity_enabled(task)
+    byline_placeholder = brand_byline_disposition(task)
     terms: list[dict[str, Any]] = []
     def add(value: Any, kind: str, source: str, language: str = "", **extra: Any) -> None:
         text = re.sub(r"\s+", " ", unicodedata.normalize("NFKC", str(value or ""))).strip()
@@ -1177,6 +1421,8 @@ def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
         else:
             add(feature, "structural_feature", f"product.structure[{i}]", language)
     for key in (("brand",) if strict else ("category", "title", "brand", "manufacturer")):
+        if key == "brand" and byline_placeholder:
+            continue
         add(product.get(key), {"title": "product", "manufacturer": "owner"}.get(key, key), f"product.{key}", language,
             **({"strategy": "phrase"} if strict else {}))
     if identity_discovery_enabled(task):
@@ -1199,6 +1445,13 @@ def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
         if item["kind"] in {"translation", "synonym", "phonetic"} and not lang:
             raise ValueError(f"query_terms[{i}] must identify its language")
         kind, value = item["kind"], item["value"]
+        if (byline_placeholder and kind == "brand" and item["derived_from"] in
+                {"product.brand", "product.brand_byline_raw", "product.raw_capture.brand"}
+                and str(value).strip().casefold() in {byline_placeholder["value"].casefold(),
+                    byline_placeholder["raw_value"].strip().casefold()}):
+            # An explicit image/OCR/mark-inventory observation remains eligible,
+            # even when the observed word itself is GENERIC or UNBRANDED.
+            continue
         if kind in {"design_code", "mark_description"}:
             match = re.fullmatch(r"product\.mark_inventory\[(\d+)\]", str(item["derived_from"]))
             inventory = product.get("mark_inventory", [])
@@ -1227,6 +1480,12 @@ def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
                 if strategy == "phrase" and (len(str(value).split()) > 8 or re.search(r'["\n\r]', str(value))):
                     raise ValueError(f"query_terms[{i}] phrase must be a short unquoted phrase")
                 if strategy == "boolean":
+                    if task.get("completion_policy_revision") == "necessary-work-v1":
+                        # Normalize only supported operators outside quoted
+                        # phrases. Source query_terms remain unchanged.
+                        value = re.sub(r'"[^"\n]+"|\b(?:AND|OR|NOT)\b',
+                            lambda match: match.group() if match.group().startswith('"') else match.group().upper(),
+                            str(value), flags=re.I)
                     boolean_tokens(str(value))
             extra["strategy"] = strategy
         add(value, kind, item["derived_from"], lang, **extra)
@@ -1283,7 +1542,8 @@ def _scope(jurisdiction: str, right: str) -> list[str]:
     return [jurisdiction] + (["WO"] if right == "patent" else [])
 
 
-def _api_params(provider: str, term: dict[str, Any], jurisdiction: str, right: str) -> dict[str, Any] | None:
+def _api_params(provider: str, term: dict[str, Any], jurisdiction: str, right: str, *,
+                query_compiler_revision: str | None = None) -> dict[str, Any] | None:
     value = term["value"]
     escaped = value.replace('"', ' ').replace('\\', ' ')
     dim = _dimension(term)
@@ -1331,12 +1591,14 @@ def _api_params(provider: str, term: dict[str, Any], jurisdiction: str, right: s
         if provider == "uspto_patent_browser" and term.get("strategy"):
             from record_browser_execution import compile_ppubs_query
             try:
-                compile_ppubs_query({"q": value, "strategy": term["strategy"], "right_type": right}, term["kind"])
+                compile_ppubs_query({"q": value, "strategy": term["strategy"], "right_type": right,
+                                     **({"query_compiler_revision": query_compiler_revision} if query_compiler_revision else {})}, term["kind"])
             except ValueError:
                 return None  # Unsupported syntax stays a planning gap, never a live zero.
-        query = " ".join(boolean_tokens(value)) if term.get("strategy") == "boolean" and dim == "text" else value
+        query = " ".join(boolean_tokens(value, query_compiler_revision)) if term.get("strategy") == "boolean" and dim == "text" else value
         return {"q": query, "filters": {"field": term["kind"], "language": term.get("language", "")},
-                **({"strategy": term["strategy"]} if term.get("strategy") else {})}
+                **({"strategy": term["strategy"]} if term.get("strategy") else {}),
+                **({"query_compiler_revision": query_compiler_revision} if query_compiler_revision else {})}
     return None
 
 
@@ -1511,6 +1773,8 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
     for requirement in task["coverage_requirements"]:
         if requirement["phase"] != "official_recall":
             continue
+        if api_first_enabled(task):
+            continue  # Discovery is planned below; do not create broad CDP work.
         jurisdiction, right = requirement["jurisdiction"], requirement["right_type"]
         eligible = [
             t for t in selected_terms
@@ -1530,7 +1794,22 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
             for dimension in dict.fromkeys(_dimension(t) for t in eligible):
                 scheduled_now = 0
                 for term in [t for t in eligible if _dimension(t) == dimension]:
-                    params = _api_params(route["provider"], term, jurisdiction, right)
+                    compiler_revision = ("ppubs-boolean-v2" if
+                        task.get("completion_policy_revision") == "necessary-work-v1"
+                        and route["provider"] == "uspto_patent_browser"
+                        and term.get("strategy") == "boolean" and dimension != "classification" else None)
+                    if compiler_revision:
+                        try:
+                            boolean_tokens(term["value"], compiler_revision)
+                        except ValueError as exc:
+                            planning_gaps.append({"requirement_id": requirement["requirement_id"],
+                                "jurisdiction": jurisdiction, "right_type": right, "provider": route["provider"],
+                                "dimension": dimension, "code": "UNSUPPORTED_QUERY_SEMANTICS",
+                                "reason": str(exc), "term_id": sha256_json(term), "query": term["value"],
+                                "derived_from": [term["derived_from"]], "assigned_to": "agent"})
+                            continue
+                    params = _api_params(route["provider"], term, jurisdiction, right,
+                                         query_compiler_revision=compiler_revision)
                     if params is None:
                         expansion_queue.append({"term_id": sha256_json(term), "provider": route["provider"],
                                                 "requirement_id": requirement["requirement_id"], "dimension": dimension,
@@ -1622,7 +1901,7 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
         text = [t for t in terms if t["kind"] in {"structural_feature", "category", "product", "function"}]
         brands = [t for t in terms if t["kind"] in {"brand", "ocr"}]
         jurisdictions = task["target_jurisdictions"]
-        if serper_free_enabled(task) and not identity_discovery_enabled(task):
+        if serper_free_enabled(task) and not identity_discovery_enabled(task) and not api_first_enabled(task):
             for provider, seed, maximum in (("serper_patents", text, 4), ("serper_web", brands or text, 3), ("serper_images", text, 3)):
                 for i, term in enumerate(seed[:maximum]):
                     right = "patent" if provider == "serper_patents" else "copyright" if provider == "serper_images" else "enforcement"
@@ -1630,7 +1909,7 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
                     row = serper_discovery_entry(provider, operation, jurisdictions[i % len(jurisdictions)], term["value"], [term["derived_from"]], right)
                     row.update(search_dimension="text", search_language=term.get("language", ""), execution_phase="initial")
                     _add(queries, provider, row)
-        if signa_free_enabled(task) and brands:
+        if signa_free_enabled(task) and brands and not api_first_enabled(task):
             office_map = {"US": "US", "EU": "EM", "GB": "GB", "FR": "FR"}
             offices = [office_map[j] for j in jurisdictions if j in office_map]
             for term in brands[:3] if offices else []:
@@ -1638,7 +1917,7 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
                     ",".join(jurisdictions), term["value"], [term["derived_from"]], offices,
                 )
                 _add(queries, "signa", row)
-        if serpapi_free_enabled(task) and not identity_discovery_enabled(task):
+        if serpapi_free_enabled(task) and not identity_discovery_enabled(task) and not api_first_enabled(task):
             images = [i for i in task.get("images", []) if str(i.get("source_url", "")).startswith("https://")]
             for i, term in enumerate(text[:2 if images else 3]):
                 jurisdiction = jurisdictions[i % len(jurisdictions)]
@@ -1654,7 +1933,11 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
                 row.update(role="discovery_only", required_for="discovery_only", execute_by_default=True, authoritative_for_final_rating=False,
                            search_dimension="image", search_language="", execution_phase="initial")
                 _add(queries, "serpapi_google_lens", row)
-    if identity_discovery_enabled(task):
+    if api_first_enabled(task):
+        from api_first_planning import append_initial
+        append_initial(task_dir, task, [t for t in selected_terms if not t.get("_triage_decision")], queries,
+            planning_gaps, expansion_queue)
+    elif identity_discovery_enabled(task):
         append_identity_discovery(task, selected_terms, queries, planning_gaps, phase)
     if scenario_workflow_enabled(task):
         # Optional discovery retains its original task budget and one shared
@@ -1685,6 +1968,10 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
         **({"specialty_workflow_revision": task["specialty_workflow_revision"]} if task.get("specialty_workflow_revision") else {}),
         **({"decision_workflow_revision": task["decision_workflow_revision"]} if scenario_workflow_enabled(task) else {}),
         **({"workflow_correction_revision": WORKFLOW_CORRECTION_REVISION} if correction_enabled(task) else {}),
+        **({"retrieval_workflow_revision": RETRIEVAL_WORKFLOW_REVISION} if api_first_enabled(task) else {}),
+        **({"retrieval_policy": deepcopy(task.get("retrieval_policy")),
+            "retrieval_policy_sha256": sha256_json(task.get("retrieval_policy"))} if api_first_enabled(task) else {}),
+        **({"term_dispositions": [brand_byline_disposition(task)]} if brand_byline_disposition(task) else {}),
         "expansion_queue": expansion_queue,
         "term_counts": {"discovered": len(selected_terms), "scheduled_routes": sum(r["state"] == "scheduled" for r in expansion_queue),
                         "deferred_routes": sum(r["state"] == "deferred" for r in expansion_queue)},
@@ -1936,10 +2223,27 @@ def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: di
                                      "action_id": action["action_id"], "assigned_to": "agent",
                                      "reason": f"{provider} requires matching q/{field} and candidate_id; action not submitted."})
                         continue
+                dimension = "identifier"
+                if api_first_enabled(task) and provider == "asset_provenance":
+                    from record_asset_provenance import specialty_enabled, asset_scope, INVESTIGATION_STEPS
+                    scope = asset_scope(task, decision["scenario_id"], right)
+                    reading_scope = action.get("reading_scope")
+                    dimension = reading_scope.get("investigation_step") if isinstance(reading_scope, dict) else None
+                    if (not specialty_enabled(task) or operation != "provenance_review"
+                            or dimension not in INVESTIGATION_STEPS.get(right, ())
+                            or params.get("asset_scope_sha256") != scope["scope_sha256"]
+                            or params.get("candidate_id") != decision["candidate_id"]):
+                        gaps.append({"code": "NEEDS_INFO_ACTION_UNSUPPORTED", "candidate_id": decision["candidate_id"],
+                                     "scenario_id": decision["scenario_id"], "jurisdiction": country, "right_type": right,
+                                     "action_id": action["action_id"], "assigned_to": "agent",
+                                     "reason": "asset_provenance requires provenance_review, the current asset_scope_sha256, "
+                                               "matching candidate_id and an explicit allowed reading_scope.investigation_step; "
+                                               "repair the Agent action before planning."})
+                        continue
                 row = entry(provider, operation, country, deepcopy(params), required=False, right_type=right,
                             requirement_ids=[req["requirement_id"] for req in eligible],
                             derived_from=[f"candidate:{decision['candidate_id']}"], wave=2)
-                row.update(required_for="comparison", execute_by_default=True, search_dimension="identifier",
+                row.update(required_for="comparison", execute_by_default=True, search_dimension=dimension,
                            search_language="", execution_phase="needs_info", triage_action_id=action["action_id"])
                 if correction_enabled(task):
                     row.update(required_facts=deepcopy(action.get("required_facts")), reading_scope=deepcopy(action.get("reading_scope")))

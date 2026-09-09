@@ -20,12 +20,20 @@ SCHEMA_VERSION = "2.3-free"
 CURRENT_SCHEMA_VERSION = "2.4-free"
 AUTOMATION_POLICY_REVISION = "automation-first-v1"
 RECALL_INTEGRITY_REVISION = "recall-integrity-v1"
+API_FIRST_REVISION = "api-first-v1"
+SERPER_API_FIRST_MAX_QUERIES_PER_TASK = 30
+SERPAPI_API_FIRST_MAX_QUERIES_PER_TASK = 10
+API_FIRST_PLAN_META_KEYS = {
+    "retrieval_workflow_revision", "discovery_intent_id", "discovery_role",
+    "refinement_round", "parent_query_id", "parent_plan_entry_sha256",
+    "source_index", "discovery_scope",
+}
 DECISION_PLAN_META_KEYS = {
     "decision_workflow_revision", "scenario_id", "scenario_sha256", "scenario_bindings",
     "triage_decision_id", "triage_decision_sha256", "triage_jurisdiction",
     "triage_candidate_id", "action_purpose", "evidence_obligation_id", "triage_action_id",
     "workflow_correction_revision", "required_facts", "reading_scope",
-}
+} | API_FIRST_PLAN_META_KEYS
 LEGACY_SCHEMA_VERSIONS = {"2.1-free", "2.2-free"}
 SUPPORTED_SCHEMA_VERSIONS = {*LEGACY_SCHEMA_VERSIONS, SCHEMA_VERSION, CURRENT_SCHEMA_VERSION}
 FREE_POLICY_REVISION = "optional-discovery-v1"
@@ -265,6 +273,48 @@ def intrinsic_patent_right_type(
     return ""
 
 
+def api_discovery_patent_right_type(document_number: object, kind_code: object = "") -> str:
+    """Infer a discovery card's document type, never its query's intended type.
+
+    ST.16 kinds are office-specific. Keep unsupported or absent identifiers
+    unresolved rather than treating every design-search hit as a design.
+    """
+    number = re.sub(r"[^A-Za-z0-9]", "", str(document_number or "")).upper()
+    # TIPO certificate series: I (invention), M (utility model), D (design).
+    # https://www.tipo.gov.tw/tw/patents/546-6802.html
+    taiwan = re.fullmatch(r"TW([IMD])\d+(?:[A-Z]\d?)?", number)
+    if taiwan:
+        return {'I': 'patent', 'M': 'utility_model', 'D': 'design'}[taiwan[1]]
+    match = re.fullmatch(r"([A-Z]{2})(D|RE|PP)?(\d+)([A-Z]\d?)?", number)
+    if not match:
+        return ""
+    office, series, _digits, suffix = match.groups()
+    kind = suffix or re.sub(r"[^A-Za-z0-9]", "", str(kind_code or "")).upper()
+    if office == "US":
+        if series == "D" or kind.startswith("S"):
+            return "design"
+        if series == "PP" or kind.startswith("P"):
+            return ""  # Plant patents need an explicit, separate assessment.
+        if kind.startswith(("A", "B", "C", "E")):
+            return "patent"
+    elif office == "CN":
+        if kind.startswith("S"):
+            return "design"
+        if kind.startswith(("U", "Y")):
+            return "utility_model"
+        if kind.startswith(("A", "B", "C")):
+            return "patent"
+    elif office in {"EP", "WO", "JP", "KR"}:
+        if office in {"JP", "KR"} and kind.startswith(("U", "Y")):
+            return "utility_model"
+        if kind.startswith(("A", "B")):
+            return "patent"
+    elif office == 'AU' and kind in {'A1', 'B1', 'B2'}:
+        # Do not generalize to the distinct A4/B4 innovation-patent series.
+        return 'patent'
+    return ""
+
+
 def deep_merge(base: dict[str, Any], overlay: dict[str, Any]) -> dict[str, Any]:
     result = dict(base)
     for key, value in overlay.items():
@@ -352,24 +402,25 @@ def _private_credential_text(filename: str) -> str:
         raise CredentialFileError(f"{filename}:FILE_UNREADABLE") from None
 
 
-def _backend_config() -> dict[str, str]:
-    def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
-        result: dict[str, Any] = {}
-        for key, value in pairs:
-            if key in result:
-                raise CredentialFileError("config.json:DUPLICATE_FIELD")
-            result[key] = value
-        return result
-
-    try:
-        value = json.loads(_private_credential_text("config.json"), object_pairs_hook=unique)
-    except json.JSONDecodeError:
-        raise CredentialFileError("config.json:INVALID_JSON") from None
-    if not isinstance(value, dict) or set(value) != {"backend_url", "backend_token"}:
-        raise CredentialFileError("config.json:EXPECTED_BACKEND_FIELDS")
-    if any(not isinstance(item, str) for item in value.values()):
-        raise CredentialFileError("config.json:EXPECTED_STRING_VALUES")
-    return value
+def _backend_config() -> dict[str, Any]:
+    """The frozen auth package merges these files and permits legacy fields."""
+    result: dict[str, Any] = {}
+    for filename in ("config.json", "config.local.json"):
+        path = skill_root() / filename
+        if filename == "config.local.json" and not path.exists():
+            continue
+        try:
+            value = load_json(path)
+        except FileNotFoundError:
+            raise CredentialFileError(f"{filename}:FILE_MISSING") from None
+        except json.JSONDecodeError:
+            raise CredentialFileError(f"{filename}:INVALID_JSON") from None
+        except (OSError, UnicodeDecodeError):
+            raise CredentialFileError(f"{filename}:FILE_UNREADABLE") from None
+        if not isinstance(value, dict):
+            raise CredentialFileError(f"{filename}:EXPECTED_OBJECT")
+        result = deep_merge(result, value)
+    return result
 
 
 def _local_env_values() -> tuple[dict[str, str], dict[str, str]]:
@@ -410,7 +461,12 @@ def _credential_result(name: str) -> tuple[str, str]:
         return "", "OFFLINE_CREDENTIALS_DISABLED"
     try:
         if name == "backend_token":
-            value = _backend_config()["backend_token"]
+            # Preserve the package's nonempty (not stripped) environment
+            # precedence and string conversion. Provider keys remain .env-only.
+            value = os.environ.get("LAOCHEN_BACKEND_TOKEN") or str(
+                _backend_config().get("backend_token", "")
+            )
+            return (value, "") if value else ("", "CREDENTIAL_MISSING")
         else:
             values, errors = _local_env_values()
             key = ENV_CREDENTIALS[name]
@@ -423,7 +479,7 @@ def _credential_result(name: str) -> tuple[str, str]:
 
 
 def credential(config: dict[str, Any], name: str) -> str:
-    """Resolve only from this Skill's config.json or .env; never env/Keychain."""
+    """Backend follows the frozen auth package; provider keys use .env only."""
     del config
     return _credential_result(name)[0]
 
@@ -553,12 +609,39 @@ def uses_optional_commercial_discovery(task: dict[str, Any]) -> bool:
     )
 
 
-def serper_free_enhancement(enabled: bool = False) -> dict[str, Any]:
+def api_first_enabled(task: dict[str, Any]) -> bool:
+    revision = task.get("retrieval_workflow_revision")
+    if revision is None:
+        return False
+    if (revision != API_FIRST_REVISION or not is_v24(task)
+        or task.get('decision_workflow_revision') != 'scenario-triage-v1'
+        or task.get('workflow_correction_revision') != 'workflow-correction-v1'
+        or not isinstance(task.get('retrieval_policy'), dict) or not task['retrieval_policy']):
+        raise ValueError("RETRIEVAL_WORKFLOW_REVISION_INVALID")
+    return True
+
+
+def discovery_plan_scope_valid(task: dict[str, Any], plan: dict[str, Any], item: dict[str, Any]) -> bool:
+    """Discovery may address a requirement without becoming official verification."""
+    if not api_first_enabled(task):
+        return item.get("requirement_ids") == []
+    if plan.get("retrieval_workflow_revision") != API_FIRST_REVISION:
+        return False
+    ids = item.get("requirement_ids")
+    known = {r.get("requirement_id"): r for r in task.get("coverage_requirements", []) if isinstance(r, dict)}
+    return (isinstance(ids, list) and all(isinstance(v, str) and v in known for v in ids)
+            and len(ids) == len(set(ids)) and type(item.get("wave")) is int and item.get("wave") in (1, 2)
+            and item.get("retrieval_workflow_revision") == API_FIRST_REVISION
+            and all(known[v].get("right_type") == item.get("right_type")
+                    and known[v].get("jurisdiction") == item.get("jurisdiction") for v in ids))
+
+
+def serper_free_enhancement(enabled: bool = False, retrieval_workflow_revision: str | None = None) -> dict[str, Any]:
     """Return the explicit bounded Serper discovery contract."""
     return {
         "enabled": enabled is True,
         "role": SERPER_FREE_ROLE,
-        "max_queries_per_task": SERPER_FREE_MAX_QUERIES_PER_TASK,
+        "max_queries_per_task": SERPER_API_FIRST_MAX_QUERIES_PER_TASK if retrieval_workflow_revision == API_FIRST_REVISION else SERPER_FREE_MAX_QUERIES_PER_TASK,
     }
 
 
@@ -572,13 +655,13 @@ def signa_free_enhancement(enabled: bool = False) -> dict[str, Any]:
     }
 
 
-def serpapi_free_enhancement(enabled: bool = False) -> dict[str, Any]:
+def serpapi_free_enhancement(enabled: bool = False, retrieval_workflow_revision: str | None = None) -> dict[str, Any]:
     """Return the bounded task-level SerpApi Google Patents fallback contract."""
     return {
         "enabled": enabled is True,
         "role": SERPAPI_FREE_ROLE,
-        "max_queries_per_task": SERPAPI_FREE_MAX_QUERIES_PER_TASK,
-        "fallback_only_when_serper_enabled": True,
+        "max_queries_per_task": SERPAPI_API_FIRST_MAX_QUERIES_PER_TASK if retrieval_workflow_revision == API_FIRST_REVISION else SERPAPI_FREE_MAX_QUERIES_PER_TASK,
+        "fallback_only_when_serper_enabled": retrieval_workflow_revision != API_FIRST_REVISION,
     }
 
 
@@ -603,8 +686,8 @@ def serpapi_free_enhancement_error(task: dict[str, Any]) -> str:
         or isinstance(maximum, bool)
         or not isinstance(maximum, int)
         or maximum < 1
-        or maximum > SERPAPI_FREE_MAX_QUERIES_PER_TASK
-        or value.get("fallback_only_when_serper_enabled") is not True
+        or maximum > (SERPAPI_API_FIRST_MAX_QUERIES_PER_TASK if api_first_enabled(task) else SERPAPI_FREE_MAX_QUERIES_PER_TASK)
+        or value.get("fallback_only_when_serper_enabled") is not (not api_first_enabled(task))
     ):
         return "SERPAPI_FREE_ENHANCEMENT_INVALID"
     return ""
@@ -642,7 +725,7 @@ def serper_free_enhancement_error(task: dict[str, Any]) -> str:
     maximum = value.get("max_queries_per_task")
     if isinstance(maximum, bool) or not isinstance(maximum, int):
         return "SERPER_FREE_ENHANCEMENT_INVALID"
-    if maximum < 1 or maximum > SERPER_FREE_MAX_QUERIES_PER_TASK:
+    if maximum < 1 or maximum > (SERPER_API_FIRST_MAX_QUERIES_PER_TASK if api_first_enabled(task) else SERPER_FREE_MAX_QUERIES_PER_TASK):
         return "SERPER_FREE_ENHANCEMENT_INVALID"
     return ""
 
@@ -758,6 +841,8 @@ def _serper_expected_query_id(
         "right_type": str(item.get("right_type") or ""),
     }
     identity_params.update({key: item[key] for key in DECISION_PLAN_META_KEYS if key in item})
+    if item.get("retrieval_workflow_revision") == API_FIRST_REVISION:
+        identity_params.update({key: item[key] for key in ("gl", "hl", "page") if key in item})
     encoded = json.dumps(
         identity_params, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     )
@@ -795,7 +880,7 @@ def authorize_serper_free_plan_entry(
     maximum = int(task["serper_free_enhancement"]["max_queries_per_task"])
     if len(all_entries) > maximum:
         raise ValueError("SERPER_TASK_QUERY_LIMIT_EXCEEDED")
-    if any(
+    if not api_first_enabled(task) and any(
         len([
             item for item in queries.get(current_provider, [])
             if isinstance(item, dict)
@@ -815,12 +900,12 @@ def authorize_serper_free_plan_entry(
         raise ValueError("SERPER_OPERATION_MISMATCH")
     if (
         item.get("required") is not False
-        or item.get("requirement_ids") != []
+        or not discovery_plan_scope_valid(task, plan, item)
         or item.get("authoritative_for_final_rating") is not False
         or item.get("role") != SERPER_FREE_ROLE
         or item.get("required_for") != SERPER_FREE_ROLE
         or item.get("execute_by_default") is not True
-        or item.get("wave") != 2
+        or (not api_first_enabled(task) and item.get("wave") != 2)
     ):
         raise ValueError("SERPER_DISCOVERY_ONLY_CONTRACT_INVALID")
     allowed_keys = {
@@ -831,7 +916,9 @@ def authorize_serper_free_plan_entry(
     if is_v24(task):
         allowed_keys |= {"search_dimension", "search_language", "execution_phase", "publication_scope"}
     if task.get("decision_workflow_revision") == "scenario-triage-v1":
-        allowed_keys |= DECISION_PLAN_META_KEYS
+        allowed_keys |= DECISION_PLAN_META_KEYS - API_FIRST_PLAN_META_KEYS
+    if api_first_enabled(task):
+        allowed_keys |= API_FIRST_PLAN_META_KEYS | {"gl", "hl", "page"}
     if set(item) - allowed_keys:
         raise ValueError("SERPER_PLAN_PARAMETERS_INVALID")
     query = str(item.get("q") or "").strip()
@@ -843,6 +930,15 @@ def authorize_serper_free_plan_entry(
         or not 1 <= result_count <= 10
     ):
         raise ValueError("SERPER_REQUEST_BOUNDS_INVALID")
+    if api_first_enabled(task):
+        expected_gl = 'fr' if item.get('jurisdiction') == 'EU' else str(item.get('jurisdiction') or '').lower()
+        if (item.get("gl") != expected_gl
+                or not re.fullmatch(r"[a-z]{2}(?:-[A-Z]{2})?", str(item.get("hl") or ""))
+                or item.get("hl") != item.get("search_language")
+                or isinstance(item.get("page", 1), bool)
+                or not isinstance(item.get("page", 1), int)
+                or not 1 <= item.get("page", 1) <= 8):
+            raise ValueError("SERPER_REQUEST_BOUNDS_INVALID")
     expected_query_id = _serper_expected_query_id(
         provider, operation, str(item.get("jurisdiction") or ""), item,
     )
@@ -907,12 +1003,12 @@ def authorize_signa_free_plan_entry(
         raise ValueError("SIGNA_OPERATION_MISMATCH")
     if (
         item.get("required") is not False
-        or item.get("requirement_ids") != []
+        or not discovery_plan_scope_valid(task, plan, item)
         or item.get("authoritative_for_final_rating") is not False
         or item.get("role") != SIGNA_FREE_ROLE
         or item.get("required_for") != SIGNA_FREE_ROLE
         or item.get("execute_by_default") is not True
-        or item.get("wave") != 2
+        or (not api_first_enabled(task) and item.get("wave") != 2)
         or item.get("right_type") != "trademark_word"
     ):
         raise ValueError("SIGNA_DISCOVERY_ONLY_CONTRACT_INVALID")
@@ -925,7 +1021,9 @@ def authorize_signa_free_plan_entry(
     if is_v24(task):
         allowed_keys |= {"search_dimension", "search_language", "execution_phase", "publication_scope"}
     if task.get("decision_workflow_revision") == "scenario-triage-v1":
-        allowed_keys |= DECISION_PLAN_META_KEYS
+        allowed_keys |= DECISION_PLAN_META_KEYS - API_FIRST_PLAN_META_KEYS
+    if api_first_enabled(task):
+        allowed_keys |= API_FIRST_PLAN_META_KEYS
     if set(item) - allowed_keys:
         raise ValueError("SIGNA_PLAN_PARAMETERS_INVALID")
     offices = item.get("filters", {}).get("offices") if isinstance(item.get("filters"), dict) else None
@@ -1003,7 +1101,7 @@ def authorize_serpapi_free_plan_entry(
         raise ValueError("SERPAPI_OPERATION_MISMATCH")
     if (
         item.get("required") is not False
-        or item.get("requirement_ids") != []
+        or not discovery_plan_scope_valid(task, plan, item)
         or item.get("authoritative_for_final_rating") is not False
         or item.get("role") != SERPAPI_FREE_ROLE
         or item.get("required_for") != SERPAPI_FREE_ROLE
@@ -1019,7 +1117,9 @@ def authorize_serpapi_free_plan_entry(
     if is_v24(task):
         allowed_keys |= {"search_dimension", "search_language", "execution_phase", "publication_scope"}
     if task.get("decision_workflow_revision") == "scenario-triage-v1":
-        allowed_keys |= DECISION_PLAN_META_KEYS
+        allowed_keys |= DECISION_PLAN_META_KEYS - API_FIRST_PLAN_META_KEYS
+    if api_first_enabled(task):
+        allowed_keys |= API_FIRST_PLAN_META_KEYS
     if set(item) - allowed_keys:
         raise ValueError("SERPAPI_PLAN_PARAMETERS_INVALID")
     query = str(item.get("q") or "").strip()
@@ -1044,7 +1144,7 @@ def authorize_serpapi_free_plan_entry(
         and normalize_text(str(row.get("q") or "")) == normalize_text(query)
         and str(row.get("right_type") or "") == str(item.get("right_type") or "")
     ]
-    if serper_free_enabled(task) and matching_serper_rows and not (
+    if not api_first_enabled(task) and serper_free_enabled(task) and matching_serper_rows and not (
         fallback_provider and fallback_query_id
     ):
         raise ValueError("SERPAPI_FALLBACK_BINDING_REQUIRED")

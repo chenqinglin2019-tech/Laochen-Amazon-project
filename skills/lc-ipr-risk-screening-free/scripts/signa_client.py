@@ -26,6 +26,7 @@ from common import (
     load_skill_config,
     parse_iso,
     sha256_json,
+    api_first_enabled, API_FIRST_PLAN_META_KEYS, DECISION_PLAN_META_KEYS,
 )
 from provider_utils import (
     ProviderError,
@@ -441,8 +442,12 @@ def probe(offices: list[str]) -> dict[str, Any]:
     }
 
 
-def _request_from_plan(item: dict[str, Any], max_results: int) -> dict[str, Any]:
-    unexpected = sorted(set(item) - PLAN_META_KEYS - POST_BODY_KEYS)
+def _request_from_plan(item: dict[str, Any], max_results: int, *, task: dict | None = None) -> dict[str, Any]:
+    metadata = set(PLAN_META_KEYS)
+    if task is not None and api_first_enabled(task):
+        metadata |= API_FIRST_PLAN_META_KEYS | DECISION_PLAN_META_KEYS | {
+            'search_dimension', 'search_language', 'execution_phase', 'publication_scope'}
+    unexpected = sorted(set(item) - metadata - POST_BODY_KEYS)
     if unexpected:
         raise ProviderError(
             "SIGNA_PLAN_PARAMETERS_INVALID",
@@ -969,7 +974,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
         try:
             config, base, key = settings()
             max_results = config["limits"]["signa_results_per_query"]
-            request_payload = _request_from_plan(item, max_results)
+            request_payload = _request_from_plan(item, max_results, task=task)
             precheck = _precheck(
                 config, base, key, request_payload, attempt_state=precheck_attempt,
             )

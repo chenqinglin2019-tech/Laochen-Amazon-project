@@ -95,6 +95,29 @@ class BrowserPlanTests(unittest.TestCase):
         self.assertEqual(again["queries"][1]["partial_resume_attempts"], 0)
         self.assertEqual(again["queries"][1]["status"], "incomplete")
 
+    def test_rate_limit_recovery_checks_once_after_cooldown_then_stops_until_external_change(self):
+        self.rows = {"uspto_patent_browser": [self.entry("Q3", "patent", "patent_recall")]}
+        self.write_plan()
+        executed = []
+        def runner(command, timeout=180):
+            if "automation-capability" in command:
+                return {"executor_available": True}
+            executed.append(command)
+            return {"status": "access_limited", "error_code": "BROWSER_RATE_LIMITED", "submission_state": "not_submitted",
+                    "rate_limit_page": {"target_id": "A" * 32, "url": "https://ppubs.uspto.gov/pubwebapp/"}}
+        first = scheduler.execute_plan(self.root, runner=runner)
+        self.assertEqual(first["provider_pauses"]["uspto_patent_browser"]["rate_limit_page"], first["queries"][0]["rate_limit_page"])
+        first["provider_pauses"]["uspto_patent_browser"]["resume_after_epoch"] = 0
+        (self.root / "browser-execution-status.json").write_text(json.dumps(first))
+        recovered = scheduler.execute_plan(self.root, runner=runner)
+        self.assertEqual(len(executed), 2)
+        self.assertEqual(recovered["provider_pauses"]["uspto_patent_browser"]["recovery_attempts"], 1)
+        recovered["provider_pauses"]["uspto_patent_browser"]["resume_after_epoch"] = 0
+        (self.root / "browser-execution-status.json").write_text(json.dumps(recovered))
+        stopped = scheduler.execute_plan(self.root, runner=lambda *args: self.fail("one recovery check is the bound"))
+        self.assertEqual(stopped["queries"][0]["error_code"], "BROWSER_RATE_LIMIT_RECOVERY_EXHAUSTED")
+        self.assertTrue(scheduler._rate_limited({"result_coverage": {"stop_reason": "browser_rate_limited"}}))
+
     def test_exact_query_filter_uses_normal_execution_and_rejects_unknown(self):
         executed = []
         def runner(command, timeout=180):
@@ -168,6 +191,7 @@ class BrowserPlanTests(unittest.TestCase):
         self.write_plan()
         capture = self.root / "partial-rate-limit.json"
         capture.write_text(json.dumps({"query_id": "Q3", "status": "success", "candidates": [{"publication_number": "US11111111B2"}],
+            "rate_limit_page": {"target_id": "A" * 32, "url": "https://ppubs.uspto.gov/pubwebapp/"},
             "result_coverage": {"retrieved_hits": 1, "total_hits": 2, "truncated": True,
                                 "stop_reason": "BROWSER_RATE_LIMITED"}}))
         executed = []
@@ -187,6 +211,7 @@ class BrowserPlanTests(unittest.TestCase):
         self.assertEqual(rows["Q3"]["result_coverage"]["retrieved_hits"], 1)
         self.assertEqual(rows["Q5"]["dispatch"], "rate_limit_deferred")
         self.assertEqual(result["provider_pauses"]["uspto_patent_browser"]["error_code"], "BROWSER_RATE_LIMITED")
+        self.assertEqual(result["provider_pauses"]["uspto_patent_browser"]["rate_limit_page"], rows["Q3"]["rate_limit_page"])
 
     def test_only_hash_bound_explicit_cancellation_skips_dispatch_without_success(self):
         self.task["screening_revision"] = "recall-integrity-v1"
@@ -322,6 +347,12 @@ class BrowserPlanIntegrationTests(unittest.TestCase):
                             "--url", "https://www.amazon.com/dp/B012345678", "--jurisdictions", "US,JP",
                             "--output-dir", directory], check=True, capture_output=True)
             task = load_json(root / "task.json")
+            # This frozen compatibility fixture exercises the original broad browser plan.
+            task.pop("retrieval_workflow_revision", None)
+            task.pop("retrieval_policy", None)
+            from common import serper_free_enhancement, serpapi_free_enhancement
+            task["serper_free_enhancement"] = serper_free_enhancement(False)
+            task["serpapi_free_enhancement"] = serpapi_free_enhancement(False)
             task["state"] = "collecting"
             task["product"].update(title="fixture product", brand="Fixture", language="en", structure=["fixture support"])
             task["product"]["analysis"] = {"status": "confirmed", "identity_sha256": product_identity_digest(task["product"], task=task)}

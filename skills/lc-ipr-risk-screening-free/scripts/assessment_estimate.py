@@ -78,6 +78,10 @@ def review_digest(evidence, candidates, ledger, plan, task, supplement=None) -> 
     if "workflow_correction_revision" in task:
         _correction_enabled(task)
         payload["workflow_correction_revision"] = task["workflow_correction_revision"]
+    if "completion_policy_revision" in task:
+        from necessary_completion import enabled
+        enabled(task)
+        payload["completion_policy_revision"] = task["completion_policy_revision"]
     return sha256_json(payload)
 
 
@@ -972,6 +976,31 @@ def _scenario_caps(review, scenarios, known):
     return values
 
 
+def missing_scope_reviews(task, scopes, first, second, registry, index):
+    """The same necessary-scope obligation serves planning and final review."""
+    missing = []
+    def qualified(row):
+        return _future_review_qualified(row, set(registry), index, task, registry)
+    for scope in scopes:
+        sid, country, right_type = (scope[key] for key in ("scenario_id", "jurisdiction", "right_type"))
+        absent = []
+        for role, review in (("first", first), ("second", second)):
+            review = review or {}
+            relevant = [row for row in review.get("assessments", [])
+                if row.get("scenario_id") == sid and scope_key(row)[:2] == (country, right_type)
+                and (not _future_labeled(row) or qualified(row))]
+            signals = [row for row in review.get("future_applications", [])
+                if row.get("scenario_id") == sid and scope_key(row)[:2] == (country, right_type) and qualified(row)]
+            if not relevant and not signals:
+                absent.append(review.get("reviewer") or role)
+        if absent:
+            missing.append({"scenario_id": sid, "jurisdiction": country, "right_type": right_type,
+                "candidate_id": "", "assessment_status": "pending",
+                "pending_reasoning": "必要范围缺少独立审阅记录；调查完成不代替风险或适用性审阅。",
+                "missing_reviewers": absent})
+    return missing
+
+
 def _compute_scenario_assessment(task, evidence, candidates, plan, ledger, first, second,
         adjudication, rows, digest, registry, supplemental_index, supplement, evidence_root, generated_at):
     """Opt-in decision contract: current risk and required-work completion differ."""
@@ -1046,22 +1075,7 @@ def _compute_scenario_assessment(task, evidence, candidates, plan, ledger, first
              for row in current_rows if row.get("assessment_status") == "pending" and row["right_type"] in necessary_rights]
         missing_scopes = []
         if corrected:
-            for scope in scopes:
-                country, right_type = scope["jurisdiction"], scope["right_type"]
-                reviewed_by = []
-                for review in (first, second):
-                    relevant = [row for row in review["assessments"]
-                        if row.get("scenario_id") == sid and scope_key(row)[:2] == (country, right_type)
-                        and (not _future_labeled(row) or qualified_future(row))]
-                    signals = [row for row in review.get("future_applications", [])
-                        if row.get("scenario_id") == sid and scope_key(row)[:2] == (country, right_type)
-                        and qualified_future(row)]
-                    reviewed_by.append(bool(relevant or signals))
-                if not all(reviewed_by):
-                    missing_scopes.append({"scenario_id": sid, "jurisdiction": country,
-                        "right_type": right_type, "candidate_id": "", "assessment_status": "pending",
-                        "pending_reasoning": "必要范围缺少独立审阅记录；调查完成不代替风险或适用性审阅。",
-                        "missing_reviewers": [review["reviewer"] for review, present in zip((first, second), reviewed_by) if not present]})
+            missing_scopes = missing_scope_reviews(task, scopes, first, second, registry, index)
             queues["scope_unassessed"] = missing_scopes
         scenario_execution = [gap for gap in execution if gap.get("scenario_id") in (None, sid)]
         gaps = [gap for gap in basic_gaps if not gap.startswith("ASSESSMENT_PENDING:")] if sid == primary_id else []
@@ -1453,7 +1467,7 @@ class VerifiedAssessmentContext:
 
 def finalize(task_dir, task, first_path, second_path=None, *, adjudication_path=None,
              supplement_path=None, output_dir=None, evidence_root=None,
-             return_context=False) -> dict[str, Any] | VerifiedAssessmentContext:
+             return_context=False, publication_mode=None, stop_reason=None) -> dict[str, Any] | VerifiedAssessmentContext:
     task_dir = Path(task_dir).resolve()
     destination = Path(output_dir) if output_dir else task_dir
     source_hashes = {}
@@ -1493,6 +1507,21 @@ def finalize(task_dir, task, first_path, second_path=None, *, adjudication_path=
             journal = {"schema_version": "1.0", "task_id": task["task_id"], "entries": []}
     assessment = compute_assessment(task, evidence, candidates, plan, ledger, first, second, adjudication,
                                     supplement=supplement, evidence_root=root, task_dir=task_dir)
+    from necessary_completion import enabled as completion_enabled, publication_context
+    snapshots = {}
+    if completion_enabled(task):
+        for name in ("source-capabilities.json", "browser-execution-status.json"):
+            path = task_dir / name
+            if path.is_file():
+                snapshots[name] = read_object(path, name)
+            elif return_context:
+                source_hashes[path] = None
+    publication = publication_context(task, evidence, candidates, plan, ledger, assessment,
+        mode=publication_mode, stop_reason=stop_reason, snapshots=snapshots,
+        task_dir=task_dir, evidence_root=root)
+    if publication is not None:
+        assessment["completion_policy_revision"] = task["completion_policy_revision"]
+        assessment["publication"] = publication
     if return_context:
         for path, expected in source_hashes.items():
             if (sha256_file(path) if path.is_file() else None) != expected:
@@ -1523,12 +1552,18 @@ def validate_assessment(task_dir, task, assessment, *, evidence_root=None) -> li
     try:
         source = Path(task.get("outputs", {}).get("assessment_input_dir") or task_dir)
         reviews = assessment["review"]["input_reviews"]
-        expected = compute_assessment(task, load_json(source / "evidence.json"),
-            load_json(source / "normalized-candidates.json"), load_json(source / "search-plan.json"),
-            load_materiality_ledger(source, task["task_id"], task=task), reviews["first"], reviews.get("second"),
+        evidence = load_json(source / "evidence.json")
+        candidates = load_json(source / "normalized-candidates.json")
+        plan = load_json(source / "search-plan.json")
+        ledger = load_materiality_ledger(source, task["task_id"], task=task)
+        root = evidence_root or assessment["review"].get("evidence_root")
+        expected = compute_assessment(task, evidence, candidates, plan, ledger, reviews["first"], reviews.get("second"),
             reviews.get("adjudication"), supplement=assessment.get("supplement"),
-            evidence_root=evidence_root or assessment["review"].get("evidence_root"),
+            evidence_root=root,
             generated_at=assessment["generated_at"], task_dir=source)
+        from necessary_completion import restore_publication
+        restore_publication(task, evidence, candidates, plan, ledger, expected, assessment,
+            task_dir=source, evidence_root=root)
         return [] if expected == assessment else ["ASSESSMENT_CANONICAL_RECOMPUTATION_MISMATCH"]
     except (ValueError, OSError, KeyError, TypeError) as exc:
         return ["ASSESSMENT_RECOMPUTATION_FAILED: " + str(exc)]
