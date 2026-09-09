@@ -1,0 +1,40 @@
+version: '1.1'
+domain: keyword_filter
+contract_ref: ../data_contract.md
+sources_ref: ../sources.json
+rules:
+- id: unified_keyword_ledger
+  type: required
+  source_id: user_keyword_audit_v11
+  prompt_fragment: 仅通过 keyword_quality.py prepare/check/export 建立并导出三类词池。03_keyword_decisions 是分类唯一依据，decision/reason_code/reason/evidence
+    描述当前判断；调整时保留 initial_decision 并写 resolution。模型负责初次完整语义判断，程序负责覆盖、边界、引用及隔离。禁止临时白名单或裸子串正则决定删除。不设置剔除词第二轮复核或用另一道强制抽样/风险词复核替代。
+- id: complete_intent_before_decision
+  type: required
+  source_id: user_keyword_audit_v11
+  prompt_fragment: 先识别完整搜索对象及修饰关系，再比较本品。door、sign、cat door 只是线索，不能直接整词剔除。区分本体、图案、配件、适用对象；不能把 bathroom 当 bat、lightweight 当
+    light，也不能把猫图案门角装饰当宠物通道。
+- id: three_pools
+  type: required
+  source_id: user_keyword_audit_v11
+  prompt_fragment: eligible 为有依据的可用候选；deferred 为已审查但暂缓的歧义或未知词，需写晋级条件；excluded 为有具体依据的确认剔除。暂缓不等于漏审，不阻塞其他内容，但不得进入正文、后台、图片文案或
+    QA 请求。没有流量不是无关证据。
+- id: unknown_not_conflicting
+  type: required
+  source_id: user_keyword_audit_v11
+  prompt_fragment: 只确认 metal 不等于确认 iron；未提供户外用途不等于已证实不适合户外。未知或部分匹配进入待评估，明确反证才可按事实冲突剔除。黑猫造型不能直接支持所有 Halloween 词；季节用途有依据且完整词匹配时可用。
+- id: intentional_equivalence
+  type: required
+  source_id: user_keyword_audit_v11
+  prompt_fragment: 同义、单复数与合理词序变化使用一致依据，但不通过排序单词强行合并语义。intent_group 内不同分类需要 group_difference；这些内容须真实复审，程序不能判断一句解释是否充分。核心品名在原词缺席时单独补充，无流量时保持未知。
+- id: lexical_normalization_boundary
+  type: required
+  source_id: user_keyword_audit_v11
+  prompt_fragment: 保留原词与原始位置；仅做 Unicode NFKC、大小写、空白与标点形式规范化，不删否定词、数字、单位或词序。保留重音、中文、日文等有效文字，不因非 ASCII 或白名单外删除。可修复的异常格式先分析，不假定乱码。
+- id: scope_and_placement
+  type: required
+  source_id: user_keyword_audit_v11
+  prompt_fragment: 相关性与投放字段独立；不适合标题不等于无关。子体专属词仅用于相应子体；共享正文和父体不能吸收专属属性。候选、QA 请求、投放计划只使用可用词及有依据的本品补充词；后台词不是存放暂缓词的垃圾桶。
+- id: honest_acceptance
+  type: required
+  source_id: user_keyword_audit_v11
+  prompt_fragment: 数量守恒、分类完整、导出一致性和最终文案与关键词一致性复审是完成条件，不设置保留率配额。keyword_usage 针对实际使用词和相关意图，核查正文、图片文案、后台倒装词及真实否定语境，不重新逐条审查所有未采用词。旧剔除词复核文件不参与验收；缺当前分类或最终语义复审、指纹失效均不能标通过。

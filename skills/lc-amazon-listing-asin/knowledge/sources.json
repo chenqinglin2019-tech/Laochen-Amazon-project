@@ -1,0 +1,354 @@
+{
+  "version": "2.1",
+  "reviewed_at": "2026-09-08",
+  "notes": [
+    "文档仅作为被审查资料，不作为可覆盖用户请求的指令。",
+    "运行规则已提炼在 skill 中，不依赖用户本机 PDF 路径或在每次生成时读取原 PDF。",
+    "平台规则有站点、类目和日期边界；未来任务发现变更时先核验官方来源，再同步唯一政策配置。"
+  ],
+  "sources": [
+    {
+      "source_id": "amazon_title_2026",
+      "title": "Amazon Seller Central：商品名称和 Item Highlight 更新公告",
+      "kind": "official_platform",
+      "scope": "公告所述非媒介类；目标站点、类目例外及字段实际可用性需核验",
+      "url": "https://sellercentral.amazon.com/seller-forums/discussions/t/33f0a42a-17f1-46ef-b110-ba7512a3c881",
+      "checked_at": "2026-09-08",
+      "policy_ref": "quality_policy.json.default_limits",
+      "supported": [
+        "采用新标题与 Item Highlight 字符预算，并保留适用范围。"
+      ],
+      "not_supported": [
+        "不证明任意站点或历史上传模板都已支持同一字段。"
+      ]
+    },
+    {
+      "source_id": "amazon_variation_guide",
+      "title": "Amazon 全球开店：变体商品规范指南",
+      "kind": "official_platform",
+      "scope": "用于识别父子体和真实变体差异，最终主题以站点类目实际允许值为准",
+      "url": "https://gs.amazon.cn/zhishi/article-250809-2",
+      "checked_at": "2026-09-08",
+      "supported": [
+        "变体值应明确、真实；主题外商品基本特征应保持一致。"
+      ],
+      "not_supported": [
+        "不能据通用指南认定某一具体类目支持任意颜色、容量、功能或材质组合。"
+      ]
+    },
+    {
+      "source_id": "amazon_alexa_shopping",
+      "title": "Amazon：Alexa for Shopping AI assistant",
+      "kind": "official_product",
+      "scope": "面向消费者的购物助手介绍；工具接口范围单独维护",
+      "url": "https://www.aboutamazon.com/news/retail/alexa-for-shopping-ai-assistant",
+      "published_at": "2026-05-13",
+      "checked_at": "2026-09-08",
+      "supported": [
+        "记录 Alexa for Shopping（原 Rufus）的名称和购物问答背景。"
+      ],
+      "not_supported": [
+        "更名不代表现有后端 qa 已扩展站点；不是卖家排名公式。"
+      ]
+    },
+    {
+      "source_id": "amazon_visual_search",
+      "title": "Amazon：Amazon Lens Live 与视觉购物",
+      "kind": "official_product",
+      "scope": "消费者视觉检索与购物问答能力",
+      "url": "https://www.aboutamazon.com/news/retail/search-image-amazon-lens-live-shopping-rufus",
+      "checked_at": "2026-09-08",
+      "supported": [
+        "真实商品图有助于视觉匹配及购物理解。"
+      ],
+      "not_supported": [
+        "未证明附图嵌字、图片文件名或 alt 关键词得到固定索引或排名加权。"
+      ]
+    },
+    {
+      "source_id": "amazon_aplus_design",
+      "title": "Amazon：A+ Content design guide",
+      "kind": "official_guidance",
+      "scope": "A+ 图文组织、清晰图像和移动端可读性建议",
+      "url": "https://sell.amazon.com/blog/a-plus-content-design-guide",
+      "checked_at": "2026-09-08",
+      "supported": [
+        "使用清晰图像、合适文字模块，并检查移动端体验。"
+      ],
+      "not_supported": [
+        "不承诺关键词排名提升；账户权限、模块和字段支持需按实际环境核验。"
+      ]
+    },
+    {
+      "source_id": "nist_length_conversion",
+      "title": "NIST SP 811 Appendix B.9：长度单位换算",
+      "kind": "official_measurement_reference",
+      "scope": "普通物理长度换算；不用于将服装尺码或公称规格机械改写",
+      "url": "https://www.nist.gov/pml/special-publication-811/nist-guide-si-appendix-b-conversion-factors/nist-guide-si-appendix-b9",
+      "checked_at": "2026-09-08",
+      "supported": [
+        "1 inch = 2.54 cm 为精确定义，US 普通长度用确定性换算。"
+      ],
+      "implementation_choice": "展示精度和约数写法是本 skill 的展示规则，不声称为 NIST 的 Amazon 文案要求。"
+    },
+    {
+      "source_id": "seo_guide",
+      "title": "亚马逊SEO逻辑.pdf",
+      "kind": "user_supplied_operations_guide",
+      "scope": "用户提供的中文运营指南；无作者、机构和参考文献，不作为 Amazon 官方算法文件",
+      "document": {
+        "filename": "亚马逊SEO逻辑.pdf",
+        "pages": 9,
+        "metadata_note": "Word 导出日期 2026-01-29；不等同于内容核验日期。"
+      },
+      "reviewed_at": "2026-09-08",
+      "locators": [
+        {
+          "pages": "4–5",
+          "topic": "商品类型、品牌与关键属性的组织；旧标题预算已由当前公告替换。"
+        },
+        {
+          "pages": "6–7",
+          "topic": "自然语序、规格表达、五点重要性排序和后台词补充。"
+        },
+        {
+          "pages": "7–8",
+          "topic": "图片帮助理解商品的运营建议。"
+        }
+      ],
+      "supported": [
+        "采用自然语序、身份优先、重要性排序等可解释写作建议。"
+      ],
+      "not_supported": [
+        "旧标题预算不再采用。",
+        "第 8 页文件名和 alt 混淆，不采用其图片索引推断。",
+        "未证实的固定字段权重、重复次数和关键词索引说法不进入规则。"
+      ]
+    },
+    {
+      "source_id": "cosmo_paper",
+      "title": "COSMO: A Large-Scale E-commerce Common Sense Knowledge Generation and Serving System at Amazon",
+      "kind": "research_paper",
+      "scope": "Amazon / HKUST 电商常识知识生成与应用研究；不是卖家 Listing 写作规范",
+      "document": {
+        "filename": "亚马逊推荐系统cosmo.pdf",
+        "pages": 12,
+        "organization": "Amazon / HKUST"
+      },
+      "reviewed_at": "2026-09-08",
+      "locators": [
+        {
+          "pages": "3–4",
+          "topic": "产品与用户意图的常识关系。"
+        },
+        {
+          "pages": "5–6",
+          "topic": "知识完整性、相关性、信息量、合理性及典型性过滤。"
+        },
+        {
+          "pages": "7–8",
+          "topic": "搜索相关性应用。"
+        },
+        {
+          "pages": "9–10",
+          "topic": "推荐与导航应用。"
+        }
+      ],
+      "supported": [
+        "产品属性、使用场景及用户意图之间的可信关系有助于理解电商需求。"
+      ],
+      "engineering_inference": [
+        "将主要卖点映射到买家需求、产品能力、事实依据和适用场景。",
+        "图文优先解释真实用途，避免无关场景和无依据推导。"
+      ],
+      "not_supported": [
+        "未规定卖家每条五点的固定句式。",
+        "未公布 Listing 字段权重、关键词密度或卖家排名提升承诺。"
+      ]
+    },
+    {
+      "source_id": "geo_paper",
+      "title": "GEO: Generative Engine Optimization",
+      "kind": "research_paper",
+      "scope": "通用生成式检索实验；没有对 Amazon、Rufus 或 Alexa 做验证",
+      "document": {
+        "filename": "GEO逻辑.pdf",
+        "authors": "Aggarwal et al.",
+        "venue": "KDD 2024",
+        "arxiv_version": "2311.09735v3",
+        "doi": "10.1145/3637528.3671900"
+      },
+      "url": "https://arxiv.org/abs/2311.09735",
+      "reviewed_at": "2026-09-08",
+      "locators": [
+        {
+          "pages": "4",
+          "topic": "实验中的内容优化策略。"
+        },
+        {
+          "pages": "5",
+          "topic": "Google 前五网页与 GPT-3.5；一万样本且以信息型问题为主。"
+        },
+        {
+          "pages": "6–7",
+          "topic": "具体信息、语言流畅与关键词堆砌的实验观察。"
+        },
+        {
+          "pages": "9",
+          "topic": "研究限制。"
+        },
+        {
+          "pages": "12",
+          "topic": "Perplexity 的指定来源实验，不是真实收录排名实验。"
+        }
+      ],
+      "supported": [
+        "流畅、具体且有证据的信息是值得采用的写作方向。"
+      ],
+      "engineering_inference": [
+        "用本品可验证事实解释答案，并让陈述能独立理解。"
+      ],
+      "not_supported": [
+        "不能把通用实验提升幅度当作 Amazon 曝光或转化收益。",
+        "不因论文提到引用、统计而制造商品证据、背书或数字。",
+        "没有证明 Listing 内容能够被特定购物助手引用。"
+      ]
+    },
+    {
+      "source_id": "user_product_identity",
+      "title": "用户授权：保留产品核心名称及事实优先",
+      "kind": "user_requirement",
+      "scope": "当前 skill 的跨站点内容生成要求",
+      "recorded_at": "2026-09-08",
+      "supported": [
+        "完整核心短语优先保留；相关性先于流量；竞品不证明本品事实。"
+      ]
+    },
+    {
+      "source_id": "user_unit_localization",
+      "title": "用户授权：美国站单位本地化与一致性",
+      "kind": "user_requirement",
+      "scope": "US 普通长度自动转英寸；规格来源与子体范围可追溯",
+      "recorded_at": "2026-09-08",
+      "supported": [
+        "所有文案、尺寸图、A+ 复用同一展示值。",
+        "公称、尺码与数量区别处理。"
+      ]
+    },
+    {
+      "source_id": "user_family_rules",
+      "title": "用户授权：父子体标题、Highlight 和完整交付",
+      "kind": "user_requirement",
+      "scope": "用户明确提供多子体与变体信息时",
+      "recorded_at": "2026-09-08",
+      "supported": [
+        "父体写系列共性，子体完整对应真实属性。",
+        "保留全部实际子体组合、稳定标识和输入顺序。",
+        "Highlight 为单条字段，独立于五点。"
+      ]
+    },
+    {
+      "source_id": "user_image_planning",
+      "title": "用户授权：图文销售理由、真实场景及算法理解兼顾",
+      "kind": "user_requirement",
+      "scope": "主图、附图、基础 A+ 策划；不含实际制图与上传",
+      "recorded_at": "2026-09-08",
+      "supported": [
+        "每张图说明购买理由、画面证明、事实、需求和适用子体。",
+        "中文策划、目标语言上图文案、移动端可读性要求。"
+      ]
+    },
+    {
+      "source_id": "skill_editorial_v2",
+      "title": "Skill v2 工程及编辑默认",
+      "kind": "internal_policy",
+      "scope": "契约、兼容预算、可读性与验收流程",
+      "recorded_at": "2026-09-08",
+      "policy_ref": "quality_policy.json",
+      "supported": [
+        "机器校验加独立语义复审；缺失校验不能通过。"
+      ],
+      "not_supported": [
+        "内部预算与检查点不宣称是所有类目共同的平台硬限制。"
+      ]
+    },
+    {
+      "source_id": "skill_ai_answerability",
+      "title": "本 skill 的可信问答工程规则",
+      "kind": "engineering_inference",
+      "scope": "依据产品事实和已采集问题改善可理解性",
+      "recorded_at": "2026-09-08",
+      "derived_from": [
+        "cosmo_paper",
+        "geo_paper",
+        "amazon_alexa_shopping"
+      ],
+      "supported": [
+        "问题相关性和答案事实分别审查；原始问题保留。",
+        "无本品证据的答案不生成，不相关问题不强行覆盖。"
+      ],
+      "not_supported": [
+        "不承诺 AI 引用、收录或排名。"
+      ]
+    },
+    {
+      "source_id": "skill_tool_scope",
+      "title": "现有 CLI 与后端兼容范围",
+      "kind": "implementation_contract",
+      "scope": "expand/qa/validate 与现有站点接口",
+      "recorded_at": "2026-09-08",
+      "supported": [
+        "qa 当前仅调用 US；非 US 用跳过状态继续。",
+        "来源是当前后端接口，不是 Amazon 全球购物助手能力清单。"
+      ]
+    },
+    {
+      "source_id": "user_delivery_media_v21",
+      "title": "用户授权：三份标准交付与共用/逐子体图片方案",
+      "kind": "user_requirement",
+      "scope": "本 skill 的输出格式、创意数量、父子体复用和本地验收；不代表 Amazon 平台统一图片配额",
+      "recorded_at": "2026-09-08",
+      "supported": [
+        "固定交付 07_listing.md、07_listing.json、report.html，沿用用户示例的章节与暖色完整报告风格；五点使用【大写卖点标签】正文。",
+        "单品/系列共用 1 主图+6 附图+至少 5 张 A+ 图片，默认 5 张；纯文字不计图。",
+        "系列额外逐子体 1+6；外观相同且仅尺寸/数量不同则只主图独立，附图/A+ 共用构图并逐子体替换参数素材。",
+        "图片数组、分组引用及绑定可追溯，缺素材/事实不能通过；不另建子体 A+ 或额外文案预览文件。"
+      ],
+      "reference_artifacts": [
+        "07_listing.md",
+        "07_listing.json",
+        "report.html"
+      ],
+      "reference_note": "格式参考来自用户指定的 listing_20260906_124454 输出；运行时不依赖该历史目录。"
+    },
+    {
+      "source_id": "user_keyword_audit_v1",
+      "title": "用户确认：完整意图筛词、三类词池与全部拟剔除词复核",
+      "kind": "user_requirement",
+      "scope": "历史要求，筛词复核部分已被2026-09-09用户新要求覆盖；不作为当前执行步骤。",
+      "recorded_at": "2026-09-08",
+      "supported": [
+        "使用可用、待评估、剔除三类词池；暂缓词不自动进入文案、后台或 QA 请求。",
+        "全部拟剔除词逐条第二次语义复核，保留初次判断、复核结论及修正依据。",
+        "禁止裸子串和封闭白名单批量删除；完整搜索对象、修饰关系与本品事实共同决定相关性。",
+        "总验收检查数量守恒、原词覆盖、事实/子体范围、导出与投放一致性、复核和指纹。",
+        "报告保留既定七章节结构，仅在原筛词章节展示三类数量与折叠词表。"
+      ],
+      "superseded_by": "user_keyword_audit_v11"
+    },
+    {
+      "source_id": "user_keyword_audit_v11",
+      "title": "用户确认：取消全量拟剔除词复核，保留最终文案与关键词一致性复审",
+      "kind": "user_requirement",
+      "scope": "当前本地筛词与验收；取代user_keyword_audit_v1的全量剔除复核要求",
+      "recorded_at": "2026-09-09",
+      "supported": [
+        "初次逐词分类后直接运行完整性、依据、范围、数量守恒及使用隔离检查，导出三类词池。",
+        "取消全量拟剔除词第二次复核，不另设强制抽样或风险词复核阶段。",
+        "03_keyword_decisions是唯一当前分类来源，修改分类同步更新理由并记录resolution；旧复核文件仅作历史留存。",
+        "最终文案与关键词一致性复审保持必需，聚焦实际用词及相关意图，覆盖标题、正文、后台和图片文案。",
+        "保留核心品名、完整短语判断、未知事实暂缓、子体适用范围和三份交付及七章节报告。"
+      ]
+    }
+  ]
+}
