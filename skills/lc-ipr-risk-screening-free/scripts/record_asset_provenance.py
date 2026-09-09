@@ -7,6 +7,7 @@ It never guesses authorship, registers a right, or claims zero database hits.
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
@@ -27,6 +28,10 @@ ASSET_RIGHTS = {
     "integrated_expression": {"copyright", "trade_dress", "unregistered_design"},
     "product_configuration": {"copyright", "trade_dress", "unregistered_design"},
     "intended_packaging": {"copyright", "trade_dress", "unregistered_design"},
+}
+EXTERNAL_INFORMATION_EVIDENCE = {
+    "supply_chain_authorization", "independent_creation_records",
+    "private_sales_and_marketing_records", "product_manufacturing_records",
 }
 
 
@@ -186,6 +191,64 @@ def investigation_complete(task: dict, payload: dict, query: dict, scenario_id: 
             and bool(step.get("reasoning")) and bool(step.get("artifact_sha256"))
             and set(step["artifact_sha256"]) <= artifacts
             and (step["status"] != "not_applicable" or not scope["asset_ids"] or classification_na))
+
+
+def external_information_actions(task: dict, payload: dict, query: dict, scenario_id: str,
+                                 registry: dict | None = None) -> list[dict]:
+    """Separate completed public research from specific private supply-chain facts.
+
+    This is a projection of the current retained investigation, not another
+    blocker ledger. Unknown facts alone never create a user dependency.
+    """
+    if (task.get("completion_policy_revision") != "necessary-work-v1"
+            or not specialty_enabled(task) or not isinstance(payload, dict)
+            or not isinstance(registry, dict)):
+        return []
+    actions = payload.get("outstanding_actions")
+    if not isinstance(actions, list) or not actions:
+        return []
+    public = {**payload, "outstanding_actions": []}
+    if not investigation_complete(task, public, query, scenario_id, registry):
+        return []
+    scope = asset_scope(task, scenario_id, query.get("right_type", ""))
+    if not scope["asset_ids"]:
+        return []
+    step = next(item for item in payload["investigation_steps"] if isinstance(item, dict)
+                and item.get("step") == query.get("search_dimension"))
+    if step.get("status") != "completed":
+        return []
+    from assessment_v24 import _retained_artifacts_complete
+    if not _retained_artifacts_complete(payload):
+        return []
+    retained = {item.get("sha256") for item in payload["artifacts"]}
+    step_refs = set(step["evidence_refs"])
+    document_kinds = {"provenance_document", "official_record", "rights_record", "license"}
+    media_extensions = {".png", ".jpg", ".jpeg", ".webp", ".avif", ".gif"}
+    ids = set()
+    def text(value):
+        return isinstance(value, str) and bool(value.strip())
+    for action in actions:
+        if (not isinstance(action, dict) or action.get("kind") != "user_information"
+                or any(not text(action.get(key)) for key in ("action_id", "purpose", "question", "reasoning"))
+                or action["action_id"] in ids or not isinstance(action.get("owner"), str)
+                or action["owner"] not in {"user", "supplier"}):
+            return []
+        ids.add(action["action_id"])
+        needed, refs = action.get("evidence_needed"), action.get("evidence_refs")
+        if (not isinstance(needed, list) or not needed or any(not text(value) for value in needed)
+                or len(set(needed)) != len(needed) or not set(needed) <= EXTERNAL_INFORMATION_EVIDENCE
+                or not isinstance(refs, list) or not refs or any(not text(ref) for ref in refs)
+                or len(set(refs)) != len(refs) or not set(refs) <= step_refs):
+            return []
+        # Every request must cite retained original text and an actual compared
+        # image from this step. A receipt or self-authored blocker is insufficient.
+        sources = [registry[ref] for ref in refs if registry[ref].get("sha256") in retained
+                   and (registry[ref].get("source_url") or registry[ref].get("source_document"))]
+        if (not any(item.get("kind") in document_kinds and item.get("path") for item in sources)
+                or not any(item.get("kind") not in {"agent_review", "retained_source_record"}
+                    and Path(str(item.get("path") or "")).suffix.lower() in media_extensions for item in sources)):
+            return []
+    return deepcopy(actions)
 
 
 def validate_payload(task_dir: Path, payload: dict[str, Any], query: dict[str, Any], candidates: dict[str, Any], task: dict | None = None) -> dict[str, Any]:

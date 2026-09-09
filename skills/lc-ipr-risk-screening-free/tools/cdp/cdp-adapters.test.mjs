@@ -1,3 +1,4 @@
+import { requireChromeExecutable } from "./platform-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
@@ -22,7 +23,7 @@ import {
   tableRows,
 } from "./cdp-cli.mjs";
 
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const CHROME = requireChromeExecutable();
 
 test("PPS published document captures exact pane identity and bounded rendered pages without claiming active ownership", async () => {
   const browser = await chromium.launch({ executablePath: CHROME, headless: true });
@@ -359,7 +360,7 @@ test("PPS rate-limit modal blocks preparation without dismissal or query and sto
       assert.equal(error.code, 'BROWSER_RATE_LIMITED'); assert.equal(error.submission_state, 'not_submitted'); return true;
     });
     const result = await collectPpubsRenderedResults(page, {result_set_id:'L1', rendered_query:'lid AND strap'}, dir, 'rate');
-    assert.equal(result.result_coverage.stop_reason, 'browser_rate_limited');
+    assert.equal(result.result_coverage.stop_reason, 'BROWSER_RATE_LIMITED');
     assert.equal(result.result_coverage.truncated, true);
     assert.equal(await page.evaluate(() => window.dialogClicks), 0);
   } finally { await browser.close(); await fs.rm(dir, {recursive:true, force:true}); }

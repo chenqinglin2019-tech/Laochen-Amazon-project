@@ -12,7 +12,7 @@ from runtime_timing import timed_cli
 
 def publish(task_dir, first_review, second_review, *, output_dir=None,
             adjudication=None, supplement=None, evidence_root=None, report_content=None,
-            assessment_policy=None):
+            assessment_policy=None, mode=None, stop_reason=None):
     source = Path(task_dir).resolve()
     destination = Path(output_dir).resolve() if output_dir else source
     task = ensure_object(load_json(source / "task.json"), "task.json")
@@ -31,7 +31,7 @@ def publish(task_dir, first_review, second_review, *, output_dir=None,
     content = ensure_object(load_json(Path(report_content)), "report content") if report_content is not None else None
     context = finalize(source, task, first_review, second_review,
         adjudication_path=adjudication, supplement_path=supplement, evidence_root=evidence_root,
-        output_dir=destination, return_context=True)
+        output_dir=destination, return_context=True, publication_mode=mode, stop_reason=stop_reason)
     from report_estimate import build_bundle_from_verified_context, validate_run
     data, manifest = build_bundle_from_verified_context(context, task_dir=source,
         output_dir=destination, report_content=content)
@@ -55,11 +55,14 @@ def main():
     parser.add_argument("--evidence-root", type=Path)
     parser.add_argument("--output-dir", type=Path)
     parser.add_argument("--report-content", type=Path)
+    parser.add_argument("--mode", choices=("final", "stage"))
+    parser.add_argument("--stop-reason")
     args = parser.parse_args()
     result = publish(args.task_dir, args.first_review, args.second_review,
         assessment_policy=args.assessment_policy, adjudication=args.adjudication,
         supplement=args.supplement, evidence_root=args.evidence_root,
-        output_dir=args.output_dir, report_content=args.report_content)
+        output_dir=args.output_dir, report_content=args.report_content,
+        mode=args.mode, stop_reason=args.stop_reason)
     print("file_integrity: valid; business_completion: " + str(result["business_completion"]))
     print(result["report"])
 

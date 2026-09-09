@@ -1,3 +1,4 @@
+import { resolvePythonExecutable } from "./platform-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import path from "node:path";
@@ -382,7 +383,7 @@ print("ok")
 `;
 
 test("JPO client enforces completeness, no-data fallback, quota stop, and one refresh", () => {
-  const result = spawnSync("python3", ["-c", PYTHON_TEST], {
+  const result = spawnSync(resolvePythonExecutable(), ["-c", PYTHON_TEST], {
     cwd: SKILL_ROOT,
     encoding: "utf8",
     env: {

@@ -41,6 +41,19 @@
 
 只读运行 `python scripts/next_work.py --task-dir /absolute/run` 获取当前 `entries/counts/unresolved_scopes`，工作按 `scenario_id/jurisdiction/right_type` 定位。状态为 `ready/awaiting_review/awaiting_access/awaiting_user/submission_unknown/blocked`；其 `status` 仅表示必要调查与分流，不替代独立审阅完成度。浏览器用 `run_browser_plan.py --query-ids Q1 Q2`、API 用 `run_api_plan.py --query-ids Q1 Q2` 批量执行准确 ID；禁用路线不因指定 ID 而启用，API 可选动作仍须显式 `--include-optional`。输出 `batch_status` 是本批次状态，`work_status` 保留全局必要缺口；逐条源回执独立保存。确认未提交后的恢复说明追加到 `action-recoveries.json`，绑定原 run ID/哈希和原计划行哈希，既不重写旧记录，也不证明本次请求已经成功提交。
 
+## 必要工作发布门禁（necessary-work-v1）
+
+新建任务的 `completion_policy_revision=necessary-work-v1` 纳入冻结审阅输入摘要。无此标记的历史任务继续原有默认行为；不能补标记或改写旧查询以迁移已经执行的任务。
+
+- 唯一执行闭环为：读取 `next_work` → 补计划、检索、阅读或专项调查 → 登记证据 → 合并与分流 → 重算待办 → 冻结输入 → 独立双审 → 发布检查。API 或浏览器批次结束不代表 Agent 工作结束。
+- 先完成素材用途和标识盘点审阅，再分别执行图形商标、版权、商业外观调查。确实不适用也须有实际图像、标识及理由支持。术语修正、计划补充、可读原件与比较保持可执行；缺账号、禁止路线、无合格适配器及限流等待保留具体阻碍，有已授权替代时先完成替代判断。
+- 已完成公开调查、但仍需用户自身供应链持有的资料时，复用该调查的 `outstanding_actions` 追加 `kind=user_information`；保留原调查记录，不造候选或第二份阻碍台账。动作须有 `action_id/purpose/question/reasoning`，`owner=user|supplier`，以及绑定本步骤已登记原文和实际图像的 `evidence_refs`。`evidence_needed` 仅接受 `supply_chain_authorization`、`independent_creation_records`、`private_sales_and_marketing_records`、`product_manufacturing_records`。资产范围、盘点及公开步骤均合格后，`next_work` 才派生 `awaiting_user`；未做公开工作、混入 Agent 动作、无原文图证、泛泛 `unresolved` 或陈旧范围仍不能形成外部阻碍。新追加调查优先于同查询的旧完成记录，收到资料后需重新审阅并追加记录。
+- `next_work.py` 可选 `--first-review`、`--second-review`，派生 `review_work` 列出各轮缺少的必要范围审阅，不改变原调查 `status`，不维护第二份持久化台账。未入选候选无需逐件评级，但必要“情景 × 国家 × 权利类型”不可整块漏审。
+- 两轮阅读同一冻结输入，第二轮不接触第一轮结论；保存真实会话标识及输入摘要。程序校验绑定，Agent 执行流程负责实际独立性。空 `assessments` 表示尚未审阅；有依据的 `pending` 范围行表示已经审阅但暂不能定级，两者不可互换。
+- `publish_report.py --mode final` 为新策略默认：必要调查、分流、核验和范围双审完成，现有业务完成度校验通过。`--mode stage --stop-reason` 要求仍可执行的 Agent 工作已处理、两轮逐范围已审、剩余工作有明确阻碍及证据。笼统“数据不足”或停止说明不能覆盖待办状态。
+- 发布前基于同一输入重算待办，在写报告文件前执行门禁。`publication` 保存发布模式、停止原因、输入摘要、待办摘要及脱敏来源能力快照；独立构建与验收共用规则，离线验证历史产物不读取本机当前凭据。输入变化使既有发布绑定失效。
+- 通过文件校验不等于排查完整；“0 个入选候选”不代表全面核验。缺口不自动升降风险，局部排除不外推整体低风险；原因写入既有说明栏目，保持报告布局、CSS 和格式锁不变。
+
 ## 核心图证与报告
 
 新生成报告使用 `visual_policy_revision=core-risk-evidence-v2`；历史 v1/无标记产物仍按原规则只读验证。中/高/极高筛选、情景隔离、必要产品对照和关键反证保持不变。

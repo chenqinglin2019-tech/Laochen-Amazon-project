@@ -30,7 +30,7 @@ class AuthStartupTests(unittest.TestCase):
             self.addCleanup(mock.stop)
         environment = offline_environment()
         environment.update(LC_IPR_TEST_MODE="", LC_IPR_OFFLINE_TESTS="", LAOCHEN_AUTH_PASSED="",
-                           LAOCHEN_BACKEND_TOKEN="ignored-environment-secret")
+                           LAOCHEN_BACKEND_TOKEN="synthetic-environment-secret")
         mock = patch.dict(os.environ, environment, clear=True)
         mock.start()
         self.addCleanup(mock.stop)
@@ -68,7 +68,7 @@ class AuthStartupTests(unittest.TestCase):
                         self.assertTrue(binary.stat().st_mode & 0o111)
                         self.assertEqual(command[1], "--config")
                         self.assertEqual(json.loads(Path(command[2]).read_text())["backend_token"],
-                                         "synthetic-config-secret")
+                                         "synthetic-environment-secret")
                     return subprocess.CompletedProcess(command, 0, "", "")
 
                 with patch.object(auth_gate.subprocess, "run", side_effect=run):
@@ -136,6 +136,77 @@ class AuthStartupTests(unittest.TestCase):
                 self.assertRaisesRegex(SystemExit, "鉴权组件启动准备失败"):
             auth_gate.require_auth()
         run.assert_not_called()
+
+    def test_first_gate_and_preflight_recheck_keep_safe_permission_reason(self):
+        import runtime_v24
+        task_dir = self.root / "task"
+        task_dir.mkdir()
+        common.atomic_write_json(task_dir / "task.json", {
+            "schema_version": "2.4-free", "task_id": "OFFLINE-AUTH", "state": "pending"})
+        executions = []
+
+        def run(command, **kwargs):
+            self.assertEqual(kwargs["encoding"], "utf-8")
+            if command[0] == "/usr/bin/xattr":
+                return subprocess.CompletedProcess(command, 0, "", "")
+            self.assertEqual(kwargs["timeout"], 20)
+            executions.append(command)
+            if len(executions) == 1:
+                return subprocess.CompletedProcess(command, 0, '{"ok":true}', "")
+            return subprocess.CompletedProcess(command, 1, "", '{"ok":false,"reason":"permission_missing"}')
+
+        with patch.object(auth_gate.subprocess, "run", side_effect=run), \
+                patch.object(runtime_v24, "assert_active_free_policy"), \
+                patch("preflight.credential_storage_checkpoint", return_value={}):
+            auth_gate.require_auth()
+            with self.assertRaisesRegex(SystemExit, "缺少本 Skill 权限"):
+                runtime_v24.preflight_credentials(task_dir)
+        self.assertEqual(len(executions), 2)
+        task = common.load_json(task_dir / "task.json")
+        self.assertEqual(task["state"], "incomplete")
+        self.assertIn("AUTH_FAILED", json.dumps(task))
+        self.assertIn("缺少本 Skill 权限", json.dumps(task, ensure_ascii=False))
+        self.assertNotIn("synthetic-environment-secret", json.dumps(task))
+
+    def test_safe_reasons_and_unknown_errors_do_not_leak(self):
+        for reason in ("unknown_skill", "skill_disabled", "permission_disabled", "permission_missing"):
+            with self.subTest(reason=reason):
+                self.assertEqual(auth_gate.result_reason(json.dumps({"reason": reason})), reason)
+                with self.assertRaises(SystemExit) as raised:
+                    auth_gate.stop(reason)
+                self.assertEqual(auth_gate.safe_failure_message(raised.exception), str(raised.exception))
+        self.assertEqual(auth_gate.safe_failure_message(SystemExit("private-token-body")), auth_gate.SAFE_FAILURE)
+        self.assertEqual(auth_gate.result_reason('{"reason":"private-token-body"}'), "auth_failed")
+
+    def test_legacy_preflight_preserves_only_allowlisted_auth_messages(self):
+        import preflight
+        task_dir = self.root / "legacy-task"
+        task_dir.mkdir()
+        safe = auth_gate.SAFE_FAILURE + "\n原因：" + auth_gate.SAFE_REASONS["permission_disabled"]
+        for incoming, expected in ((safe, safe), ("private-response-body", auth_gate.SAFE_FAILURE)):
+            common.atomic_write_json(task_dir / "task.json", {
+                "schema_version": "2.3-free", "task_id": "OFFLINE-AUTH-LEGACY", "state": "pending"})
+            with patch.object(preflight, "assert_active_free_policy"), \
+                    patch.object(preflight, "is_active_schema", return_value=True), \
+                    patch.object(preflight, "credential_storage_checkpoint", return_value={}), \
+                    patch.object(preflight, "require_auth", side_effect=SystemExit(incoming)), \
+                    self.assertRaises(SystemExit) as raised:
+                preflight.phase_credentials(task_dir)
+            self.assertEqual(str(raised.exception), expected)
+            task = common.load_json(task_dir / "task.json")
+            self.assertEqual(task["errors"][-1]["code"], "AUTH_FAILED")
+            self.assertEqual(task["errors"][-1]["detail"], expected)
+            self.assertNotIn("private-response-body", json.dumps(task))
+
+    def test_component_timeout_keeps_original_service_reason(self):
+        def run(command, **kwargs):
+            if command[0] == "/usr/bin/xattr":
+                return subprocess.CompletedProcess(command, 0, "", "")
+            raise subprocess.TimeoutExpired(command, 20, output="private-token-body")
+        with patch.object(auth_gate.subprocess, "run", side_effect=run), \
+                self.assertRaisesRegex(SystemExit, "鉴权服务暂时不可用") as raised:
+            auth_gate.require_auth()
+        self.assertNotIn("private-token-body", str(raised.exception))
 
     @unittest.skipUnless(sys.platform == "darwin", "Native macOS extended attributes")
     def test_native_mac_removal_is_idempotent_and_preserves_other_files_and_attributes(self):

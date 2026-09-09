@@ -310,8 +310,11 @@ class EpoQuotaLedger:
         state["updated_at"] = _now_iso(now)
         fd, temporary = tempfile.mkstemp(prefix=".epo-quota.", dir=str(self.root))
         try:
-            os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                # Windows has no fchmod; mkstemp inherits the user's directory
+                # ACL there. Keep the descriptor owned by the context on errors.
+                if hasattr(os, "fchmod"):
+                    os.fchmod(handle.fileno(), 0o600)
                 json.dump(state, handle, sort_keys=True, separators=(",", ":"))
                 handle.write("\n")
                 handle.flush()

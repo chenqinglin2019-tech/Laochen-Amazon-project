@@ -1,9 +1,12 @@
+import { requireChromeExecutable } from "./platform-runtime.mjs";
 import test from "node:test";
+import path from "node:path";
+import os from "node:os";
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
 import { candidateCapturePaths, expandTsdrVerificationSections, tsdrRenderedSnapshot } from "./cdp-cli.mjs";
 
-const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const CHROME = requireChromeExecutable();
 const field = (label, value) => `<div class="row"><div class="key">${label}:</div><div class="value">${value}</div></div>`;
 const section = (label, content, key = label) => `<div class="expand_wrapper default_hide"><h2 class="expand_heading"><span data-sectiontitle="${key}"><a class="sectionLink" href="javascript:;">${label}</a></span></h2><div class="toggle_container" style="display:none"><div class="sectionContainer">${content}</div></div></div>`;
 const RECORD = `<div>Status results found</div><div id="summary">
@@ -93,14 +96,15 @@ test("figurative verification uses TSDR's markInformation key and Code(s) label 
 });
 
 test("strict TSDR retries have unique capture, screenshot and official-mark evidence paths", () => {
-  const args = ["/tmp/tsdr-task", "uspto_tsdr", "97876463", "QRY-test", { screening_revision: "recall-integrity-v1" }];
+  const taskDir = path.join(os.tmpdir(), "tsdr-task");
+  const args = [taskDir, "uspto_tsdr", "97876463", "QRY-test", { screening_revision: "recall-integrity-v1" }];
   const first = candidateCapturePaths(...args), second = candidateCapturePaths(...args);
   for (const key of ["capturePath", "screenshotPath", "markImagePath"]) {
     assert.notEqual(first[key], second[key]);
     assert.match(first[key], /uspto_tsdr-QRY-test-/);
   }
   const legacy = candidateCapturePaths(...args.slice(0, 4));
-  assert.equal(legacy.capturePath, "/tmp/tsdr-task/uspto_tsdr-97876463-capture.json");
-  assert.equal(legacy.screenshotPath, "/tmp/tsdr-task/screenshots/uspto_tsdr-97876463.png");
-  assert.equal(legacy.markImagePath, "/tmp/tsdr-task/images/uspto-tsdr-97876463-official-mark.png");
+  assert.equal(legacy.capturePath, path.join(taskDir, "uspto_tsdr-97876463-capture.json"));
+  assert.equal(legacy.screenshotPath, path.join(taskDir, "screenshots", "uspto_tsdr-97876463.png"));
+  assert.equal(legacy.markImagePath, path.join(taskDir, "images", "uspto-tsdr-97876463-official-mark.png"));
 });

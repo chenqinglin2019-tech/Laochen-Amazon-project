@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -310,17 +311,20 @@ def main() -> None:
     parser.add_argument("--include-optional", action="store_true")
     parser.add_argument("--max-workers", type=int, default=0)
     parser.add_argument("--query-ids", nargs="+", help="Execute exact API IDs as one resumable batch (2.4 only)")
+    parser.add_argument("--phase", choices=("discovery", "verification"), default="")
     args = parser.parse_args()
     task_dir = args.task_dir.resolve()
     if load_json(task_dir / "task.json").get("schema_version") == "2.4-free":
         from runtime_v24 import execute_api_plan
-        result = execute_api_plan(task_dir, wave=args.wave, include_optional=args.include_optional, max_workers=args.max_workers, query_ids_filter=args.query_ids)
+        result = execute_api_plan(task_dir, wave=args.wave, include_optional=args.include_optional, max_workers=args.max_workers, query_ids_filter=args.query_ids, phase=args.phase)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if result.get("status") != "success":
             raise SystemExit(2)
         return
     if args.query_ids is not None:
         raise SystemExit("Exact API batches require a 2.4 task")
+    if args.phase:
+        raise SystemExit("Retrieval phases require an API-first task")
     task = ensure_object(load_json(task_dir / "task.json"), "task.json")
     plan = ensure_object(load_json(task_dir / "search-plan.json"), "search-plan.json")
     evidence = ensure_object(load_json(task_dir / "evidence.json"), "evidence.json")
@@ -422,7 +426,8 @@ def main() -> None:
             pool.submit(
                 subprocess.run,
                 command_for(scripts, task_dir, provider, item),
-                capture_output=True, text=True, check=False,
+                capture_output=True, text=True, encoding="utf-8", check=False,
+                env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
             ): (provider, item)
             for provider, item in parallel_pending
         }
@@ -447,7 +452,8 @@ def main() -> None:
             break
         result = subprocess.run(
             command_for(scripts, task_dir, provider, item),
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, encoding="utf-8", check=False,
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         )
         results.append(completed_result(provider, item, result))
 
@@ -468,7 +474,8 @@ def main() -> None:
             continue
         result = subprocess.run(
             command_for(scripts, task_dir, provider, item),
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, encoding="utf-8", check=False,
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         )
         results.append(completed_result(provider, item, result))
 
@@ -479,7 +486,8 @@ def main() -> None:
     for provider, item in serper_pending:
         result = subprocess.run(
             command_for(scripts, task_dir, provider, item),
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, encoding="utf-8", check=False,
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         )
         results.append(completed_result(provider, item, result))
 
@@ -488,7 +496,8 @@ def main() -> None:
     for provider, item in signa_pending:
         result = subprocess.run(
             command_for(scripts, task_dir, provider, item),
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, encoding="utf-8", check=False,
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         )
         results.append(completed_result(provider, item, result))
 
@@ -523,7 +532,8 @@ def main() -> None:
                 continue
         result = subprocess.run(
             command_for(scripts, task_dir, provider, item),
-            capture_output=True, text=True, check=False,
+            capture_output=True, text=True, encoding="utf-8", check=False,
+            env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
         )
         results.append(completed_result(provider, item, result))
     print(json.dumps({

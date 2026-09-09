@@ -488,14 +488,24 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Build official/free-only search-plan.json.")
     parser.add_argument("--task-dir", type=Path, required=True)
     parser.add_argument("--expand", action="store_true", help="Append candidate-derived 2.4 searches without rewriting existing query hashes")
+    parser.add_argument("--discovery-followup", type=Path, help="Append an API-first reviewed follow-up, bounded stop review, or unsubmitted primary repair")
     args = parser.parse_args()
     task_dir = args.task_dir.resolve()
     task = ensure_object(load_json(task_dir / "task.json"), "task.json")
     if task.get("schema_version") == "2.4-free":
+        if args.discovery_followup:
+            if args.expand:
+                parser.error("--discovery-followup and --expand are separate append operations")
+            from api_first_planning import append_followup
+            append_followup(task_dir, load_json(args.discovery_followup))
+            print(task_dir / "search-plan.json")
+            return
         from workflow_v24 import generate_plan
         generate_plan(task_dir, expand=args.expand)
         print(task_dir / "search-plan.json")
         return
+    if args.discovery_followup:
+        parser.error("--discovery-followup requires an API-first 2.4 task")
     evidence = ensure_object(load_json(task_dir / "evidence.json"), "evidence.json")
     if not is_active_schema(task):
         raise SystemExit("Legacy 2.1/2.2 tasks are evidence-read-only; search plans cannot be regenerated")

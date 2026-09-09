@@ -19,9 +19,8 @@ from pathlib import Path
 from urllib import error, request
 from xml.etree import ElementTree
 from common import atomic_write_json, load_json, now_iso, sha256_bytes
-from provider_utils import ProviderError, assert_test_endpoint, request_timeout, classify_http, record_error, record_result
+from provider_utils import ProviderError, assert_test_endpoint, request_timeout, classify_http, record_error, record_result, file_lock
 from provider_plan_v24 import load_action
-from epo_quota_ledger import fcntl, msvcrt
 
 PROVIDER = 'epo_publication_server'
 BASE = 'https://data.epo.org/publication-server/rest/v1.2'
@@ -47,19 +46,8 @@ class EpsQuotaLedger:
 
     @contextmanager
     def locked(self):
-        with (self.directory / '.lock').open('a+b') as handle:
-            if fcntl is not None:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            elif msvcrt is not None:
-                handle.seek(0); handle.write(b'0'); handle.flush(); handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-            try:
-                yield
-            finally:
-                if fcntl is not None:
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
-                elif msvcrt is not None:
-                    handle.seek(0); msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        with file_lock(self.directory / '.lock'):
+            yield
 
     def read(self):
         now = self.clock()

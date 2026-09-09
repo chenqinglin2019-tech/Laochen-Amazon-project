@@ -22,6 +22,15 @@ def merge_captured_product(task: dict, capture: dict, media_hashes: list[str]) -
     strict = recall_integrity_enabled(task)
     old_identity = product_identity_digest(product, task=task)
     fields = ["title", "brand", "manufacturer", "category", "bullets", "specifications", "visible_ip_claims"]
+    for field, expected_type in (("brand_byline_raw", str), ("brand_placeholder", bool)):
+        if field in capture:
+            if not isinstance(capture[field], expected_type):
+                raise ValueError(f"{field} has an invalid type")
+            fields.append(field)
+        else:
+            # A legacy/new capture without byline metadata must not inherit an
+            # earlier capture's placeholder classification.
+            product.pop(field, None)
     if not strict:
         fields.append("structure")
     product["actual_asin"] = str(capture.get("actual_asin") or "").upper()

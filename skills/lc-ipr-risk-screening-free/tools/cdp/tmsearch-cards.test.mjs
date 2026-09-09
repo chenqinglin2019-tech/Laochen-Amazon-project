@@ -1,3 +1,4 @@
+import { requireChromeExecutable } from "./platform-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { chromium } from "playwright-core";
@@ -53,7 +54,7 @@ test("TM single-result detail requires route, repeated serial, rendered mark and
 });
 
 test("TM semantic readiness reads cards in verified field-tag mode", async () => {
-  const browser=await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  const browser=await chromium.launch({executablePath:requireChromeExecutable(),headless:true});
   try {
     const page=await browser.newPage();
     await page.setContent(`<mat-select formcontrolname="searchRefinement">Field tag and Search builder</mat-select><input id="searchbar"><pre id="results"></pre>`);
@@ -83,7 +84,7 @@ test("TM semantic readiness reads cards in verified field-tag mode", async () =>
 });
 
 test("TM single-result auto-navigation binds the field-tag query, not a direct serial lookup", async () => {
-  const browser=await chromium.launch({executablePath:"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",headless:true});
+  const browser=await chromium.launch({executablePath:requireChromeExecutable(),headless:true});
   try {
     const page=await browser.newPage(), q='CM:"Lid Latch"';
     // Local interception only: this fixture does not reach USPTO.
@@ -92,7 +93,8 @@ test("TM single-result auto-navigation binds the field-tag query, not a direct s
     await page.locator('#searchbar').fill(q);
     await page.locator('#result').evaluate((e,text)=>e.textContent=text,`Result 1 of 1 for ${q}\n${DETAIL}`);
     const config={tmsearch_query_binding:{tmsearchQuery:q},cdp:{semantic_poll_ms:10,semantic_stable_samples:2}};
-    const result=await waitForSearchSemanticState(page,'uspto_tmsearch_browser',200,config);
+    // A positive result needs two samples even under release-suite contention.
+    const result=await waitForSearchSemanticState(page,'uspto_tmsearch_browser',2000,config);
     assert.equal(result.stable,true);assert.equal(result.candidates[0].serial_number,'88418732');
     assert.equal(result.tmsearch_binding.result_view,'detail');assert.equal(result.tmsearch_binding.result_index,1);
     await page.locator('#result').evaluate((e,text)=>e.textContent=text,`Result 1 of 1 for 88418732\n${DETAIL}`);

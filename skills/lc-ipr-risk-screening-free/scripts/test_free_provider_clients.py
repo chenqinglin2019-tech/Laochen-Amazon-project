@@ -26,6 +26,12 @@ class SerperEntitlementTests(unittest.TestCase):
             path = Path(temporary)
             subprocess.run([sys.executable, str(Path(__file__).with_name('create_task.py')), '--url', 'https://www.amazon.com/dp/B012345678', '--jurisdictions', 'US', '--output-dir', str(path), '--enable-serper-free', '--enable-serpapi-free'], capture_output=True, check=True)
             task = load_json(path / 'task.json')
+            # Preserve the historical 2.4 account-proof/fallback expectation.
+            task.pop('retrieval_workflow_revision', None)
+            task.pop('retrieval_policy', None)
+            task['serper_free_enhancement']['max_queries_per_task'] = 10
+            task['serpapi_free_enhancement']['max_queries_per_task'] = 3
+            task['serpapi_free_enhancement']['fallback_only_when_serper_enabled'] = True
             task.pop('recall_planning_revision', None)  # Isolate the existing account-entitlement contract.
             task['state'] = 'collecting'
             task['product'].update(title='hinged phone stand', language='en', structure=['hinged housing'])

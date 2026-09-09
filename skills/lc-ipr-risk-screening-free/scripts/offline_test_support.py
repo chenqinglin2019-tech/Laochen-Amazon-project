@@ -16,6 +16,8 @@ def offline_environment(source: dict[str, str] | None = None) -> dict[str, str]:
         environment.pop(name, None)
     environment["LC_IPR_OFFLINE_TESTS"] = "1"
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["PYTHONUTF8"] = "1"
+    environment["PYTHONIOENCODING"] = "utf-8"
     return environment
 
 

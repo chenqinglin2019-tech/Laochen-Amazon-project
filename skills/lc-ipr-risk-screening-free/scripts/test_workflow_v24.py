@@ -23,6 +23,13 @@ class WorkflowTests(unittest.TestCase):
         self.path = Path(self.temp.name)
         subprocess.run([sys.executable, str(Path(__file__).with_name("create_task.py")), "--url", "https://www.amazon.com/dp/B012345678", "--jurisdictions", "US,GB,FR,DE,IT,ES,JP", "--output-dir", str(self.path), "--enable-serper-free", "--enable-signa-free", "--enable-serpapi-free"], check=True, capture_output=True)
         self.task = load_json(self.path / "task.json")
+        # These fixtures assert the frozen pre-API-first routing contract.
+        self.task.pop("retrieval_workflow_revision", None)
+        self.task.pop("retrieval_policy", None)
+        self.task["serper_free_enhancement"]["max_queries_per_task"] = 10
+        self.task["serpapi_free_enhancement"]["max_queries_per_task"] = 3
+        self.task["serpapi_free_enhancement"]["fallback_only_when_serper_enabled"] = True
+        self.task.pop("completion_policy_revision", None)  # Frozen pre-completion-policy compatibility fixture.
         self.task.pop("workflow_correction_revision", None)  # Frozen pre-correction compatibility fixture.
         self.task.pop("decision_workflow_revision", None)  # Frozen pre-scenario contract.
         self.task.pop("specialty_workflow_revision", None)
@@ -179,6 +186,13 @@ class RecallIntegrityTests(unittest.TestCase):
         self.path = Path(self.temp.name)
         subprocess.run([sys.executable, str(Path(__file__).with_name("create_task.py")), "--url", "https://www.amazon.com/dp/B012345678", "--jurisdictions", "US", "--output-dir", str(self.path)], check=True, capture_output=True)
         self.task = load_json(self.path / "task.json")
+        # These fixtures assert the frozen pre-API-first routing contract.
+        self.task.pop("retrieval_workflow_revision", None)
+        self.task.pop("retrieval_policy", None)
+        self.task["serper_free_enhancement"]["max_queries_per_task"] = 10
+        self.task["serpapi_free_enhancement"]["max_queries_per_task"] = 3
+        self.task["serpapi_free_enhancement"]["fallback_only_when_serper_enabled"] = True
+        self.task.pop("completion_policy_revision", None)  # Frozen recall-integrity compatibility fixture.
         self.task.pop("workflow_correction_revision", None)  # Frozen recall-integrity compatibility fixture.
         self.task.pop("decision_workflow_revision", None)  # Frozen recall-integrity contract.
         self.task.pop("specialty_workflow_revision", None)

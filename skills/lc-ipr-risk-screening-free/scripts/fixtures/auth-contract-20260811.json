@@ -1,0 +1,51 @@
+{
+  "schema": "LC-IPR-AUTH-BASELINE/1.0",
+  "archive_name": "lc-ipr-risk-screening-free-auth-gated-20260811(1).zip",
+  "archive_sha256": "f61510d4a55b0da503b30d81ad598d85fbc5b7611796d7388bb75169d8d5c04f",
+  "binary_sha256": {
+    "lc-ipr-auth-check-darwin-amd64": "b0a0bf7e7aa0b681bbcaeecc7651790e4e12773c65fbdd20b1bd95739bb4695a",
+    "lc-ipr-auth-check-darwin-arm64": "c048ab1c9740843a8b343231e712fffaaa810141d8674bf7c4b03519281bce01",
+    "lc-ipr-auth-check-linux-amd64": "6aeda1ed58fefe918f36c1dea6c067e7914d5dab4b6ef315bfb6365506b14f0c",
+    "lc-ipr-auth-check-windows-amd64.exe": "d3003ec2264be6e2a62698912afb0587ac7f9b7ce24c5ca348f622087eaf71e7"
+  },
+  "timeout_seconds": 20,
+  "method": "POST",
+  "path": "/auth/skill-check",
+  "skill_id": "ipr_risk_screening_free",
+  "token_location": "JSON api_key",
+  "success_response": {
+    "allowed": true,
+    "reason": "permission_enabled"
+  },
+  "reason_case_sensitive": true,
+  "reason_trim_whitespace": true,
+  "source_freeze": {
+    "revision": "restored-auth-wrapper-v1",
+    "file_sha256": {
+      "scripts/auth_gate.py": "98db3a202644c28640be2634ca0c903f6e3901d5c03d004caeb30e5584b549eb"
+    },
+    "function_ast_sha256": {
+      "scripts/common.py": {
+        "load_skill_config": "cc313aaf69d893d683aa83340375e7d3f0b0ff0a3545383a81f15e7e74499277",
+        "_backend_config": "6930e00447fe885b81c34672d4cddb783621f54201afb795fca9afa5694303ff",
+        "_credential_result": "73627052d5b6e0c8773c096c9c7683bab88af09a1bd989b34f24c11c1167daf0",
+        "credential": "7d1159095f04809fd6824c6ce7618f4382942ef503c729a6e1993942a287a6db",
+        "credential_issue": "9f3c94a7a4af8444f22ded8590e006cb2f4e9381fa557c0da43fc3b450629a57",
+        "offline_credentials_disabled": "bbde16679d450c9e6532d997ce989a8a4a7659fa30a1353855cff45a23f19332"
+      },
+      "scripts/preflight.py": {
+        "local_secret_findings": "d01b7148f43c825b4bcfe6f6dbf99d1e767dd38aa73122e1f7c6f38eef58aa9d",
+        "credential_storage_checkpoint": "854a560025d9de0acceacbc9d6f14f8f55057c072a988af2235a16d13dd5cdcc"
+      }
+    },
+    "ast_canonicalization": "ast.dump(function_node, annotate_fields=True, include_attributes=False), UTF-8 SHA256",
+    "scope": "Dedicated wrapper is frozen in full; only backend/config/offline and safe credential-scan functions are frozen in shared modules. Unrelated retrieval helpers remain independently editable.",
+    "non_protocol_adaptations": [
+      "Prepare only the hash-verified selected Mac component and remove only its quarantine attribute.",
+      "Use explicit UTF-8 for native output and safe temporary 0600 config transport.",
+      "Filter inherited credential variables after resolving the same effective backend token.",
+      "Carry only allowlisted auth failure text through preflight; preserve AUTH_FAILED state."
+    ],
+    "update_rule": "Changes require explicit auth-baseline review, never an incidental retrieval optimization refresh."
+  }
+}

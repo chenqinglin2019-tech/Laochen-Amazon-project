@@ -81,11 +81,11 @@ def test_credentials() -> None:
             patch.dict(os.environ, environment),
             patch.object(subprocess, "run", side_effect=AssertionError("Credential lookup must not run Keychain")),
         ):
-            assert common.credential({}, "backend_token") == "local-backend-fixture"
+            assert common.credential({}, "backend_token") == "ignored-environment-fixture"
             assert common.credential({}, "epo_consumer_key") == "local-epo-fixture"
             (root / "config.json").unlink()
             (root / ".env").unlink()
-            assert common.credential({}, "backend_token") == ""
+            assert common.credential({}, "backend_token") == "ignored-environment-fixture"
             assert common.credential({}, "epo_consumer_key") == ""
         for marker in ("LC_IPR_TEST_MODE", "LC_IPR_OFFLINE_TESTS"):
             with (

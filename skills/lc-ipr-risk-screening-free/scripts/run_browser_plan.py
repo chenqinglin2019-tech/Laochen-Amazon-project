@@ -23,7 +23,7 @@ from execution_lock import execution_lock
 from record_browser_execution import canonical_digest, validate_browser_execution
 from workflow_v24 import (validated_query_cancellation, reconcile_scenario_actions,
                          scenario_workflow_enabled, correction_enabled, TEMPORARY_DISPATCH_CODES,
-                         record_action_recovery)
+                         record_action_recovery, browser_submitted_failure_state, browser_partial_recovery_state)
 
 ROOT = Path(__file__).resolve().parents[1]
 CDP = ROOT / "tools" / "cdp" / "cdp-cli.mjs"
@@ -54,7 +54,7 @@ def browser_implementation_digest(task: dict) -> str:
 def _rate_limited(value: dict) -> bool:
     coverage = value.get("result_coverage") or {}
     return (value.get("error_code") == "BROWSER_RATE_LIMITED"
-            or isinstance(coverage, dict) and any(coverage.get(key) == "BROWSER_RATE_LIMITED"
+            or isinstance(coverage, dict) and any(str(coverage.get(key) or "").upper() == "BROWSER_RATE_LIMITED"
                                                  for key in ("error_code", "stop_reason")))
 
 
@@ -146,8 +146,8 @@ def run_process(command: list[str], timeout: int = 180) -> dict:
         # The CDP CLI calls the same Python authority before opening a source.
         # Inherit this verified interpreter, not an unrelated system python3
         # whose installed PDF/runtime dependencies may differ.
-        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, check=False,
-                                env={**os.environ, "LC_IPR_PYTHON": sys.executable})
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=timeout, check=False,
+                                env={**os.environ, "LC_IPR_PYTHON": sys.executable, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     except subprocess.TimeoutExpired:
         return {"status": "access_limited", "error_code": "BROWSER_EXECUTION_TIMEOUT",
                 "detail": "The automatic browser operation exceeded its bounded timeout."}
@@ -239,7 +239,7 @@ def completed_capture(task_dir: Path, task: dict, provider: str, entry: dict, pr
 
 
 def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
-                 query_ids_filter: list[str] | None = None, runner=run_process) -> dict[str, Any]:
+                 query_ids_filter: list[str] | None = None, runner=run_process, phase: str = "") -> dict[str, Any]:
     run_started = time.monotonic()
     if query_ids_filter is not None and (query_id_filter or not isinstance(query_ids_filter, (list, tuple))
             or not query_ids_filter or any(not isinstance(q, str) or not q for q in query_ids_filter)
@@ -248,6 +248,8 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
     selected_ids = set(query_ids_filter or ([query_id_filter] if query_id_filter else []))
     task_dir = task_dir.resolve()
     task = load_json(task_dir / "task.json")
+    from retrieval_execution import selected_phase, in_phase
+    phase = selected_phase(task, phase, "browser")
     assert_active_free_policy(task)
     if task.get("schema_version") != "2.4-free":
         raise ValueError("LEGACY_TASK_READ_ONLY: browser plan scheduler only accepts 2.4-free")
@@ -265,6 +267,8 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                    if browser_provider(provider) for row in entries}
     if selected_ids and not selected_ids <= browser_ids:
         raise ValueError("SEARCH_PLAN_INVALID: query-id must select an exact browser row")
+    if selected_ids and any(row.get("query_id") in selected_ids and not in_phase(row, phase) for row in all_entries):
+        raise ValueError("SELECTED_QUERY_PHASE_MISMATCH")
     if correction_enabled(task) and any(row.get("query_id") in selected_ids and row.get("execute_by_default") is False for row in all_entries):
         raise ValueError("SELECTED_QUERY_NOT_EXECUTABLE: exact selection cannot enable a disabled browser route")
     if scenario_workflow_enabled(task):
@@ -275,20 +279,27 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
     if previous and previous.get("task_id") != task["task_id"]:
         raise ValueError("BROWSER_EXECUTION_TASK_MISMATCH")
     rows = {r["query_id"]: r for r in previous.get("queries", [])}
+    config = load_skill_config()
+    backoff = config.get("cdp", {}).get("rate_limit_backoff_seconds", RATE_LIMIT_BACKOFF_SECONDS)
+    backoff = backoff if type(backoff) is int and 1 <= backoff <= 86400 else RATE_LIMIT_BACKOFF_SECONDS
+    partial_limit = config.get("cdp", {}).get("partial_resume_limit", 1)
+    partial_limit = partial_limit if type(partial_limit) is int and 0 <= partial_limit <= 1 else 1
     prior_pauses = previous.get("provider_pauses")
     rate_wait = {p: value for p, value in (prior_pauses if isinstance(prior_pauses, dict) else {}).items()
                  if isinstance(value, dict) and value.get("error_code") == "BROWSER_RATE_LIMITED"
                  and isinstance(value.get("resume_after_epoch"), (float, int))
                  and not isinstance(value["resume_after_epoch"], bool)
-                 and time.time() < value["resume_after_epoch"] <= time.time() + RATE_LIMIT_BACKOFF_SECONDS}
+                 and value["resume_after_epoch"] <= time.time() + backoff}
+    for value in rate_wait.values():
+        attempts = value.get("recovery_attempts", 0)
+        value["recovery_attempts"] = min(1, max(0, attempts)) if type(attempts) is int else 1
     report = {"schema_version": "1.0", "task_id": task["task_id"], "started_at": now_iso(),
               "queries": list(rows.values()), "provider_pauses": rate_wait, "required_user_actions": [], "status": "success"}
     node = shutil.which("node")
-    config = load_skill_config()
     cdp_budget = min(165, max(1, float(config.get("cdp", {}).get("operation_timeout_ms", 165000)) / 1000))
     capability_cache, access_wait = {}, set()
     implementation_digest = browser_implementation_digest(task)
-    static_errors = {"INTERNAL_ROUTE_CONTRACT_ERROR", "AUTOMATION_NOT_VALIDATED", "AUTOMATIC_QUERY_FIELD_UNSUPPORTED", "AUTOMATIC_QUERY_FILTER_UNSUPPORTED", "AUTOMATIC_QUERY_LANGUAGE_UNSUPPORTED", "BROWSER_QUERY_SEMANTICS_UNSUPPORTED", "UNSUPPORTED_QUERY_SEMANTICS", "CURRENT_STATUS_ROUTE_UNAVAILABLE"}
+    static_errors = {"INTERNAL_ROUTE_CONTRACT_ERROR", "AUTOMATION_NOT_VALIDATED", "AUTOMATIC_QUERY_FIELD_UNSUPPORTED", "AUTOMATIC_QUERY_FILTER_UNSUPPORTED", "AUTOMATIC_QUERY_LANGUAGE_UNSUPPORTED", "BROWSER_QUERY_SEMANTICS_UNSUPPORTED", "UNSUPPORTED_QUERY_SEMANTICS", "USPTO_QUERY_REJECTED", "CURRENT_STATUS_ROUTE_UNAVAILABLE"}
     batch = _BatchInputs(task_dir)
     batch_ids = set()
     report["selected_query_ids"] = sorted(selected_ids)
@@ -298,7 +309,10 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
         if not browser_provider(provider):
             continue
         for entry in entries:
-            if not isinstance(entry, dict) or wave and not (correction_enabled(task) and selected_ids) and entry.get("wave", 1) != wave or entry.get("execute_by_default") is False:
+            if (not isinstance(entry, dict) or not in_phase(entry, phase)
+                    or (not phase and wave and not (correction_enabled(task) and selected_ids)
+                        and entry.get("wave", 1) != wave)
+                    or entry.get("execute_by_default") is False):
                 continue
             query_id = str(entry.get("query_id") or "")
             if selected_ids and query_id not in selected_ids:
@@ -337,11 +351,29 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                                   "historical_reuse": historical, "finished_at": now_iso()}
                 continue
             params = request_params(entry)
-            authorize_exact_plan_execution(task_dir, task, provider, entry["operation"], query_id,
-                                           jurisdiction=entry["jurisdiction"], right_type=entry["right_type"],
-                                           query=str(entry.get("q") or entry.get("query") or ""), request_params=params)
             prior = rows.get(query_id, {})
-            if provider in rate_wait:
+            partial_recovery = browser_partial_recovery_state(task, batch.read("evidence.json"), provider, entry,
+                {**prior, "partial_resume_limit": partial_limit})
+            explicit_repair = (query_id in selected_ids and prior.get("plan_entry_sha256") == canonical_digest(entry)
+                and bool(prior.get("implementation_sha256")) and prior["implementation_sha256"] != implementation_digest)
+            if partial_recovery and partial_recovery["state"] == "blocked" and not explicit_repair:
+                rows[query_id] = {**prior, "query_id": query_id, "provider": provider,
+                    "jurisdiction": entry["jurisdiction"], "right_type": entry["right_type"], "operation": entry["operation"],
+                    "plan_entry_sha256": canonical_digest(entry), "status": "incomplete", "capture_status": "success",
+                    "dispatch": "partial_deferred", "submission_state": "not_submitted", "source_query_performed": False,
+                    "resumed_without_query": True, "error_code": partial_recovery["reason"],
+                    "detail": partial_recovery["detail"], "partial_resume_attempts": partial_recovery["partial_resume_attempts"],
+                    "partial_resume_limit": partial_limit, "finished_at": now_iso()}
+                continue
+            failed_submission = browser_submitted_failure_state(task, batch.read("evidence.json"), provider, entry)
+            if not failed_submission or failed_submission["state"] not in {"blocked", "submission_unknown"}:
+                authorize_exact_plan_execution(task_dir, task, provider, entry["operation"], query_id,
+                                               jurisdiction=entry["jurisdiction"], right_type=entry["right_type"],
+                                               query=str(entry.get("q") or entry.get("query") or ""), request_params=params)
+            pause = rate_wait.get(provider)
+            cooling = pause and time.time() < pause["resume_after_epoch"]
+            recovery_exhausted = pause and pause.get("recovery_attempts", 0) >= 1
+            if pause and (cooling or recovery_exhausted):
                 if completed_capture(task_dir, task, provider, entry, prior, allow_partial=False):
                     prior["resumed_without_query"] = True
                     continue
@@ -352,15 +384,15 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                                   "operation": entry["operation"], "plan_entry_sha256": canonical_digest(entry),
                                   "status": "incomplete" if prior.get("status") in SUCCESS | {"incomplete"} else "access_limited",
                                   "dispatch": "rate_limit_deferred", "phase": "await_source_retry",
-                                  "submission_state": "not_submitted", "error_code": "BROWSER_RATE_LIMIT_COOLDOWN",
-                                  "detail": "Provider requests paused after its Too Many Requests notice; no query or dialog dismissal attempted.",
+                                  "submission_state": "not_submitted", "error_code": "BROWSER_RATE_LIMIT_RECOVERY_EXHAUSTED" if recovery_exhausted and not cooling else "BROWSER_RATE_LIMIT_COOLDOWN",
+                                  "detail": "The one rate-limit recovery check was exhausted; an external source-state change is required." if recovery_exhausted and not cooling else "Provider requests paused after its Too Many Requests notice; no query or dialog dismissal attempted.",
                                   "resume_after_epoch": rate_wait[provider]["resume_after_epoch"], "finished_at": now_iso()}
                 if prior.get("capture_status") in SUCCESS or prior.get("status") in SUCCESS:
                     rows[query_id]["capture_status"] = prior.get("capture_status") or prior["status"]
                 continue
             partial_resumes = 0
             retained_partial = prior.get("retained_partial_capture")
-            if (recall_integrity_enabled(task) and prior.get("partial_resume_attempts") == 1
+            if (recall_integrity_enabled(task) and prior.get("partial_resume_attempts") == partial_limit
                     and prior.get("implementation_sha256") == implementation_digest
                     and prior.get("status") not in SUCCESS | {"incomplete"}
                     and isinstance(retained_partial, dict)
@@ -372,10 +404,17 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                 captured = load_json(Path(prior["capture_path"]))
                 if recall_integrity_enabled(task) and partial_result(captured):
                     prior["result_coverage"] = captured["result_coverage"]
+                    if (task.get("retrieval_workflow_revision") == "api-first-v1"
+                            and entry.get("execution_phase") == "discovery_fallback"
+                            and captured["result_coverage"].get("stop_reason") == "bounded_sample_limit"):
+                        prior.update(status="incomplete", capture_status="success", dispatch="sample_retained",
+                                     resumed_without_query=True, source_query_performed=False,
+                                     detail="Bounded sample retained; review or append a justified refinement before further collection.")
+                        continue
                     attempts = prior.get("partial_resume_attempts", 0)
                     attempts = attempts if isinstance(attempts, int) and not isinstance(attempts, bool) and attempts >= 0 else 0
                     attempts = attempts if prior.get("implementation_sha256") == implementation_digest else 0
-                    if attempts >= 1:
+                    if attempts >= partial_limit:
                         prior.update(status="incomplete", capture_status="success", dispatch="partial_deferred",
                                      resumed_without_query=True, error_code="BROWSER_PARTIAL_RESUME_LIMIT",
                                      detail="Partial result retained; one automatic resume was exhausted. " + str(prior.get("result_coverage", {}).get("stop_reason") or "coverage incomplete"))
@@ -389,6 +428,15 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                 prior["resumed_without_query"] = True
                 prior["dispatch"] = "blocked_reused"
                 continue
+            if failed_submission and failed_submission["state"] in {"blocked", "submission_unknown"}:
+                rows[query_id] = {**prior, "query_id": query_id, "provider": provider,
+                    "jurisdiction": entry["jurisdiction"], "right_type": entry["right_type"], "operation": entry["operation"],
+                    "plan_entry_sha256": canonical_digest(entry), "status": "access_limited",
+                    "dispatch": "submitted_failure_deferred", "phase": "await_source_retry",
+                    "submission_state": "not_submitted", "error_code": failed_submission["reason"],
+                    "detail": failed_submission.get("detail", "Verify the prior browser submission before retrying."),
+                    "submitted_failure_recovery": failed_submission, "finished_at": now_iso()}
+                continue
             tick = time.monotonic()
             row_deadline = tick + 180
             def remaining(limit):
@@ -399,8 +447,12 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
             row = {"implementation_sha256": implementation_digest, "query_id": query_id, "provider": provider, "jurisdiction": entry["jurisdiction"],
                    "right_type": entry["right_type"], "operation": entry["operation"],
                    "plan_entry_sha256": canonical_digest(entry), "started_at": now_iso(), "preflight_elapsed_ms": preflight_ms}
+            if failed_submission:
+                row["submitted_failure_recovery"] = failed_submission
             if recall_integrity_enabled(task):
                 row["partial_resume_attempts"] = partial_resumes
+                if task.get("completion_policy_revision") == "necessary-work-v1":
+                    row["partial_resume_limit"] = partial_limit
                 if partial_resumes:
                     row["retained_partial_capture"] = retained_partial
             try:
@@ -419,10 +471,19 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                                   "phase": "validate_route", "submission_state": "not_submitted",
                                   "detail": capability.get("detail", "No automatic browser executor has been accepted for this route."), "browser_capability": capability}
                     else:
+                        if provider in rate_wait:
+                            # Persist before the attempt so interruption cannot
+                            # create an unlimited retry loop. CDP checks the
+                            # existing visible notice before submitting.
+                            rate_wait[provider]["recovery_attempts"] = 1
+                            rate_wait[provider]["recovery_started_at"] = now_iso()
+                            atomic_write_json(status_path, report)
                         recovery = record_action_recovery(task_dir, provider, entry, implementation_sha256=implementation_digest)
                         if recovery:
                             row["recovery_id"] = recovery["recovery_id"]
-                        result = runner([node, str(CDP), "run-planned-query", "--task-dir", str(task_dir), "--query-id", query_id, "--acceptance-probe", "--deadline-epoch-ms", str(round((time.time() + min(cdp_budget, remaining(180) - 10)) * 1000))], remaining(180))
+                        result = runner([node, str(CDP), "run-planned-query", "--task-dir", str(task_dir), "--query-id", query_id, "--acceptance-probe",
+                            *(["--check-existing-rate-limit"] if provider in rate_wait else []),
+                            "--deadline-epoch-ms", str(round((time.time() + min(cdp_budget, remaining(180) - 10)) * 1000))], remaining(180))
                 status = str(result.get("status") or "access_limited")
                 if correction_enabled(task):
                     row["submission_state"] = result.get("submission_state") or "unknown"
@@ -439,7 +500,7 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                         raise ValueError("Browser result status does not match the capture")
                     validate_browser_execution(capture, task, task_dir, provider)
                     # Receipt-validated capture is authoritative when CLI summaries omit details.
-                    result = {**result, **{key: capture[key] for key in ("error_code", "detail", "phase", "submission_state") if capture.get(key)}}
+                    result = {**result, **{key: capture[key] for key in ("error_code", "detail", "phase", "submission_state", "rate_limit_page") if capture.get(key)}}
                     recorded = runner(recorder_command(provider, entry, task_dir, capture_path), remaining(60))
                     if recorded.get("status") != "success" or recorded.get("recorded_status") not in (None, "", status):
                         raise ValueError("Browser recorder rejected the capture: " + str(recorded.get("detail", "validation failure")))
@@ -452,12 +513,25 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                     row["source_run_id"] = record_failure(task_dir, task, provider, entry, result)
                 row.update(status=status, phase=result.get("phase", ""), submission_state=result.get("submission_state", ""), error_code=str(result.get("error_code") or ""),
                            detail=redact_sensitive_text(result.get("detail") or "")[:800])
+                if isinstance(result.get("rate_limit_page"), dict):
+                    row["rate_limit_page"] = result["rate_limit_page"]
                 if _rate_limited(row):
+                    recovery_attempts = rate_wait.get(provider, {}).get("recovery_attempts", 0)
                     rate_wait[provider] = {"error_code": "BROWSER_RATE_LIMITED", "query_id": query_id,
-                                           "observed_at": now_iso(), "resume_after_epoch": time.time() + RATE_LIMIT_BACKOFF_SECONDS}
+                                           "observed_at": now_iso(), "resume_after_epoch": time.time() + backoff,
+                                           "recovery_attempts": recovery_attempts,
+                                           "rate_limit_page": row.get("rate_limit_page")}
+                elif provider in rate_wait and row.get("submission_state") == "submitted":
+                    rate_wait.pop(provider, None)
                 if recall_integrity_enabled(task) and status == "success" and (partial_result(row) or _rate_limited(row)):
                     row.update(status="incomplete", capture_status="success", error_code="BROWSER_RESULT_PARTIAL",
                                detail="Validated partial results retained; retrieval is incomplete: " + str(row["result_coverage"].get("stop_reason") or "coverage incomplete"))
+                    if _rate_limited(result) or str(row["result_coverage"].get("stop_reason", "")).upper() == "BROWSER_RATE_LIMITED":
+                        row["source_error_code"] = "BROWSER_RATE_LIMITED"
+                    partial_recovery = browser_partial_recovery_state(task, batch.read("evidence.json"), provider, entry, row)
+                    if partial_recovery and partial_recovery["state"] == "blocked":
+                        row.update(dispatch="partial_deferred", error_code=partial_recovery["reason"],
+                            partial_resume_attempts=partial_recovery["partial_resume_attempts"], detail=partial_recovery["detail"])
             except (OSError, ValueError, TypeError, KeyError, ProviderError) as exc:
                 row.update(status="access_limited", error_code="BROWSER_ROW_FAILED", detail=redact_sensitive_text(exc)[:800])
                 try:
@@ -466,7 +540,7 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                     row["record_error"] = redact_sensitive_text(record_exc)[:400]
             row["finished_at"] = now_iso()
             row["elapsed_ms"] = round((time.monotonic() - tick) * 1000)
-            row["dispatch"] = "executed"
+            row.setdefault("dispatch", "executed")
             with (task_dir / "browser-attempts.jsonl").open("a", encoding="utf-8") as log:
                 log.write(json.dumps({"task_id": task["task_id"], **row}, ensure_ascii=False) + "\n")
             rows[query_id] = row
@@ -495,13 +569,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task-dir", required=True, type=Path)
     parser.add_argument("--wave", type=int, choices=(1, 2), default=0, help="Default: both waves")
+    parser.add_argument("--phase", choices=("verification", "fallback"), default="")
     selected = parser.add_mutually_exclusive_group()
     selected.add_argument("--query-id", default="", help="Execute one exact generated browser row, preserving normal recording and locking")
     selected.add_argument("--query-ids", nargs="+", help="Execute these exact IDs serially in plan order, with one batch initialization")
     args = parser.parse_args()
     try:
         with execution_lock(args.task_dir, "browser"):
-            report = execute_plan(args.task_dir, args.wave, query_id_filter=args.query_id, query_ids_filter=args.query_ids)
+            report = execute_plan(args.task_dir, args.wave, query_id_filter=args.query_id, query_ids_filter=args.query_ids, phase=args.phase)
         print(json.dumps({"status": report["status"], "status_path": str(args.task_dir.resolve() / "browser-execution-status.json"),
                           "query_count": len(report["queries"]), "required_user_actions": report["required_user_actions"]}, ensure_ascii=False))
     except (OSError, ValueError, ProviderError) as exc:

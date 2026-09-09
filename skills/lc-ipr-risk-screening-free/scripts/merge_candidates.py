@@ -8,6 +8,7 @@ from copy import deepcopy
 import json
 import re
 import shlex
+import sys
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -16,7 +17,7 @@ from common import (
     AMAZON_EU_COUNTRIES, add_history, assert_active_free_policy, atomic_write_json,
     ensure_object, intrinsic_patent_right_type, is_active_schema, load_json,
     normalize_text, load_skill_config, now_iso, parse_iso, SERPAPI_PROVIDER,
-    SERPER_PROVIDERS,
+    SERPER_PROVIDERS, api_discovery_patent_right_type,
     stable_id,
 )
 from annotate_materiality import apply_materiality_annotations, load_materiality_ledger
@@ -60,12 +61,17 @@ def patent_key(item: dict[str, Any]) -> str:
     number = re.sub(r"[^A-Za-z0-9]", "", number).upper()
     jurisdiction = str(item.get("jurisdiction") or number[:2]).upper()
     kind = str(item.get("kind_code") or "").upper()
-    right_type = intrinsic_patent_right_type(jurisdiction, number, kind) or str(
-        item.get("right_type") or "patent"
-    )
+    api_discovery = item.get('retrieval_workflow_revision') == 'api-first-v1' and item.get('source_index') == 'google_patents'
+    right_type = (api_discovery_patent_right_type(number, kind) or 'unknown') if api_discovery else (
+        intrinsic_patent_right_type(jurisdiction, number, kind) or str(item.get("right_type") or "patent"))
     family = str(item.get("family_id") or "")
     if (publication or re.match(r"^[A-Z]{2}(?:D|RE|PP)?\d", number)) and number:
         return f"{jurisdiction}:{right_type}:{number}"
+    if (not number and not family and item.get('retrieval_workflow_revision') == 'api-first-v1'
+        and item.get('source_index') == 'google_patents' and re.fullmatch(r'[0-9a-f]{64}', str(item.get('source_record_sha256') or ''))):
+        # A readable API card without an identifier still needs triage. Its
+        # retained source-row hash is a discovery identity, never a patent ID.
+        return f"{jurisdiction}:{right_type}:discovery:{item['source_record_sha256']}"
     return f"{jurisdiction}:{right_type}:{number}:{kind}" if number else f"{right_type}:family:{family}" if family else ""
 
 
@@ -193,6 +199,14 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
             candidates = [candidates]
         if not isinstance(candidates, list):
             continue
+        source_run = runs.get(str(entry.get('source_run_id')), {})
+        if (entry.get('provider') in {'serpapi_google_lens', 'serper_images'} and candidates
+                and all(isinstance(c, dict) and c.get('retrieval_workflow_revision') == 'api-first-v1' for c in candidates)):
+            if entry.get('provider') == 'serper_images':
+                from serper_client import retained_source_records
+            else:
+                from serpapi_lens_client import retained_source_records
+            candidates = retained_source_records({'collections': {'copyright_assets': [entry]}}, source_run)
         for item in candidates:
             if not isinstance(item, dict):
                 continue
@@ -223,7 +237,9 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
                         "application_number",
                     ) if str(item.get(field) or "").strip()
                 ), "")
-                intrinsic_type = intrinsic_patent_right_type(
+                api_discovery = (item.get('retrieval_workflow_revision') == 'api-first-v1'
+                                 and item.get('source_index') == 'google_patents')
+                intrinsic_type = api_discovery_patent_right_type(document_number, item.get('kind_code')) if api_discovery else intrinsic_patent_right_type(
                     item.get("jurisdiction") or item.get("office"),
                     document_number, item.get("kind_code"),
                 )
@@ -236,6 +252,9 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
                             "resolved": intrinsic_type,
                             "basis": "intrinsic_document_identifier",
                         })
+                elif api_discovery:
+                    item['right_type'] = 'unknown'
+                    item['right_type_status'] = 'unresolved'
                 elif source_right_type and not item.get("right_type"):
                     item["right_type"] = source_right_type
             elif source_right_type and not item.get("right_type"):
@@ -265,6 +284,18 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
             }
             if source_key:
                 source_ref["source_key"] = source_key
+            if item.get('source_index'):
+                source_ref.update({k: item[k] for k in ('source_index', 'source_record_sha256', 'source_position', 'source_collection',
+                    'source_record_hash_stage', 'original_source_record_sha256', 'normalization_provenance') if k in item})
+                source_ref['record_fields'] = {k: item[k] for k in (
+                    'publication_number', 'title', 'url', 'assignee', 'inventor', 'priority_date',
+                    'filing_date', 'publication_date', 'grant_date', 'thumbnail_url', 'image_url',
+                    'figures', 'pdf_url', 'source_identity_conflict') if k in item}
+                source_ref['payload_digest'] = source_run.get('payload_digest', '')
+                source_ref['plan_entry_sha256'] = source_run.get('plan_entry_sha256', '')
+                # Keep transport evidence separate from independent upstream
+                # indexes: Serper and SerpApi both expose Google Patents.
+                item['source_indexes'] = [item['source_index']]
             if key not in result:
                 result[key] = {**item, "normalization_key": key, "sources": [source_ref], "conflicts": {}}
                 continue
@@ -284,6 +315,7 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
                     "publication_numbers", "application_numbers", "priority_numbers",
                     "family_members", "legal_events", "detail_operations",
                     "publication_documents", "publication_relations", "evidence_refs", "verification_refs",
+                    "source_indexes",
                 } and isinstance(value, list):
                     # Retain every source reference across same-record recall
                     # and historical fact rows. References do not grant official
@@ -587,6 +619,7 @@ def coalesce_candidate_ids(items: list[dict[str, Any]]) -> None:
         "publication_numbers", "application_numbers", "priority_numbers",
         "family_members", "legal_events", "detail_operations", "evidence_refs",
         "verification_refs", "publication_documents", "publication_relations",
+        "source_indexes",
     }
     for item in items:
         candidate_id = str(item.get("candidate_id") or "").strip()
@@ -1034,7 +1067,7 @@ def _public_identifier_action(
     recall_operation = "copyright_recall" if right_type == "copyright" else "enforcement_recall"
     accepted_fields = list(PUBLIC_RECORD_IDENTIFIER_FIELDS[right_type])
     resume_argv = [
-        "python3", str(Path(__file__).resolve()), "--task-dir", str(task_dir),
+        sys.executable, str(Path(__file__).resolve()), "--task-dir", str(task_dir),
     ]
     return {
         "action_id": stable_id(

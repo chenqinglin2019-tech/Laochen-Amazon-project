@@ -1,3 +1,4 @@
+import { requireChromeExecutable } from "./platform-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { plannedReadingScope, capturePpubsDocumentPages } from "./cdp-cli.mjs";
@@ -16,7 +17,7 @@ test("minimal reading contract is exact and legacy remains unchanged", () => {
 test("representative page scope captures only requested page and does not claim full PDF", async () => {
   const { chromium } = await import("playwright-core");
   const fs = await import("node:fs/promises"), os = await import("node:os"), path = await import("node:path");
-  const browser = await chromium.launch({ executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true });
+  const browser = await chromium.launch({ executablePath: requireChromeExecutable(), headless: true });
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "ipr-reading-fixture-"));
   try {
     await fs.mkdir(path.join(dir, "screenshots"));

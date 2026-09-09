@@ -15,7 +15,7 @@
 
 客户端从 `--task-dir` 和 `--query-id` 指向的全局唯一计划行取得参数，校验任务策略、来源、操作、国家、权利类型、候选和参数绑定。任务中的元数据 `search_dimension/search_language/execution_phase/publication_scope` 不发送给外部接口。run 与 evidence 保留同一 `plan_entry_sha256`。SerpApi Patents/Lens 与 Signa 另支持下面的显式重试参数。
 
-全部第三方凭据只从 Skill 根目录 `.env` 读取，无环境变量或 Keychain 回退；后台授权只读取同目录 `config.json` 的 `backend_token`，该文件严格只含 `backend_url/backend_token`。macOS/Unix 上两文件权限均为 `0600`，缺失、格式或权限问题输出脱敏原因；可选凭据不可用只影响对应来源。`.env` 不执行 shell、不展开变量、不修改进程环境。会话 Token、Cookie 仅存内存；凭据不写入任务、原始响应、报表或命令参数。初始化与分发见 [本地配置与凭据](../INSTRUCTIONS.md#2-本地配置与凭据)。
+全部第三方凭据只从 Skill 根目录 `.env` 读取，无环境变量或 Keychain 回退；后台授权恢复原包规则：非空进程 `LAOCHEN_BACKEND_TOKEN` 优先，否则读取同目录 `config.json` 与 `config.local.json` 合并后的 `backend_token`。新建私密文件使用当前用户权限，macOS/Unix 为 `0600`；缺失、格式或权限问题输出脱敏原因；可选凭据不可用只影响对应来源。`.env` 不执行 shell、不展开变量、不修改进程环境。会话 Token、Cookie 仅存内存；凭据不写入任务、原始响应、报表或命令参数。初始化与分发见 [本地配置与凭据](../INSTRUCTIONS.md#2-本地配置与凭据)。
 
 `.env` 沿用 12 个既有字段名：`EPO_OPS_CONSUMER_KEY`、`EPO_OPS_CONSUMER_SECRET`、`EUIPO_CLIENT_ID`、`EUIPO_CLIENT_SECRET`、`JPO_API_USERNAME`、`JPO_API_PASSWORD`、`INPI_USERNAME`、`INPI_PASSWORD`、`SERPER_API_KEY`、`SIGNA_API_KEY`、`SERPAPI_API_KEY`、`RAPIDAPI_KEY`。空值表示未配置；保留 `RAPIDAPI_KEY` 字段不代表启用新来源。云端 Skill 授权与知识产权数据源账号独立，后台 Token 不存入 `.env`。
 
@@ -34,6 +34,8 @@
 ### 可调执行边界
 
 报告校验只完整重算一次可信评估，后续视图复用同次结果；执行缺口从已算覆盖派生。`decision_snapshot` 仅在单次不可变输入作用域复用纯索引/判断，退出核对内容摘要并清空；真实源文件仍核验，不能用mtime或跨运行缓存代替哈希。批次浏览器入口 `run_browser_plan.py --task-dir DIR --query-ids QRY1 QRY2` 只装载协调一次，逐条回执/检查点保持独立，每动作检查当前字节与撤销状态；不提高同源并发，部分成功遇限流也暂停该来源。
+
+`necessary-work-v1` 新任务的普通浏览器已提交失败，按现有 `source_runs` 中相同 provider、query_id 和完整 `plan_entry_sha256` 计数：初次失败后至多恢复一次，默认值 `cdp.submitted_failure_resume_limit=1` 位于 `references/runtime-config.json`。待办、批次执行器与直接浏览器入口共用同一判断；两次失败后显示 `BROWSER_SUBMITTED_FAILURE_RECOVERY_EXHAUSTED`，保留失败原因、回执引用和次数，不再自动提交。删除状态文件、修改实现摘要均不重置次数；历史无标记任务沿用原行为。成功和部分成功走已有完成／部分结果恢复机制；限流冷却、未提交动作不消耗普通失败次数，未知提交先核验，查询语法拒绝交 Agent 修计划。耗尽仅证明该准确计划行的来源执行受阻，仍须处理其他来源、分类补查和 Agent 调查后才能按阶段报告规则停止。
 
 先处理身份、主体和核心结构，再补缺失维度；宽泛查询按有证据的用途/分类拆分，原截断与未处理候选保留，不以命中一件专利终止必要召回。PDF/已登记页图/TSDR合格事实复用，不重复下载或为显示用途重查。双审可并行读取同一冻结快照，主审等两方完成；证据实质变化重开受影响项。fast/release仅在Skill修改时执行，商品排查仍运行鉴权、输入/证据/报告验证。阶段计时分别记录调度、网站、合并、评估、渲染与验证，不将来源时间字段或离线提速外推整轮速度。
 
@@ -93,6 +95,8 @@ JPO 号码核验成功不能填补 J-PlatPat 关键词、图像召回缺口；�
 ## 可选商业免费发现
 
 ### Serper
+
+`api-first-v1` 新任务采用 [API 优先契约](api-first.md)：Serper 三操作共享 30 次；有官方免费证明或用户明确现有余额授权后执行。以下 10 次及固定停止规则仅用于无新标记历史任务。
 
 初始提供 2,500 次免费查询，无需信用卡；不是每月恢复的额度。仅使用 `patents/search/images`，任务共 10 次，上限分别 4/3/3；文字 Images 不等于反向图片搜索。[官方免费额度](https://serper.dev/)
 

@@ -1,0 +1,2 @@
+# Existing retained-PDF reader; use a local virtual environment, never global pip.
+pypdf==6.10.0

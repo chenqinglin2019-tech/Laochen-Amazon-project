@@ -41,3 +41,11 @@ test("invalid runtime settings report no file contents", async (t) => {
     });
   }
 });
+
+
+test("runtime settings accept UTF-8 BOM and CRLF from Windows editors", async (t) => {
+  const root = await fixture(t);
+  const runtime = { cdp: { chrome_executable: "", user_data_dir: "~/测试 data" } };
+  await fs.writeFile(path.join(root, "references", "runtime-config.json"), "\uFEFF" + JSON.stringify(runtime, null, 2).replace(/\n/g, "\r\n"));
+  assert.deepEqual(await loadConfig(root), runtime);
+});

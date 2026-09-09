@@ -1,3 +1,4 @@
+import { resolvePythonExecutable } from "./platform-runtime.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
@@ -25,12 +26,12 @@ except ValueError as exc:
     print(str(exc))
     raise SystemExit(3)
 `;
-  const missing = spawnSync("python3", ["-c", script, JSON.stringify({})], {
+  const missing = spawnSync(resolvePythonExecutable(), ["-c", script, JSON.stringify({})], {
     encoding: "utf8", env: PYTHON_ENV,
   });
   assert.equal(missing.status, 3);
   assert.match(missing.stdout, /REGISTRY_TERMS_REVIEW_REQUIRED/);
-  const invalid = spawnSync("python3", ["-c", script, JSON.stringify({
+  const invalid = spawnSync(resolvePythonExecutable(), ["-c", script, JSON.stringify({
     terms_review: {
       schema_version: "1.0", operator_confirmed: true,
       decision: "cdp_assisted_single_action_confirmed",
@@ -45,7 +46,7 @@ test("registry recorder skips before reading capture when JPO already completed 
   const taskDir = await fs.mkdtemp(path.join(os.tmpdir(), "registry-recorder-skip-"));
   try {
     const checkedAt = new Date().toISOString();
-    const coverageResult = spawnSync("python3", [
+    const coverageResult = spawnSync(resolvePythonExecutable(), [
       "-c",
       "import json; from common import build_coverage_requirements; print(json.dumps(build_coverage_requirements(['JP'])))",
     ], {
@@ -65,7 +66,7 @@ test("registry recorder skips before reading capture when JPO already completed 
       right_type: "patent",
       requirement_ids: ["COV-JP-PATENT-VERIFY"],
     };
-    const digestResult = spawnSync("python3", [
+    const digestResult = spawnSync(resolvePythonExecutable(), [
       "-c",
       "import json,sys; from common import sha256_json; print(sha256_json(json.loads(sys.argv[1])))",
       JSON.stringify(jpoPlanEntry),
@@ -163,7 +164,7 @@ test("registry recorder skips before reading capture when JPO already completed 
       }] },
     }));
     const missingCapture = path.join(taskDir, "must-not-be-read.json");
-    const result = spawnSync("python3", [
+    const result = spawnSync(resolvePythonExecutable(), [
       RECORDER,
       "--task-dir", taskDir,
       "--provider", "jplatpat_browser",
@@ -193,7 +194,7 @@ test("registry evidence binds each local image to hash, bytes, and MIME type", a
     const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     await fs.mkdir(screenshotsDir, { recursive: true });
     await fs.writeFile(imagePath, bytes);
-    const result = spawnSync("python3", [
+    const result = spawnSync(resolvePythonExecutable(), [
       "-c",
       [
         "import json,sys",
@@ -257,7 +258,7 @@ print(result[0])
       record_number: planned.record_number,
       page_record_number: planned.record_number,
     };
-    const valid = spawnSync("python3", ["-c", script, taskDir, JSON.stringify(validCapture)], {
+    const valid = spawnSync(resolvePythonExecutable(), ["-c", script, taskDir, JSON.stringify(validCapture)], {
       encoding: "utf8", env: PYTHON_ENV,
     });
     assert.equal(valid.status, 0, valid.stderr);
@@ -269,12 +270,12 @@ print(result[0])
       { page_record_number: "DE402024999999" },
       { status: "no_result", page_record_number: "", page_query_record: "" },
     ]) {
-      const invalid = spawnSync("python3", [
+      const invalid = spawnSync(resolvePythonExecutable(), [
         "-c", script, taskDir, JSON.stringify({ ...validCapture, ...mutation }),
       ], { encoding: "utf8", env: PYTHON_ENV });
       assert.equal(invalid.status, 3, invalid.stderr);
     }
-    const boundNoResult = spawnSync("python3", [
+    const boundNoResult = spawnSync(resolvePythonExecutable(), [
       "-c", script, taskDir, JSON.stringify({
         ...validCapture, status: "no_result", page_record_number: "",
         page_query_record: planned.record_number,
@@ -332,7 +333,7 @@ print(result[0])
       record_number: planned.record_number,
       page_record_number: planned.record_number,
     };
-    const valid = spawnSync("python3", [
+    const valid = spawnSync(resolvePythonExecutable(), [
       "-c", script, taskDir, planned.record_number, JSON.stringify(capture),
     ], { encoding: "utf8", env: PYTHON_ENV });
     assert.equal(valid.status, 0, valid.stderr);
@@ -340,7 +341,7 @@ print(result[0])
       [planned.record_number, { source_key: "ttabvue" }],
       ["IPR202600123", {}],
     ]) {
-      const invalid = spawnSync("python3", [
+      const invalid = spawnSync(resolvePythonExecutable(), [
         "-c", script, taskDir, record, JSON.stringify({ ...capture, ...mutation }),
       ], { encoding: "utf8", env: PYTHON_ENV });
       assert.equal(invalid.status, 3, invalid.stderr);
@@ -383,12 +384,12 @@ print(result[0])
     for (const [kind, capture, expected] of [
       ["patent", patentCapture, patent.query_id], ["trademark", trademarkCapture, trademark.query_id],
     ]) {
-      const valid = spawnSync("python3", ["-c", script, kind, taskDir, JSON.stringify(capture)], {
+      const valid = spawnSync(resolvePythonExecutable(), ["-c", script, kind, taskDir, JSON.stringify(capture)], {
         encoding: "utf8", env: PYTHON_ENV,
       });
       assert.equal(valid.status, 0, valid.stderr);
       assert.match(valid.stdout, new RegExp(expected));
-      const stale = spawnSync("python3", [
+      const stale = spawnSync(resolvePythonExecutable(), [
         "-c", script, kind, taskDir, JSON.stringify({ ...capture, candidate_id: "CAND-STALE" }),
       ], { encoding: "utf8", env: PYTHON_ENV });
       assert.notEqual(stale.status, 0);
@@ -414,7 +415,7 @@ except ValueError as exc:
     raise SystemExit(3)
 print("accepted")
 `;
-  return spawnSync("python3", [
+  return spawnSync(resolvePythonExecutable(), [
     "-c", script,
     JSON.stringify(capture),
     JSON.stringify(planned),

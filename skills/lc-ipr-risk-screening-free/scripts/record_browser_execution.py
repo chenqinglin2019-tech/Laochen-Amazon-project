@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,110 @@ from common import load_json, path_within, sha256_file, validate_checked_at, rec
 def canonical_digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
                                      separators=(",", ":")).encode()).hexdigest()
+
+
+def ppubs_row_coverage(pages: list, total: int | None) -> dict:
+    """Reconstruct source ordinals independently from deduplicated candidates."""
+    ordinals, conflicts, families = {}, set(), {}
+    invalid, last, duplicates = 0, None, False
+    for page in pages:
+        for view in page.get("viewports") or []:
+            last = view
+            snapshot_records = {}
+            if view.get("total_hits") != total or view.get("loading") is not False:
+                invalid += 1
+            for row in view.get("rows") or []:
+                record = re.sub(r"[^A-Za-z0-9]", "", str(row.get("documentId") or "")).upper()
+                raw = str(row.get("rowNumber") or "")
+                ordinal = int(raw) if re.fullmatch(r"[0-9]+", raw) else 0
+                if (type(total) is not int or not 1 <= ordinal <= total
+                        or not re.fullmatch(r"US(?:(?:D|RE|PP)?\d{5,11})(?:[A-Z]\d?)?", record)):
+                    invalid += 1
+                    continue
+                if record in snapshot_records and snapshot_records[record] != ordinal:
+                    duplicates = True
+                snapshot_records[record] = ordinal
+                if ordinal in ordinals and ordinals[ordinal] != record:
+                    conflicts.add(ordinal)
+                else:
+                    ordinals[ordinal] = record
+                label = str(row.get("familyGroup") or "").strip()
+                if re.fullmatch(r"[+\u2212-]\s*\d*", label):
+                    families[record] = label
+    mappings = [[ordinal, record] for ordinal, record in sorted(ordinals.items())]
+    position = (last or {}).get("viewport") or {}
+    top, height, scroll = (position.get(key) for key in ("top", "height", "scroll_height"))
+    bottom = (all(type(value) in {int, float} and math.isfinite(value) for value in (top, height, scroll))
+              and top >= 0 and height > 0 and scroll >= height and top + height >= scroll - 1)
+    collapsed = sorted(record for record, label in families.items() if re.fullmatch(r"\+\s*\d+", label))
+    return {"reported_rows": total, "retrieved_rows": len(mappings), "unique_publications": len(set(ordinals.values())),
+            "ordinal_records": mappings, "duplicate_rows_observed": duplicates,
+            "invalid_observations": invalid, "conflicting_ordinals": sorted(conflicts),
+            "unexpanded_family_records": collapsed, "bottom_confirmed": bottom,
+            "complete": type(total) is int and total > 0 and len(mappings) == total
+                and all(ordinal == index for index, (ordinal, _) in enumerate(mappings, 1))
+                and not invalid and not conflicts and not collapsed and bottom}
+
+
+def ppubs_counting_complete(coverage: dict, records: list | None = None) -> bool:
+    """Check the recorded row-unit proof, preserving unique publication counts."""
+    proof = coverage.get("row_coverage")
+    if (coverage.get("coverage_counting_revision") != "ppubs-result-rows-v1" or not isinstance(proof, dict)
+            or proof.get("complete") is not True or proof.get("bottom_confirmed") is not True
+            or proof.get("duplicate_rows_observed") is not True
+            or type(coverage.get("total_hits")) is not int or coverage["total_hits"] <= 0
+            or proof.get("reported_rows") != coverage["total_hits"]
+            or proof.get("retrieved_rows") != coverage["total_hits"]
+            or proof.get("unique_publications") != coverage.get("retrieved_hits")
+            or proof.get("invalid_observations") != 0 or proof.get("conflicting_ordinals") != []
+            or proof.get("unexpanded_family_records") != [] or coverage.get("viewport_gaps") != []
+            or coverage.get("unconfirmed_family_member_count") != 0
+            or (coverage.get("family_expansion") or {}).get("gaps") != []):
+        return False
+    mappings = proof.get("ordinal_records")
+    if (not isinstance(mappings, list) or len(mappings) != coverage["total_hits"]
+            or any(not isinstance(pair, list) or len(pair) != 2 or type(pair[0]) is not int or pair[0] != index
+                   or not isinstance(pair[1], str) or not re.fullmatch(r"US(?:(?:D|RE|PP)?\d{5,11})(?:[A-Z]\d?)?", pair[1])
+                   for index, pair in enumerate(mappings, 1))):
+        return False
+    identities = {pair[1] for pair in mappings}
+    if len(identities) != coverage.get("retrieved_hits"):
+        return False
+    if records is not None:
+        actual = {re.sub(r"[^A-Za-z0-9]", "", str(row.get("publication_number") or row.get("record_number") or "")).upper()
+                  for row in records}
+        if len(records) != len(identities) or actual != identities:
+            return False
+    return True
+
+
+def _tm_zero_transition(binding: dict, rendered: str) -> bool:
+    if binding.get("binding_method") != "submitted_zero_transition_v1":
+        return False
+    transition = binding.get("zero_result_transition")
+    if not isinstance(transition, dict):
+        return False
+    before = transition.get("baseline")
+    if (not isinstance(before, dict) or type(before.get("zero_visible")) is not bool
+            or type(before.get("card_count")) is not int or before["card_count"] < 0
+            or not isinstance(before.get("result_query"), str)
+            or not isinstance(transition.get("submission_id"), str) or not transition["submission_id"]
+            or transition.get("rendered_query") != rendered or transition.get("zero_visible") is not True
+            or binding.get("result_query") != "" or binding.get("result_view") != "list"
+            or type(transition.get("observed_loading")) is not bool):
+        return False
+    from urllib.parse import urlsplit
+    current, previous = urlsplit(str(transition.get("final_url") or "")), urlsplit(str(before.get("url") or ""))
+    if (current.scheme != "https" or current.netloc != "tmsearch.uspto.gov" or current.path != "/search/search-results"
+            or previous.scheme != "https" or previous.netloc != "tmsearch.uspto.gov"):
+        return False
+    method = transition.get("method")
+    container = transition.get("result_container_transition")
+    result_cycle = (isinstance(container, dict) and all(container.get(key) is True for key in
+                    ("prior_zero_disappeared", "result_loading_observed", "result_zero_reappeared")))
+    return ((method == "result_route" and not before["zero_visible"] and not previous.path.startswith("/search/search-results"))
+            or (method == "result_replaced" and not before["zero_visible"] and bool(before["card_count"] or before["result_query"]))
+            or (method == "loading_cycle" and before["zero_visible"] and result_cycle and transition["observed_loading"] is True))
 
 
 def validate_tm_result_binding(capture: dict, observation: dict, rendered: str) -> None:
@@ -30,6 +135,8 @@ def validate_tm_result_binding(capture: dict, observation: dict, rendered: str) 
     displayed_rows = pages[-1].get("candidates") if isinstance(pages, list) and pages and isinstance(pages[-1], dict) else rows
     normalize = lambda value: re.sub(r"\s+", " ", str(value or "").replace("“", '"').replace("”", '"')).strip()
     query = normalize(rendered)
+    zero_transition = (capture.get("status") == "no_result" and total == 0 and not rows
+                       and _tm_zero_transition(binding, rendered))
     if (type(total) is not int or total < 0
             or not isinstance(rows, list)
             or binding.get("loading") is not False
@@ -37,7 +144,7 @@ def validate_tm_result_binding(capture: dict, observation: dict, rendered: str) 
             or type(binding.get("parsed_count")) is not int or binding["parsed_count"] != len(displayed_rows)
             or binding.get("result_view") not in {"list", "detail"}
             or (binding.get("result_view") == "detail" and (total != 1 or binding.get("result_index") != 1))
-            or normalize(binding.get("result_query")) not in {query, '"' + query + '"'}
+            or not zero_transition and normalize(binding.get("result_query")) not in {query, '"' + query + '"'}
             or observation.get("observed_count") != len(rows)
             or type(observation.get("observed_count")) is not int
             or (capture.get("status") == "no_result" and (total != 0 or rows))
@@ -93,11 +200,13 @@ def validate_ppubs_phrase(value: str) -> None:
         raise ValueError("UNSUPPORTED_QUERY_SEMANTICS: phrase must be a short lexical phrase, not marketing text")
 
 
-def compile_ppubs_boolean(value: str) -> str:
+def compile_ppubs_boolean(value: str, revision: str | None = None) -> str:
     tokens = re.findall(r'''"[^"\r\n]+"|\(|\)|[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*''', value.strip())
     if not tokens or "".join(tokens).replace(" ", "") != re.sub(r"\s", "", value) or len(tokens) > 80:
         raise ValueError("UNSUPPORTED_QUERY_SEMANTICS: unsupported Boolean token or excessive query")
     operators = {"AND", "OR", "NOT"}
+    if revision == "ppubs-boolean-v2" and any(re.fullmatch(r"(?:WITH|SAME|ADJ\d*|NEAR\d*|XOR)", token, re.I) for token in tokens):
+        raise ValueError("UNSUPPORTED_QUERY_SEMANTICS: unquoted PPS reserved operator; supply an explicit supported Boolean expression or revise the source terms")
     for token in tokens:
         if token.startswith('"'):
             validate_ppubs_phrase(token[1:-1])
@@ -163,7 +272,7 @@ def compile_ppubs_query(entry: dict, field: str) -> dict:
             validate_ppubs_phrase(value)
             rendered = f'"{value}"'
         else:
-            rendered = compile_ppubs_boolean(value)
+            rendered = compile_ppubs_boolean(value, entry.get("query_compiler_revision"))
         if code:
             rendered = f"({rendered}).{code}."
     design = entry.get("right_type") == "design" and strategy != "record_number"
@@ -311,6 +420,18 @@ def validate_browser_execution(capture: dict, task: dict, task_dir: Path,
         expected["result_pages_sha256"] = canonical_digest(capture.get("result_pages") or [])
     if capture.get("document_retrieval"):
         expected["document_retrieval_sha256"] = canonical_digest(capture["document_retrieval"])
+    if capture.get("rate_limit_page"):
+        page_ref = capture["rate_limit_page"]
+        from urllib.parse import urlsplit
+        allowed_hosts = {"uspto_patent_browser": {"ppubs.uspto.gov"},
+                         "uspto_tmsearch_browser": {"tmsearch.uspto.gov"},
+                         "uspto_tsdr": {"tsdr.uspto.gov", "tsdrsec.uspto.gov"}}[provider]
+        page_url = urlsplit(str(page_ref.get("url") or "")) if isinstance(page_ref, dict) else None
+        if (not isinstance(page_ref, dict) or not re.fullmatch(r"[a-fA-F0-9]{16,64}", str(page_ref.get("target_id") or ""))
+                or page_url.scheme != "https" or page_url.netloc not in allowed_hosts
+                or page_ref.get("url") != capture.get("final_url")):
+            raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: original rate-limit page identity is invalid")
+        expected["rate_limit_page_sha256"] = canonical_digest(page_ref)
     if not isinstance(receipt, dict) or any(receipt.get(k) != v for k, v in expected.items()):
         raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: receipt does not match plan or capture")
     validate_checked_at(str(receipt.get("completed_at") or ""))
@@ -347,6 +468,14 @@ def validate_browser_execution(capture: dict, task: dict, task_dir: Path,
             if entry.get("query_compiler_revision") == "tm-figurative-fields-v1":
                 validate_tm_result_pages(capture, task_dir, rendered)
             validate_tm_result_binding(capture, observations[-1], rendered)
+            if binding.get("binding_method") == "submitted_zero_transition_v1":
+                transition = binding["zero_result_transition"]
+                if (capture.get("final_url") != transition["final_url"]
+                        or not any(event.get("submission_id") == transition["submission_id"]
+                                   and event.get("submission_confirmed") is True
+                                   and event.get("result_baseline") == transition["baseline"]
+                                   for event in submissions)):
+                    raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: TM zero result lacks this attempt's confirmed transition")
             if (binding.get("query_bound") is not True or binding.get("input_value") != rendered
                     or binding.get("rendered_query") != rendered
                     or binding.get("search_mode") != "Field tag and Search builder"
@@ -419,6 +548,18 @@ def validate_browser_execution(capture: dict, task: dict, task_dir: Path,
             captured_records = {str(row.get("record_number") or "") for row in capture.get("candidates") or []}
             if observed_records != captured_records:
                 raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: candidates differ from bound result pages")
+            coverage = capture.get("result_coverage") or {}
+            if coverage.get("coverage_counting_revision") is not None:
+                proof = ppubs_row_coverage(pages, coverage.get("total_hits"))
+                if (coverage.get("coverage_counting_revision") != "ppubs-result-rows-v1"
+                        or type(coverage.get("total_hits")) is not int or coverage["total_hits"] <= 0
+                        or coverage.get("row_coverage") != proof
+                        or coverage.get("total_hits") != bindings[-1].get("total_hits")
+                        or coverage.get("retrieved_hits") != len(captured_records)
+                        or coverage.get("unretrieved_result_row_count") != max(0, proof["reported_rows"] - proof["retrieved_rows"])
+                        or coverage.get("unretrieved_document_count") != (0 if proof["complete"] else None)
+                        or (coverage.get("truncated") is False and not ppubs_counting_complete(coverage, capture["candidates"]))):
+                    raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: PPS result-row coverage differs from ordinal evidence")
     results = capture.get("candidates") if isinstance(capture.get("candidates"), list) else {
         "record_number": capture.get("record_number") or capture.get("serial_number") or "",
         "page_record_number": capture.get("page_record_number") or capture.get("page_case_number") or "",

@@ -25,13 +25,13 @@ def run_check(name, command, output, *, cwd=ROOT, env=None, timeout=180):
     env = {**offline_environment(env), "LC_IPR_FREE_SEARCH_LEDGER_DIR": str(output / (name + "-test-ledger"))}
     try:
         process = subprocess.run(command, cwd=cwd, env=env, capture_output=True,
-                                 text=True, timeout=timeout, check=False)
+                                 text=True, encoding="utf-8", errors="replace", timeout=timeout, check=False)
         text = process.stdout + "\n" + process.stderr
         code = process.returncode
     except subprocess.TimeoutExpired:
         text, code = "Verification command exceeded its bounded deadline.\n", 124
     # Logs are local test output, never a copy of the invoking process environment.
-    (output / (name + ".log")).write_text(text)
+    (output / (name + ".log")).write_text(text, encoding="utf-8")
     counts = {}
     for key in ("tests", "pass", "fail", "skipped"):
         match = re.search(r"^# " + key + r" (\d+)$", text, re.M)
@@ -99,14 +99,14 @@ def generate_estimate_fixture(output, *, scenario=False):
         review["review_context"]["evidence_digest"] = review_digest(evidence, candidates, ledger, plan, task)
     for name, value in zip(("task", "evidence", "normalized-candidates", "search-plan",
                             "materiality-annotations", "first-review", "second-review"), values):
-        (directory / (name + ".json")).write_text(json.dumps(value, ensure_ascii=False))
+        (directory / (name + ".json")).write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
     main = values[0]["images"][0]
     figure = {"path": main["path"], "sha256": sha256_file(Path(main["path"])),
               "label": "离线合成测试图", "caption": "仅用于模板和原图哈希验收，不是业务证据。"}
     (directory / "presentation.json").write_text(json.dumps({
         "product_facts": {"main_visual": figure},
         "release_visual_fixture": {"schema": "CORE-VISUAL-RELEASE/1.0", "expected_core_refs": ["EV-RELEASE-CORE"],
-            "excluded_refs": ["EV-RELEASE-ZERO", "EV-RELEASE-FAIL"], "scenario_isolation": scenario}}, ensure_ascii=False))
+            "excluded_refs": ["EV-RELEASE-ZERO", "EV-RELEASE-FAIL"], "scenario_isolation": scenario}}, ensure_ascii=False), encoding="utf-8")
     return directory
 
 
@@ -121,6 +121,7 @@ def _main():
         parser.error("Use a new or empty --output-dir; existing verification is read-only")
     output.mkdir(parents=True, exist_ok=True)
     env = offline_environment()
+    env["LC_IPR_PYTHON"] = sys.executable
     env.pop("REPORT_V2_HTML", None)
     env.pop("REPORT_ESTIMATE_HTML", None)
     env["LC_IPR_RELEASE_CHECK"] = "1" if args.mode == "release" else "0"
@@ -182,7 +183,7 @@ def _main():
                 "live_recall_acceptance": {"status": "not_run", "required_separately": True,
                     "command": "scripts/verify_recall_acceptance.py --task-dir DIR --oracle FILE --output NEW_FILE"},
                 "checks": results}
-    (output / "verification.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n")
+    (output / "verification.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(str(output / "verification.json"), flush=True)
     return 0 if complete else 1
 

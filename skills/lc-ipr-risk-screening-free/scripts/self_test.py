@@ -111,7 +111,7 @@ def command(
     succeeds: bool = True, contains: str = "",
 ) -> subprocess.CompletedProcess[str]:
     result = subprocess.run(
-        [sys.executable, *arguments], text=True, capture_output=True,
+        [sys.executable, *arguments], text=True, encoding="utf-8", capture_output=True,
         env=offline_environment(env), check=False, timeout=30,
     )
     output = f"{result.stdout}\n{result.stderr}"
@@ -134,7 +134,7 @@ def report_browser_acceptance(report_path: Path) -> None:
     env["REPORT_V2_HTML"] = str(report_path)
     test_path = SKILL_ROOT / "tools" / "cdp" / "report-v2-layout.test.mjs"
     result = subprocess.run(
-        [node, "--test", str(test_path)], text=True, capture_output=True,
+        [node, "--test", str(test_path)], text=True, encoding="utf-8", capture_output=True,
         env=env, cwd=test_path.parent, check=False, timeout=60,
     )
     output = f"{result.stdout}\n{result.stderr}"
