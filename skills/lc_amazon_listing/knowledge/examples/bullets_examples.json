@@ -1,24 +1,679 @@
 {
-  "version": "0.1",
+  "version": "2.1",
   "domain": "bullets",
+  "contract_ref": "../data_contract.md",
+  "policy_ref": "../quality_policy.json",
+  "note": "事实驱动的教学夹具；示例中的产品、用户资料及来源定位是明确提供的演示输入，不是真实商品声明。good_listing 使用完整 v2.1 契约；bad_cases.listing_patch 仅展示待替换字段。参数均应经 normalize 复算；本示例没有后端或语义验收记录，不可宣称交付已通过。 bad_cases.expected_failure 是审查类别，不是工具错误码。",
   "examples": [
     {
-      "category": ["phone_stand", "desk_accessories"],
-      "good": [
-        "【STABLE & SECURE】Weighted non-slip silicone base keeps your phone steady during video calls, no more worrying about it tipping over",
-        "【ADJUSTABLE VIEWING ANGLE】270° rotation lets you find the right angle for video calls, recipe following, or watching videos hands-free",
-        "【UNIVERSAL COMPATIBILITY】Fits most 4-10 inch phones, including large models with thick cases up to 12mm",
-        "【FOLDABLE & PORTABLE】Collapses flat to slip into your bag - perfect for travel, coffee shops, or switching between home and office",
-        "【PREMIUM BUILD QUALITY】Aluminum alloy body weighs just 3.5oz but supports phones up to 1.5lbs without wobbling"
+      "case_id": "facts_before_persuasion_and_units",
+      "input_profile": {
+        "schema_version": "2.1",
+        "listing_mode": "single",
+        "site": "US",
+        "listing_language": "English",
+        "listing_language_code": "en",
+        "brand": null,
+        "category": "Decorative bud vase",
+        "audience": {
+          "identity": [
+            "home decorators"
+          ]
+        },
+        "materials": [
+          "clear glass"
+        ],
+        "functions": [
+          "display a single flower stem"
+        ],
+        "scenes": [
+          "shelf",
+          "desk"
+        ],
+        "specs": {},
+        "limitations": [],
+        "pain_points": [
+          "need a small vase for an individual stem"
+        ],
+        "product_identity": {
+          "original_name": "天鹅造型玻璃单枝花瓶",
+          "canonical_name": "Swan-Shaped Glass Bud Vase",
+          "protected_terms": [
+            "Swan-Shaped Glass Bud Vase"
+          ]
+        },
+        "facts": [
+          {
+            "fact_id": "single_identity",
+            "field": "product_type",
+            "value": "Swan-Shaped Glass Bud Vase",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          },
+          {
+            "fact_id": "single_material",
+            "field": "material",
+            "value": "clear glass",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          },
+          {
+            "fact_id": "single_use",
+            "field": "intended_use",
+            "value": "display a single fresh or dried flower stem on a shelf or desk",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          },
+          {
+            "fact_id": "single_care",
+            "field": "care",
+            "value": "hand wash",
+            "source_ref": "example:user_supplied_product_brief",
+            "status": "confirmed"
+          }
+        ],
+        "measurements": [
+          {
+            "measurement_id": "single_height",
+            "kind": "length",
+            "subject": "product",
+            "label": "height",
+            "value": "15.24",
+            "unit": "cm",
+            "source_ref": "example:user_supplied_measurement_sheet",
+            "display_value": "6",
+            "display_unit": "in",
+            "display_text": "6 in",
+            "approximate": false
+          },
+          {
+            "measurement_id": "single_width",
+            "kind": "length",
+            "subject": "product",
+            "label": "width",
+            "value": "7.62",
+            "unit": "cm",
+            "source_ref": "example:user_supplied_measurement_sheet",
+            "display_value": "3",
+            "display_unit": "in",
+            "display_text": "3 in",
+            "approximate": false
+          }
+        ],
+        "images": [
+          {
+            "image_id": "single_front",
+            "source": "example:facts_before_persuasion_and_units:single_front",
+            "applies_to": [
+              "all"
+            ]
+          },
+          {
+            "image_id": "single_detail",
+            "source": "example:facts_before_persuasion_and_units:single_detail",
+            "applies_to": [
+              "all"
+            ]
+          }
+        ],
+        "forbidden_terms": []
+      },
+      "good_listing": {
+        "schema_version": "2.1",
+        "listing_mode": "single",
+        "site": "US",
+        "listing_language": "English",
+        "listing_language_code": "en",
+        "title": "Swan-Shaped Glass Bud Vase for Single Stems",
+        "item_highlight": "Clear glass for an individual flower stem on a shelf or desk; height 6 in",
+        "bullets": [
+          "【SWAN FORM】A glass bud vase shaped like a swan adds a defined decorative accent to a shelf or desk.",
+          "【SINGLE-STEM DISPLAY】Use the vase for an individual fresh or dried flower stem.",
+          "【CLEAR GLASS】The transparent body keeps the stem visible as part of the arrangement.",
+          "【CHECK THE FIT】The vase measures 6 in in height and 3 in in width; measure your display space before placing it.",
+          "【CARE】Hand wash the glass vase."
+        ],
+        "description": "This Swan-Shaped Glass Bud Vase displays an individual fresh or dried flower stem on a shelf or desk. The clear glass body is 6 in in height and 3 in in width. Hand wash the vase.",
+        "search_terms": "floral vessel tabletop decor",
+        "claims": [
+          {
+            "field": "title",
+            "fact_ids": [
+              "single_identity",
+              "single_use"
+            ],
+            "measurement_ids": []
+          },
+          {
+            "field": "item_highlight",
+            "fact_ids": [
+              "single_material",
+              "single_use"
+            ],
+            "measurement_ids": [
+              "single_height"
+            ]
+          },
+          {
+            "field": "bullets[0]",
+            "fact_ids": [
+              "single_identity",
+              "single_material",
+              "single_use"
+            ],
+            "measurement_ids": []
+          },
+          {
+            "field": "bullets[1]",
+            "fact_ids": [
+              "single_use"
+            ],
+            "measurement_ids": []
+          },
+          {
+            "field": "bullets[2]",
+            "fact_ids": [
+              "single_material"
+            ],
+            "measurement_ids": []
+          },
+          {
+            "field": "bullets[3]",
+            "fact_ids": [],
+            "measurement_ids": [
+              "single_height",
+              "single_width"
+            ]
+          },
+          {
+            "field": "bullets[4]",
+            "fact_ids": [
+              "single_care"
+            ],
+            "measurement_ids": []
+          },
+          {
+            "field": "description",
+            "fact_ids": [
+              "single_identity",
+              "single_material",
+              "single_use",
+              "single_care"
+            ],
+            "measurement_ids": [
+              "single_height",
+              "single_width"
+            ]
+          }
+        ],
+        "image_plan": [
+          {
+            "plan_id": "single_main",
+            "role": "main",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "白底正侧视角展示单只花瓶，主体占据画面中央；不放花材或其他未包含配件。",
+            "buyer_question": "我买到的是什么产品？",
+            "selling_point": "真实玻璃单枝花瓶及造型",
+            "visual_evidence": "主图只出现本次购买的单只花瓶，真实轮廓可与产品资料核对。",
+            "scene_intent": "寻找玻璃单枝花瓶，先确认商品身份",
+            "overlay_text": "",
+            "fact_ids": [
+              "single_identity",
+              "single_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "single_front"
+            ],
+            "body_refs": [
+              "title"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图1（主图）"
+          },
+          {
+            "plan_id": "single_secondary_1",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "使用侧面轮廓和瓶口近景，保留实物比例，不制造未给定的瓶口尺寸或结构。",
+            "buyer_question": "近看花瓶是什么造型？",
+            "selling_point": "清楚展示轮廓与瓶口",
+            "visual_evidence": "轮廓与瓶口近景直接对应实物参考图，不以文字代替结构展示。",
+            "scene_intent": "比较花瓶轮廓与瓶口外观",
+            "overlay_text": "Glass Bud Vase",
+            "fact_ids": [
+              "single_identity",
+              "single_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "single_detail"
+            ],
+            "body_refs": [
+              "bullets[0]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图2（造型特写）"
+          },
+          {
+            "plan_id": "single_secondary_2",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "左右两幅场景分别插一枝鲜花和一枝干花，画面标清花材为道具，不暗示随售或多枝容量。",
+            "buyer_question": "鲜花和干花都可以展示吗？",
+            "selling_point": "单枝鲜花或干花展示用途",
+            "visual_evidence": "两种花材的单枝摆放示例说明已确认的用途；道具范围标识清楚。",
+            "scene_intent": "寻找适合单枝鲜花或干花的花瓶",
+            "overlay_text": "For a Single Fresh or Dried Stem",
+            "fact_ids": [
+              "single_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "single_detail"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图3（花材展示）"
+          },
+          {
+            "plan_id": "single_secondary_3",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "以实物表面和边缘特写呈现玻璃；不添加防碎、认证或耐热图标。",
+            "buyer_question": "花瓶本体是什么材质？",
+            "selling_point": "实物玻璃材质可判断",
+            "visual_evidence": "实物表面与边缘特写支持玻璃材质判断，不能证明抗摔或耐热性能。",
+            "scene_intent": "确认花瓶的玻璃材质",
+            "overlay_text": "Glass Body",
+            "fact_ids": [
+              "single_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "single_detail"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图4（材质细节）"
+          },
+          {
+            "plan_id": "single_secondary_4",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "同一款花瓶分别放在空置桌角和置物架，使用实际比例，不宣称任意狭小空间均适配。",
+            "buyer_question": "适合摆在怎样的位置？",
+            "selling_point": "桌面和置物架上的单枝装饰",
+            "visual_evidence": "桌面与置物架的实际摆放画面展示已确认场景，花瓶大小保持实物比例。",
+            "scene_intent": "寻找桌面或置物架装饰花瓶",
+            "overlay_text": "For a Shelf or Desk",
+            "fact_ids": [
+              "single_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "single_front"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图5（桌面场景）"
+          },
+          {
+            "plan_id": "single_secondary_5",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "正面实物轮廓配清楚的维度箭头；套用当前子体参数，不能用某一款高度代表全系列。",
+            "buyer_question": "高度和宽度能否适合我的位置？",
+            "selling_point": "购买前核对实际尺寸",
+            "visual_evidence": "箭头方向与高度/宽度标签一致，数值取自对应本品或子体的测量记录。",
+            "scene_intent": "按实际尺寸选择适合展示空间的花瓶",
+            "overlay_text": "Height 6 in | Width 3 in",
+            "fact_ids": [],
+            "measurement_ids": [
+              "single_height",
+              "single_width"
+            ],
+            "source_image_ids": [
+              "single_front"
+            ],
+            "body_refs": [
+              "bullets[3]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图6（尺寸适配）"
+          },
+          {
+            "plan_id": "single_secondary_6",
+            "role": "secondary",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "近景展示手部温和手洗花瓶，避免添加洗碗机或抗摔暗示；无已知水温或清洁剂条件不写参数。",
+            "buyer_question": "使用后怎样清洗？",
+            "selling_point": "清楚的手洗要求",
+            "visual_evidence": "手洗动作和简短文字共同表达资料给出的护理方式。",
+            "scene_intent": "了解玻璃花瓶的清洗方法",
+            "overlay_text": "Hand Wash",
+            "fact_ids": [
+              "single_care"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "single_detail"
+            ],
+            "body_refs": [
+              "bullets[4]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "image": "图7（手洗护理）"
+          }
+        ],
+        "brand_name": null,
+        "media_strategy": "single",
+        "a_plus_plan": [
+          {
+            "plan_id": "single_aplus_1",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "宽幅展示桌面与单只花瓶，留足原生文字区域；花枝仅用于演示用途。",
+            "buyer_question": "花瓶怎样构成桌面的一处装饰？",
+            "selling_point": "玻璃花瓶与单枝花材组合",
+            "visual_evidence": "单只花瓶与单枝花材的整体场景说明用途，避免多件随售误解。",
+            "scene_intent": "寻找能展示单枝花材的桌面装饰",
+            "overlay_text": "",
+            "fact_ids": [
+              "single_identity",
+              "single_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "single_front"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块1：装饰概览",
+            "asset_type": "image",
+            "native_text": "A Glass Bud Vase for a Single Stem"
+          },
+          {
+            "plan_id": "single_aplus_2",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "连续近景展示空花瓶和插入一枝花材的状态，避免暗示自带花枝。",
+            "buyer_question": "怎样开始单枝花材布置？",
+            "selling_point": "直观说明单枝插放方式",
+            "visual_evidence": "空瓶与插入单枝花材的连续画面对照说明使用方法。",
+            "scene_intent": "了解单枝花瓶怎样使用",
+            "overlay_text": "",
+            "fact_ids": [
+              "single_use"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "single_detail"
+            ],
+            "body_refs": [
+              "bullets[0]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块2：摆放方式",
+            "asset_type": "image",
+            "native_text": "Display an Individual Fresh or Dried Stem"
+          },
+          {
+            "plan_id": "single_aplus_3",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "配图展示瓶口、侧面与底部可见轮廓；保持真实结构，不添加防滑或防倾倒效果箭头。",
+            "buyer_question": "瓶身细节是什么样的？",
+            "selling_point": "让买家观察玻璃与轮廓",
+            "visual_evidence": "瓶口、侧面和底部的实物局部可查验造型，不暗示未给定防滑或稳定性能。",
+            "scene_intent": "近距离比较花瓶材质和结构",
+            "overlay_text": "",
+            "fact_ids": [
+              "single_identity",
+              "single_material"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "single_detail"
+            ],
+            "body_refs": [
+              "description"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块3：结构观察",
+            "asset_type": "image",
+            "native_text": "See the Glass Body and Vase Shape"
+          },
+          {
+            "plan_id": "single_aplus_4",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "配图使用本款轮廓和维度箭头，原生文字列尺寸并提醒核对摆放空间；不以手机等不确定物体代替尺寸。",
+            "buyer_question": "下单前如何核对展示空间？",
+            "selling_point": "把尺寸与选择步骤连起来",
+            "visual_evidence": "实际维度箭头与原生尺寸文字对应同一测量数据。",
+            "scene_intent": "下单前核对花瓶高度与摆放位置",
+            "overlay_text": "",
+            "fact_ids": [],
+            "measurement_ids": [
+              "single_height",
+              "single_width"
+            ],
+            "source_image_ids": [
+              "single_front"
+            ],
+            "body_refs": [
+              "bullets[3]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块4：空间选择",
+            "asset_type": "image",
+            "native_text": "Height 6 in | Width 3 in"
+          },
+          {
+            "plan_id": "single_aplus_5",
+            "role": "aplus",
+            "applies_to": [
+              "all"
+            ],
+            "direction": "近景呈现手洗场景和擦净后单独摆放的花瓶；原生文字简明说明，不加入未给定的清洁方式。",
+            "buyer_question": "摆放后如何维护花瓶？",
+            "selling_point": "明确手洗而不扩张耐用承诺",
+            "visual_evidence": "手洗场景配原生护理文字，说明一致且不引入其他洗涤承诺。",
+            "scene_intent": "了解购买后的花瓶护理要求",
+            "overlay_text": "",
+            "fact_ids": [
+              "single_care"
+            ],
+            "measurement_ids": [],
+            "source_image_ids": [
+              "single_detail"
+            ],
+            "body_refs": [
+              "bullets[4]"
+            ],
+            "mobile_check": "制作后按手机宽度预览；主体轮廓清楚，最多一条主标题和短说明；尺寸箭头与标签不得重叠。当前验收策划，成图另行检查。",
+            "production_notes": "使用演示输入中明确提供的参考素材，按本构图制作；场景道具不表示随售，禁止推导未给定性能。",
+            "status": "ready",
+            "module": "模块5：日常护理",
+            "asset_type": "image",
+            "native_text": "Hand Wash the Glass Vase"
+          }
+        ],
+        "image_sets": {
+          "shared": {
+            "main": "single_main",
+            "secondary": [
+              "single_secondary_1",
+              "single_secondary_2",
+              "single_secondary_3",
+              "single_secondary_4",
+              "single_secondary_5",
+              "single_secondary_6"
+            ],
+            "a_plus": [
+              "single_aplus_1",
+              "single_aplus_2",
+              "single_aplus_3",
+              "single_aplus_4",
+              "single_aplus_5"
+            ]
+          },
+          "variants": []
+        },
+        "buyer_question_coverage": [
+          {
+            "question": "Can I use a fresh or dried stem?",
+            "status": "covered",
+            "location": "Description；附图花材展示；A+ 摆放方式",
+            "source": "local_editorial"
+          },
+          {
+            "question": "What are the vase dimensions?",
+            "status": "covered",
+            "location": "对应子体或单品第4点；尺寸图及 A+ 空间选择",
+            "source": "local_editorial"
+          },
+          {
+            "question": "How do I clean the vase?",
+            "status": "covered",
+            "location": "第5点、护理附图及 A+ 日常护理",
+            "source": "local_editorial"
+          },
+          {
+            "question": "Is the glass unbreakable?",
+            "status": "not_claimed",
+            "location": "资料无抗摔或防碎测试依据，未在文案或图片中主张",
+            "source": "local_editorial"
+          }
+        ],
+        "excluded_claims": [
+          "Unbreakable or shatterproof glass",
+          "Certified child safety",
+          "Guaranteed resistance to tipping",
+          "Dishwasher-safe care"
+        ]
+      },
+      "bad_cases": [
+        {
+          "listing_patch": {
+            "bullets[0]": "Unbreakable premium glass protects your family and lasts forever."
+          },
+          "error": "输入没有防碎、健康或寿命证据；玻璃材质不能推出这些承诺。",
+          "expected_failure": "factual_support"
+        },
+        {
+          "listing_patch": {
+            "bullets[3]": "The vase measures 15.24 cm in height and 7.62 cm in width."
+          },
+          "error": "US 上架字段使用原始厘米，未引用规范化后的展示值。",
+          "expected_failure": "measurement_consistency"
+        },
+        {
+          "listing_patch": {
+            "bullets[1]": "Flower vase bud vase glass vase flower holder perfect vase for every use."
+          },
+          "error": "关键词堆砌、无依据绝对表达，未解释本品能做什么。",
+          "expected_failure": "readability"
+        }
       ],
-      "bad": [
-        "Made of high quality material",
-        "Can be used for many purposes",
-        "Good phone stand for desk use very stable and secure with adjustable angle compatible with all phones",
-        "Buy now best price free shipping",
-        "Phone stand phone holder cell phone stand desk phone stand office phone stand"
+      "qa_example": {
+        "status": "completed",
+        "site": "US",
+        "qa_pairs": [
+          {
+            "keyword": "glass bud vase",
+            "questions": [
+              "Is this phone holder adjustable?",
+              "Is the glass unbreakable?"
+            ]
+          }
+        ],
+        "requested_keywords": [
+          "glass bud vase"
+        ],
+        "question_reviews": [
+          {
+            "question": "Is this phone holder adjustable?",
+            "keyword": "glass bud vase",
+            "relevance": "irrelevant",
+            "fact_ids": [],
+            "applies_to": [
+              "all"
+            ],
+            "disposition": "excluded"
+          },
+          {
+            "question": "Is the glass unbreakable?",
+            "keyword": "glass bud vase",
+            "relevance": "relevant",
+            "fact_ids": [],
+            "applies_to": [
+              "all"
+            ],
+            "disposition": "unsupported"
+          }
+        ]
+      },
+      "acceptance": [
+        "按购买理由排序，单条聚焦一个问题，条数与预算来自政策。",
+        "无关 QA 排除，相关但无证据的问题不生成答案。",
+        "US 所有尺寸引用 display_text 且高度、宽度不混用。",
+        "新交付使用三份标准文件；共用/逐子体图片方案按 image_sets 完整计数并绑定事实与素材。"
       ],
-      "note": "好：每条有大写卖点+具体数据+场景收益。差：模糊/堆词/促销/无结构"
+      "input_brief": "演示用户资料：美国站；无品牌；产品为天鹅造型透明玻璃单枝花瓶，可插单枝鲜花或干花，摆在桌面或置物架；高 15.24 cm，宽 7.62 cm；手洗。未提供认证、抗摔、寿命或防倾倒测试； 本例另明确提供各款正面、侧面及结构细节参考图；profile.images 的 example: 定位是此演示输入的素材标识，不是已采集的真实商品文件。"
     }
   ]
 }

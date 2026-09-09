@@ -1,0 +1,16 @@
+{
+  "purpose": "合成导入示例；只说明数据处理，不代替本品事实或自动语义判断",
+  "input_tables": [
+    {"filename": "keywords-a.csv", "rows": [["关键词", "月搜索量"], ["Black Cat Door Corner", ""], ["lightweight cat decor", "0"], ["猫咪门角装饰", "10"], ["cat’s door topper", "100"]]},
+    {"filename": "keywords-b.csv", "rows": [["Keyword", "Monthly Searches"], ["black cat door corner", "20"], ["cat's door topper", "120"]]}
+  ],
+  "expected_counts": {"raw_records": 6, "unique": 4, "duplicates": 2},
+  "expected_metrics": [
+    {"keyword": "Black Cat Door Corner", "monthly_searches": 20, "note": "另一条来源未知，不覆盖已知值；两个原始行仍保留"},
+    {"keyword": "lightweight cat decor", "monthly_searches": 0, "note": "真实零值保留，不因包含 light 删除"},
+    {"keyword": "猫咪门角装饰", "monthly_searches": 10, "note": "非英文正常导入，使用位置由后续目标语言及意图判断"},
+    {"keyword": "cat’s door topper", "monthly_searches": null, "note": "安全规范化后同词存在两个已知值，保留各来源，聚合标未知及 metric_conflict"}
+  ],
+  "next_step": "prepare 生成未分类记录；结合产品事实逐词分类，再 check/export。imported 状态不等于筛词或最终验收通过。",
+  "site_routing": {"US": "筛词与 05 候选通过后使用 backend_cli.py qa，保留真实请求及原始响应", "other_supported_sites": "06_qa.json 使用 skipped、真实 site、rufus_us_only、qa_pairs=[]；最终 validate 仍执行"}
+}
