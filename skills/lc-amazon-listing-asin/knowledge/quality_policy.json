@@ -1,0 +1,118 @@
+{
+  "version": "2.1",
+  "checked_at": "2026-09-08",
+  "default_limits": {
+    "title_max_chars": 75,
+    "item_highlight_max_chars": 125,
+    "bullets_count": 5,
+    "bullet_max_chars": 500,
+    "bullets_total_max_chars": 1000,
+    "search_terms_max_bytes": 249
+  },
+  "limit_provenance": {
+    "title_max_chars": {
+      "kind": "platform",
+      "source_id": "amazon_title_2026",
+      "scope": "non-media; verify category exceptions before use"
+    },
+    "item_highlight_max_chars": {
+      "kind": "platform",
+      "source_id": "amazon_title_2026"
+    },
+    "bullets_count": {
+      "kind": "skill_default",
+      "note": "本 skill 固定交付 5 条，不声称全类目统一平台数量"
+    },
+    "bullet_max_chars": {
+      "kind": "compatibility",
+      "note": "现有后端兼容预算；目标类目更严格时另行核验"
+    },
+    "bullets_total_max_chars": {
+      "kind": "editorial_budget",
+      "note": "内部简洁写作预算，不宣称全部类目平台硬限制"
+    },
+    "search_terms_max_bytes": {
+      "kind": "conservative_budget",
+      "note": "UTF-8 含空格严格低于 250 字节，不宣称所有站点相同额度"
+    }
+  },
+  "sites": {
+    "US": {
+      "language": "English",
+      "language_code": "en",
+      "length_unit": "in",
+      "qa_enabled": true
+    },
+    "UK": {
+      "language": "English",
+      "language_code": "en",
+      "length_unit": "source",
+      "qa_enabled": false
+    },
+    "CA": {
+      "language": "English",
+      "language_code": "en",
+      "length_unit": "source",
+      "qa_enabled": false
+    },
+    "IN": {
+      "language": "English",
+      "language_code": "en",
+      "length_unit": "source",
+      "qa_enabled": false
+    },
+    "JP": {
+      "language": "Japanese",
+      "language_code": "ja",
+      "length_unit": "source",
+      "qa_enabled": false
+    },
+    "DE": {
+      "language": "German",
+      "language_code": "de",
+      "length_unit": "source",
+      "qa_enabled": false
+    },
+    "FR": {
+      "language": "French",
+      "language_code": "fr",
+      "length_unit": "source",
+      "qa_enabled": false
+    },
+    "IT": {
+      "language": "Italian",
+      "language_code": "it",
+      "length_unit": "source",
+      "qa_enabled": false
+    },
+    "ES": {
+      "language": "Spanish",
+      "language_code": "es",
+      "length_unit": "source",
+      "qa_enabled": false
+    }
+  },
+  "semantic_checks": [
+    "identity",
+    "readability",
+    "factual_support",
+    "language",
+    "variant_scope",
+    "qa_relevance",
+    "keyword_usage"
+  ],
+  "media_checks": [
+    "image_truth"
+  ],
+  "media_limits": {
+    "main_count": 1,
+    "secondary_count": 6,
+    "a_plus_min_images": 5,
+    "a_plus_default_images": 5
+  },
+  "media_limit_provenance": {
+    "kind": "user_requirement",
+    "source_id": "user_delivery_media_v21",
+    "note": "本次确认的创意交付数量，不作为 Amazon 平台统一图片数量声明"
+  }
+}

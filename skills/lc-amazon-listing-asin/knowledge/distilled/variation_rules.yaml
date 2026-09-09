@@ -1,0 +1,58 @@
+version: '2.1'
+domain: variants
+contract_ref: ../data_contract.md
+policy_ref: ../quality_policy.json
+sources_ref: ../sources.json
+rules:
+- id: family_activation
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: 用户明确提供多子体及变体信息时用 family 模式，否则单品模式。只保留实际输入组合和顺序，不自动生成颜色与尺寸的笛卡尔积。
+- id: variant_identity
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: 保留原 SKU/ASIN；缺少时为 null。variant_id 分配稳定、安全的内部编号，不伪造卖家 SKU；所有产物用同一编号。报告以 SKU 或内部编号加完整变体属性清楚标注每个子体。
+- id: family_common_facts
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: 用户明确说明适用于全系列，或所有已提供子体均有一致来源证实的事实，才可放根级 facts。某些子体已知、其余未知不等于共同事实；每个子体有效事实是根级加本子体，禁止借用兄弟子体。
+- id: variation_theme_check
+  type: required
+  source_id: amazon_variation_guide
+  prompt_fragment: variation_dimensions 保留用户指定顺序，未指定则采用经确认的主题顺序。variation_theme 保存实际类目来源及核验状态；主题外商品类型、材质、功能差异必须定位并说明，不能仅凭通用指南宣布合法组合。
+- id: real_attribute_names
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: attributes.value 保留输入，display/title_value 为准确本地化表达。不将 Black 1 猜成 Dark Grey；真实值无法确定时列出待补信息。尺寸属性通过 measurement_id 复用该子体规范化展示值。
+- id: parent_title_scope
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: 父标题是共同商品描述，保留完整品名，不包含具体颜色、尺码、容量、口味等变体值、价格、库存或具体包装数量。禁的是这些属性值，不是所有数字；已证实共同材质中的 304 等数字正常保留。
+- id: child_title_template
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: 用单一 title_template，每个 variation_dimensions 插槽恰好出现一次且顺序一致。先预留完整品名及最长属性组合的字符，再统一精简次要共同文本。无法兼顾预算和身份时报告冲突，不删除关键变体值或单位。
+  limit_ref: default_limits.title_max_chars
+- id: parent_highlight_scope
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: 父 Highlight 只写全系列事实，不含具体变体值；系列选择范围只能根据实际提供的子体描述。
+- id: child_highlight_mapping
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: 每个子体一条 item_highlight 字符串，与标题同项展示。允许仅颜色不同的子体共享真实卖点，不推导颜色决定的功能、人群或健康优势。
+  limit_ref: default_limits.item_highlight_max_chars
+- id: child_content_resolution
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: shared_content 包含全部成立的 bullets/description/search_terms；content_overrides 只覆盖必要字段，bullets 整组替换。claims 记录继承后完整正文，图片
+    body_refs 指向对应子体解析后的字段。
+- id: family_complete_output
+  type: required
+  source_id: user_family_rules
+  prompt_fragment: 一次性完整输出父标题与父 Highlight、全部子体标题与 Highlight、共享正文和必要覆盖、媒体策划与适用子体。不得使用其他同理、省略号或抽样子体替代交付。局部校验失败时整组不能通过。
+- id: family_media_sets
+  type: required
+  source_id: user_delivery_media_v21
+  prompt_fragment: 系列始终交付共用完整 1 主图+6 附图+至少 5 张 A+ 图片，并按输入顺序交付逐子体方案。外观不同或不能确认时每子体独立 1+6；外观一致且仅尺寸/数量不同并有 appearance_assessment 来源时仅主图独立，附图/A+
+    共用创意、逐子体绑定参数和素材。两类模式均不另建子体 A+；不能自动新增未给定子体。

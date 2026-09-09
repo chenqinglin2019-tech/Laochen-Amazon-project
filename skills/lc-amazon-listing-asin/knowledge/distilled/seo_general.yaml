@@ -1,67 +1,59 @@
-# SEO 通用规则（跨字段）
-# 来源：Amazon A9/A10 算法逻辑 + GEO 优化
-
-version: 0.1
+version: '2.0'
 domain: general
-applies_to:
-  category: ["*"]
+contract_ref: ../data_contract.md
+policy_ref: ../quality_policy.json
+sources_ref: ../sources.json
 rules:
-  - id: seo_keyword_placement_priority
-    type: soft
-    prompt_fragment: |
-      关键词权重分配（从高到低）：
-      1. Title — 权重最高，核心词必须在这里
-      2. Bullet Points — 次高，属性词和长尾词
-      3. Search Terms — 补充标题/bullets 没覆盖的词
-      4. Description — 权重最低，但有助于 A10 语义理解
-      
-      不要在低权重位置重复高权重位置已有的词。
-    source: "Amazon A10 algorithm"
-
-  - id: seo_no_stuffing
-    type: soft
-    prompt_fragment: |
-      关键词密度控制：
-      - 同一个词在同一字段中最多出现 2 次
-      - 读起来必须通顺自然
-      - 如果为了塞词导致句子不通顺，宁可不塞
-      Amazon 会惩罚明显的关键词堆砌。
-    source: "Amazon A10 anti-spam"
-
-  - id: seo_phrase_match
-    type: soft
-    prompt_fragment: |
-      尽量保持关键词短语的完整性（phrase match）。
-      "phone stand for desk" 比 "phone desk stand" 更好，
-      因为买家搜索时是按完整短语搜的。
-      但不要为了保持短语而牺牲可读性。
-    source: "Amazon search matching"
-
-  - id: geo_rufus_optimization
-    type: soft
-    prompt_fragment: |
-      GEO/Rufus 优化（仅 US 站且 qa.json 已完成）：
-      - Amazon Rufus AI 会从 listing 中提取信息回答买家问题
-      - 确保 listing 中包含 qa.json 里问题的答案信息
-      - 用陈述句而非疑问句（Rufus 需要提取答案，不是问题）
-      - 具体数据比模糊描述更容易被 Rufus 引用
-      - 非 US 的 qa.json 为 skipped，不得编造问题或套用 US 问答
-      示例：
-        差：Our stand is very stable.
-        好：Weighted silicone base prevents tipping on surfaces up to 15° incline.
-    source: "GEO paper (待补充)"
-
-  - id: cosmo_intent_chain
-    type: soft
-    prompt_fragment: |
-      COSMO 场景意图链路：
-      每个卖点都应该体现完整链路：
-        场景意图(为什么需要) → 产品能力(怎么满足) → 用户收益(得到什么)
-      
-      示例：
-        场景：Video calls at desk (场景意图)
-        能力：Adjustable 270° rotation (产品能力)
-        收益：Always find the perfect angle, no more awkward camera positions (用户收益)
-      
-      不要只写能力（"270° rotation"），要连上场景和收益。
-    source: "COSMO paper (待补充)"
+- id: evidence_order
+  type: required
+  source_id: user_product_identity
+  prompt_fragment: 产品身份与确认事实优先于平台格式规则之外的流量建议。官方平台要求、研究论文结论、内部写作策略分开标明来源与范围；sources.json 是出处登记，quality_policy.json
+    是数字预算唯一配置。
+- id: identity_not_downgraded
+  type: required
+  source_id: user_product_identity
+  prompt_fragment: 原始品名与 protected_terms 是必保产品身份；后台商品类型枚举、竞品主词和所谓官方关键词均不能代替用户实际产品。若术语存在歧义，先核实本品身份，不为搜索量强行更名。
+- id: keywords_candidate_pool
+  type: required
+  source_id: user_product_identity
+  prompt_fragment: 筛词流程必须执行 keyword_filter_rules.yaml，以统一工具导出的 eligible 词作为候选池；deferred/excluded 不进入投放或 QA。04_kw_tagged 保留旧标签以兼容接口，同时增加 role、intent_group、source、traffic_percentage 和
+    applies_to。identity 优先级不受旧 high/relevant 标签限制；05_title_keywords 记录实际投放计划，不是标题必须覆盖词数的配额。
+- id: keywords_intent_group
+  type: editorial
+  source_id: skill_editorial_v2
+  prompt_fragment: 归并同义、词序变化和同一需求表达，使用一致的保留标准。以本品相关性和实际用户词汇筛选，再参考真实流量；无流量数据标未知。每个选词说明对应本品事实或需求，不机械保留 gifts、kids
+    等泛词。
+- id: competitor_boundary
+  type: required
+  source_id: user_product_identity
+  prompt_fragment: 竞品 ASIN 整组扩词和问答仅帮助理解搜索及需求，不能证明本品材质、尺寸、认证、性能、适配或变体组合；禁止要求本品文案覆盖竞品整组共性。
+- id: seo_plain_language
+  type: editorial
+  source_id: seo_guide
+  prompt_fragment: 标题帮助识别产品，五点支持购买判断，长描补充信息，后台词补充表达。前台允许自然重复品名，不写固定字段权重、关键词重复次数或相同词序必然优于自然表达的伪官方规则。
+- id: cosmo_relation_planning
+  type: editorial
+  source_id: cosmo_paper
+  prompt_fragment: COSMO 研究表明产品与用户需求、使用场景之间的常识关系可用于电商搜索推荐。本 skill 将其转化为卖点规划：买家需求—产品能力—事实依据—适用场景。此转化是工程推导，不是论文规定的卖家字段模板或已公开排名公式。
+- id: geo_research_boundary
+  type: editorial
+  source_id: geo_paper
+  prompt_fragment: GEO 是通用生成式检索研究，采用具体、流畅、有证据的表达作为写作启发；不照搬实验百分比，不承诺 Amazon 收录或排名提升，不添加无法验证的引文、统计或权威口吻。
+- id: qa_relevance_gate
+  type: required
+  source_id: skill_ai_answerability
+  prompt_fragment: 06_qa.raw.json 保存 US 后端原始响应；06_qa.json 保存 requested_keywords 和逐题 question_reviews。irrelevant/uncertain
+    不写答案，相关而缺事实为 unsupported；自拟问题不得冒充后端结果。只有 answered 的问题才进入已覆盖清单。
+- id: ai_all_sites
+  type: required
+  source_id: skill_tool_scope
+  prompt_fragment: 清楚的身份、规格、适配和限制适用于所有站点。qa 接口仅在 US 启用是现有工具范围，不是非 US 不能做清晰问答表达或 AI 信息优化的依据。非 US 按契约写 skipped
+    状态，不冒用 US 采集数据。
+- id: no_image_ranking_formula
+  type: editorial
+  source_id: amazon_visual_search
+  prompt_fragment: 视觉购物能力不等于图片嵌入关键词必然被索引或加权。用真实图片证明购买理由，关键参数同步在正文；记录画面、事实和需求的对应，不承诺搜索或 AI 排名效果。
+- id: semantic_review_required
+  type: required
+  source_id: skill_editorial_v2
+  prompt_fragment: 机器检查只能确认结构、数值和引用范围，不能证明语序自然或营销承诺成立。生成后独立复审身份、可读性、事实、语言、子体范围、问题相关性、实际关键词使用和画面真实性；不得以文件已生成替代验收通过。

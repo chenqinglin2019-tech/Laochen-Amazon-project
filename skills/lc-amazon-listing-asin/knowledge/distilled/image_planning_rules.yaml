@@ -1,0 +1,62 @@
+version: '2.1'
+domain: media
+contract_ref: ../data_contract.md
+policy_ref: ../quality_policy.json
+sources_ref: ../sources.json
+rules:
+- id: media_contract
+  type: required
+  source_id: user_delivery_media_v21
+  prompt_fragment: image_plan/a_plus_plan 每项按 data_contract.md 保存唯一 plan_id、image 或 module、中文 direction、role、applies_to、买家问题、卖点、画面证据、场景/搜索意图、overlay_text、引用、body_refs、mobile_check
+    和 production_notes。A+ 原生文字用 native_text；新输出统一 a_plus_plan，旧 aplus_plan 只读兼容，两字段冲突报错。
+- id: media_sets
+  type: required
+  source_id: user_delivery_media_v21
+  prompt_fragment: image_sets 显式列出 shared 和按输入顺序的 variants，每套 main 恰 1 个、secondary 恰 6 个，A+ 只放 shared。单品 media_strategy=single；系列存在外观差异或未确认时
+    per_variant_full，各子体独立 1+6；有来源确认外观相同且仅尺寸/数量不同时 shared_secondary，各子体仅独立主图，6 附图与 A+ 引用共用创意并列清参数/素材替换。所有创意都必须归组，不能只给部分子体示例。
+- id: media_numbering_aplus_count
+  type: required
+  source_id: user_delivery_media_v21
+  prompt_fragment: 每套主附图从图1（主图）至图7编号，跨组 plan_id 仍唯一。A+ 默认 5 张图片，有真实信息需要时增加；每项 module 编号和 asset_type=image/text 明确，纯文字 FAQ 不计图片。子体不独立策划
+    A+。
+- id: media_selling_reason
+  type: editorial
+  source_id: user_delivery_media_v21
+  prompt_fragment: 每张图回答一个主要购买问题，用真实画面证明主要卖点。单品/系列共用均固定 1 主图、6 附图、至少 5 张 A+ 图片；按购买决策安排不同画面和信息任务，不复制同一句卖点凑数。资料不足时保留必需位置并标 pending，说明缺口，不能减图或编造后宣布完成。
+- id: media_main
+  type: required
+  source_id: user_image_planning
+  prompt_fragment: 主图准确展示该可售子体的实物、数量及随附配件，overlay_text/native_text 均为空。执行前核验目标类目要求；不把未含道具当配件。全系列主图为统一构图方向，具体产品颜色、数量和规格按子体绑定，不能将全系列画成一个购买套装。
+- id: media_variant_scope
+  type: required
+  source_id: user_delivery_media_v21
+  prompt_fragment: 共用模板 applies_to=all 的本体只引用根级共性和通用素材。参数或实物素材不同通过 variant_bindings 按输入顺序完整覆盖全部子体，每个绑定替换模板对应字段并只引用根级与自身事实/素材；不把兄弟子体数值合并成共同事实。
+- id: media_material_availability
+  type: required
+  source_id: user_delivery_media_v21
+  prompt_fragment: source_image_ids 只能引用资料实际提供且范围匹配的素材。需要图片而解析后缺少素材时，production_notes 写清子体、角度或部件缺口，验收保持 incomplete；模板本体可留空但完整绑定后每个子体都须有自己的适用素材。纯文字模块不要求图片素材。
+- id: media_text_sync
+  type: required
+  source_id: user_unit_localization
+  prompt_fragment: overlay_text 或 native_text 含参数时复用 measurements.display_text，并在 body_refs 对应正文写出相同参数及 measurement_ids。尺寸图保留维度标签；US
+    正文、尺寸图、A+ 都用同一英寸结果。参数无法辨认时不按图片比例猜数值。
+- id: media_scene_truth
+  type: editorial
+  source_id: cosmo_paper
+  prompt_fragment: 人物、环境、道具、安装方式、比例与适配对象必须符合确认事实。画面表达真实用途，不为覆盖 COSMO 场景展示无法成立的安装、承重、兼容性或效果。
+- id: media_ai_boundary
+  type: editorial
+  source_id: amazon_visual_search
+  prompt_fragment: 画面可帮助视觉匹配和购物理解，但官方视觉能力介绍不支持图片嵌入关键词必然获得排名加权的结论。重要信息同时出现在自然、可读正文中，避免大段关键词嵌字。
+- id: media_aplus
+  type: editorial
+  source_id: amazon_aplus_design
+  prompt_fragment: 默认按基础 A+ 模块能力策划；优先将目标语言原生模块文案保存于 native_text，实际需要嵌在图片中的文字才写入 overlay_text，否则 overlay_text 为空。production_notes 说明原生文字与配图的制作方式。共同模块只写系列共性，变体选购模块准确对应实际组合。替代文本用于描述画面，不当作后台关键词槽；制作或上传前核验可用字段。
+- id: media_language_mobile
+  type: required
+  source_id: user_image_planning
+  prompt_fragment: 策划说明中文，overlay_text 和 native_text 使用 listing_language，主图不加图片嵌字。mobile_check 写具体字级层次、文字量、主体比例和手机端检查点，不只填通过；无法在当前阶段实际检查成图时明确记录为制作验收要求。
+- id: media_semantic_review
+  type: required
+  source_id: skill_editorial_v2
+  prompt_fragment: 引用合法不等于画面或承诺真实。独立复审实际范围、未含配件、场景、比例、参数与正文同步；最终渲染图不存在时只验收策划，不能宣称已完成成图视觉验收。
