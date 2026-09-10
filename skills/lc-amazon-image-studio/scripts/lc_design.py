@@ -195,12 +195,52 @@ def design_prompt_lines(job: dict) -> list[str]:
 
 def validate_design(job: dict) -> list[str]:
     errors = []
+    profile = job.get("prompt_profile", "legacy")
+    if not isinstance(profile, str) or profile not in {"legacy", "images_2_5_v1"}:
+        errors.append("prompt_profile must be legacy or images_2_5_v1")
+    if "prompt_edit" in job:
+        edit = job["prompt_edit"]
+        if (profile != "images_2_5_v1" or not isinstance(edit, dict)
+                or set(edit) != {"target_path", "failures"}
+                or not isinstance(edit.get("target_path"), str) or not edit["target_path"].strip()
+                or Path(edit["target_path"]).is_absolute() or ".." in Path(edit["target_path"]).parts
+                or "\x00" in edit["target_path"] or "://" in edit["target_path"]
+                or not isinstance(edit.get("failures"), list) or not edit["failures"]
+                or any(not isinstance(item, str) or not item.strip() for item in edit["failures"])):
+            errors.append("prompt_edit requires images_2_5_v1, a project-relative target_path and nonempty failures")
     from lc_title_effects import validate_config
     errors.extend(validate_config(job))
     mode = resolve_text_mode(job)
     if not isinstance(mode, str) or mode not in TEXT_MODES:
         errors.append("text_mode must be none, local_overlay or model_native")
     value = job.get("copy")
+    reason = job.get("model_native_reason")
+    if isinstance(reason, dict) and reason.get("kind") == "native_poster":
+        if profile != "images_2_5_v1" or mode != "model_native":
+            errors.append("native_poster requires prompt_profile images_2_5_v1 and text_mode model_native")
+        if not isinstance(reason.get("notes"), str) or not reason["notes"].strip():
+            errors.append("native_poster requires specific model_native_reason notes")
+        if isinstance(value, dict) and any(character.isnumeric() for text in value.values()
+                                          if isinstance(text, str) for character in text):
+            errors.append("native_poster cannot contain numeric copy; use local_overlay")
+        embedding = job.get("embedding_decision")
+        if isinstance(embedding, dict) and embedding.get("kind") == "surface_embedded_3d":
+            errors.append("native_poster is flat typography; surface_embedded_3d requires an artistic lettering reason")
+        layouts = [_layout(job)]
+        brief = job.get("design_brief")
+        if isinstance(brief, dict) and isinstance(brief.get("layout"), dict):
+            layouts.append(brief["layout"])
+        intents = job.get("image_intent", [])
+        intents = [intents] if isinstance(intents, str) else intents if isinstance(intents, list) else []
+        precise_intents = {"dimensions", "dimension", "specifications", "specification", "steps",
+                           "step_by_step", "how_to", "faq", "assembly", "installation", "setup"}
+        explicit_intents = {re.sub(r"[\s-]+", "_", item.strip().casefold())
+                            for item in [*intents, job.get("copy_role")]
+                            if isinstance(item, str)}
+        if (explicit_intents & precise_intents or any(
+                layout.get("template") in ("dimensions", "components") or layout.get("recipe") == "steps"
+                or layout.get("faq") for layout in layouts)):
+            errors.append("native_poster cannot serve dimensions, steps, FAQ or other explicit precision-copy intents; use local_overlay")
     if value is not None and mode != "model_native":
         errors.append("job.copy is model_native-only; local copy belongs to layout")
     if mode == "model_native":

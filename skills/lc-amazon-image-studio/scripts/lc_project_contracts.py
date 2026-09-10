@@ -183,9 +183,15 @@ def style_job_issues(job: dict) -> list[str]:
     from lc_design import resolve_text_mode, has_marketing_text
     if resolve_text_mode(job) == "model_native":
         reason = job.get("model_native_reason")
-        if (not isinstance(reason, dict) or reason.get("kind") not in {"artistic_lettering", "integrated_material"}
+        allowed = {"artistic_lettering", "integrated_material"}
+        if job.get("prompt_profile") == "images_2_5_v1":
+            allowed.add("native_poster")
+        if (not isinstance(reason, dict) or not isinstance(reason.get("kind"), str) or reason["kind"] not in allowed
                 or not isinstance(reason.get("notes"), str) or not reason["notes"].strip()):
-            errors.append("model_native requires model_native_reason kind artistic_lettering/integrated_material and specific notes; ordinary copy uses local_overlay")
+            kinds = "artistic_lettering/integrated_material" + ("/native_poster" if "native_poster" in allowed else "")
+            guidance = ("; native_poster is limited to approved flat poster copy" if "native_poster" in allowed
+                        else "; ordinary copy uses local_overlay")
+            errors.append(f"model_native requires model_native_reason kind {kinds} and specific notes{guidance}")
     elif has_marketing_text(job) and (job.get("layout") or {}).get("version") != 3:
         errors.append("project typography requires layout.version=3; migrate the layout explicitly before adopting the contract")
     return errors
@@ -375,11 +381,11 @@ def _contains(text, phrase):
     return bool(re.search(r"(?<!\w)" + re.escape(_normal(phrase)) + r"(?!\w)", _normal(text)))
 
 
-def project_contract_report(manifest: dict) -> dict:
+def project_contract_report(manifest: dict, job_ids=None) -> dict:
     """Set-wide copy gate; no automatic shortening or fabricated fact reviews."""
     errors = validate_project_contracts(manifest)
     if errors:
-        return {"passed": False, "issues": errors, "jobs": []}
+        return {"passed": False, "issues": errors, "shared_issues": errors, "jobs": []}
     budget = ({**default_copy_budget(), **manifest["copy_budget"]} if "copy_budget" in manifest else None)
     jobs, total, used_facts, all_text = [], 0, set(), []
     style = resolved_style_contract(manifest)
@@ -436,7 +442,14 @@ def project_contract_report(manifest: dict) -> dict:
         for fact in budget.get("required_fact_ids", []):
             if fact not in used_facts:
                 errors.append(f"COPY_REQUIRED_FACT_MISSING: {fact}; retain a visible block bound to this fact")
-    report.update(passed=not errors, issues=errors)
+    # Set-wide copy totals remain a delivery gate, not a generation queue gate.
+    # A malformed shared contract is rejected above; per-image defects stay local.
+    report.update(passed=not errors, issues=errors, shared_issues=[])
+    if job_ids is not None:
+        selected = set(job_ids)
+        report["jobs"] = [row for row in jobs if row["id"] in selected]
+        report["issues"] = [f"{row['id']}: {issue}" for row in report["jobs"] for issue in row["issues"]]
+        report["passed"] = not report["issues"]
     return report
 
 
@@ -447,7 +460,7 @@ def preflight_project_contracts(manifest: dict, base: Path, jobs: list[dict] | N
     raster contrast and text fit remain mandatory in the existing renderer.
     """
     report = project_contract_report(manifest)
-    if not report["passed"]:
+    if report.get("shared_issues"):
         return report
     from lc_design import resolve_text_mode
     import lc_layout as renderer
@@ -485,6 +498,8 @@ def preflight_project_contracts(manifest: dict, base: Path, jobs: list[dict] | N
         except (ValueError, TypeError, KeyError, OSError) as exc:
             issue = f"{job.get('id')}: TYPOGRAPHY_PREFLIGHT: {exc}"
             report["issues"].append(issue)
+            row = next(row for row in report["jobs"] if row["id"] == job.get("id"))
+            row["issues"].append(issue)
             checks.append({"id": job.get("id"), "passed": False, "issue": issue})
     report.update(passed=not report["issues"], typography_preflight=checks)
     return report

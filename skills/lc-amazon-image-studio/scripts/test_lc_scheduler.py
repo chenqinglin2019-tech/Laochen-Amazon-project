@@ -90,6 +90,15 @@ class SchedulerTests(unittest.TestCase):
         m["jobs"][0]["title_effect_attempts"][0]["status"] = "returned"
         self.assertEqual(s.state(m)["model_capacity"], 1)
 
+    def test_busy_model_slot_does_not_block_local_compose(self):
+        m = manifest()
+        s.set_tool_capacity(m, 1)
+        m["jobs"][1]["status"] = "generating"
+        m["jobs"].append({"id": "local", "status": "pending", "render_mode": "pixel_composite"})
+        self.assertEqual(s.state(m)["model_capacity"], 0)
+        dispatch = p.execution_plan(m)["dispatch"]
+        self.assertEqual([(job["id"], job["action"]) for job in dispatch], [("local", "compose")])
+
     def test_rate_limit_late_success_and_retry_after(self):
         m = manifest()
         a, late = attempt(m), attempt(m, "late")
@@ -304,6 +313,23 @@ class DispatchIntegrationTests(unittest.TestCase):
         self.assertEqual(self.m, before)
         self.assertFalse((self.base / self.secondary()["raw_output"]).exists())
 
+    def test_reserved_call_records_start_and_ingests_after_sibling_rate_limit(self):
+        p.transition_job(self.m, SECONDARY_ID, "generating", NOTE, self.base)
+        identifier = self.secondary()["active_attempt_id"]
+        invoked_at = time.time()  # The synthetic tool is already in flight.
+        self.m["scheduler_policy"] = s.default_policy()
+        s.record_failure(self.m, attempt(self.m, "synthetic-sibling"), "429", retry_after_seconds=60)
+        self.assertEqual(self.m["concurrency"], 1)
+        self.assertEqual(s.state(self.m)["model_capacity"], 0)
+        event = w.attempt_event(self.m, SECONDARY_ID, identifier, "tool_started", invoked_at)
+        self.assertEqual(event["tool_started_at"], invoked_at)
+        artifact = self.base / "synthetic-late-event-output.png"
+        Image.new("RGB", (1600, 1600), "white").save(artifact)
+        result = w.ingest(self.m, self.base, SECONDARY_ID, artifact, identifier, tool_returned_at=time.time())
+        self.assertEqual(result["status"], "generated")
+        self.assertEqual(self.secondary()["generation_attempts"][-1]["status"], "ingested")
+        self.assertGreater(s.state(self.m)["retry_after_seconds"], 0)
+
     def test_new_scheduler_policy_does_not_change_generation_fingerprint(self):
         before = p.generation_fingerprint(self.m, self.secondary(), self.base)
         self.m.update(scheduler_policy=s.default_policy(), concurrency=4,
@@ -388,6 +414,19 @@ class DispatchIntegrationTests(unittest.TestCase):
         self.assertEqual([value["id"] for value in result["dispatch"]], ["04_next"])
         self.assert_dispatch_paths(result)
 
+    def test_diagnosed_job_does_not_consume_the_only_dispatch_slot(self):
+        from lc_runtime_status import build_status, record_command_failure
+        self.prepared_queue()
+        s.set_tool_capacity(self.m, 1)
+        for _ in range(2):
+            record_command_failure(self.m, "plan", "synthetic-current-input", "synthetic layout failure",
+                                   job_ids=["03_next"])
+        before = copy.deepcopy(self.m)
+        result = build_status(self.m, self.base)
+        self.assertEqual([value["id"] for value in result["dispatch"]], ["04_next"])
+        self.assertEqual(result["next_actions"][0]["action"], "diagnose")
+        self.assertEqual(self.m, before)
+
     def test_review_submit_returns_next_prepared_paths_immediately(self):
         from pipeline_test_support import simulate_secondary_output
         self.prepared_queue()
@@ -417,6 +456,18 @@ class TitleSchedulerIntegrationTests(unittest.TestCase):
         self.m.update(scheduler_policy=s.default_policy(), concurrency=2,
                       generation_gate={"status": "open"}, anchor_job_id="anchor",
                       jobs=[{"id": "anchor", "status": "qa_passed"}, self.job])
+        # This class isolates transport behavior with a synthetic anchor. Give
+        # that stand-in a real bound final and explicitly stub only its QA
+        # context; production filesystem gates must not be relaxed for the test.
+        anchor_file = self.base / "synthetic-transport-anchor.png"
+        Image.new("RGB", (32, 32), "white").save(anchor_file)
+        self.m["jobs"][0].update(final_output=anchor_file.name,
+            qa_final_sha256=p.sha256_file(anchor_file), qa_fingerprint="synthetic-transport-context")
+        original = p.qa_fingerprint
+        qa_context = patch.object(p, "qa_fingerprint", side_effect=lambda m, job, base:
+            "synthetic-transport-context" if job.get("id") == "anchor" else original(m, job, base))
+        qa_context.start()
+        self.addCleanup(qa_context.stop)
 
     def tearDown(self):
         self.fixture.tearDown()

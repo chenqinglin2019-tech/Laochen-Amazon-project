@@ -5,7 +5,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageChops, ImageDraw
 
 import lc_title_effects as effects
 
@@ -101,6 +101,104 @@ class TitleEffectTests(unittest.TestCase):
         self.assertNotIn("title_effect_attempts", self.job)
         self.assertIn('"Evening Glow"', first["prompt"])
         self.assertNotIn("Exact approved body", first["prompt"])
+
+    def test_missing_and_legacy_profile_preserve_prompt_and_effect_bindings(self):
+        self.job.pop("prompt_profile", None)
+        before = self.prepare()
+        dependencies = effects.dependencies(self.job, self.base, phase="review")
+        self.assertEqual(before["prompt"],
+            'Edit only the decorative headline "Evening Glow" once. '
+            'Keep the exact local letterforms, size, position and color role. Apply shallow surface embossing on '
+            'The visible matte wall above the product; lighting/material: Warm light from left. '
+            'Do not add, move, reword or alter any other text, brand, fact, number, product or scene. '
+            'Edits and contact shadow must stay within normalized region [0.05, 0.05, 0.4, 0.3]. '
+            'Return a full-canvas raster; the separate, reviewed grayscale adoption mask determines the only accepted pixels.')
+        self.job["prompt_profile"] = "legacy"
+        self.assertEqual(before, self.prepare())
+        self.assertEqual(dependencies, effects.dependencies(self.job, self.base, phase="review"))
+        self.assertNotIn("prompt_profile", self.job["title_effect_state"]["descriptor"])
+
+    def test_images_2_5_prompt_has_one_exact_title_and_local_adoption_contract(self):
+        self.job["prompt_profile"] = "images_2_5_v1"
+        prepared = self.prepare()
+        prompt = prepared["prompt"]
+        self.assertTrue(prompt.startswith("Use case: precise-object-edit\nInput image 1:"))
+        self.assertEqual(prompt.count('"Evening Glow"'), 1)
+        self.assertNotIn("Exact approved body", prompt)
+        self.assertIn("The visible matte wall above the product", prompt)
+        self.assertIn("Warm light from left", prompt)
+        self.assertIn("fidelity targets", prompt)
+        self.assertIn("accepted locally", prompt)
+        self.assertIn("200 x 200", prompt)
+        self.assertNotIn("pixel-for-pixel", prompt)
+        self.assertEqual(prepared, self.prepare())
+        self.assertEqual(prepared["attempt_counts"], {"initial": 0, "quality_repair": 0, "transient_retry": 0})
+
+    def test_attempt_history_requires_array_of_objects(self):
+        self.job["title_effect_attempts"] = {}
+        self.assertIn("title_effect_attempts must be an array", effects.validate_config(self.job))
+        for value in (None, [], "attempt"):
+            self.job["title_effect_attempts"] = [value]
+            self.assertIn("title_effect_attempts[0] must be an object", effects.validate_config(self.job))
+        self.job["title_effect_attempts"] = []
+        self.assertEqual(effects.validate_config(self.job), [])
+
+    def test_profile_switch_invalidates_effect_and_attempt_without_resetting_budget(self):
+        original = copy.deepcopy(self.job)
+        raw_sha = effects._hash(self.base / "background.png")
+        for source, destination in (("legacy", "images_2_5_v1"), ("images_2_5_v1", "legacy")):
+            with self.subTest(source=source, destination=destination):
+                self.job = copy.deepcopy(original)
+                self.job["prompt_profile"] = source
+                self.ingest()
+                self.assertTrue(self.composite()["applied"])
+                old_fingerprint = self.job["title_effect_state"]["fingerprint"]
+                old_attempts = copy.deepcopy(self.job["title_effect_attempts"])
+                old_dependencies = {phase: effects.dependencies(self.job, self.base, phase=phase)
+                                    for phase in ("layout", "review")}
+                self.job["prompt_profile"] = destination
+                for phase in ("layout", "review"):
+                    self.assertNotEqual(old_dependencies[phase], effects.dependencies(self.job, self.base, phase=phase))
+                self.assertEqual(effects.prepare(self.manifest, self.base, self.job)["status"], "needs_guide")
+                result = self.composite()
+                self.assertFalse(result["applied"])
+                self.assertEqual(result["fallback_reason"], "TITLE_EFFECT_CANDIDATE_STALE")
+                self.assertNotEqual(old_fingerprint, self.job["title_effect_state"]["fingerprint"])
+                self.assertEqual(old_attempts, self.job["title_effect_attempts"])
+                with self.assertRaisesRegex(effects.TitleEffectError, "STALE_ATTEMPT"):
+                    effects.ingest(self.manifest, self.base, self.job, self.base / "candidate.png",
+                                   self.base / "mask.png", attempt_id=old_attempts[0]["id"])
+                with self.assertRaisesRegex(effects.TitleEffectError, "BUDGET_EXHAUSTED"):
+                    effects.attempt_event(self.manifest, self.base, self.job, "tool_started", at=200)
+                repair = effects.attempt_event(self.manifest, self.base, self.job, "tool_started",
+                    kind="quality_repair", at=200, reason="Explicit prompt-profile upgrade")
+                effects.attempt_event(self.manifest, self.base, self.job, "failed", attempt_id=repair["id"], at=201, reason="Fixture timeout")
+                self.assertEqual(self.prepare()["attempt_counts"], {"initial": 1, "quality_repair": 1, "transient_retry": 0})
+                self.assertEqual(raw_sha, effects._hash(self.base / "background.png"))
+
+    def test_images_2_5_preserves_mask_guards_and_only_adopts_allowed_pixels(self):
+        self.job["prompt_profile"] = "images_2_5_v1"
+        attempt = self.start()
+        for name, point, value, expected in (
+                ("outside", (9, 15), 1, "OUTSIDE_ALLOWED"),
+                ("product", (100, 100), 1, "OUTSIDE_ALLOWED"),
+                ("body", (20, 60), 1, "TOUCHES_OTHER_TEXT"),
+                ("missing-title", (21, 21), 0, "REPLACE_ALL_TITLE_INK")):
+            with self.subTest(name=name):
+                with Image.open(self.base / "mask.png") as mask:
+                    mask.putpixel(point, value)
+                    path = self.base / f"profile-{name}.png"
+                    mask.save(path)
+                with self.assertRaisesRegex(effects.TitleEffectError, expected):
+                    effects.ingest(self.manifest, self.base, self.job, self.base / "candidate.png", path, attempt_id=attempt)
+        effects.ingest(self.manifest, self.base, self.job, self.base / "candidate.png", self.base / "mask.png", attempt_id=attempt)
+        result = self.composite()
+        self.assertTrue(result["applied"])
+        with Image.open(result["output_path"]) as output, Image.open(self.base / "flat.png") as flat, Image.open(self.base / "mask.png") as mask:
+            difference = ImageChops.difference(output, flat)
+            self.assertIsNotNone(difference.getbbox())
+            self.assertIsNone(ImageChops.multiply(difference, ImageChops.invert(mask).convert("RGB")).getbbox())
+        self.assertEqual(self.prepare()["attempt_counts"]["initial"], 1)
 
     def test_numbers_brands_facts_and_wrong_routes_are_rejected(self):
         changes = [lambda j: j.update(text_mode="model_native"), lambda j: j.update(kind="main"),

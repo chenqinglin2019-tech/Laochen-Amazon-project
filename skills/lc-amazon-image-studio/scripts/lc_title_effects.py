@@ -208,11 +208,19 @@ def _configured(job):
 
 def validate_config(job):
     """Return structural/title/semantic errors for validate_design, without I/O."""
+    errors = []
     try:
         _configured(job)
     except (TitleEffectError, KeyError, TypeError, ValueError) as error:
-        return [str(error)]
-    return []
+        errors.append(str(error))
+    attempts = job.get("title_effect_attempts", [])
+    if not isinstance(attempts, list):
+        errors.append("title_effect_attempts must be an array")
+    else:
+        for index, attempt in enumerate(attempts):
+            if not isinstance(attempt, dict):
+                errors.append(f"title_effect_attempts[{index}] must be an object")
+    return errors
 
 
 def _descriptor(manifest, base, job):
@@ -266,9 +274,12 @@ def _descriptor(manifest, base, job):
                 if mapped:
                     protected.append(_box(mapped))
     sources = _sources(manifest, base, config.get("source_reference_ids", job.get("source_reference_ids")))
-    return {"version": 1, "group_id": group_id, "title": title, "config": copy.deepcopy(config),
-            "group": group, "canvas": list(job["canvas"]), "protected": protected,
-            "allowed_bbox_norm": _box(config.get("allowed_bbox_norm")), "sources": sources}
+    descriptor = {"version": 1, "group_id": group_id, "title": title, "config": copy.deepcopy(config),
+                  "group": group, "canvas": list(job["canvas"]), "protected": protected,
+                  "allowed_bbox_norm": _box(config.get("allowed_bbox_norm")), "sources": sources}
+    if job.get("prompt_profile") == "images_2_5_v1":
+        descriptor["prompt_profile"] = job["prompt_profile"]
+    return descriptor
 
 
 def _pixels(box, size, *, inner=False):
@@ -332,8 +343,12 @@ def _capture(manifest, base, job, flat, background, glyph, bboxes):
 
 def _effect_descriptor(descriptor):
     """Inputs that can change the title edit itself, excluding other content."""
-    return {key: copy.deepcopy(descriptor[key]) for key in
-            ("version", "group_id", "title", "config", "group", "canvas", "allowed_bbox_norm", "sources")}
+    result = {key: copy.deepcopy(descriptor[key]) for key in
+              ("version", "group_id", "title", "config", "group", "canvas", "allowed_bbox_norm", "sources")}
+    # Missing/legacy profiles keep the historical descriptor and hash intact.
+    if "prompt_profile" in descriptor:
+        result["prompt_profile"] = descriptor["prompt_profile"]
+    return result
 
 
 def _current(manifest, base, job):
@@ -364,6 +379,30 @@ def _configuration(job):
              "raw_product_bbox_norm", "text_mode", "kind", "_project_style", "typography_decision")}
 
 
+def _prompt(descriptor):
+    """Compile title instructions without touching prepared state or attempt bindings."""
+    prompt = (f"Edit only the decorative headline {json.dumps(descriptor['title'], ensure_ascii=False)} once. "
+              f"Keep the exact local letterforms, size, position and color role. Apply shallow surface embossing on "
+              f"{descriptor['config']['surface']}; lighting/material: {descriptor['config']['material_lighting']}. "
+              "Do not add, move, reword or alter any other text, brand, fact, number, product or scene. "
+              f"Edits and contact shadow must stay within normalized region {descriptor['allowed_bbox_norm']}. "
+              "Return a full-canvas raster; the separate, reviewed grayscale adoption mask determines the only accepted pixels.")
+    if descriptor.get("prompt_profile") == "images_2_5_v1":
+        prompt = (
+            "Use case: precise-object-edit\n"
+            "Input image 1: the exact flat guide; use it as the edit target and letterform reference.\n"
+            f"Edit: apply shallow surface embossing to this decorative headline once: {json.dumps(descriptor['title'], ensure_ascii=False)}.\n"
+            "Preserve its exact letterforms, spelling, size, position and color role.\n"
+            f"Carrier surface: {descriptor['config']['surface']}.\n"
+            f"Material and lighting: {descriptor['config']['material_lighting']}; match the visible perspective and contact shadows.\n"
+            f"Edit region: {descriptor['allowed_bbox_norm']} in normalized [x, y, width, height]; confine the title and its contact shadow to this region.\n"
+            "Preserve all other text, brand, facts, numbers, product features and scene as fidelity targets. Add no extra lettering or objects.\n"
+            "A separate, reviewed grayscale adoption mask controls which pixels are accepted locally; it must exclude every product protection region and other text.\n"
+            f"Output: one opaque full-canvas raster, {descriptor['canvas'][0]} x {descriptor['canvas'][1]}, with the original framing.\n"
+        )
+    return prompt
+
+
 def prepare(manifest, base, job, *, flat_path=None, background_path=None, glyph_path=None, bboxes=None):
     """Prepare immutable local guides/prompt; never consume or reset an attempt."""
     supplied = [flat_path, background_path, glyph_path, bboxes]
@@ -388,12 +427,7 @@ def prepare(manifest, base, job, *, flat_path=None, background_path=None, glyph_
         state.pop("applied", None)
     elif state.get("status") in {None, "needs_guide"}:
         state["status"] = "ready"
-    prompt = (f"Edit only the decorative headline {json.dumps(descriptor['title'], ensure_ascii=False)} once. "
-              f"Keep the exact local letterforms, size, position and color role. Apply shallow surface embossing on "
-              f"{descriptor['config']['surface']}; lighting/material: {descriptor['config']['material_lighting']}. "
-              "Do not add, move, reword or alter any other text, brand, fact, number, product or scene. "
-              f"Edits and contact shadow must stay within normalized region {descriptor['allowed_bbox_norm']}. "
-              "Return a full-canvas raster; the separate, reviewed grayscale adoption mask determines the only accepted pixels.")
+    prompt = _prompt(descriptor)
     state["prompt"] = prompt
     state["prompt_sha256"] = _digest({"fingerprint": fingerprint, "prompt": prompt})
     return {"status": state["status"], "fingerprint": fingerprint, "prompt": prompt,
@@ -422,7 +456,7 @@ def attempt_event(manifest, base, job, event, *, attempt_id=None, kind="initial"
             if is_hold(job) or job.get("status") in {"blocked", "failed", "generating"}:
                 raise TitleEffectError("TITLE_EFFECT_JOB_NOT_READY")
             try:
-                require_capacity(manifest, job)
+                require_capacity(manifest, job, base=base)
             except ValueError as exc:
                 raise TitleEffectError("TITLE_EFFECT_CONCURRENCY_FULL: " + str(exc)) from exc
             if "layout_result" in job and not job["layout_result"].get("passed"):
@@ -526,7 +560,7 @@ def ingest(manifest, base, job, artifact_path, mask_path, *, attempt_id, review=
     attempt.update(status="ingested", binding=binding, artifact=artifact, mask=mask_record)
     if manifest.get("scheduler_policy"):
         from lc_scheduler import record_success
-        record_success(manifest, attempt)
+        record_success(manifest, attempt, base=base)
     return {"binding": binding, "cached": False, "review_required": True,
             "artifact": copy.deepcopy(artifact), "mask": copy.deepcopy(mask_record)}
 
@@ -678,6 +712,8 @@ def dependencies(job, base, *, phase="layout"):
             except (TitleEffectError, OSError):
                 files[record["path"]] = "MISSING"
     result = {"groups": configured, "candidate_binding": candidate.get("binding"), "files": files}
+    if job.get("prompt_profile") == "images_2_5_v1":
+        result["prompt_profile"] = job["prompt_profile"]
     if phase == "review":
         result.update(fingerprint=state.get("fingerprint"), guide=copy.deepcopy(state.get("guide")),
                       applied=copy.deepcopy(state.get("applied")), fallback_reason=state.get("fallback_reason"))

@@ -71,6 +71,49 @@ class DeliveryDirectoryTests(unittest.TestCase):
         self.assertEqual(second["copied_files"], 0)
         self.assertFalse(list(self.base.rglob("*.zip")))
 
+    def test_bound_legacy_overview_moves_without_copying_approved_images(self):
+        overview = self.base / "final/contact_sheet.png"
+        overview.write_bytes(b"pipeline owned overview")
+        binding = {"sha256": file_hash(overview), "inputs": "approved fixture inventory"}
+        self.manifest["delivery_artifacts"] = {"final/contact_sheet.png": binding}
+        path = self.base / "project_manifest.json"
+        path.write_text(json.dumps(self.manifest))
+        with patch("lc_delivery.shutil.copy2", side_effect=AssertionError("Approved JPGs must not copy")):
+            result = delivery.prepare_delivery_directory(self.manifest, self.base, delivery_result={"ready": True}, manifest_path=path)
+        self.assertEqual(result["output_dir"], str(self.base / "final"))
+        self.assertEqual(result["copied_files"], 0)
+        self.assertFalse(overview.exists())
+        self.assertEqual((self.base / "review/contact_sheet.png").read_bytes(), b"pipeline owned overview")
+        self.assertEqual(self.manifest["delivery_artifacts"], {"review/contact_sheet.png": binding})
+        self.assertEqual(json.loads(path.read_text())["delivery_artifacts"], self.manifest["delivery_artifacts"])
+
+    def test_user_destination_prevents_owned_overview_migration(self):
+        overview = self.base / "final/contact_sheet.png"
+        overview.write_bytes(b"pipeline overview")
+        self.manifest["delivery_artifacts"] = {"final/contact_sheet.png": {"sha256": file_hash(overview)}}
+        (self.base / "review").mkdir()
+        destination = self.base / "review/contact_sheet.png"
+        destination.write_bytes(b"user-owned drawing")
+        path = self.base / "project_manifest.json"
+        path.write_text(json.dumps(self.manifest))
+        result = delivery.prepare_delivery_directory(self.manifest, self.base, delivery_result={"ready": True}, manifest_path=path)
+        self.assertIn("images-v001", result["output_dir"])
+        self.assertEqual(overview.read_bytes(), b"pipeline overview")
+        self.assertEqual(destination.read_bytes(), b"user-owned drawing")
+
+    def test_overview_relocation_resumes_after_new_binding_was_written(self):
+        overview = self.base / "final/contact_sheet.png"
+        overview.write_bytes(b"pipeline overview")
+        binding = {"sha256": file_hash(overview), "inputs": "fixture"}
+        self.manifest["delivery_artifacts"] = {"final/contact_sheet.png": binding, "review/contact_sheet.png": copy.deepcopy(binding)}
+        (self.base / "review").mkdir()
+        overview.rename(self.base / "review/contact_sheet.png")
+        path = self.base / "project_manifest.json"
+        path.write_text(json.dumps(self.manifest))
+        result = delivery.prepare_delivery_directory(self.manifest, self.base, delivery_result={"ready": True}, manifest_path=path)
+        self.assertEqual(result["output_dir"], str(self.base / "final"))
+        self.assertNotIn("final/contact_sheet.png", self.manifest["delivery_artifacts"])
+
     def test_legacy_scattered_outputs_flatten_without_filename_collisions(self):
         for job in self.manifest["jobs"]:
             folder = self.base / "legacy" / job["id"]
@@ -269,6 +312,34 @@ class ScopedSnapshotTests(unittest.TestCase):
         actual = transactions._stage_project_files(self.manifest, self.base, {"a"}, command_name="prepare")
         self.assertIn("final/b.jpg", actual)
         self.assertNotIn("raw/b.png", actual)
+
+    def test_bound_repair_target_and_attachment_in_history_are_staged_and_cas_checked(self):
+        target = self.base / "revision/old-attempt.png"
+        target.write_bytes(b"bound repair input")
+        self.manifest["jobs"][0].update(prompt_edit={"target_path": "revision/old-attempt.png"},
+                                         generation_reference_paths=["review/source_quality/b-target.png"])
+        actual = transactions._stage_project_files(self.manifest, self.base, {"a"}, command_name="prepare")
+        self.assertIn("revision/old-attempt.png", actual)
+        self.assertIn("review/source_quality/b-target.png", actual)
+        self.assertNotIn("raw/b.png", actual)
+        dependencies = transactions._dependencies(self.manifest, {"a"}, self.base)
+        self.assertIn(target, dependencies)
+        target.unlink()
+        self.assertIn(target, transactions._dependencies(self.manifest, {"a"}, self.base))
+
+    def test_staged_worker_keeps_newest_authoritative_runtime_diagnostics(self):
+        latest_record = {"command_failures": [{"scope": "b", "error": "new observed error", "consecutive_count": 2}]}
+        def operation(staged):
+            stage_manifest = json.loads(staged.read_text())
+            stage_manifest["runtime_diagnostics"] = {"command_failures": [{"scope": "a", "error": "stale snapshot"}]}
+            transactions._atomic(staged, transactions._bytes(stage_manifest))
+            live = json.loads(self.manifest_path.read_text())
+            live["runtime_diagnostics"] = latest_record
+            transactions._atomic(self.manifest_path, transactions._bytes(live))
+            return 0
+        transactions.run_staged_command(self.manifest_path, ["a"], operation, command_name="prepare")
+        current = json.loads(self.manifest_path.read_text())
+        self.assertEqual(current["runtime_diagnostics"], latest_record)
 
     def test_malformed_asset_containers_are_left_to_manifest_validation(self):
         for invalid in (7, None, "not a list", {"path": "not-a-list.png"}):

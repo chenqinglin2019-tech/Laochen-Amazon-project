@@ -152,7 +152,7 @@ class PipelineTests(unittest.TestCase):
                 elif changed=='copy':b['layout']={'template':'scene','headline':'Changed copy'}
                 elif changed=='review':a['semantic_qa_results']['clarity']={'verdict':'fail'}
                 elif changed=='fact':self.m['facts'][0]['text']='changed evidence claim'
-                elif changed=='contact':Image.new('RGB',(20,20),'red').save(self.base/'final/contact_sheet.png')
+                elif changed=='contact':Image.new('RGB',(20,20),'red').save(self.base/'review/contact_sheet.png')
                 elif changed=='qa_report':p.write_json(self.base/'qa_report.json',{'jobs':[]})
                 else:
                     b['layout']={'template':'scene','font_sizes':{'headline':150}}

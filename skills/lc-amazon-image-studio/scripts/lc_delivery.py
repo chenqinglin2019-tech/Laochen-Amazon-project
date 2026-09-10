@@ -16,10 +16,12 @@ from pathlib import Path
 from typing import Callable
 
 from lc_assets import digest, file_hash, file_hash_context
+from lc_inputs import IMAGE_SUFFIXES, image_input_paths
 
 COMPACT_DEFAULTS = {"name": "compact_jpg", "jpeg_quality": 92}
 EVIDENCE_VERSION = 1
-_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp"}
+_IMAGE_SUFFIXES = IMAGE_SUFFIXES
+_COMPACTION_AREA = ".lc-compaction"
 
 
 def resolve_delivery_profile(manifest: dict) -> dict:
@@ -96,7 +98,7 @@ def _cache_path(base: Path, value: str | Path) -> Path:
     path = _inside(base, value)
     relative = path.relative_to(base.resolve()).as_posix()
     directories = ("review/layouts/", "review/image_layers/", "review/details/", "review/source_quality/")
-    exact = {"final/contact_sheet.png", "review/micro_detail_contact_sheet.png"}
+    exact = {"final/contact_sheet.png", "review/contact_sheet.png", "review/micro_detail_contact_sheet.png"}
     if path.suffix.lower() not in _IMAGE_SUFFIXES or not (relative.startswith(directories) or relative in exact):
         raise ValueError(f"Not an owned rebuildable image cache: {relative}")
     return path
@@ -154,60 +156,11 @@ def source_cache_metadata_is_current(manifest: dict, base: Path) -> bool:
 
 def retained_input_paths(manifest: dict, base: Path) -> set[Path]:
     """All retained image inputs, including reused assets in nominal cache dirs."""
-    result: set[Path] = set()
-    values = [ref.get("path") for ref in manifest.get("references", [])]
-    values += [job.get(key) for job in manifest.get("jobs", [])
-               for key in ("raw_output", "final_output", "background_asset")]
-    # Layers and panels can point at adopted assets outside source/ and raw/.
-    def visit(value):
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if isinstance(item, str) and (key.endswith("_path") or key.endswith("_asset") or key in {"path", "image"}):
-                    if Path(item).suffix.lower() in _IMAGE_SUFFIXES:
-                        values.append(item)
-                elif isinstance(item, (dict, list)):
-                    visit(item)
-        elif isinstance(value, list):
-            for item in value:
-                visit(item)
-    for job in manifest.get("jobs", []):
-        for key in ("product_layers", "layout", "panel_sources"):
-            visit(job.get(key))
-        effect = job.get("title_effect_state", {})
-        for key in ("guide", "candidate"):
-            visit(effect.get(key))
-        visit(effect.get("descriptor", {}).get("sources"))
-    for value in values:
-        if value:
-            path = Path(value).expanduser()
-            result.add((path if path.is_absolute() else base / path).resolve())
-    return result
+    return image_input_paths(manifest, base)
 
 
 def _job_input_paths(manifest: dict, job: dict, base: Path) -> set[Path]:
-    from lc_quality import _reference_ids
-    selected = set(_reference_ids(manifest, job))
-    def references(value):
-        if isinstance(value, dict):
-            for key, item in value.items():
-                if key == "reference_id" and isinstance(item, str):
-                    selected.add(item)
-                elif isinstance(item, (dict, list)):
-                    references(item)
-        elif isinstance(value, list):
-            for item in value:
-                references(item)
-    references(job.get("layout", {}))
-    refs = {ref["id"]: ref for ref in manifest.get("references", [])}
-    pending = list(selected)
-    while pending:
-        ref = refs.get(pending.pop(), {})
-        for rid in ref.get("provenance", {}).get("source_reference_ids", []):
-            if rid not in selected:
-                selected.add(rid)
-                pending.append(rid)
-    scoped = {**manifest, "jobs": [job], "references": [ref for rid, ref in refs.items() if rid in selected]}
-    return retained_input_paths(scoped, base)
+    return image_input_paths(manifest, base, job_ids={job["id"]})
 
 
 def _retired_path(base: Path, value: str | Path) -> Path:
@@ -269,7 +222,7 @@ def persist_review_evidence(manifest: dict, base: Path, qa_report: dict,
                               "stage_fingerprints": stage_fingerprints_fn(manifest, job, base) if stage_fingerprints_fn else {},
                               "cache_artifacts": artifacts}
     project_artifacts = {}
-    for relative in ("final/contact_sheet.png", "review/micro_detail_contact_sheet.png"):
+    for relative in ("final/contact_sheet.png", "review/contact_sheet.png", "review/micro_detail_contact_sheet.png"):
         actual = artifact_sha256(manifest, None, base, base / relative)
         if actual:
             project_artifacts[relative] = actual
@@ -312,49 +265,170 @@ def persist_review_evidence(manifest: dict, base: Path, qa_report: dict,
     return bindings
 
 
+def _compaction_entry_paths(base: Path, journal_path: Path, entry: dict) -> tuple[Path, Path]:
+    relative = entry.get("relative")
+    if (not isinstance(relative, str) or Path(relative).is_absolute() or ".." in Path(relative).parts
+            or not isinstance(entry.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", entry["sha256"])):
+        raise ValueError("COMPACTION_RECOVERY_REQUIRED: invalid journal artifact")
+    source = (_retired_path if relative.startswith("raw/") else _cache_path)(base, relative)
+    if source.relative_to(base).as_posix() != relative:
+        raise ValueError("COMPACTION_RECOVERY_REQUIRED: noncanonical journal artifact")
+    backup_root = _inside(base, journal_path.parent / "files")
+    backup = _inside(base, backup_root / relative)
+    if not backup.is_relative_to(backup_root):
+        raise ValueError("COMPACTION_RECOVERY_REQUIRED: artifact escapes quarantine")
+    return source, backup
+
+
+def _purge_compaction_files(base: Path, journal_path: Path, journal: dict) -> int:
+    """Delete only journaled quarantined bytes after a durable successful gate."""
+    reclaimed = 0
+    entries = [(entry, _compaction_entry_paths(base, journal_path, entry)[1]) for entry in journal.get("files", [])]
+    for entry, path in entries:
+        if not path.exists():
+            continue
+        if not path.is_file() or file_hash(path) != entry["sha256"]:
+            raise ValueError(f"COMPACTION_RECOVERY_REQUIRED: quarantine changed: {path}")
+        reclaimed += path.stat().st_size
+        path.unlink()
+    return reclaimed
+
+
+def _rollback_compaction(base: Path, manifest_path: Path, journal_path: Path,
+                         journal: dict, manifest: dict | None) -> None:
+    current = file_hash(manifest_path) if manifest_path.is_file() else None
+    if current not in {journal.get("before_manifest_sha256"), journal.get("after_manifest_sha256")}:
+        raise ValueError("COMPACTION_RECOVERY_REQUIRED: manifest changed during cleanup")
+    for entry in reversed(journal.get("files", [])):
+        target, backup = _compaction_entry_paths(base, journal_path, entry)
+        if target.exists():
+            if not target.is_file() or file_hash(target) != entry["sha256"]:
+                raise ValueError(f"COMPACTION_RECOVERY_REQUIRED: newer artifact: {target}")
+        elif backup.is_file() and file_hash(backup) == entry["sha256"]:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(backup, target)
+        else:
+            raise ValueError(f"COMPACTION_RECOVERY_REQUIRED: missing backup: {target}")
+    if journal.get("before_manifest_sha256") is None:
+        manifest_path.unlink(missing_ok=True)
+    else:
+        backup = _inside(base, journal_path.parent / "manifest.before")
+        if not backup.is_file() or file_hash(backup) != journal["before_manifest_sha256"]:
+            raise ValueError("COMPACTION_RECOVERY_REQUIRED: manifest backup changed")
+        # Keep the backup until recovery itself is durably marked complete.
+        temporary = manifest_path.with_name(manifest_path.name + ".compact-recovery.tmp")
+        try:
+            shutil.copy2(backup, temporary)
+            os.replace(temporary, manifest_path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    if manifest is not None:
+        manifest.clear()
+        manifest.update(copy.deepcopy(journal["before_manifest"]))
+    journal["state"] = "rolled_back"
+    _write_json(journal_path, journal)
+
+
+def recover_compaction(manifest: dict | None, base: Path, *, manifest_path: Path) -> list[dict]:
+    """Recover cleanup under the existing manifest lock, with no new auth path.
+
+    A crash before the post-cleanup gate commits restores every staged file and
+    the exact previous manifest. A crash after commit only finishes deleting
+    journaled private cache copies. Newer user bytes are never overwritten.
+    """
+    base = Path(base).resolve()
+    manifest_path = _inside(base, manifest_path)
+    area = _inside(base, _COMPACTION_AREA)
+    recovered = []
+    if not area.is_dir():
+        return recovered
+    with file_hash_context(fresh=True):
+        for candidate in sorted(area.glob("tx-*/journal.json")):
+            journal_path = _inside(base, candidate)
+            journal = json.loads(journal_path.read_text(encoding="utf-8"))
+            if journal.get("manifest_path") != manifest_path.relative_to(base).as_posix():
+                raise ValueError("COMPACTION_RECOVERY_REQUIRED: journal manifest mismatch")
+            state = journal.get("state")
+            if state in {"prepared", "staging"}:
+                _rollback_compaction(base, manifest_path, journal_path, journal, manifest)
+                recovered.append({"state": "rolled_back", "journal": str(journal_path)})
+            elif state == "committed":
+                reclaimed = _purge_compaction_files(base, journal_path, journal)
+                journal["state"] = "finished"
+                _write_json(journal_path, journal)
+                recovered.append({"state": "finished", "journal": str(journal_path), "reclaimed_bytes": reclaimed})
+    return recovered
+
+
 def compact_project(manifest: dict, base: Path, *, manifest_path: Path,
                     delivery_check_fn: Callable[[dict, Path], dict],
                     qa_fingerprint_fn: Callable[[dict, dict, Path], str],
                     stage_fingerprints_fn: Callable | None = None) -> dict:
-    """Caller holds its manifest lock. Preserve inputs; delete only bound caches."""
+    """Caller holds its manifest lock; failed cleanup restores files and bindings."""
     base = base.resolve()
     manifest_path = _inside(base, manifest_path)
+    recover_compaction(manifest, base, manifest_path=manifest_path)
     if resolve_delivery_profile(manifest)["name"] != "compact_jpg":
         raise ValueError("Old projects must explicitly adopt compact_jpg before cleanup")
     before = delivery_check_fn(manifest, base)
     if not before.get("ready"):
         raise ValueError("Delivery gate must pass before cleanup")
     qa_report = json.loads((base / "qa_report.json").read_text(encoding="utf-8"))
-    persist_review_evidence(manifest, base, qa_report, qa_fingerprint_fn,
-                            stage_fingerprints_fn=stage_fingerprints_fn)
-    protected = retained_input_paths(manifest, base)
-    candidates = {}
-    for job in [*manifest.get("jobs", []), None]:
-        record = _read_evidence(manifest, job, base)
-        if record is None:
-            raise ValueError("Review evidence binding failed before cleanup")
-        for relative, expected in {**record["cache_artifacts"], **record.get("retired_artifacts", {})}.items():
-            path = _retired_path(base, relative) if relative in record.get("retired_artifacts", {}) else _cache_path(base, relative)
-            if path.resolve() in protected or not path.exists():
-                continue
+    area = _inside(base, _COMPACTION_AREA)
+    area.mkdir(exist_ok=True)
+    transaction = Path(tempfile.mkdtemp(prefix="tx-", dir=area))
+    journal_path = transaction / "journal.json"
+    journal = {"version": 1, "state": "prepared", "manifest_path": manifest_path.relative_to(base).as_posix(),
+               "before_manifest": copy.deepcopy(manifest),
+               "before_manifest_sha256": file_hash(manifest_path) if manifest_path.is_file() else None,
+               "after_manifest_sha256": None, "files": []}
+    if manifest_path.is_file():
+        shutil.copy2(manifest_path, transaction / "manifest.before")
+    _write_json(journal_path, journal)
+    try:
+        persist_review_evidence(manifest, base, qa_report, qa_fingerprint_fn,
+                                stage_fingerprints_fn=stage_fingerprints_fn)
+        protected = retained_input_paths(manifest, base)
+        candidates = {}
+        for job in [*manifest.get("jobs", []), None]:
+            record = _read_evidence(manifest, job, base)
+            if record is None:
+                raise ValueError("Review evidence binding failed before cleanup")
+            for relative, expected in {**record["cache_artifacts"], **record.get("retired_artifacts", {})}.items():
+                path = _retired_path(base, relative) if relative in record.get("retired_artifacts", {}) else _cache_path(base, relative)
+                if path.resolve() in protected or not path.exists():
+                    continue
+                if file_hash(path) != expected:
+                    raise ValueError(f"Cache changed after actual review: {relative}")
+                candidates[path] = expected
+        # Register the complete move set before any image leaves its live path.
+        prepared = transaction / "manifest.after"
+        _write_json(prepared, manifest)
+        journal.update(state="staging", after_manifest_sha256=file_hash(prepared),
+                       files=[{"relative": path.relative_to(base).as_posix(), "sha256": expected}
+                              for path, expected in candidates.items()])
+        _write_json(journal_path, journal)
+        os.replace(prepared, manifest_path)
+        for path, expected in candidates.items():
+            (_retired_path if path.relative_to(base).parts[0] == "raw" else _cache_path)(base, path)
             if file_hash(path) != expected:
-                raise ValueError(f"Cache changed after actual review: {relative}")
-            candidates[path] = expected
-    # This durable manifest write must precede deletion: an interrupted cleanup
-    # remains resumable and all surviving/missing caches still have real evidence.
-    _write_json(manifest_path, manifest)
-    removed, reclaimed = [], 0
-    for path, expected in candidates.items():
-        (_retired_path if path.relative_to(base).parts[0] == "raw" else _cache_path)(base, path)
-        if file_hash(path) != expected:
-            raise ValueError(f"Cache changed during cleanup: {path}")
-        reclaimed += path.stat().st_size
-        path.unlink()
-        removed.append(path.relative_to(base).as_posix())
-    after = delivery_check_fn(manifest, base)
-    if not after.get("ready"):
-        raise ValueError("Delivery gate failed after cleanup; retained inputs and evidence are intact")
-    _write_json(manifest_path, manifest)
+                raise ValueError(f"Cache changed during cleanup: {path}")
+            backup = _inside(base, transaction / "files" / path.relative_to(base))
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(path, backup)
+        with file_hash_context(fresh=True):
+            after = delivery_check_fn(manifest, base)
+        if not after.get("ready"):
+            raise ValueError("Delivery gate failed after cleanup; cleanup rolled back")
+        journal["state"] = "committed"
+        _write_json(journal_path, journal)
+    except BaseException:
+        _rollback_compaction(base, manifest_path, journal_path, journal, manifest)
+        raise
+    reclaimed = _purge_compaction_files(base, journal_path, journal)
+    journal["state"] = "finished"
+    _write_json(journal_path, journal)
+    removed = [entry["relative"] for entry in journal["files"]]
     return {"ready": True, "removed": removed, "reclaimed_bytes": reclaimed,
             "retained_input_files": len(protected), "model_calls": 0,
             "project_bytes": sum(path.stat().st_size for path in base.rglob("*") if path.is_file() and not path.is_symlink()),
@@ -420,11 +494,60 @@ def _directory_result(directory: Path, images: list[dict], *, reused: bool, copi
         for image in images], "image_count": len(images), "reused": reused, "copied_files": copied_files}
 
 
-def prepare_delivery_directory(manifest: dict, base: Path, *, delivery_result: dict) -> dict:
+def preserve_owned_overview(manifest: dict, base: Path, *, manifest_path: Path) -> dict:
+    """Move only a hash-bound legacy overview out of final, without a gate gap.
+
+    Publish the new copy and binding before retiring the old path; either name
+    therefore has a genuine current binding even after a process interruption.
+    A user-owned destination is never adopted or overwritten.
+    """
+    base = Path(base).resolve()
+    manifest_path = _inside(base, manifest_path)
+    old, new = "final/contact_sheet.png", "review/contact_sheet.png"
+    artifacts = manifest.get("delivery_artifacts") or {}
+    binding = artifacts.get(old)
+    if not isinstance(binding, dict) or not binding.get("sha256"):
+        return {"moved": False}
+    source, target = _inside(base, old), _inside(base, new)
+    if source in retained_input_paths(manifest, base):
+        return {"moved": False}
+    expected = binding["sha256"]
+    if not source.exists():
+        # Resume the tiny interval after unlink and before retiring its binding.
+        if artifacts.get(new) == binding and target.is_file() and file_hash(target) == expected:
+            del artifacts[old]
+            _write_json(manifest_path, manifest)
+            return {"moved": True, "path": str(target)}
+        return {"moved": False}
+    if not source.is_file() or file_hash(source) != expected:
+        return {"moved": False}
+    if target.exists():
+        if artifacts.get(new) != binding or not target.is_file() or file_hash(target) != expected:
+            return {"moved": False}
+    else:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("xb") as output, source.open("rb") as input_stream:
+            shutil.copyfileobj(input_stream, output)
+            output.flush()
+            os.fsync(output.fileno())
+        if file_hash(target) != expected:
+            raise ValueError("Legacy overview copy failed verification")
+    artifacts[new] = copy.deepcopy(binding)
+    _write_json(manifest_path, manifest)
+    if file_hash(_inside(base, source)) != expected:
+        raise ValueError("Legacy overview changed during relocation")
+    source.unlink()
+    del artifacts[old]
+    _write_json(manifest_path, manifest)
+    return {"moved": True, "path": str(target)}
+
+
+def prepare_delivery_directory(manifest: dict, base: Path, *, delivery_result: dict,
+                               manifest_path: Path | None = None) -> dict:
     """Expose only current approved images as a flat directory, never a ZIP.
 
     The caller holds its manifest lock and supplies the successful delivery gate
-    for this same state (the post-cleanup result for compact projects). This
+    for this same state. Cleanup is optional and never a delivery prerequisite. This
     helper checks current final bytes and directory contents, not the full QA
     graph again. Version-folder publication also has its own lock for callers
     that prepare the same already-approved manifest concurrently.
@@ -436,6 +559,8 @@ def prepare_delivery_directory(manifest: dict, base: Path, *, delivery_result: d
     base = Path(base).resolve()
     with file_hash_context(fresh=True):
         images = _approved_delivery_images(manifest, base)
+        if manifest_path is not None:
+            preserve_owned_overview(manifest, base, manifest_path=manifest_path)
         final = _inside(base, "final")
         if all(image["source"].parent == final for image in images) and _directory_matches(base, final, images, hashes=False):
             return _directory_result(final, images, reused=True, copied_files=0)

@@ -70,6 +70,75 @@ class LayoutV3Tests(unittest.TestCase):
             title["headline_treatment"] = {"kind": "shadow", "color": "#111111", "offset_em": [.06, .08], "blur_em": .08, "opacity": .55}
             self.assertEqual(layout._prepare_job({}, base, job)["text_groups"][0]["headline_treatment"]["kind"], "shadow")
 
+    def test_headline_max_lines_is_a_bounded_group_option(self):
+        for value in (None, True, False, 0, -1, 4, 2.0, "3", float("nan"), float("inf")):
+            job = self.job(); job["layout"]["text_groups"][0]["headline_max_lines"] = value
+            with self.subTest(value=value), self.assertRaisesRegex(layout.LayoutError, "headline_max_lines"):
+                layout.validate_layout_v3(job["layout"])
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            Image.new("RGB", (1000, 1000), "white").save(base / "base.png")
+            Image.new("RGB", (200, 100), "#DDCCAA").save(base / "scene.png")
+            job = self.job(); original = copy.deepcopy(job)
+            default = layout._prepare_job({}, base, job)
+            self.assertEqual(job, original)
+            self.assertEqual([g["headline_max_lines"] for g in default["text_groups"]], [2, 2])
+            for value in (1, 2, 3):
+                job["layout"]["text_groups"][0]["headline_max_lines"] = value
+                layout.validate_layout_v3(job["layout"])
+                prepared = layout._prepare_job({}, base, job)
+                self.assertEqual([g["headline_max_lines"] for g in prepared["text_groups"]], [value, 2])
+                self.assertEqual(prepared["text_groups"][0]["sizes"], default["text_groups"][0]["sizes"])
+            self.assertNotEqual(layout.layout_fingerprint({}, original, base), layout.layout_fingerprint({}, job, base))
+
+    @unittest.skipUnless(os.environ.get("LC_LAYOUT_BROWSER_TEST") == "1", "opt-in Chromium regression")
+    def test_headline_max_lines_measurement_and_render_preserve_other_guards(self):
+        import lc_typography
+        with tempfile.TemporaryDirectory(prefix="V3-headline-lines-") as temp:
+            base = Path(temp); Image.new("RGB", (970, 600), "white").save(base / "base.png")
+            accepted = {"id": "accepted", "kind": "a_plus", "text_mode": "local_overlay", "canvas": [970, 600],
+                        "layout_input": "base.png", "output_product_bbox_norm": [.6, .2, .3, .65],
+                        "_project_style": {**lc_typography.default_contract(), "color_roles": {"headline": "#111111", "body": "#111111"},
+                                           "font_roles": {"headline": {"family": "sans", "weight": 700}}},
+                        "layout": {"version": 3, "recipe": "photo_overlay", "text_groups": [
+                            {"id": "title", "box": [.08, .12, .4, .74], "headline": "Small\nTool\nDetails",
+                             "headline_max_lines": 3, "body": "Visible detail"}]}}
+            jobs = [accepted]
+            def variant(identifier):
+                job = copy.deepcopy(accepted); job["id"] = identifier; jobs.append(job)
+                return job
+            default = variant("default"); default["layout"]["text_groups"][0].pop("headline_max_lines")
+            two_default = variant("two-default"); two_default["layout"]["text_groups"][0].update(headline="Small\nDetails")
+            two_default["layout"]["text_groups"][0].pop("headline_max_lines")
+            two_explicit = variant("two-explicit"); two_explicit["layout"]["text_groups"][0].update(headline="Small\nDetails", headline_max_lines=2)
+            fourth = variant("fourth"); fourth["layout"]["text_groups"][0]["headline"] = "Small\nTool\nVisible\nDetails"
+            capacity = variant("capacity"); capacity["layout"]["text_groups"][0]["box"] = [.08, .12, .4, .2]
+            protected = variant("protected"); protected["output_product_bbox_norm"] = [.1, .18, .25, .3]
+            contrast = variant("contrast"); contrast["layout"]["text_groups"][0]["text_color"] = "#FFFFFF"
+            body = variant("body"); body["layout"]["text_groups"][0]["body"] = "One\nTwo\nThree\nFour"
+            sibling = variant("sibling"); sibling["layout"]["text_groups"].append(
+                {"id": "other", "headline": "One\nTwo\nThree", "box": [.54, .08, .38, .8]})
+            sibling.pop("output_product_bbox_norm")
+            measured = layout.render_batch({}, base, jobs, measure_only=True)
+            rendered = layout.render_batch({}, base, jobs)
+            for output in (measured, rendered):
+                for identifier in ("accepted", "two-default", "two-explicit"):
+                    self.assertTrue(output[identifier]["passed"], (identifier, output[identifier]["checks"]))
+                for identifier, check_name, element in (("default", "text_fit", "group-title-headline"),
+                        ("fourth", "text_fit", "group-title-headline"), ("capacity", "text_group_fit", "group-title"),
+                        ("protected", "protected_region", None), ("body", "text_fit", "group-title-body"),
+                        ("sibling", "text_fit", "group-other-headline")):
+                    self.assertTrue(any(c["check"] == check_name and not c["passed"] and
+                                        (element is None or c.get("element") == element)
+                                        for c in output[identifier]["checks"]), (identifier, output[identifier]["checks"]))
+                check = next(c for c in output["accepted"]["checks"] if c["check"] == "text_fit" and c["element"] == "group-title-headline")
+                self.assertEqual((check["line_count"], check["max_lines"]), (3, 3))
+            self.assertTrue(any(c["check"] == "glyph_contrast" and c["passed"] for c in rendered["accepted"]["checks"]))
+            self.assertTrue(any(c["check"] == "glyph_contrast" and not c["passed"] for c in rendered["contrast"]["checks"]))
+            self.assertEqual(rendered["accepted"]["bboxes"], rendered["default"]["bboxes"])
+            with Image.open(base / rendered["two-default"]["output_path"]) as a, Image.open(base / rendered["two-explicit"]["output_path"]) as b:
+                self.assertEqual(a.tobytes(), b.tobytes())
+
     def test_measurement_render_has_no_review_artifacts(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)

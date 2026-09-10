@@ -203,6 +203,9 @@ def validate_layout_v3(layout):
         if family not in {"sans", "serif"} or weight not in ({400, 600} if family == "serif" else {400, 600, 700}):
             raise core.LayoutError("V3 Sans weights are 400/600/700; Serif weights are 400/600")
         core._v2_mobile_sizes({"mobile_sizes": group.get("mobile_sizes", layout.get("mobile_sizes", {}))})
+        headline_max_lines = group.get("headline_max_lines", 2)
+        if type(headline_max_lines) is not int or not 1 <= headline_max_lines <= 3:
+            raise core.LayoutError("Text group headline_max_lines must be an integer from 1 to 3")
         copy_values = [core._text(group.get(key, ""), f"text_groups[{index}].{key}", 500 if key == "body" else 180) for key in ("headline", "body", "label")]
         if not any(copy_values):
             raise core.LayoutError("Every text group needs visible headline/body/label copy")
@@ -297,6 +300,7 @@ def prepare_groups(layout, geom, direction):
                          "sizes": {key: value * width / 360 for key, value in tokens.items()},
                          "headline_family": group.get("headline_family", layout.get("headline_family", "sans")),
                          "headline_weight": group.get("headline_weight", layout.get("headline_weight", 600)),
+                         "headline_max_lines": group.get("headline_max_lines", 2),
                          "body_weight": group.get("body_weight", layout.get("body_weight", 400)),
                          "label_weight": group.get("label_weight", layout.get("label_weight", 600)),
                          "ink": group.get("text_color", layout.get("text_color", "#29251F")),

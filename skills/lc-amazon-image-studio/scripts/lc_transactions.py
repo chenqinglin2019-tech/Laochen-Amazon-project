@@ -14,11 +14,14 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
 import time
 from pathlib import Path
+
+from lc_inputs import image_input_paths
 
 
 class TransactionConflict(ValueError):
@@ -28,13 +31,13 @@ class TransactionConflict(ValueError):
 _AREA = ".lc-transactions"
 _MISSING = object()
 _VOLATILE = {"jobs", "network_health", "concurrency", "anchor_job_id", "generation_gate",
-             "delivery_artifacts", "timings", "metrics", "transaction_timings"}
+             "delivery_artifacts", "timings", "metrics", "transaction_timings", "runtime_diagnostics"}
 _DERIVED = {"quality_metrics", "image_size", "product_pixel_size", "edge_signal",
             "reference_crops", "sha256"}
 _GLOBAL_FILES = {"execution_plan.json", "qa_report.json", "delivery_report.json",
-                 "final/contact_sheet.png", "review/micro_detail_contact_sheet.png",
+                 "final/contact_sheet.png", "review/contact_sheet.png", "review/micro_detail_contact_sheet.png",
                  "review/micro_detail_contact_sheet.cache.json"}
-_SKIP_DIRS = {_AREA, ".git", "revision", "__pycache__", "node_modules"}
+_SKIP_DIRS = {_AREA, ".lc-compaction", ".git", "revision", "__pycache__", "node_modules"}
 _SKIP_SUFFIXES = {".zip", ".html", ".lock", ".tmp"}
 _JOB_ARTIFACT_DIRS = ("review/layouts", "review/image_layers", "review/packets",
                       "review/submissions", "prompts", "repairs")
@@ -80,7 +83,12 @@ def _sha(path):
 def _token(path):
     try:
         stat = Path(path).stat()
-        return [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
+        token = [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns]
+        # Windows ctime is creation time; equal size/restored mtime cannot
+        # certify equal contents. Keep CAS conservative on that platform.
+        if os.name == "nt":
+            token.append(_sha(path))
+        return token
     except FileNotFoundError:
         return None
 
@@ -122,7 +130,7 @@ def _files(root, declared=()):
             path = Path(directory) / name
             if name.startswith(".") or path.suffix.lower() in _SKIP_SUFFIXES or path.is_symlink():
                 continue
-            seen.add(str(path.relative_to(root)))
+            seen.add(path.relative_to(root).as_posix())
             yield path
     # A directory name is not an artifact type: revision may hold a live image
     # dependency as well as old HTML/ZIP reports. Include only declared files,
@@ -157,7 +165,7 @@ def _project_files_in(value, base):
             if (".." not in relative.parts and relative.parts and relative.parts[0] != _AREA
                     and path.is_file() and not path.is_symlink()
                     and path.resolve().is_relative_to(base)):
-                declared.add(str(relative))
+                declared.add(relative.as_posix())
         except (OSError, ValueError):
             continue
     return declared
@@ -177,6 +185,10 @@ def _validation_inputs(manifest):
     values = [ref.get("path") for ref in _objects(manifest.get("references"))]
     for job in _objects(manifest.get("jobs")):
         values.append(job.get("background_asset"))
+        normalization = job.get("background_normalization") or {}
+        if isinstance(normalization, dict):
+            values.extend(mask.get("path") for key in ("background_mask", "protection_mask")
+                          if isinstance(mask := normalization.get(key), dict))
         values.extend(item.get("path") for item in _objects(job.get("disclosure_extra_images")))
         for layer in _objects(job.get("product_layers")):
             values.extend(layer.get(key) for key in ("asset_path", "mask_path"))
@@ -195,7 +207,8 @@ def _stage_project_files(manifest, base, selected, *, command_name):
     job. Unselected rasters, historical attempts, and unrelated user files are
     not transaction inputs merely because they live below the project root.
     """
-    values = [_input_projection(manifest), _validation_inputs(manifest)]
+    values = [_input_projection(manifest), _validation_inputs(manifest),
+              [str(path) for path in image_input_paths(manifest, base, job_ids=selected)]]
     for job in manifest.get("jobs", []):
         if job["id"] in selected:
             values.append({key: value for key, value in job.items()
@@ -218,14 +231,14 @@ def _stage_project_files(manifest, base, selected, *, command_name):
     for directory in _JOB_ARTIFACT_DIRS:
         folder = base / directory
         if folder.is_dir() and not folder.is_symlink():
-            paths.update(str(path.relative_to(base)) for path in folder.iterdir()
+            paths.update(path.relative_to(base).as_posix() for path in folder.iterdir()
                          if path.is_file() and not path.is_symlink()
-                         and _artifact_owner(str(path.relative_to(base)), manifest) in selected)
+                         and _artifact_owner(path.relative_to(base).as_posix(), manifest) in selected)
     for job_id in selected:
         for parent in ("review/details", "title_effects"):
             folder = base / parent / job_id
             if folder.is_dir() and not folder.is_symlink():
-                paths.update(str(path.relative_to(base)) for path in _files(folder))
+                paths.update(path.relative_to(base).as_posix() for path in _files(folder))
     # A symlinked directory is never a way to stage a writable live artifact.
     return {relative for relative in paths
             if not any((base / parent).is_symlink() for parent in Path(relative).parents)}
@@ -248,7 +261,7 @@ def _input_projection(manifest):
 def _dependencies(manifest, selected, base):
     values = [_input_projection(manifest), _validation_inputs(manifest)]
     values.extend(job for job in manifest["jobs"] if job["id"] in selected)
-    result = set()
+    result = image_input_paths(manifest, base, job_ids=selected)
     for value in _strings(values):
         if not value or len(value) > 4096 or "\n" in value or "://" in value:
             continue
@@ -269,7 +282,7 @@ def _dependencies(manifest, selected, base):
             folder = base / directory
             if folder.is_dir():
                 result.update(path.resolve() for path in folder.glob(f"{job_id}*") if path.is_file()
-                              and _artifact_owner(str(path.relative_to(base)), manifest) == job_id)
+                              and _artifact_owner(path.relative_to(base).as_posix(), manifest) == job_id)
         folder = base / "review/details" / job_id
         if folder.is_dir():
             result.update(path.resolve() for path in folder.rglob("*") if path.is_file())
@@ -280,10 +293,12 @@ def _dependencies(manifest, selected, base):
 
 
 def _artifact_owner(relative, manifest):
+    relative = Path(relative).as_posix()
     for job in sorted(manifest["jobs"], key=lambda item: len(item["id"]), reverse=True):
-        if relative in {job.get("raw_output"), job.get("final_output"), job.get("prompt_file")}:
+        if relative in {Path(job[key]).as_posix() for key in ("raw_output", "final_output", "prompt_file")
+                        if job.get(key)}:
             return job["id"]
-        parent, name = str(Path(relative).parent), Path(relative).name
+        parent, name = Path(relative).parent.as_posix(), Path(relative).name
         if relative.startswith("review/details/" + job["id"] + "/"):
             return job["id"]
         if relative.startswith("title_effects/" + job["id"] + "/"):
@@ -297,14 +312,34 @@ def _artifact_owner(relative, manifest):
 def _map_outputs(value, source, target, *, all_strings=False):
     """Inputs keep their exact reference spelling; only output fields relocate."""
     if isinstance(value, dict):
-        return {key: _map_outputs(child, source, target,
+        return {_map_outputs(key, source, target, all_strings=all_strings): _map_outputs(child, source, target,
                                  all_strings=all_strings or key in {"output_path", "preview_path", "packet"})
                 for key, child in value.items()}
     if isinstance(value, list):
         return [_map_outputs(child, source, target, all_strings=all_strings) for child in value]
     if all_strings and isinstance(value, str):
+        if os.name == "nt":
+            # Windows accepts both separators and case-insensitive drive/path
+            # spelling; require a separator boundary so stage-other is intact.
+            prefix = r"[\\/]".join(re.escape(part) for part in re.split(r"[\\/]", str(source).rstrip("\\/")))
+            return re.sub(prefix + r"(?=[\\/]|$)", lambda _: str(target).rstrip("\\/"),
+                          value, flags=re.IGNORECASE)
+        if value == str(source):
+            return str(target)
         return value.replace(str(source) + os.sep, str(target) + os.sep)
     return value
+
+
+def _canonicalize_text(text, source, target):
+    """Rebase decoded JSON paths, including escaped Windows backslashes."""
+    try:
+        value = json.loads(text)
+    except ValueError:
+        return _map_outputs(text, source, target, all_strings=True)
+    mapped = _map_outputs(value, source, target, all_strings=True)
+    if mapped == value:
+        return text  # Do not reformat/hash unchanged review artifacts.
+    return json.dumps(mapped, ensure_ascii=False, indent=2) + ("\n" if text.endswith("\n") else "")
 
 
 def _merge(before, current, proposed, location="manifest"):
@@ -386,6 +421,8 @@ def _refresh_dispatch_output(stream, command_name, plan):
 def recover_pending(manifest_path):
     """Recover interrupted promotions. Caller MUST already own manifest_lock."""
     manifest_path = Path(manifest_path).resolve()
+    from lc_delivery import recover_compaction
+    recover_compaction(None, manifest_path.parent, manifest_path=manifest_path)
     area = manifest_path.parent / _AREA
     if not area.is_dir():
         return
@@ -434,6 +471,10 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
         snapshot_lock_wait = time.monotonic() - wait_started
         snapshot_lock_started = time.monotonic()
         snapshot = _json(manifest_path)
+        from lc_image_pipeline import validate_generation_backend
+        backend_errors = validate_generation_backend(snapshot)
+        if backend_errors:
+            raise ValueError("Unsupported generation inputs:\n- " + "\n- ".join(backend_errors))
         available = {job["id"] for job in snapshot.get("jobs", [])}
         selected = available if job_ids is None else set(job_ids)
         if not selected or selected - available:
@@ -489,7 +530,7 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
             raise TransactionConflict("UNSCOPED_JOB_WRITE: worker changed an unselected job")
         changed = {}
         for path in _files(stage, declared):
-            relative = str(path.relative_to(stage))
+            relative = path.relative_to(stage).as_posix()
             if path == stage_manifest or relative in _GLOBAL_FILES:
                 continue
             prior = initial.get(relative)
@@ -497,8 +538,10 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
                 continue
             # Canonicalize textual outputs BEFORE hashing/promoting.
             if path.suffix in {".json", ".txt", ".md"}:
-                payload = path.read_bytes().replace(os.fsencode(str(stage) + os.sep), os.fsencode(str(base) + os.sep))
-                _atomic(path, payload)
+                text = path.read_text(encoding="utf-8")
+                canonical = _canonicalize_text(text, stage, base)
+                if canonical != text:
+                    _atomic(path, canonical.encode("utf-8"))
             output_hash = _sha(path)
             if _sha(base / relative) != output_hash:
                 owner = _artifact_owner(relative, snapshot)
@@ -525,9 +568,14 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
             for path, token in snapshot_tokens.items():
                 if _token(path) != token:
                     raise TransactionConflict(f"STALE_TRANSACTION: input artifact changed: {path}")
-            merged = _merge({k: v for k, v in snapshot.items() if k != "jobs"},
-                            {k: v for k, v in latest.items() if k != "jobs"},
-                            {k: v for k, v in proposed.items() if k != "jobs"})
+            # Runtime failure observations are published by the authoritative
+            # CLI after staged work, never by a stale rendering workspace.
+            excluded = {"jobs", "runtime_diagnostics"}
+            merged = _merge({k: v for k, v in snapshot.items() if k not in excluded},
+                            {k: v for k, v in latest.items() if k not in excluded},
+                            {k: v for k, v in proposed.items() if k not in excluded})
+            if "runtime_diagnostics" in latest:
+                merged["runtime_diagnostics"] = copy.deepcopy(latest["runtime_diagnostics"])
             merged["jobs"] = [copy.deepcopy(proposed_jobs[job["id"]] if job["id"] in selected else job)
                               for job in latest["jobs"]]
             for relative in list(changed):
@@ -567,7 +615,7 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
             if not (isinstance(result, int) and result != 0 and proposed == snapshot):
                 try:
                     from lc_image_pipeline import execution_plan
-                    plan = execution_plan(merged)
+                    plan = execution_plan(merged, base=base)
                     _atomic(stage / "execution_plan.json", _bytes(plan))
                     if _sha(stage / "execution_plan.json") != _sha(base / "execution_plan.json"):
                         changed["execution_plan.json"] = _sha(stage / "execution_plan.json")
@@ -617,6 +665,6 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
         raise
     finally:
         if stdout.getvalue():
-            print(stdout.getvalue().replace(str(stage), str(base)), end="")
+            print(_canonicalize_text(stdout.getvalue(), stage, base), end="")
         if stderr.getvalue():
-            print(stderr.getvalue().replace(str(stage), str(base)), end="", file=sys.stderr)
+            print(_canonicalize_text(stderr.getvalue(), stage, base), end="", file=sys.stderr)

@@ -48,6 +48,13 @@ def validate(manifest):
         return errors
     if "tool_capacity" in health and not _integer(health["tool_capacity"], 1, 4):
         errors.append("network_health.tool_capacity must be an integer in 1..4")
+    if "tool_capacity_evidence" in health:
+        evidence = health["tool_capacity_evidence"]
+        if (not isinstance(evidence, dict) or "tool_capacity" not in health
+                or not all(isinstance(evidence.get(key), str) and evidence[key].strip()
+                           for key in ("source", "reason"))
+                or not _seconds(evidence.get("recorded_at"))):
+            errors.append("network_health.tool_capacity_evidence requires source, reason and recorded_at")
     for name in ("adaptive_successes", "scheduler_epoch", "consecutive_timeouts"):
         if name in health and (type(health[name]) is not int or health[name] < 0):
             errors.append(f"network_health.{name} must be a nonnegative integer")
@@ -57,10 +64,26 @@ def validate(manifest):
     return errors
 
 
-def set_tool_capacity(manifest, capacity):
+def set_tool_capacity(manifest, capacity, *, source=None, reason=None, now=None):
     if not _integer(capacity, 1, 4):
         raise ValueError("tool_capacity must be an integer in 1..4")
-    manifest.setdefault("network_health", {})["tool_capacity"] = capacity
+    if source is not None or reason is not None:
+        if not all(isinstance(value, str) and value.strip() for value in (source, reason)):
+            raise ValueError("tool_capacity source and reason must both be nonempty strings")
+        recorded = time.time() if now is None else now
+        if not _seconds(recorded):
+            raise ValueError("tool_capacity recorded_at must be finite nonnegative Unix seconds")
+        evidence = {"source": source.strip(), "reason": reason.strip(), "recorded_at": recorded}
+    else:
+        # Historical integer-only callers remain valid, but cannot inherit a
+        # previous observation that described a different capacity.
+        evidence = None
+    health = manifest.setdefault("network_health", {})
+    health["tool_capacity"] = capacity
+    if evidence is None:
+        health.pop("tool_capacity_evidence", None)
+    else:
+        health["tool_capacity_evidence"] = evidence
 
 
 def retry_after(value):
@@ -84,16 +107,61 @@ def state(manifest, *, now=None, exclude_product=None):
     active = active_count(manifest, exclude_product=exclude_product)
     return {"concurrency": configured, "effective_concurrency": ceiling,
             "active_model_calls": active, "model_capacity": 0 if wait else max(0, ceiling - active),
-            "retry_after_seconds": round(wait, 3), "cooldown_until": health.get("cooldown_until", 0)}
+            "retry_after_seconds": round(wait, 3), "cooldown_until": health.get("cooldown_until", 0),
+            "tool_capacity": health.get("tool_capacity"),
+            "tool_capacity_evidence": copy.deepcopy(health.get("tool_capacity_evidence"))}
 
 
-def anchor_passed(manifest):
+def anchor_passed(manifest, base=None):
+    """A real immutable submission can survive local-only export/layout repair.
+
+    This authorizes scheduling only, never final QA or delivery. Without a
+    filesystem base we cannot validate a proof and retain the legacy status gate.
+    """
     anchor = manifest.get("anchor_job_id")
-    return any(job.get("id") == anchor and job.get("status") == "qa_passed"
-               for job in manifest.get("jobs", []))
+    job = next((value for value in manifest.get("jobs", []) if value.get("id") == anchor), None)
+    if job is None:
+        return False
+    proof = job.get("product_review_proof")
+    if base is None:
+        return job.get("status") == "qa_passed"
+    if not proof:
+        # Legacy projects have no immutable product submission. With actual
+        # files available, status alone cannot authorize a changed image.
+        try:
+            import lc_image_pipeline as p
+            final = p.resolve_project_path(job.get("final_output"), Path(base), "anchor final output")
+            return (job.get("status") == "qa_passed" and final is not None and final.is_file()
+                    and bool(job.get("qa_final_sha256"))
+                    and p.sha256_file(final) == job["qa_final_sha256"]
+                    and job.get("qa_fingerprint") == p.qa_fingerprint(manifest, job, Path(base)))
+        except (OSError, ValueError, TypeError, KeyError):
+            return False
+    if job.get("status") in {"blocked", "failed", "pending", "generating", "generation_repair_needed"}:
+        return False
+    try:
+        import lc_image_pipeline as p
+        from lc_workflow import product_review_context
+        if not isinstance(proof, dict):
+            return False
+        path = p.resolve_project_path(proof.get("path"), Path(base), "anchor product review proof")
+        if path is None or not path.is_file() or p.sha256_file(path) != proof.get("sha256"):
+            return False
+        record = p.read_json(path)
+        if (record.get("job") != anchor or record.get("status") != "qa_passed"
+                or record.get("submission_hash") != p.digest(record.get("reviews"))):
+            return False
+        old = record.get("product_context", {})
+        current = product_review_context(manifest, job, Path(base))
+        # image_layers is a rebuildable pre-JPEG cache. Model raw bytes, actual
+        # evidence, observed bounds and product-review rules remain mandatory.
+        keys = ("generation", "raw", "annotations", "evidence", "panels", "rules")
+        return bool(current.get("raw")) and all(key in old and old[key] == current.get(key) for key in keys)
+    except (OSError, ValueError, TypeError, KeyError):
+        return False
 
 
-def require_capacity(manifest, job, *, exclude_product=None):
+def require_capacity(manifest, job, *, exclude_product=None, base=None):
     current = state(manifest, exclude_product=exclude_product)
     if current["retry_after_seconds"]:
         raise ValueError(f"MODEL_RETRY_AFTER: wait {current['retry_after_seconds']} seconds before dispatch")
@@ -102,7 +170,7 @@ def require_capacity(manifest, job, *, exclude_product=None):
     if adaptive(manifest):
         if manifest.get("generation_gate", {}).get("status") != "open":
             raise ValueError("MODEL_GENERATION_GATE_CLOSED: run plan before dispatch")
-        if not anchor_passed(manifest):
+        if not anchor_passed(manifest, base):
             if manifest.get("anchor_job_id") != job.get("id"):
                 raise ValueError("MODEL_ANCHOR_REQUIRED: only the selected anchor may run before its QA passes")
             if active_count(manifest, exclude_product=exclude_product):
@@ -163,7 +231,7 @@ def record_failure(manifest, attempt, reason, *, retry_after_seconds=None, now=N
         health["cooldown_until"] = max(health.get("cooldown_until", 0), now + delay)
 
 
-def record_success(manifest, attempt, *, now=None):
+def record_success(manifest, attempt, *, now=None, base=None):
     if not adaptive(manifest):
         manifest.setdefault("network_health", {})["consecutive_timeouts"] = 0
         return
@@ -176,7 +244,7 @@ def record_success(manifest, attempt, *, now=None):
             or attempt.get("scheduler_concurrency") != manifest.get("concurrency", 2)):
         return  # A late return cannot heal a newer backoff or grow a newer tier.
     health["consecutive_timeouts"] = 0
-    if (not anchor_passed(manifest)
+    if (not anchor_passed(manifest, base)
             or now < max(health.get("cooldown_until", 0), health.get("retry_after_until", 0))):
         return
     ceiling = min(manifest["scheduler_policy"]["max_concurrency"], health.get("tool_capacity", 4))

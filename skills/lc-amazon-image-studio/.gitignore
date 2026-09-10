@@ -1,5 +1,8 @@
-# Local production credentials and private template extensions must never be published.
-/config.json
-/assets/layouts/design_templates.user.json
-/scripts/__pycache__/
+# Local account credentials. Never package or version-control this file.
+config.json
+
+# Local runtime and test artifacts.
+__pycache__/
 *.py[cod]
+.lc-transactions/
+.lc-compaction/
