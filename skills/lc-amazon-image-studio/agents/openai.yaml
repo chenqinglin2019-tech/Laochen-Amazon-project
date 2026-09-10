@@ -1,4 +1,4 @@
 interface:
   display_name: "易逊-亚马逊套图生成 V5"
   short_description: "参考驱动商业海报与精确拼版，混合文字路线、产品一致性审核和增量快速交付。"
-  default_prompt: "Use $lc-amazon-image-studio to create a reference-driven Amazon image set with per-image native or local typography, verified product details, incremental processing and actual visual review."
+  default_prompt: "Use $lc-amazon-image-studio together with the official $imagegen skill. Load both skills, reuse guidance already read this turn, and apply official prompting guidance before compiling and binding each image prompt. Keep verified product details, the four locks, per-image native or local typography, and the existing authentication, scheduling, review and delivery workflow. Use the built-in image_gen tool with the bound prompt; do not add a second generation or prompt-augmentation pass."

@@ -125,7 +125,7 @@ try {
       const flow=document.createElement('div');flow.className='text-group';
       placePixels(flow,{...contentLimit,height:0});flow.style.height='auto';flow.style.gap=group.sizes.body*group.gap_em+'px';
       flow.style.textAlign=group.align;stage.append(flow);
-      for(const [key,role,maxLines,weight] of [['headline','headline',2,group.headline_weight],['body','body',3,group.body_weight??400],['label','label',3,group.label_weight??600]]){
+      for(const [key,role,maxLines,weight] of [['headline','headline',group.headline_max_lines??2,group.headline_weight],['body','body',3,group.body_weight??400],['label','label',3,group.label_weight??600]]){
        if(!group[key])continue;
        const id=`group-${group.id}-${key}`,el=document.createElement('div');el.className='text '+role;el.dataset.id=id;el.textContent=group[key];
        el.style.fontSize=group.sizes[role]+'px';el.style.color=group.ink;el.style.fontWeight=String(weight);el.style.textAlign=group.align;

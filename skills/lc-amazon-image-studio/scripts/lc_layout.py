@@ -370,7 +370,7 @@ def _discover_runtime() -> dict:
     if os.environ.get("LOCALAPPDATA"):cache_roots.append(Path(os.environ["LOCALAPPDATA"])/"ms-playwright")
     if os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):cache_roots.insert(0,Path(os.environ["PLAYWRIGHT_BROWSERS_PATH"]))
     for cache in cache_roots:
-        for pattern in ["chromium*/chrome-headless-shell*/chrome-headless-shell","chromium*/chrome-headless-shell*/headless_shell.exe","chromium*/chrome-*/chrome","chromium*/chrome-*/chrome.exe","chromium*/chrome-*/Chromium.app/Contents/MacOS/Chromium"]:
+        for pattern in ["chromium*/chrome-headless-shell*/chrome-headless-shell","chromium*/chrome-headless-shell*/headless_shell.exe","chromium*/chrome-headless-shell*/chrome-headless-shell.exe","chromium*/chrome-*/chrome","chromium*/chrome-*/chrome.exe","chromium*/chrome-*/Chromium.app/Contents/MacOS/Chromium","chromium*/chrome-*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"]:
             browsers.extend(sorted(cache.glob(pattern),reverse=True))
     selected=None; seen=[]
     for browser in browsers:
@@ -817,7 +817,7 @@ def render_batch(manifest: dict, base: Path, jobs: list[dict], *, measure_only: 
         shared_metrics["payload_serialize_seconds"] = round(time.monotonic() - phase_started, 4)
         shared_metrics["payload_bytes"] = len(serialized.encode("utf-8"))
         phase_started = time.monotonic()
-        run=subprocess.run([runtime["node"],str(Path(__file__).with_name("render_layout.mjs"))],input=serialized,text=True,capture_output=True,timeout=max(90,40*len(eligible)))
+        run=subprocess.run([runtime["node"],str(Path(__file__).with_name("render_layout.mjs"))],input=serialized,text=True,encoding="utf-8",capture_output=True,timeout=max(90,40*len(eligible)))
         shared_metrics["renderer_process_seconds"] = round(time.monotonic() - phase_started, 4)
         if run.returncode:raise LayoutError(f"Renderer failed: {run.stderr[-2000:]}")
         rendered=json.loads(run.stdout)

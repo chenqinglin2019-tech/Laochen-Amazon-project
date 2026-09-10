@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image, JpegImagePlugin
 
@@ -125,6 +128,118 @@ class CompactDeliveryTests(unittest.TestCase):
         self.assertTrue((self.base / "raw/unregistered.png").exists())
         self.assertTrue((self.base / "raw/01.png").exists())
         self.assertEqual(2, len(self.job["generation_attempts"]))
+
+    def test_repair_target_and_actual_attachment_remain_current_inputs(self):
+        target = self.base / "raw/old.png"
+        target.write_bytes(b"actual earlier tool output")
+        attachment = self.base / "review/layouts/01-360.png"
+        self.job.update(prompt_edit={"target_path": "raw/old.png", "failures": ["fixture failure"]},
+                        generation_reference_paths=[str(attachment)])
+        self.job["generation_attempts"] = [{"id": "old", "status": "ingested", "retained_artifact_path": "raw/old.png", "artifact_sha256": assets.file_hash(target)}]
+        result = self.compact()
+        self.assertTrue(result["ready"])
+        self.assertTrue(target.is_file())
+        self.assertTrue(attachment.is_file())
+        record = json.loads((self.base / self.manifest["review_evidence"]["01"]["path"]).read_text())
+        self.assertIn("raw/old.png", record["input_files"])
+        self.assertIn("review/layouts/01-360.png", record["input_files"])
+
+    def test_actual_attachment_provenance_recursively_retains_real_sources(self):
+        for name in ("adopted", "restored", "original"):
+            (self.base / f"source/{name}.png").write_bytes(name.encode())
+        self.manifest["references"] += [
+            {"id": "adopted", "path": "source/adopted.png", "provenance": {"source_reference_ids": ["restored"]}},
+            {"id": "restored", "path": "source/restored.png", "provenance": {"source_reference_ids": ["original"]}},
+            {"id": "original", "path": "source/original.png"},
+        ]
+        self.job["generation_reference_paths"] = ["source/adopted.png"]
+        self.compact()
+        record = json.loads((self.base / self.manifest["review_evidence"]["01"]["path"]).read_text())
+        self.assertTrue({"source/adopted.png", "source/restored.png", "source/original.png"} <= record["input_files"].keys())
+
+    def test_failed_post_gate_restores_exact_manifest_caches_and_bindings(self):
+        path = self.base / "project_manifest.json"
+        original = json.dumps(self.manifest, separators=(",", ":")).encode()
+        path.write_bytes(original)
+        before = copy.deepcopy(self.manifest)
+        images = {str(item.relative_to(self.base)): item.read_bytes() for item in self.base.rglob("*.png")}
+        with patch.object(self, "gate", wraps=self.gate) as original_gate:
+            # Keep the actual pre-gate while failing only the post-cleanup gate.
+            with self.assertRaisesRegex(ValueError, "rolled back"):
+                delivery.compact_project(self.manifest, self.base, manifest_path=path,
+                    delivery_check_fn=lambda m, b: original_gate(m, b) if self.cache.exists() else {"ready": False},
+                    qa_fingerprint_fn=self.fingerprint)
+        self.assertEqual(path.read_bytes(), original)
+        self.assertEqual(self.manifest, before)
+        for relative, payload in images.items():
+            self.assertEqual((self.base / relative).read_bytes(), payload)
+        self.assertTrue(self.gate(self.manifest, self.base)["ready"])
+
+    def test_process_exit_after_staging_is_rolled_back_on_next_manifest_lock(self):
+        path = self.base / "project_manifest.json"
+        original = json.dumps(self.manifest).encode()
+        path.write_bytes(original)
+        code = '''
+import json, os, sys
+from pathlib import Path
+import lc_assets as assets
+import lc_delivery as delivery
+base = Path(sys.argv[1])
+path = base / "project_manifest.json"
+manifest = json.loads(path.read_text())
+def fingerprint(m, j, b):
+    return assets.digest({"recipe": j["recipe"], "input": assets.file_hash(b / "source/product.png"),
+        "final": assets.file_hash(b / j["final_output"]),
+        "artifact": delivery.artifact_sha256(m, j, b, b / "review/layouts/01.png")})
+def gate(m, b):
+    if not (b / "review/layouts/01.png").exists():
+        os._exit(17)
+    return {"ready": True}
+delivery.compact_project(manifest, base, manifest_path=path, delivery_check_fn=gate, qa_fingerprint_fn=fingerprint)
+'''
+        result = subprocess.run([sys.executable, "-c", code, str(self.base)], cwd=Path(__file__).parent, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 17, result.stderr)
+        self.assertFalse(self.cache.exists())
+        from lc_workflow import manifest_lock
+        with manifest_lock(path):
+            self.assertTrue(self.cache.exists())
+            self.assertEqual(path.read_bytes(), original)
+        self.assertTrue(self.gate(self.manifest, self.base)["ready"])
+
+    def test_interrupted_purge_finishes_without_rolling_back_passed_cleanup(self):
+        with patch("lc_delivery._purge_compaction_files", side_effect=OSError("fixture purge interruption")):
+            with self.assertRaisesRegex(OSError, "purge interruption"):
+                self.compact()
+        self.assertFalse(self.cache.exists())
+        result = delivery.recover_compaction(self.manifest, self.base, manifest_path=self.base / "project_manifest.json")
+        self.assertEqual(result[0]["state"], "finished")
+        self.assertTrue(self.gate(self.manifest, self.base)["ready"])
+        self.assertEqual([], self.compact()["removed"])
+
+    def test_quarantine_recovery_rejects_traversal_without_touching_user_files(self):
+        with patch("lc_delivery._purge_compaction_files", side_effect=OSError("fixture stop before purge")):
+            with self.assertRaises(OSError):
+                self.compact()
+        journal_path = next((self.base / ".lc-compaction").glob("tx-*/journal.json"))
+        journal = json.loads(journal_path.read_text())
+        source = self.base / "source/product.png"
+        original = source.read_bytes()
+        journal["files"].append({"relative": "../../../source/product.png", "sha256": assets.file_hash(source)})
+        journal_path.write_text(json.dumps(journal))
+        with self.assertRaisesRegex(ValueError, "invalid journal artifact"):
+            delivery.recover_compaction(self.manifest, self.base, manifest_path=self.base / "project_manifest.json")
+        self.assertEqual(source.read_bytes(), original)
+
+    def test_exact_input_restoration_reuses_existing_approval_without_rebinding(self):
+        self.compact()
+        before = copy.deepcopy(self.manifest)
+        source = self.base / "source/product.png"
+        payload = source.read_bytes()
+        source.unlink()
+        self.assertIsNone(delivery.artifact_sha256(self.manifest, self.job, self.base, self.cache))
+        source.write_bytes(payload)
+        self.assertTrue(self.gate(self.manifest, self.base)["ready"])
+        self.assertEqual(self.manifest, before)
 
     def test_unrelated_image_change_does_not_remove_this_jobs_missing_cache_binding(self):
         Image.new("RGB", (120, 100), "white").save(self.base / "source/unrelated.png")

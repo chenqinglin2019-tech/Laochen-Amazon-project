@@ -37,12 +37,12 @@ class RuntimeIOTests(unittest.TestCase):
                 expected = assets.file_hash(path)
                 with assets.file_hash_context():
                     self.assertEqual(expected, assets.file_hash(path))
-                self.assertEqual(len(reads), 1)
+                self.assertEqual(len(reads), 2 if os.name == "nt" else 1)
                 with assets.file_hash_context(fresh=True):
                     self.assertEqual(expected, assets.file_hash(path))
-                self.assertEqual(len(reads), 2)
+                self.assertEqual(len(reads), 3 if os.name == "nt" else 2)
             self.assertEqual(expected, assets.file_hash(path))
-        self.assertEqual(len(reads), 3)
+        self.assertEqual(len(reads), 4 if os.name == "nt" else 3)
 
     def test_same_size_and_restored_mtime_does_not_hide_source_change(self):
         path = self.base / "source.bin"

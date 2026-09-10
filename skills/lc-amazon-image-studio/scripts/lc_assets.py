@@ -49,7 +49,10 @@ def file_hash(path: Path) -> str:
     requested = Path(path)
     resolved = requested.resolve(strict=True)
     before = _file_token(resolved.stat())
-    cache = _HASH_SCOPE.get()
+    # Windows ctime is creation time on supported Python versions. Equal
+    # size/mtime/ctime cannot prove unchanged bytes after an in-place rewrite.
+    # Keep all actual read/binding checks; only disable stat-only reuse there.
+    cache = None if os.name == "nt" else _HASH_SCOPE.get()
     saved = cache.get(str(resolved)) if cache is not None else None
     if saved is not None and saved[0] == before:
         if requested.resolve(strict=True) != resolved or _file_token(resolved.stat()) != before:

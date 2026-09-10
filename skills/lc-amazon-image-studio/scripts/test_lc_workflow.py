@@ -392,7 +392,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_contact_sheets_reuse_content_cache(self):
         self.m = ready_fixture(self.base)
-        paths = [self.base / "final/contact_sheet.png", self.base / "review/micro_detail_contact_sheet.png"]
+        paths = [self.base / "review/contact_sheet.png", self.base / "review/micro_detail_contact_sheet.png"]
         before = [path.stat().st_mtime_ns for path in paths]
         p.quality_assurance(self.m, self.base, [SECONDARY_ID])
         p.create_final_contact_sheet(self.m, self.base)

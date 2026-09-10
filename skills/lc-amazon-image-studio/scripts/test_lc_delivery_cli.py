@@ -74,27 +74,30 @@ class DeliveryCLITests(unittest.TestCase):
             self.assertEqual(path.parent, Path("final"))
             self.assertEqual(path.suffix, ".jpg")
 
-    def test_compact_cli_runs_two_real_gates_and_reuses_clean_final(self):
+    def test_deliver_runs_one_real_gate_and_reuses_clean_final_without_cleanup(self):
         manifest = self.ready(compact=True)
         before = {job["id"]: ((self.base / job["final_output"]).stat().st_mtime_ns, file_hash(self.base / job["final_output"])) for job in manifest["jobs"]}
         actual_gate = pipeline.delivery_check
         with patch.object(pipeline, "delivery_check", wraps=actual_gate) as gate, \
              patch.object(pipeline, "export_image", side_effect=AssertionError("Delivery must not encode final images")), \
+             patch("lc_delivery.compact_project", side_effect=AssertionError("Delivery must not run cleanup")), \
              patch("lc_delivery.shutil.copy2", side_effect=AssertionError("Clean final must not be copied")):
             code, result, stderr = self.cli("deliver", "--manifest", str(self.path))
         self.assertEqual(code, 0, stderr or result)
-        self.assertEqual(gate.call_count, 2)
+        self.assertEqual(gate.call_count, 1)
         self.assertEqual(result["output_dir"], str(self.base / "final"))
         self.assertEqual(result["copied_files"], 0)
-        self.assertNotIn("delivery_result", result["compaction"])
+        self.assertNotIn("compaction", result)
+        self.assertFalse((self.base / ".lc-compaction").exists())
+        self.assertTrue(list((self.base / "review/layouts").glob("*.png")))
         self.assert_inventory(result, manifest)
         with patch.object(pipeline, "delivery_check", wraps=actual_gate) as repeated_gate, \
              patch.object(Image.Image, "save", side_effect=AssertionError("Unchanged deliver must not encode images")), \
              patch("lc_delivery.shutil.copy2", side_effect=AssertionError("Unchanged deliver must not copy")):
             code, second, stderr = self.cli("deliver", "--manifest", str(self.path))
         self.assertEqual(code, 0, stderr or second)
-        self.assertEqual(repeated_gate.call_count, 2)
-        self.assertEqual(second["compaction"]["removed"], [])
+        self.assertEqual(repeated_gate.call_count, 1)
+        self.assertNotIn("compaction", second)
         self.assertEqual(second["images"], result["images"])
         self.assertEqual(before, {job["id"]: ((self.base / job["final_output"]).stat().st_mtime_ns, file_hash(self.base / job["final_output"])) for job in manifest["jobs"]})
 
@@ -110,7 +113,7 @@ class DeliveryCLITests(unittest.TestCase):
         self.assertTrue(all(entry["filename"].endswith(".png") for entry in result["images"]))
         self.assertNotIn("compaction", result)
         self.assertEqual(result["copied_files"], len(manifest["jobs"]))
-        self.assertTrue((self.base / "final/contact_sheet.png").is_file())
+        self.assertTrue((self.base / "review/contact_sheet.png").is_file())
         self.assert_inventory(result, manifest)
         with patch("lc_delivery.shutil.copy2", side_effect=AssertionError("Legacy repeat must reuse approved copies")), \
              patch.object(Image.Image, "save", side_effect=AssertionError("Legacy repeat must not encode")):
@@ -128,7 +131,25 @@ class DeliveryCLITests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertNotIn("output_dir", result)
         self.assertFalse((self.base / "delivery").exists())
-        self.assertTrue((self.base / "final/contact_sheet.png").is_file())
+        self.assertTrue((self.base / "review/contact_sheet.png").is_file())
+
+    def test_explicit_compact_runs_two_gates_and_preserves_successful_delivery(self):
+        manifest = self.ready(compact=True)
+        code, delivered, stderr = self.cli("deliver", "--manifest", str(self.path))
+        self.assertEqual(code, 0, stderr or delivered)
+        with patch.object(pipeline, "delivery_check", wraps=pipeline.delivery_check) as gate, \
+             patch.object(Image.Image, "save", side_effect=AssertionError("Cleanup must not encode images")):
+            code, result, stderr = self.cli("compact", "--manifest", str(self.path))
+        self.assertEqual(code, 0, stderr or result)
+        self.assertEqual(gate.call_count, 2)
+        self.assertTrue(result["ready"])
+        self.assertGreater(result["reclaimed_bytes"], 0)
+        self.assertEqual(result["model_calls"], 0)
+        code, repeated, stderr = self.cli("deliver", "--manifest", str(self.path))
+        self.assertEqual(code, 0, stderr or repeated)
+        self.assertEqual(repeated["images"], delivered["images"])
+        self.assertEqual(repeated["copied_files"], 0)
+        self.assert_inventory(repeated, manifest)
 
     def test_invalid_asset_lists_fail_through_structured_cli_validation(self):
         for field in ("product_layers", "disclosure_extra_images", "items"):

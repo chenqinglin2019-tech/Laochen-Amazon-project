@@ -75,7 +75,7 @@ def _attempt(job, attempt_id):
     return attempt
 
 
-def attempt_event(manifest, job_id, attempt_id, event, timestamp=None):
+def attempt_event(manifest, job_id, attempt_id, event, timestamp=None, *, base=None):
     """Record actual tool-boundary events; filesystem times are never substituted."""
     import lc_image_pipeline as p
     job = _job(manifest, job_id)
@@ -93,8 +93,10 @@ def attempt_event(manifest, job_id, attempt_id, event, timestamp=None):
             return copy.deepcopy(attempt)
         raise p.PipelineError("An existing tool event cannot be rewritten")
     if event == "tool_started" and attempt.get("ingested_at") is None:
-        from lc_scheduler import require_capacity
-        require_capacity(manifest, job, exclude_product=job_id)
+        # transition already reserved this slot. A later sibling 429 can lower
+        # capacity for future admissions, not erase this real in-flight event.
+        if job.get("status") != "generating" or attempt.get("status") != "dispatched":
+            raise p.PipelineError("tool_started requires a current dispatched generation reservation")
     if when < attempt["dispatched_at"] or when > time.time():
         raise p.PipelineError("Event timestamp is outside the dispatched attempt")
     if event == "tool_started" and "tool_returned_at" in attempt:
@@ -151,7 +153,7 @@ def ingest(manifest, base: Path, job_id, artifact: Path, attempt_id, *, tool_ret
         if tool_returned_at is not None:
             attempt_event(manifest, job_id, attempt_id, "tool_returned", tool_returned_at)
         return {"job": job_id, "attempt_id": attempt_id, "idempotent": True,
-                "status": job["status"], "dispatch": p.execution_plan(manifest)["dispatch"]}
+                "status": job["status"], "dispatch": p.execution_plan(manifest, base)["dispatch"]}
     if job.get("status") != "generating":
         raise p.PipelineError("Only a generating attempt can ingest a new artifact")
     raw = p.resolve_project_path(job.get("raw_output"), base, "raw_output")
@@ -172,7 +174,7 @@ def ingest(manifest, base: Path, job_id, artifact: Path, attempt_id, *, tool_ret
     attempt.update(status="ingested", artifact_sha256=artifact_hash,
                    artifact_path=str(artifact), retained_artifact_path=p.relpath(raw, base), ingested_at=now)
     from lc_scheduler import record_success
-    record_success(manifest, attempt, now=now)
+    record_success(manifest, attempt, now=now, base=base)
     p.record_timing(job, "ingest", started)
     if "tool_started_at" in attempt and "tool_returned_at" in attempt:
         job.setdefault("timings", []).extend([
@@ -183,7 +185,7 @@ def ingest(manifest, base: Path, job_id, artifact: Path, attempt_id, *, tool_ret
     else:
         attempt["tool_duration_unavailable"] = True
     return {"job": job_id, "attempt_id": attempt_id, "idempotent": False, "status": "generated",
-            "raw_output": job["raw_output"], "dispatch": p.execution_plan(manifest)["dispatch"]}
+            "raw_output": job["raw_output"], "dispatch": p.execution_plan(manifest, base)["dispatch"]}
 
 
 def annotation_fingerprint(job):
@@ -233,6 +235,8 @@ def review_context(manifest, job, base):
         result["evidence"] = p.digest({"dependencies": evidence_dependencies(manifest, job, base),
                                        "assessment": job.get("source_assessment", {})})
         result["dependency_rules"] = p.sha256_file(p.SCRIPT_DIR / "lc_dependencies.py")
+    from lc_review_rules import rule_hashes
+    result.update(rule_hashes("review", manifest, job))
     return result
 
 
@@ -316,13 +320,16 @@ def product_review_context(manifest, job, base):
     evidence = evidence_dependencies(manifest, job, base)
     image = base / "review" / "image_layers" / f"{job['id']}.png"
     raw = p.resolve_path(job.get("raw_output"), base)
-    return {"generation": p.generation_fingerprint(manifest, job, base),
+    result = {"generation": p.generation_fingerprint(manifest, job, base),
             "raw": p.sha256_file(raw) if raw and raw.is_file() else None,
             "image": p.sha256_file(image) if image.is_file() else None,
             "annotations": annotation_fingerprint(job), "evidence": evidence,
             "panels": p.panel_contracts(manifest, job, base) if p.has_panel_sources(job) else [],
             "rules": {name: p.sha256_file(p.SCRIPT_DIR / name) for name in
                       ("lc_workflow.py", "lc_dependencies.py", "lc_image_pipeline.py", "lc_quality.py", "lc_assets.py")}}
+    from lc_review_rules import rule_hashes
+    result.update(rule_hashes("product", manifest, job))
+    return result
 
 
 def _reusable_product_reviews(manifest, job, base, comparisons):
@@ -413,7 +420,9 @@ def _review_prepare_impl(manifest, base: Path, job_id, annotations=None, *, forc
         manifest, base, job_id, annotations, force=force)
     if cached:
         return cached
-    if "raw_product_bbox_norm" in annotations:
+    # The batch worker applied annotations before rendering. Do not overwrite
+    # its computed source/output geometry after pixels and layout are bound.
+    if not prepared and "raw_product_bbox_norm" in annotations:
         job["raw_product_bbox_norm"] = annotations["raw_product_bbox_norm"]
     if not prepared:
         p.prepare(manifest, base, [job_id])
@@ -620,7 +629,7 @@ def _prepare_reviews(manifest, base, selected, annotations, *, force, only_ready
                     # Per-job guards also protect this shared file. Rebuild its
                     # current state after individual rollback, never keep a
                     # sibling's earlier snapshot of the plan.
-                    p.write_json(base / "execution_plan.json", p.execution_plan(candidate))
+                    p.write_json(base / "execution_plan.json", p.execution_plan(candidate, base))
                     commit(candidate)
                     for job_id, _ in completed:
                         guards[job_id].close()
@@ -829,4 +838,4 @@ def _review_submit_impl(manifest, base: Path, packet):
     manifest.clear()
     manifest.update(candidate)
     return {"job": target["id"], "status": target["status"], "idempotent": False,
-            "dispatch": p.execution_plan(manifest)["dispatch"]}
+            "dispatch": p.execution_plan(manifest, base)["dispatch"]}

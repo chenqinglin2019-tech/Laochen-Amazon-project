@@ -79,6 +79,7 @@ SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 DERIVED_BLOCK_PREFIXES = (
     "DESIGN_REFERENCE_REQUIRED:",
     "DESIGN_COPY:",
+    "LOCAL_BACKGROUND:",
     "SOURCE_",
     "FINE_DETAIL_",
     "RESTORED_MASTER_",
@@ -192,7 +193,7 @@ def resolve_project_path(value: str | None, base: Path, label: str) -> Path | No
 
 def relpath(path: Path, base: Path) -> str:
     try:
-        return str(path.resolve().relative_to(base.resolve()))
+        return path.resolve().relative_to(base.resolve()).as_posix()
     except ValueError:
         return str(path.resolve())
 
@@ -204,6 +205,33 @@ def sha256_file(path: Path) -> str:
 def require_enum(value: Any, allowed: set[str], label: str, errors: list[str]) -> None:
     if not isinstance(value, str) or value not in allowed:
         errors.append(f"{label} must be one of {sorted(allowed)}, got {value!r}")
+
+
+def validate_generation_backend(manifest: dict) -> list[str]:
+    """Reject retired project/attempt bindings instead of dispatching them again."""
+    errors = []
+    require_enum(manifest.get("generation_backend", "built_in_image_gen"), VALID_BACKENDS, "generation_backend", errors)
+    for field in ("web_policy", "web_health", "web_batch_pause", "web_reference_source"):
+        if field in manifest:
+            errors.append(f"{field} belongs to a removed backend; retain this project as an archive")
+    jobs = manifest.get("jobs", [])
+    for index, job in enumerate(jobs if isinstance(jobs, list) else []):
+        if not isinstance(job, dict):
+            continue
+        for field in ("native_canvas_approval", "web_native_export_approval"):
+            if field in job:
+                errors.append(f"jobs[{index}].{field} belongs to a removed backend")
+        for field in ("generation_attempts", "title_effect_attempts"):
+            attempts = job.get(field, [])
+            for i, attempt in enumerate(attempts if isinstance(attempts, list) else []):
+                if not isinstance(attempt, dict):
+                    continue
+                label = f"jobs[{index}].{field}[{i}]"
+                if "backend" in attempt:
+                    require_enum(attempt["backend"], VALID_BACKENDS, f"{label}.backend", errors)
+                if "web" in attempt:
+                    errors.append(f"{label}.web belongs to a removed backend")
+    return errors
 
 
 def validate_id(value: Any, label: str, errors: list[str]) -> None:
@@ -231,6 +259,8 @@ def validate_manifest(manifest: dict[str, Any], base: Path, check_files: bool = 
     errors: list[str] = []
     if not isinstance(manifest, dict):
         return ["manifest must be an object"]
+    if manifest.get("review_rule_profile") not in (None, "legacy", "scoped_v1"):
+        errors.append("review_rule_profile must be legacy or scoped_v1")
 
     def obj(parent, key, label, required=False):
         value = parent.get(key, None if required else {})
@@ -317,7 +347,7 @@ def validate_manifest(manifest: dict[str, Any], base: Path, check_files: bool = 
         errors.append(f"schema_version must be {SCHEMA_VERSION}")
     validate_id(manifest.get("project_id"), "project_id", errors)
     require_enum(manifest.get("run_mode"), VALID_RUN_MODES, "run_mode", errors)
-    require_enum(manifest.get("generation_backend"), VALID_BACKENDS, "generation_backend", errors)
+    errors.extend(validate_generation_backend(manifest))
     from lc_scheduler import validate as validate_scheduler
     errors.extend(validate_scheduler(manifest))
     boolean(manifest, "critical_detail_census_completed", "critical_detail_census_completed")
@@ -430,6 +460,8 @@ def validate_manifest(manifest: dict[str, Any], base: Path, check_files: bool = 
         if not isinstance(job, dict):
             errors.append(f"{label} must be an object")
             continue
+        if job.get("review_rule_profile") not in (None, "legacy", "scoped_v1"):
+            errors.append(f"{label}.review_rule_profile must be legacy or scoped_v1")
         unique_id(job.get("id"), f"{label}.id", job_ids)
         require_enum(job.get("render_mode"), VALID_RENDER_MODES, f"{label}.render_mode", errors)
         require_enum(job.get("status", "pending"), VALID_JOB_STATUS, f"{label}.status", errors)
@@ -441,6 +473,12 @@ def validate_manifest(manifest: dict[str, Any], base: Path, check_files: bool = 
             number(job.get(field, 0), f"{label}.{field}", 0, 10000, integer=True)
         if "active_attempt_id" in job:
             validate_id(job["active_attempt_id"], f"{label}.active_attempt_id", errors)
+        if "title_effect_adoption_mask" in job:
+            mask = obj(job, "title_effect_adoption_mask", f"{label}.title_effect_adoption_mask")
+            path_value(mask.get("path"), f"{label}.title_effect_adoption_mask.path")
+            value = mask.get("sha256")
+            if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+                errors.append(f"{label}.title_effect_adoption_mask.sha256 must be a SHA-256 digest")
         if "queued_at" in job:
             number(job["queued_at"], f"{label}.queued_at", 0, 253402300799)
         attempt_ids: set[str] = set()
@@ -876,6 +914,11 @@ def generation_geometry(job: dict) -> dict:
         if errors:
             raise PipelineError("; ".join(errors))
         return copy.deepcopy(lock)
+    if job.get("prompt_profile") == "images_2_5_v1" and resolve_text_mode(job) == "model_native":
+        layout = {**design_layout_payload(job), **(job.get("layout") or {})}
+        return {"image_region_norm": [0, 0, 1, 1],
+                "product_region_norm": copy.deepcopy(layout.get("product_region_norm") or job["target_product_bbox_norm"]),
+                "text_regions_norm": [copy.deepcopy(layout["text_group_box"])] if layout.get("text_group_box") else []}
     if not job.get("layout") or job.get("kind") == "main" or resolve_text_mode(job) == "model_native":
         return {"image_region_norm": [0, 0, 1, 1],
                 "product_region_norm": job["target_product_bbox_norm"], "text_regions_norm": []}
@@ -921,6 +964,22 @@ def compile_job_prompt(manifest: dict[str, Any], job: dict[str, Any], base: Path
     paths = list(dict.fromkeys(reference_paths))
     roles = {r["path"]: r.get("role", "whole_product_reference") for r in manifest["references"]}
     geometry = generation_geometry(job)
+    if job.get("prompt_profile") == "images_2_5_v1":
+        from lc_prompting import compile_image_prompt, ordered_references
+        request = job.get("prompt_edit") or {}
+        try:
+            if request and not resolve_project_path(request["target_path"], base, "repair edit target").is_file():
+                raise ValueError("The bound repair edit target is missing; restore it before planning")
+            paths = ordered_references(manifest, job, paths)
+        except ValueError as exc:
+            job["status"], job["blocked_reason"] = "blocked", "QUALITY_PROMPT_INPUT:" + str(exc)
+            return "Prompt preparation blocked: " + str(exc) + "\n", required, hidden, paths
+        prompt = compile_image_prompt(manifest, job, paths, detail_blocks, geometry, {
+            "geometry": lock_lines(truth.get("geometry_lock", {})),
+            "material": lock_lines(truth.get("material_lock", {})),
+            "scene_scale": lock_lines(truth.get("scene_scale_lock", {})),
+        })
+        return prompt, required, hidden, paths
     sections = ["Geometry Lock:", *lock_lines(truth.get("geometry_lock", {})),
                 "- Preserve physical structure and dimensions. Natural perspective, silhouette projection and occlusion may change with the requested view.",
                 "", "Material Lock:", *lock_lines(truth.get("material_lock", {})),
@@ -1033,6 +1092,9 @@ def current_fingerprints(manifest: dict, job: dict, base: Path) -> dict[str, str
                           "padding_color": job.get("padding_color", "#ffffff"),
                           "language": manifest.get("language"), "theme": manifest.get("style_profile", {}),
                           "assets": asset_dependencies(job.get("layout", {}), base)}
+    if job.get("background_normalization") is not None:
+        from lc_background import dependencies
+        layout_inputs["background_normalization"] = dependencies(job, base)
     if "text_mode" in job or job.get("design_brief"):
         layout_inputs.update(text_mode=resolve_text_mode(job), design=design_layout_payload(job))
     layout_hash = digest(layout_inputs)
@@ -1068,7 +1130,13 @@ def compile_prompts(manifest: dict[str, Any], base: Path, job_ids: Iterable[str]
             continue
         previous = job.get("fingerprints", {})
         prompt, required, hidden, refs = compile_job_prompt(manifest, job, base)
-        new = current_fingerprints(manifest, job, base)
+        from lc_background import BackgroundError
+        try:
+            new = current_fingerprints(manifest, job, base)
+        except BackgroundError as exc:
+            clear_reviews(job, image_changed=False)
+            job["status"], job["blocked_reason"] = "blocked", "LOCAL_BACKGROUND:" + str(exc)
+            continue
         path = prompt_dir / f"{job['id']}.txt"
         if not path.is_file() or path.read_text(encoding="utf-8") != prompt:
             path.write_text(prompt, encoding="utf-8")
@@ -1217,7 +1285,11 @@ def aspect_safe_postprocess(manifest: dict[str, Any], base: Path, force: bool = 
             continue
         layout_path = base / "review" / "layouts" / f"{job['id']}.png"
         image_path = base / "review" / "image_layers" / f"{job['id']}.png"
-        image_input_hash = digest({"raw": raw_sha, "canvas": job["canvas"], "bbox": job.get("raw_product_bbox_norm"), "padding_color": job.get("padding_color", "#ffffff")})
+        image_inputs = {"raw": raw_sha, "canvas": job["canvas"], "bbox": job.get("raw_product_bbox_norm"), "padding_color": job.get("padding_color", "#ffffff")}
+        if job.get("background_normalization") is not None:
+            from lc_background import dependencies
+            image_inputs["background_normalization"] = dependencies(job, base)
+        image_input_hash = digest(image_inputs)
         image_cached = not force and job.get("image_input_hash") == image_input_hash and image_path.is_file() and job.get("image_file_sha256") == sha256_file(image_path)
         if not image_cached:
             with Image.open(raw_path) as opened:
@@ -1233,6 +1305,17 @@ def aspect_safe_postprocess(manifest: dict[str, Any], base: Path, force: bool = 
                     job["output_product_bbox_norm"] = [(offset[0]+x*contained.width)/image.width,
                                                        (offset[1]+y*contained.height)/image.height,
                                                        w*contained.width/image.width, h*contained.height/image.height]
+                if job.get("background_normalization") is not None:
+                    from lc_background import apply, BackgroundError
+                    try:
+                        image, job["background_normalization_result"] = apply(image, job, base)
+                    except BackgroundError as exc:
+                        clear_reviews(job, image_changed=False)
+                        job.pop("background_normalization_result", None)
+                        job["status"], job["blocked_reason"] = "blocked", "LOCAL_BACKGROUND:" + str(exc)
+                        continue
+                else:
+                    job.pop("background_normalization_result", None)
                 image_sha = pixel_hash(image)
                 if job.get("image_sha256") and job["image_sha256"] != image_sha:
                     clear_reviews(job, image_changed=True)
@@ -1425,6 +1508,13 @@ def create_repair_prompt(
     repair_dir = base / "repairs"
     repair_dir.mkdir(parents=True, exist_ok=True)
     path = repair_dir / f"{job['id']}__{detail['id']}.txt"
+    if job.get("prompt_profile") == "images_2_5_v1":
+        from lc_prompting import detail_repair_prompt
+        location, crop = evidence_for_job(detail, job)
+        if not location or not crop or detail.get("status") != "confirmed":
+            raise PipelineError(f"DETAIL_UNVERIFIABLE:{detail['id']}: cannot compile a repair without current evidence")
+        path.write_text(detail_repair_prompt(manifest, job, detail, location, crop), encoding="utf-8")
+        return relpath(path, base)
     prompt = (
         "Use case: precise-object-edit\n"
         f"Edit target: {job.get('raw_output', '')}\n"
@@ -1448,6 +1538,10 @@ def create_semantic_repair_prompt(job: dict[str, Any], failed: list[str], base: 
     repair_dir = base / "repairs"
     repair_dir.mkdir(parents=True, exist_ok=True)
     path = repair_dir / f"{job['id']}__semantic.txt"
+    if job.get("prompt_profile") == "images_2_5_v1":
+        from lc_prompting import semantic_repair_prompt
+        path.write_text(semantic_repair_prompt(job, failed), encoding="utf-8")
+        return relpath(path, base)
     prompt = (
         "Use case: precise-object-edit\n"
         f"Edit target: {job.get('raw_output', '')}\n"
@@ -1579,6 +1673,8 @@ def qa_fingerprint(manifest: dict, job: dict, base: Path) -> str:
     if "design_resolution" in job:
         payload["design_resolution"] = job["design_resolution"]
         payload["reference_issue"] = design_reference_issue(job)
+    from lc_review_rules import rule_hashes
+    payload.update(rule_hashes("qa", manifest, job))
     return digest(payload)
 
 
@@ -1708,7 +1804,7 @@ def quality_assurance(manifest: dict[str, Any], base: Path,
             check("LOCAL_TITLE_EFFECT_REVIEW", not effect_issues, issues=effect_issues)
             layout_failures.extend(effect_issues)
         copy_issues = claim_issues(manifest, job)
-        contracts = project_contract_report(manifest)
+        contracts = project_contract_report(manifest, [job["id"]])
         check("PROJECT_STYLE_AND_COPY", contracts["passed"], issues=contracts["issues"])
         if not contracts["passed"]:
             layout_failures.extend(contracts["issues"])
@@ -1927,9 +2023,9 @@ def create_micro_detail_sheet(items: list[tuple[str, Path]], output: Path) -> No
 
 
 def create_final_contact_sheet(manifest: dict[str, Any], base: Path) -> None:
-    output = base / "final" / "contact_sheet.png"
+    output = base / "review" / "contact_sheet.png"
     inputs = contact_inputs(manifest, base)
-    binding = manifest.get("delivery_artifacts", {}).get("final/contact_sheet.png", {})
+    binding = manifest.get("delivery_artifacts", {}).get("review/contact_sheet.png", {})
     if binding.get("inputs") == inputs and binding.get("sha256") and binding.get("sha256") == artifact_sha256(manifest, None, base, output):
         return
     items: list[tuple[str, Path]] = []
@@ -1961,7 +2057,7 @@ def create_final_contact_sheet(manifest: dict[str, Any], base: Path) -> None:
         )
     output.parent.mkdir(parents=True, exist_ok=True)
     canvas.save(output, format="PNG", optimize=True)
-    bind_artifact(manifest, base, "final/contact_sheet.png", inputs)
+    bind_artifact(manifest, base, "review/contact_sheet.png", inputs)
 
 
 def contact_inputs(manifest: dict, base: Path) -> str:
@@ -2043,14 +2139,16 @@ def delivery_check(manifest: dict[str, Any], base: Path) -> dict[str, Any]:
         if mobile_preview_required(job) and not mobile_preview_is_current(job, base, manifest):
             issues.append(f"{job['id']}: mobile preview is missing or changed since review")
         issues.extend(f"{job['id']}: {v}" for v in check_export(job, path))
-    for relative in ("qa_report.json", "final/contact_sheet.png", "review/micro_detail_contact_sheet.png"):
+    overview = ("review/contact_sheet.png" if "review/contact_sheet.png" in manifest.get("delivery_artifacts", {})
+                else "final/contact_sheet.png")
+    for relative in ("qa_report.json", overview, "review/micro_detail_contact_sheet.png"):
         path = base / relative
         actual_sha = sha256_file(path) if relative == "qa_report.json" and path.is_file() else artifact_sha256(manifest, None, base, path)
         if not actual_sha:
             issues.append(f"required delivery artifact missing: {relative}")
         elif relative != "qa_report.json":
             binding = manifest.get("delivery_artifacts", {}).get(relative, {})
-            expected = digest(qa_report) if relative.startswith("review/") else contact_inputs(manifest, base)
+            expected = contact_inputs(manifest, base) if relative == overview else digest(qa_report)
             if binding.get("sha256") != actual_sha or binding.get("inputs") != expected:
                 issues.append(f"required delivery artifact stale or modified: {relative}")
     result = {"schema_version": SCHEMA_VERSION, "project_id": manifest.get("project_id"),
@@ -2094,9 +2192,13 @@ def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
             raise PipelineError("pixel_composite uses the local compose command, not an image-model call")
         if not job.get("prompt_hash"):
             raise PipelineError(f"Job {job_id} has not been prepared")
+        if (job.get("prompt_profile") == "images_2_5_v1"
+                and current in {"generation_repair_needed", "repair_needed"}
+                and (job.get("prompt_edit") or {}).get("target_path") != job.get("raw_output")):
+            raise PipelineError("Repair prompt is not bound to the current failed image; run plan before dispatch")
         if manifest.get("generation_gate", {}).get("status") != "open":
             raise PipelineError(f"Generation gate is closed: {manifest.get('generation_gate', {})}")
-        contract_report = project_contract_report(manifest)
+        contract_report = project_contract_report(manifest, [job_id])
         if not contract_report["passed"]:
             raise PipelineError("Project design/copy preflight failed: " + "; ".join(contract_report["issues"]))
         if base is None:
@@ -2111,8 +2213,11 @@ def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
             raise PipelineError("Current source evidence or processing mode requires review: " + ";".join(decision["blocked_reasons"]))
         if any(a.get("status") == "started" for a in job.get("title_effect_attempts", [])):
             raise PipelineError("An active local title edit must return before replacing its product base")
+        # Read-only status can suggest a healthy replacement anchor after a
+        # per-job diagnostic. Recompute that same choice under this write lock.
+        execution_plan(manifest, base)
         try:
-            require_capacity(manifest, job, exclude_product=job_id)
+            require_capacity(manifest, job, exclude_product=job_id, base=base)
         except ValueError as exc:
             raise PipelineError(str(exc)) from exc
         if base is not None and generation_fingerprint(manifest, job, base) != job["prompt_hash"]:
@@ -2223,6 +2328,28 @@ def prepare(manifest: dict[str, Any], base: Path, job_ids: Iterable[str] | None 
         external_agent_planning_measurement="unavailable_no_external_planning_events")
 
 
+def prepare_prompt_edits(manifest: dict, base: Path, selected: set[str]) -> None:
+    """Freeze a verified failed output as a prompt input before recompilation.
+
+Repair sidecars remain review aids. The existing dispatch/attempt/ingest chain
+binds the resulting main prompt and this target via generation_reference_paths.
+"""
+    jobs = [job for job in manifest["jobs"] if job["id"] in selected
+            and job.get("prompt_profile") == "images_2_5_v1"
+            and job.get("status") in {"generation_repair_needed", "repair_needed"}]
+    if not jobs:
+        return
+    report = read_json(base / "qa_report.json")
+    for job in jobs:
+        result = next((item for item in report.get("jobs", []) if item.get("id") == job["id"]), {})
+        target = resolve_project_path(job.get("raw_output"), base, "repair edit target")
+        failures = result.get("image_failures")
+        if (not failures or digest(result) != job.get("qa_report_fingerprint") or target is None
+                or not target.is_file() or sha256_file(target) != job.get("bound_raw_sha256")):
+            raise PipelineError(f"{job['id']}: repair requires a current bound QA report and unchanged raw target")
+        job["prompt_edit"] = {"target_path": job["raw_output"], "failures": list(dict.fromkeys(failures))}
+
+
 def _prepare_impl(manifest: dict[str, Any], base: Path, job_ids: Iterable[str] | None = None) -> None:
     selected = job_selection(manifest, job_ids)
     for job in manifest["jobs"]:
@@ -2235,6 +2362,7 @@ def _prepare_impl(manifest: dict[str, Any], base: Path, job_ids: Iterable[str] |
         raise PipelineError("Manifest validation failed:\n- " + "\n- ".join(errors))
     from lc_layout import layout_geometry
     selected = job_selection(manifest, job_ids)
+    prepare_prompt_edits(manifest, base, selected)
     from lc_style_reference import prepare_design_briefs
     from lc_stage_timing import record_batch_stage
     reference_started = time.perf_counter()
@@ -2266,9 +2394,13 @@ def _prepare_impl(manifest: dict[str, Any], base: Path, job_ids: Iterable[str] |
         reason = str(job.get("blocked_reason", ""))
         if job.get("status") == "blocked" and reason.startswith(DERIVED_BLOCK_PREFIXES):
             job["status"] = "pending"
+            if reason.startswith("LOCAL_BACKGROUND:") and job.get("generated_prompt_hash") == generation_fingerprint(manifest, job, base):
+                job["status"] = "generated"
             job.pop("blocked_reason", None)
         if job.get("layout") and job.get("placement_mode", "template") == "template" and not job.get("generation_geometry_lock") and resolve_text_mode(job) != "model_native":
             job["target_product_bbox_norm"] = layout_geometry(job)["product_region_norm"]
+        if job.get("prompt_profile") == "images_2_5_v1" and resolve_text_mode(job) == "model_native" and not job.get("generation_geometry_lock"):
+            job["target_product_bbox_norm"] = generation_geometry(job)["product_region_norm"]
         if "text_mode" in job:
             planned_job = copy.deepcopy(job)
             planned_job.pop("model_text_review", None)
@@ -2289,7 +2421,11 @@ def _prepare_impl(manifest: dict[str, Any], base: Path, job_ids: Iterable[str] |
             invalidate_visual_design_review(manifest, job, base)
             if required_design_unresolved(job) and job.get("status") in {"pending", "generation_repair_needed"}:
                 job["status"], job["blocked_reason"] = "blocked", "DESIGN_REFERENCE_REQUIRED:resolve the explicit reference before dispatch"
-    if contract_report["passed"]:
+    local_issues = {row["id"]: row["issues"] for row in contract_report["jobs"] if row["issues"]}
+    for job in manifest["jobs"]:
+        if job["id"] in selected and job["id"] in local_issues and job.get("status") in {"pending", "generation_repair_needed"}:
+            job["status"], job["blocked_reason"] = "blocked", "DESIGN_COPY:" + ";".join(local_issues[job["id"]])
+    if not contract_report.get("shared_issues"):
         typography_jobs = [j["id"] for j in manifest["jobs"] if j["id"] in selected
                            and j.get("status") in {"pending", "generation_repair_needed"}
                            and j.get("render_mode") != "pixel_composite" and not is_hold(j)]
@@ -2300,19 +2436,27 @@ def _prepare_impl(manifest: dict[str, Any], base: Path, job_ids: Iterable[str] |
                 job = find_by_id(manifest["jobs"], result["id"])
                 job["typography_dispatch_binding"] = {"passed": result["passed"],
                     "inputs": typography_dispatch_fingerprint(manifest, job, base)}
+                if not result["passed"]:
+                    job["status"], job["blocked_reason"] = "blocked", "DESIGN_COPY:TYPOGRAPHY_PREFLIGHT:" + str(result.get("issues", fit_report["issues"]))
     global_reasons = list(manifest.get("shared_blockers", []))
-    global_reasons.extend(contract_report["issues"])
+    global_reasons.extend(contract_report.get("shared_issues", []))
     if not manifest.get("critical_detail_census_completed"):
         global_reasons.append("CENSUS_INCOMPLETE: inspect all product sources and record P0/P1 visibility")
     manifest["generation_gate"] = {"status": "closed" if global_reasons else "open",
         "shared_reasons": global_reasons,
         "blocked_required_jobs": [j["id"] for j in manifest["jobs"] if j.get("required", True) and j["status"] == "blocked"]}
-    write_json(base / "execution_plan.json", execution_plan(manifest))
+    write_json(base / "execution_plan.json", execution_plan(manifest, base))
 
 
-def execution_plan(manifest: dict) -> dict:
+def execution_plan(manifest: dict, base: Path | None = None) -> dict:
+    errors = validate_generation_backend(manifest)
+    if errors:
+        raise PipelineError("Unsupported generation inputs:\n- " + "\n- ".join(errors))
+    from lc_runtime_status import active_diagnostics
+    diagnosed = {identifier for record in active_diagnostics(manifest, base)
+                 for identifier in record.get("jobs", [])} if base is not None else set()
     ready = [j for j in manifest["jobs"] if j.get("status") in {"pending", "generation_repair_needed"}
-             and not is_hold(j) and not required_design_unresolved(j)]
+             and j["id"] not in diagnosed and not is_hold(j) and not required_design_unresolved(j)]
     def risk(job):
         explicit = job.get("risk_priority")
         if isinstance(explicit, (int, float)):
@@ -2322,12 +2466,12 @@ def execution_plan(manifest: dict) -> dict:
     # An anchor is tied to its generation fingerprint, not its fixed slot name.
     anchor = manifest.get("anchor_job_id")
     previous_anchor = find_by_id(manifest["jobs"], anchor) if anchor else None
-    if (previous_anchor is None or is_hold(previous_anchor) or required_design_unresolved(previous_anchor)
+    if (previous_anchor is None or anchor in diagnosed or is_hold(previous_anchor) or required_design_unresolved(previous_anchor)
             or previous_anchor.get("status") in {"blocked", "failed"}) and ready:
         anchor = ready[0]["id"]
         manifest["anchor_job_id"] = anchor
-    anchor_job = find_by_id(manifest["jobs"], anchor) if anchor else None
-    anchor_passed = bool(anchor_job and anchor_job.get("status") == "qa_passed")
+    from lc_scheduler import anchor_passed as verified_anchor_passed
+    anchor_passed = verified_anchor_passed(manifest, base=base)
     allowed = ready if anchor_passed else [j for j in ready if j["id"] == anchor]
     if manifest.get("generation_gate", {}).get("status") != "open":
         allowed = []
@@ -2388,10 +2532,11 @@ def init_project(project_dir: Path, project_id: str, force: bool = False, *,
                     design_template_policy={"version": 1, "mode": "auto"},
                     style_contract=default_style_contract(),
                     delivery_profile={"name": "compact_jpg", "jpeg_quality": 92},
-                    review_dependency_version=2)
+                    review_dependency_version=2, review_rule_profile="scoped_v1")
     for job in template["jobs"]:
         job["canvas"] = list(canvas)
         job["generation_dependency_version"] = 2
+        job["prompt_profile"] = "images_2_5_v1"
         if job.get("kind") == "main":
             job["text_mode"] = "none"
         else:
@@ -2463,14 +2608,17 @@ def parser() -> argparse.ArgumentParser:
     init.add_argument("--a-plus-canvas", nargs=2, type=int)
     init.add_argument("--a-plus-count", type=int, default=6)
     subs.add_parser("doctor", help="Verify pinned local rendering runtime and fonts")
-    for name in ("validate", "prepare", "plan", "compose", "postprocess", "qa", "finalize", "delivery-check", "deliver", "migrate"):
+    for name in ("validate", "prepare", "plan", "compose", "postprocess", "qa", "finalize", "delivery-check", "deliver", "compact", "status", "migrate"):
         sub = subs.add_parser(name)
         sub.add_argument("--manifest", type=Path, required=True)
         if name == "validate": sub.add_argument("--skip-file-check", action="store_true")
         if name in {"prepare", "plan", "compose", "postprocess", "qa", "finalize"}:
             sub.add_argument("--jobs", nargs="+", help="Only process these job ids; preserve unrelated job outputs and reviews")
         if name == "postprocess": sub.add_argument("--force", action="store_true")
-        if name == "plan": sub.add_argument("--tool-capacity", type=int, choices=range(1, 5))
+        if name == "plan":
+            sub.add_argument("--tool-capacity", type=int, choices=range(1, 5))
+            sub.add_argument("--tool-capacity-source")
+            sub.add_argument("--tool-capacity-reason")
         if name == "migrate":
             sub.add_argument("--marketplace")
             sub.add_argument("--language")
@@ -2525,6 +2673,7 @@ def parser() -> argparse.ArgumentParser:
             effect.add_argument("--attempt-id", required=True)
     for sub in subs.choices.values():
         sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS)
+        sub.add_argument("--detail", action="store_true", help="Include full audit and timing details")
     return command
 
 
@@ -2534,6 +2683,10 @@ def run_command(args) -> int:
     result = None
     json_mode = getattr(args, "json", False)
     def emit(value, *, ok=True):
+        from lc_cli_output import compact_result, safe_text_payload
+        if not getattr(args, "detail", False):
+            value = compact_result(value, args.command, manifest_path)
+        value = safe_text_payload(value)
         if json_mode:
             payload = dict(value) if isinstance(value, dict) else {"result": str(value)}
             payload.update(ok=ok, command=args.command)
@@ -2563,6 +2716,13 @@ def run_command(args) -> int:
             return 0
         base = manifest_path.parent
         manifest = read_json(manifest_path)
+        if args.command == "status":
+            errors = validate_manifest(manifest, base, check_files=False)
+            if errors:
+                raise PipelineError("Status input validation failed:\n- " + "\n- ".join(errors))
+            from lc_runtime_status import build_status
+            emit(build_status(manifest, base, detail=getattr(args, "detail", False)))
+            return 0
         if args.command == "validate":
             errors = validate_manifest(manifest, base, check_files=not args.skip_file_check)
             if errors:
@@ -2578,9 +2738,11 @@ def run_command(args) -> int:
         elif args.command == "plan":
             if getattr(args, "tool_capacity", None) is not None:
                 from lc_scheduler import set_tool_capacity
-                set_tool_capacity(manifest, args.tool_capacity)
+                if not args.tool_capacity_source or not args.tool_capacity_reason:
+                    raise PipelineError("--tool-capacity requires --tool-capacity-source and --tool-capacity-reason")
+                set_tool_capacity(manifest, args.tool_capacity, source=args.tool_capacity_source, reason=args.tool_capacity_reason)
             prepare(manifest, base, args.jobs)
-            result = execution_plan(manifest)
+            result = execution_plan(manifest, base)
         elif args.command in {"postprocess", "compose"}:
             aspect_safe_postprocess(manifest, base, force=getattr(args, "force", False), job_ids=args.jobs)
         elif args.command == "qa":
@@ -2594,18 +2756,16 @@ def run_command(args) -> int:
         elif args.command == "delivery-check":
             result = delivery_check(manifest, base)
         elif args.command == "deliver":
-            from lc_delivery import compact_project, prepare_delivery_directory
-            profile = resolve_delivery_profile(manifest)
-            if profile["name"] == "compact_jpg":
-                compaction = compact_project(manifest, base, manifest_path=manifest_path,
-                    delivery_check_fn=delivery_check, qa_fingerprint_fn=qa_fingerprint,
-                    stage_fingerprints_fn=current_fingerprints)
-                result = compaction.pop("delivery_result")
-                result["compaction"] = compaction
-            else:
-                result = delivery_check(manifest, base)
-            result.update(prepare_delivery_directory(manifest, base, delivery_result=result))
+            from lc_delivery import prepare_delivery_directory
+            result = delivery_check(manifest, base)
+            result.update(prepare_delivery_directory(manifest, base, delivery_result=result, manifest_path=manifest_path))
             write_json(base / "delivery_report.json", result)
+        elif args.command == "compact":
+            from lc_delivery import compact_project
+            result = compact_project(manifest, base, manifest_path=manifest_path,
+                delivery_check_fn=delivery_check, qa_fingerprint_fn=qa_fingerprint,
+                stage_fingerprints_fn=current_fingerprints)
+            write_json(base / "compaction_report.json", result)
         elif args.command == "transition":
             transition_job(manifest, args.job, args.status, args.reason, base,
                            retry_after_seconds=getattr(args, "retry_after_seconds", None))
@@ -2642,7 +2802,7 @@ def run_command(args) -> int:
                 result = ingest(manifest, base, args.job, args.artifact, args.attempt_id,
                                 tool_returned_at=getattr(args, "tool_returned_at", None))
             elif args.command == "attempt-event":
-                result = attempt_event(manifest, args.job, args.attempt_id, args.event, args.timestamp)
+                result = attempt_event(manifest, args.job, args.attempt_id, args.event, args.timestamp, base=base)
             elif args.command == "review-prepare":
                 annotations = read_json(args.annotations) if args.annotations else None
                 result = (review_prepare(manifest, base, args.job, annotations, force=args.force) if args.job
@@ -2660,6 +2820,7 @@ def run_command(args) -> int:
             record_stage(target, "lock_recovery", seconds=lock["recovery_seconds"], scope="command", command=args.command,
                          measurement="pending_transaction_recovery_after_lock_acquired")
         write_json(manifest_path, manifest)
+        args._command_result = result
         if json_mode:
             emit(result or {}, ok=not (isinstance(result, dict) and result.get("errors")))
         else:
@@ -2668,7 +2829,8 @@ def run_command(args) -> int:
             print(manifest_path)
         return 2 if isinstance(result, dict) and result.get("errors") else 0
     except (PipelineError, ValueError, OSError) as exc:
-        if manifest is not None and manifest_path is not None and args.command not in {"validate", "delivery-check"}:
+        args._command_error = str(exc)
+        if manifest is not None and manifest_path is not None and args.command not in {"validate", "delivery-check", "status"}:
             write_json(manifest_path, manifest)
         print(str(exc), file=sys.stderr)
         if json_mode:
@@ -2676,13 +2838,12 @@ def run_command(args) -> int:
         return 2
 
 
-def main() -> int:
-    args = parser().parse_args()
+def _run_main_args(args) -> int:
     from lc_workflow import manifest_lock
     path = getattr(args, "manifest", None)
     if args.command == "init":
         path = args.project_dir / "project_manifest.json"
-    if path is None:
+    if path is None or args.command == "status":
         return run_command(args)
     try:
         if args.command in {"prepare", "plan", "compose", "postprocess", "qa", "finalize", "review-prepare", "review-submit", "title-effect-prepare"}:
@@ -2710,16 +2871,32 @@ def main() -> int:
                 staged_args.manifest = stage_manifest_path
                 if args.command == "review-prepare" and not args.job:
                     staged_args.jobs = selected
-                return run_command(staged_args)
+                try:
+                    return run_command(staged_args)
+                finally:
+                    for field in ("_command_error", "_command_result"):
+                        if hasattr(staged_args, field):
+                            setattr(args, field, getattr(staged_args, field))
             return run_staged_command(path.expanduser().resolve(), selected, operation, command_name=args.command)
         with manifest_lock(path.expanduser().resolve()) as lock_timing:
             args._manifest_lock_timing = lock_timing
             return run_command(args)
     except (TimeoutError, ValueError, OSError, PipelineError) as exc:
+        args._command_error = str(exc)
         print(str(exc), file=sys.stderr)
         if getattr(args, "json", False):
             print(json.dumps({"ok": False, "command": args.command, "error": str(exc)}, ensure_ascii=False))
         return 2
+
+
+def main() -> int:
+    # The CLI JSON protocol is UTF-8 even when Windows pipes use a legacy ACP.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+    args = parser().parse_args()
+    from lc_command_diagnostics import run_observed_command
+    return run_observed_command(args, lambda: _run_main_args(args))
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -63,6 +64,29 @@ class CompactPipelineTests(unittest.TestCase):
             stream.write(b"changed")
         with self.assertRaises(p.PipelineError):
             p.delivery_check(m, self.base)
+
+    def test_bound_repair_of_retired_attempt_survives_full_pipeline_compaction(self):
+        m = create_v3_fixture(self.base)
+        m["delivery_profile"] = {"name": "compact_jpg"}
+        m["review_dependency_version"] = 2
+        job = m["jobs"][1]
+        target = self.base / "raw/earlier-attempt.png"
+        shutil.copy2(self.base / "source/product_front.png", target)
+        job.update(prompt_profile="images_2_5_v1", prompt_edit={"target_path": "raw/earlier-attempt.png", "failures": ["Fix the fixture structure"]})
+        prepare_fixture(m, self.base)
+        simulate_secondary_output(m, self.base)
+        job["generation_attempts"].insert(0, {"id": "fixture-earlier", "status": "ingested", "kind": "initial",
+            "retained_artifact_path": "raw/earlier-attempt.png", "artifact_sha256": p.sha256_file(target),
+            "prompt_hash": "synthetic-earlier-attempt-not-a-production-call", "dispatched_at": 1.0})
+        finish_fixture(m, self.base)
+        generation = p.generation_fingerprint(m, job, self.base)
+        final = p.sha256_file(self.base / job["final_output"])
+        result = self.compact(m)
+        self.assertTrue(result["ready"])
+        self.assertTrue(target.is_file())
+        self.assertEqual(p.generation_fingerprint(m, job, self.base), generation)
+        self.assertEqual(p.sha256_file(self.base / job["final_output"]), final)
+        self.assertTrue(p.delivery_check(m, self.base)["ready"])
 
     def test_compact_single_export_change_keeps_sibling_and_rebuilds_overview(self):
         m = self.ready()
