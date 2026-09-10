@@ -13,6 +13,7 @@ from pathlib import Path
 import re
 from typing import Any
 from xml.etree import ElementTree
+from completion_policy import supported as necessary_work_enabled
 
 from common import (add_history, assert_active_free_policy,
                     assert_default_discovery_plan_contract, atomic_write_json,
@@ -233,7 +234,7 @@ def query_coverage(evidence: dict[str, Any], candidates: dict[str, Any], plan: d
                             reviewed_assets=len(payload["coverage_attestation"]["reviewed_asset_ids"]))
                         return output
                 output.update(gap="INVESTIGATION_STEPS_OR_SCOPE_INCOMPLETE", investigation_status="incomplete")
-                if (task or {}).get("completion_policy_revision") == "necessary-work-v1" and entries:
+                if necessary_work_enabled(task) and entries:
                     # The current retained revision may reopen public work.
                     # Invalid/mixed requests must remain Agent work, never be
                     # hidden by an older completed payload for this same row.

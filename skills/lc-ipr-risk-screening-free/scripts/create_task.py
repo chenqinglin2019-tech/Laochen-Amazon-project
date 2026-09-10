@@ -203,12 +203,14 @@ def main() -> None:
         # Policy is versioned separately from immutable collection contracts.
         # Existing tasks without this field retain their historical evaluator.
         task["assessment_policy"] = "evidence-estimate-v1"
+        task["assessment_revision"] = "partial-evidence-v1"
         task["screening_revision"] = RECALL_INTEGRITY_REVISION
         task["recall_planning_revision"] = "identity-discovery-v1"
         task["specialty_workflow_revision"] = "asset-scope-v1"
         task["decision_workflow_revision"] = DECISION_WORKFLOW_REVISION
         task["workflow_correction_revision"] = "workflow-correction-v1"
-        task["completion_policy_revision"] = "necessary-work-v1"
+        from completion_policy import CURRENT_REVISION
+        task["completion_policy_revision"] = CURRENT_REVISION
         task["retrieval_workflow_revision"] = "api-first-v1"
         retrieval = config["api_first"]
         task["retrieval_policy"] = dict(retrieval)

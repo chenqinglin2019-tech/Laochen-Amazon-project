@@ -32,6 +32,7 @@ class ScenarioPlanningTests(unittest.TestCase):
         self.task["serper_free_enhancement"] = serper_free_enhancement(False)
         self.task["serpapi_free_enhancement"] = serpapi_free_enhancement(False)
         self.task.pop("completion_policy_revision", None)  # Frozen scenario routing/consumer compatibility fixture.
+        self.task.pop("assessment_revision", None)  # Keep historical rating expectations; new policy has separate tests.
         self.task.pop("recall_planning_revision", None)  # This fixture isolates scenario routing from clue handoff.
         self.task["state"] = "collecting"
         self.task["product"].update(actual_asin="B012345678", variant={"confirmed": True, "value": "fixture"},

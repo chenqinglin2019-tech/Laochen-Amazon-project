@@ -14,6 +14,7 @@ import io
 import json
 import mimetypes
 import re
+import tempfile
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,11 @@ RISK_CLASS = dict(zip(RISKS, ["very_low", "low", "medium", "high", "critical"]))
 CSS_PATH = Path(__file__).resolve().parent.parent / "assets" / "evidence-estimate-template.css"
 EXPLANATION_FIELDS = [("supporting_evidence", "支持风险的事实"), ("counter_evidence", "降低风险的事实"), ("reasoning", "主审推论"), ("assumptions", "假设与范围"), ("confidence_reasoning", "置信度理由"), ("human_checks", "人工核查"), ("raise_if", "上调条件"), ("lower_if", "下调条件")]
 CSV_FIELDS = ["row_type", "jurisdiction", "right_type", "candidate_id", "title", "scope", "risk", "confidence", "aggregation_included", "supporting_evidence", "counter_evidence", "reasoning", "assumptions", "confidence_reasoning", "human_checks", "raise_if", "lower_if", "evidence_refs", "evidence_sources"]
+BASIS_LABELS = {"official_verified": "已由官方记录核验", "source_observed": "来源所载，未经官方核验",
+                "inferred": "基于所列证据的审阅推论", "unknown": "尚无足够证据", "conflicted": "来源记载存在冲突，未解决"}
+FACT_FIELDS = {"title": "文献或标识名称", "publication_number": "公开号", "registration_number": "登记号",
+               "legal_status": "法律状态", "owner": "权利人", "assignee": "受让人", "applicant": "申请人",
+               "goods_services": "商品与服务", "claims": "权利要求", "claim_text": "权利要求文本"}
 
 
 
@@ -168,6 +174,8 @@ def _unique_notes(*groups: Any) -> list[str]:
 
 
 def _reason_value(row: dict, key: str) -> Any:
+    if key == "reasoning" and row.get("risk_basis") in {"evidence_supported", "policy_fallback"} and row.get("risk_reasoning"):
+        return row["risk_reasoning"]
     value = row.get(key)
     if not value and key == "counter_evidence" and row.get("screening_revision") == RECALL_INTEGRITY_REVISION:
         return "未取得降低风险的证据。检索缺口不作为排除事实。"
@@ -190,7 +198,58 @@ def _module_id(row: dict) -> str:
 
 
 def _is_scored(row: dict) -> bool:
-    return not row.get("out_of_scope") and row.get("aggregation_included", True) and _module_id(row) != "enforcement" and row.get("risk") in RISKS
+    return not row.get("out_of_scope") and row.get("risk_aggregation_included", row.get("aggregation_included", True)) and _module_id(row) != "enforcement" and row.get("risk") in RISKS
+
+
+def _partial_report(data: dict) -> bool:
+    from assessment_estimate import PARTIAL_EVIDENCE_REVISION
+    return data.get("assessment_revision") == PARTIAL_EVIDENCE_REVISION and bool(data.get("query_trace"))
+
+
+def _risk_basis_note(row: dict) -> str:
+    return {"policy_fallback": "规则兜底：已取得信息中未确认中、高或极高风险；低风险不代表已经排除侵权风险。",
+            "evidence_supported": "证据支持：基于已列事实及主审判断，未完成工作仍单独保留。"}.get(row.get("risk_basis"), "")
+
+
+def _partial_warning(data: dict) -> str:
+    from report_query_trace import ZERO_WARNING
+    summary = data["query_trace"]["summary"]
+    warning = "查询未完成；未完成步骤 " + str(summary["unfinished_step_count"]) + " 项；全部评级置信度为低。"
+    if summary["zero_effective_search"]:
+        warning += ZERO_WARNING if data['overall'].get('risk') == '低' and data['overall'].get('risk_basis') == 'policy_fallback' else "有效检索为零；当前风险由已审阅的具体证据支持，未完成范围不代表已排除侵权。"
+    return warning
+
+
+def _query_dimension_label(dimension: dict) -> str:
+    label = " · ".join(str(dimension[key]) for key in ("scenario_id", "jurisdiction", "right_type") if dimension.get(key)) or "未标注查询范围"
+    return label + (" [情景版本 " + str(dimension['scenario_sha256'])[:12] + "]" if dimension.get('scenario_sha256') else "")
+
+
+def _query_notes_html(notes: list[str]) -> str:
+    # Query strings and diagnostic IDs can occur after a translated prefix, so
+    # the legacy line-start diagnostic detector cannot see them. Only this new
+    # ledger uses the existing code wrapping rule; no CSS or old markup changes.
+    return '<ul>' + ''.join('<li><code>' + html.escape(note) + '</code></li>' for note in notes) + '</ul>'
+
+
+def _query_trace_html(data: dict) -> str:
+    from report_query_trace import query_notes
+    trace = data["query_trace"]
+    result = '<h3>逐维查询事实与单项结论</h3><p class="meta">' + html.escape(trace["note"]) + '</p>'
+    for dimension in trace["dimensions"]:
+        label = _query_dimension_label(dimension)
+        result += '<details class="fold"><summary>' + html.escape(label) + '</summary><div class="fold-content">'
+        for index in dimension["query_indices"]:
+            result += _query_notes_html(query_notes(trace["queries"][index]))
+        if not dimension["query_indices"]:
+            result += '<p>本维度未见已规划查询或实际执行记录。</p>'
+        for row in dimension["conclusions"]:
+            grade = (row.get("risk", "") + "风险／低置信度") if row.get("risk") and not row.get("out_of_scope") else "未纳入本次风险评价"
+            result += '<p><strong>单项结论：' + html.escape(str(row.get("title") or row.get("candidate_id") or label)) + ' · ' + html.escape(grade) + '</strong></p>'
+            result += _list_html([_risk_basis_note(row), _text(_reason_value(row, "reasoning") or row.get("pending_reasoning")),
+                "尚需核查：" + _text(row.get("human_checks")), "可能上调：" + _text(row.get("raise_if")), "可能下调：" + _text(row.get("lower_if"))])
+        result += '</div></details>'
+    return result
 
 
 def _risk_text(overall: dict) -> str:
@@ -281,6 +340,186 @@ def _registry(*objects: Any, registered_only: bool = False) -> dict[str, dict]:
     for obj in objects:
         visit(obj)
     return result
+
+
+def build_verification_basis(task: dict, evidence: dict, assessment: dict, candidates: dict, plan: dict) -> dict:
+    """Describe observed facts; reuse the assessment engine's official eligibility.
+
+    A source saying Active or carrying an official_verification object is still
+    only a source observation without its exact accepted plan/run/record proof.
+    None of these derived disclosures changes a risk, confidence or work status.
+    """
+    from assessment_v24 import official_refs
+    registry = _registry(evidence, assessment.get("supplement", {}), registered_only=True)
+    runs = {run.get("run_id"): run for run in evidence.get("source_runs", []) if isinstance(run, dict)}
+    candidate_index = {row["candidate_id"]: row for group in candidates.values() if isinstance(group, list)
+                       for row in group if isinstance(row, dict) and row.get("candidate_id")}
+    rows = assessment.get("assessments", [])
+    refs = _refs(rows) + _refs(assessment.get("publication", {}).get("limitations", []))
+    sources = []
+    for ref in dict.fromkeys(refs):
+        entry = registry.get(ref, {})
+        role = " ".join(_text(entry.get(key)) for key in ("role", "kind", "privacy", "purpose")).casefold()
+        if entry.get("private") is True or any(word in role for word in ("private", "login", "account", "debug")):
+            continue
+        run = runs.get(entry.get("source_run_id"), {})
+        payload = entry.get("payload", {})
+        metadata = payload if isinstance(payload, dict) else {}
+        official_metadata = metadata.get("official_verification", {})
+        if not isinstance(official_metadata, dict):
+            official_metadata = {}
+        raw_url = (entry.get("source_url") or entry.get("url") or entry.get("final_url") or run.get("source_url")
+                   or metadata.get("source_url") or metadata.get("url") or official_metadata.get("url"))
+        url = _safe_url(raw_url)
+        if urlsplit(url).scheme not in {"http", "https"}:
+            url = ""
+        source_time = entry.get("source_checked_at") or entry.get("collected_at")
+        if not source_time and entry.get("checked_at_meaning") != "retained_file_hash_verification":
+            source_time = entry.get("checked_at")
+        source_time = source_time or metadata.get("source_checked_at") or metadata.get("checked_at") or official_metadata.get("checked_at") or run.get("checked_at") or run.get("finished_at") or ""
+        sources.append({"evidence_id": ref, "source_name": entry.get("source_name") or entry.get("provider")
+                        or run.get("provider") or urlsplit(url).hostname or "未标明来源名称",
+                        "source_url": url, "source_checked_at": source_time,
+                        "source_time_note": "原取证时间未登记" if not source_time else "原来源取证时间；不使用报告生成时间替代",
+                        "source_run_id": entry.get("source_run_id", ""),
+                        "authority_scope": entry.get("authority_scope") or run.get("authority_scope") or "unknown",
+                        "retained_sha256": entry.get("sha256", ""), "observed_facts": []})
+    source_index = {item["evidence_id"]: item for item in sources}
+    items = []
+    for row in rows:
+        candidate = candidate_index.get(row.get("candidate_id"), {})
+        accepted = official_refs(task, evidence, plan, candidate, row.get("jurisdiction", ""),
+                                 row.get("right_type", "")) if candidate else set()
+        observations = {field: [] for field in FACT_FIELDS}
+        for ref in _refs(row):
+            if ref not in source_index:
+                continue
+            entry = registry.get(ref, {})
+            run = runs.get(entry.get("source_run_id"), {})
+            if entry.get("source_run_id") and (not run or run.get("status") != "success"):
+                continue
+            payload = entry.get("payload", {})
+            records = payload if isinstance(payload, list) else payload.get("candidates", [payload]) if isinstance(payload, dict) else []
+            if entry.get("publication_number"):
+                records = [*records, entry]
+            for record in records:
+                if not isinstance(record, dict):
+                    continue
+                if any((record.get(key) or entry.get(key)) and (record.get(key) or entry.get(key)) != row.get(key)
+                       for key in ("jurisdiction", "right_type")):
+                    continue
+                identity_match = bool(candidate and record.get("candidate_id") == candidate.get("candidate_id"))
+                number = candidate.get("publication_number")
+                if not identity_match and number and record.get("publication_number") == number:
+                    identity_match = (record.get("jurisdiction") or entry.get("jurisdiction")) == row.get("jurisdiction")
+                if not identity_match:
+                    continue
+                # Even an accepted official record only supports fields actually
+                # present in that record. Review reasoning is not an official fact.
+                official = record.get("official_verification", {})
+                for field in FACT_FIELDS:
+                    value = official.get(field) if isinstance(official, dict) and official.get(field) is not None else record.get(field)
+                    if value in (None, "", [], {}):
+                        continue
+                    text = _text(value)
+                    observation = {"evidence_id": ref, "source_field": "official_verification." + field
+                                   if isinstance(official, dict) and official.get(field) is not None else field,
+                                   "candidate_id": row.get("candidate_id", ""), "jurisdiction": row.get("jurisdiction", ""),
+                                   "right_type": row.get("right_type", ""), "source_record_sha256": _digest(record),
+                                   "value": text[:800], "value_sha256": _digest(value), "excerpted": len(text) > 800,
+                                   "basis": "official_verified" if ref in accepted and isinstance(official, dict)
+                                            and official.get(field) is not None else "source_observed"}
+                    if observation not in observations[field]:
+                        observations[field].append(observation)
+                    fact = {"field": field, "label": FACT_FIELDS[field], **observation}
+                    if fact not in source_index[ref]["observed_facts"]:
+                        source_index[ref]["observed_facts"].append(fact)
+        facts = []
+        for field, label in FACT_FIELDS.items():
+            observed = observations[field]
+            if not observed and field not in {"legal_status", "owner", "claims", "goods_services"}:
+                continue
+            if field == "claims" and row.get("right_type") not in {"patent", "utility_model", "utility_patent"}:
+                continue
+            if field == "goods_services" and row.get("right_type") not in {"trademark_word", "trademark_figurative"}:
+                continue
+            values = {item["value_sha256"] for item in observed}
+            basis = ("unknown" if not observed else "conflicted" if len(values) > 1 else
+                     "official_verified" if any(item["basis"] == "official_verified" for item in observed) else "source_observed")
+            facts.append({"field": field, "label": label, "basis": basis, "basis_label": BASIS_LABELS[basis],
+                          "observations": observed, "evidence_refs": list(dict.fromkeys(item["evidence_id"] for item in observed))})
+        inference = _text(_reason_value(row, "reasoning") or row.get("pending_reasoning") or row.get("scope_reasoning"))
+        facts.append({"field": "review_inference", "label": "审阅推论", "basis": "inferred" if inference else "unknown",
+                      "basis_label": BASIS_LABELS["inferred" if inference else "unknown"], "value": inference,
+                      "evidence_refs": [ref for ref in _refs(row) if ref in source_index], "observations": []})
+        items.append({"assessment_index": len(items), **{key: row.get(key, "") for key in
+                      ("scenario_id", "jurisdiction", "right_type", "candidate_id", "title")},
+                      "facts": facts, "unverified_facts": [fact["label"] for fact in facts
+                          if fact["basis"] in {"source_observed", "unknown", "conflicted"}]})
+    counts = {basis: sum(fact["basis"] == basis for item in items for fact in item["facts"]) for basis in BASIS_LABELS}
+    return {"schema": "IPR-VERIFICATION-BASIS/1.0", "sources": sources, "assessments": items, "fact_counts": counts,
+            "note": "来源记载仅证明取证时该来源展示的内容；未核验事项不等于无权利或无侵权风险。"}
+
+
+def _delivery_text(data: dict) -> str:
+    if not data.get("verification_basis"):
+        return ""
+    publication = data.get("publication", {})
+    mode = publication.get("mode")
+    label = "来源取证报告已生成 · 含未经官方核验事项" if mode == "evidence" else "阶段取证报告 · 仍有待处理工作" if mode == "stage" else "报告已生成 · 核验范围见逐项依据"
+    labels = {"completed": "完成", "complete": "完成", "partial": "部分交付", "incomplete": "未完成", "unknown": "未知"}
+    return label + "。交付状态：" + labels.get(publication.get("delivery_status"), "未知") + "；业务完成度：" + labels.get(data["overall"].get("business_completion"), "未知") + "。"
+
+
+def _report_risk_text(data: dict) -> str:
+    if data.get("verification_basis") and data.get("publication", {}).get("mode") == "evidence" and data["overall"].get("risk") not in RISKS:
+        return "来源取证报告 · 尚未定级"
+    return _risk_text(data["overall"])
+
+
+def _basis_item(data: dict, row: dict) -> dict:
+    identity = ("scenario_id", "jurisdiction", "right_type", "candidate_id", "title")
+    return next((item for item in data.get("verification_basis", {}).get("assessments", [])
+                 if all(item.get(key, "") == row.get(key, "") for key in identity)), {})
+
+
+def _basis_notes(data: dict, row: dict) -> list[str]:
+    return [fact["label"] + "：" + fact["basis_label"] + ("；" + fact["value"] if fact.get("value") else "")
+            + ("；" + "；".join(item["value"] + " [" + item["evidence_id"] + "]" for item in fact["observations"])
+               if fact["observations"] else "") for fact in _basis_item(data, row).get("facts", [])]
+
+
+def _source_notes(data: dict, row: dict | None = None) -> list[str]:
+    refs = set(_refs(row)) if row is not None else None
+    if row is not None and isinstance(row.get("evidence_refs"), str):
+        refs.update(row["evidence_refs"].split(";"))
+    def facts(item):
+        return [fact for fact in item["observed_facts"] if row is None or not row.get("candidate_id")
+                or all(fact.get(key, "") == row.get(key, "") for key in ("candidate_id", "jurisdiction", "right_type"))]
+    return [item["source_name"] + " [" + item["evidence_id"] + "]；来源：" + (item["source_url"] or "未登记来源 URL")
+            + "；原取证时间：" + (item["source_checked_at"] or "未登记")
+            + "；实际支持：" + ("；".join(fact["candidate_id"] + " · " + fact["label"] + "=" + fact["value"] + "（" + BASIS_LABELS[fact["basis"]] + "）"
+                                      for fact in facts(item)) or "仅为已引用来源材料，未提取可单独核实的登记事实")
+            for item in data.get("verification_basis", {}).get("sources", []) if refs is None or item["evidence_id"] in refs]
+
+
+def _source_html(data: dict, row: dict | None = None) -> str:
+    notes = _source_notes(data, row)
+    if not notes:
+        return ""
+    refs = set(_refs(row)) if row is not None else None
+    links = ['<a href="' + html.escape(item["source_url"], quote=True) + '">' + html.escape(item["source_name"] + " [" + item["evidence_id"] + "]") + '</a>'
+             for item in data["verification_basis"]["sources"] if item["source_url"] and (refs is None or item["evidence_id"] in refs)]
+    return _list_html(notes) + ('<p class="source-note">原始来源链接：' + " · ".join(links) + '</p>' if links else "")
+
+
+def _limitation_notes(data: dict) -> list[str]:
+    return [str(item.get("reason", "未登记阻碍原因")) + ": "
+            + " · ".join(str(item[key]) for key in ("scenario_id", "jurisdiction", "right_type", "candidate_id") if item.get(key))
+            + ("；具体缺口：" + str(item["planning_gap"]) if item.get("planning_gap") else "")
+            + "；" + _text(item.get("reasoning"))
+            + ("；证据 [" + ", ".join(item["evidence_refs"]) + "]" if item.get("evidence_refs") else "")
+            for item in data.get("publication", {}).get("limitations", [])]
 
 
 def _resolve(root: Path, path: str, *, relative_root: Path | None = None) -> Path:
@@ -729,8 +968,11 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
     bindings = _registered_files(root, {"source_url": task.get("request", {}).get("url", ""), "images": media_task.get("images", []), "main_visual": media_task.get("product", {}).get("main_visual", {})}, media_evidence, assessment.get("supplement", {}))
     rows = assessment.get("assessments", [])
     scenario_mode = task.get("decision_workflow_revision") == "scenario-triage-v1"
+    from assessment_estimate import partial_evidence_enabled, PARTIAL_EVIDENCE_REVISION
+    partial = partial_evidence_enabled(task) and (assessment.get("status") == "incomplete"
+        or assessment.get("overall", {}).get("business_completion") == "incomplete")
     for row in rows:
-        if not row.get("out_of_scope") and row.get("aggregation_included", True) and _module_id(row) != "enforcement":
+        if not row.get("out_of_scope") and row.get("risk_aggregation_included", row.get("aggregation_included", True)) and _module_id(row) != "enforcement":
             if row.get("risk") not in RISKS or _confidence(row) not in CONFIDENCES:
                 raise ValueError("REPORT_INVALID_FINAL_RATING")
     overall = assessment.get("overall", {})
@@ -817,7 +1059,9 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
             images.extend(selected)
     evidence_index = []
     visual_ids = [item["evidence_id"] for item in _section_figures(sections) if item.get("evidence_id")] if visual_policy_revision else []
-    for identifier in list(dict.fromkeys(_refs(rows + signal_rows) + visual_ids)):
+    from completion_policy import evidence_delivery_enabled
+    limitation_refs = _refs(assessment.get("publication", {}).get("limitations", [])) if evidence_delivery_enabled(task) else []
+    for identifier in list(dict.fromkeys(_refs(rows + signal_rows) + visual_ids + limitation_refs)):
         record = registry.get(identifier, {"evidence_id": identifier})
         role = " ".join(_text(record.get(key, "")) for key in ("role", "kind", "privacy", "purpose")).casefold()
         if record.get("private") is True or any(word in role for word in ("private", "login", "account", "debug")):
@@ -855,10 +1099,14 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
                     for scope in assessment["coverage"]["scopes"] if scope.get("scenario_id") == task["primary_scenario_id"]
                     and RIGHT_MODULES.get(scope["right_type"]) == key and scope.get("gaps"))
                 modules[-1]["pending_count"] = len(pending)
-            if risk and modules[-1]["pending_count"]:
+            if risk and modules[-1]["pending_count"] and not partial:
                 modules[-1]["label"] = label + '（已评局部）'
                 modules[-1]["confidence_reasoning"] = ('仅为已评局部风险；仍有 ' + str(modules[-1]["pending_count"])
                     + ' 项待评范围或候选，不是该模块的最终等级。' + modules[-1]["confidence_reasoning"])
+        if partial:
+            modules[-1]["confidence"] = "低"
+            modules[-1]["risk_basis"] = ("evidence_supported" if risk in {"中", "高", "极高"} else "policy_fallback") if risk else None
+            modules[-1]["confidence_reasoning"] = "查询未完成，模块置信度统一为低；当前等级不改变原查询、审阅及核验完成状态。" + _risk_basis_note(modules[-1])
     confidence_basis = _unique_notes(
         overall.get("confidence_reasoning"),
         [(row.get("title") or row.get("candidate_id") or row.get("scope", "主导风险事项")) + "：" + row["confidence_reasoning"] for row in _overall_drivers(overall, rows) if row.get("confidence_reasoning")],
@@ -867,6 +1115,14 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
         confidence_basis = ["总置信度取决定总体风险的证据链及覆盖置信度上限；具体假设见逐项推论。"]
     inputs = {"task": task, "evidence": evidence, "assessment": assessment, "candidates": candidates, "journal": journal, "search_plan": plan}
     result = {"report_schema": REPORT_SCHEMA, "assessment_policy": POLICY, "task_id": task["task_id"], "generated_at": assessment.get("generated_at", ""), "section_order": SECTION_ORDER, "product": product, "overall": overall, "assessments": rows, "supplemental_rows": signal_rows, "modules": modules, "coverage": assessment.get("coverage", {}), "future_applications": assessment.get("future_applications", []), "enforcement_signals": assessment.get("enforcement_signals", []), "lead": _localize_html(overall.get("report_lead", ""), root, out, linked_files, bindings), "summary": _localize_html(overall.get("report_summary", ""), root, out, linked_files, bindings), "scope": product.get("report_scope") or product.get("intended_use", ""), "sections": sections, "coverage_notes": _unique_notes(content.get("coverage_notes", []), assessment.get("coverage", {}).get("notes", [])), "overall_confidence_basis": confidence_basis, "evidence_cutoff": content.get("evidence_cutoff") or "见各引用证据的核查时间", "change_note": content.get("change_note") or "报告生成时间不代表全部证据重新检索；评级按所列来源时点和现行策略生成。", "review_method": content.get("review_method", ""), "review_binding": content.get("review_binding", {}), "footer": content.get("footer", "本报告为指定产品、销售行为、法域及证据时点下的风险预判。风险等级与证据置信度分别表达；范围限制及核查条件随结论列示。"), "visual_evidence": images, "evidence_index": evidence_index, "linked_files": linked_files, "presentation_source": content, "presentation_explicit": report_content is not None, "trace": {"source_task_dir": str(task_dir), "input_digests": {key: _digest(value) for key, value in inputs.items()}, "assessment_digest": assessment.get("review", {}).get("evidence_digest", ""), "report_content_digest": _digest(content), "template_css_sha256": _sha(CSS_PATH.read_bytes())}, "offline_policy": {"images_embedded_as_data_uri": True, "remote_resources": False, "scripts": False, "visual_limit": None}}
+    if partial_evidence_enabled(task):
+        result["assessment_revision"] = PARTIAL_EVIDENCE_REVISION
+    if partial:
+        from report_query_trace import build_query_trace
+        result["query_trace"] = build_query_trace(task, evidence, assessment, candidates, plan,
+            source_task_dir=task.get("outputs", {}).get("assessment_input_dir") or task_dir)
+        result["coverage_notes"].append(_partial_warning(result))
+        result["overall_confidence_basis"] = _unique_notes(["查询未完成，全部评级置信度统一为低。"], result["overall_confidence_basis"])
     if scenario_mode:
         result["decision_workflow_revision"] = task["decision_workflow_revision"]
         result["scenario_summaries"] = assessment["scenario_summaries"]
@@ -890,6 +1146,18 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
         for raw, label in (("kind=provenance_document", "资料类型：来源文件"),
                            ("document_type=published_license_terms", "文档类型：公开许可条款")):
             result["coverage_notes"] = [note.replace(raw, label) for note in result["coverage_notes"]]
+        from completion_policy import evidence_delivery_enabled
+        if evidence_delivery_enabled(task):
+            # This is the prospective artifact view, not the assessment's
+            # readiness decision. Public builders validate it in a private
+            # staging directory before any completed report is delivered.
+            if publication.get("mode") in {"evidence", "final"}:
+                result["publication"]["delivery_status"] = "completed"
+            result["verification_basis"] = build_verification_basis(task, evidence, assessment, candidates, plan)
+            result["coverage_notes"].append(_delivery_text(result))
+            result["coverage_notes"].append(result["verification_basis"]["note"])
+            if publication.get("mode") == "evidence" and not partial:
+                result["coverage_notes"].append("本报告已完成来源取证交付；官方核验、检索覆盖和风险评估仍按原状态逐项披露。")
     if task.get("workflow_correction_revision") == "workflow-correction-v1":
         result["workflow_correction_revision"] = task["workflow_correction_revision"]
         result = _compact_report_data(result)
@@ -935,10 +1203,18 @@ def _queue_record(data: dict, item: dict) -> dict:
 def _scope_display(scope: dict, data: dict) -> dict:
     if data.get("report_model_revision") != COMPACT_REPORT_REVISION:
         return scope
-    return {key: scope[key] for key in ("scenario_id", "jurisdiction", "right_type", "status",
+    result = {key: scope[key] for key in ("scenario_id", "jurisdiction", "right_type", "status",
         "retrieval_status", "triage_status", "verification_status", "gaps", "unresolved_facts", "work_reasons")
         if key in scope} | {"queue_counts": {key: len(value) for key, value in scope.get("queues", {}).items()},
                            "完整记录": "report-data.json：coverage.scopes、decision_records"}
+    if data.get("verification_basis"):
+        result["delivery_status"] = data["publication"].get("delivery_status", "unknown")
+        result["unverified_facts"] = list(dict.fromkeys(label for item in data["verification_basis"]["assessments"]
+            if all(item.get(key, "") == scope.get(key, "") for key in ("scenario_id", "jurisdiction", "right_type"))
+            for label in item["unverified_facts"]))
+        result["delivery_limitations"] = [item for item in data["publication"].get("limitations", [])
+            if all(item.get(key, "") == scope.get(key, "") for key in ("scenario_id", "jurisdiction", "right_type"))]
+    return result
 
 
 def _scope_queue_notes(scope: dict, data: dict) -> list[str]:
@@ -1035,6 +1311,10 @@ def _gaps_html(data: dict) -> str:
     result = '<h2>人工核查与注意事项</h2><p class="meta">以下事项用于提高置信度及调整等级，不是拒绝输出当前评级的前提。</p>'
     if data["overall"].get("business_completion") == "incomplete":
         result = '<h2>人工核查与注意事项</h2><p class="meta">本报告保留已核实结果及未完成工作；证据不足的项目尚未定级，自动检索工作仍由 Agent 完成。</p>'
+    if _partial_report(data):
+        from report_query_trace import unfinished_notes
+        result = '<h2>人工核查与注意事项</h2><p class="meta">本报告基于已取得信息评级；未确认中高风险的适用项按规则判低，不表示已排除侵权风险，也不改变未完成状态。</p>'
+        result += '<h3>未完成的查询及核验步骤</h3>' + _query_notes_html(unfinished_notes(data["query_trace"]))
     checked = sorted((row for row in _display_rows(data) if not row.get('out_of_scope') and row.get('human_checks')), key=_human_priority)
     has_p1 = any(_human_priority(row) == 1 for row in checked)
     primary = [row for row in checked if _human_priority(row) == 1] if has_p1 else checked
@@ -1061,13 +1341,21 @@ def render_html(data: dict, output_dir: Path) -> str:
     def facts(items):
         return '<div class="facts">' + ''.join('<div class="fact"><span>' + e(key) + '</span><div>' + val + '</div></div>' for key, val in items) + '</div>'
     product_body = '<div class="product-layout"><div class="gallery single">' + (_figure(product["main_visual"], output_dir) if product.get("main_visual") else '<p class="empty">未附产品主图；按已列文字与证据范围评价。</p>') + '</div><div class="product-copy"><span class="badge">评价对象与使用前提</span><h2>' + e(product.get("title", "产品知识产权风险预判")) + '</h2>' + facts([("ASIN", e(product.get("asin", ""))), ("法域", e(_text(product.get("jurisdictions", [])))), ("品牌", e(_text(product.get("brand", "")))), ("变体", e(_text(product.get("variant", "")))), ("评估前提", e(_text(data.get("scope", "")))), ("商品链接", '<a href="' + e(product["source_url"], quote=True) + '">来源商品页面</a>')]) + '</div></div>'
-    risk_text = _risk_text(overall)
+    if data.get("verification_basis"):
+        product_body += '<div class="review-note"><strong>' + e(_delivery_text(data)) + '</strong><p>' + e(data["verification_basis"]["note"]) + '</p></div>'
+    if _partial_report(data):
+        product_body = '<div class="gap"><strong>' + e(_partial_warning(data)) + '</strong><p>' + e(_risk_basis_note(overall)) + '</p></div>' + product_body
+    risk_text = _report_risk_text(data)
     decision = '<div class="decision-head"><div><h2>当前风险预判</h2><p class="meta">基于现有证据的主审判断 · 置信度独立评价</p></div><div class="risk-seal risk-seal-' + RISK_CLASS.get(overall["risk"], "not_assessable") + '"><small>总体风险</small><b>' + (overall["risk"] or '尚未定级') + '</b><small>置信度 ' + overall["confidence"] + '</small></div></div><div class="decision"><strong>' + _inline(data.get("lead") or (risk_text + '／' + overall["confidence"] + '置信度')) + '</strong>' + _list_html(overall.get("reasons", [])) + _inline(data.get("summary", "")) + '</div><div class="grid"><div class="metric"><span>评级策略</span><b>五级风险预判</b><small>' + POLICY + '</small></div><div class="metric"><span>当前总评</span><b>' + risk_text + '</b><small>主审确认的最高适用风险</small></div><div class="metric"><span>判断把握</span><b>' + overall["confidence"] + '置信度</b><small>关键证据链及覆盖边界决定</small></div><div class="metric"><span>纳入评价</span><b>' + str(sum(_is_scored(row) for row in data["assessments"])) + ' 项</b><small>文献数不等于独立有效权利数</small></div></div>'
     if not data.get("scenario_summaries") and overall.get("business_completion") == "incomplete" and overall.get("known_scoped_risk"):
         decision += '<p class="scope-line">已评范围最高风险：' + e(overall["known_scoped_risk"]) + '；仅适用于下列已评对象，不代表整项排查完成。</p>'
     decision += _scenario_html(data)
     decision += '<div class="review-note"><strong>总体置信度依据</strong>' + _list_html(data['overall_confidence_basis']) + '</div><p class="source-note">证据截止：' + e(_text(data['evidence_cutoff'])) + ' · 本版生成：' + e(data['generated_at']) + '</p><p class="scope-line">' + e(_text(data['change_note'])) + '</p>'
     coverage = '<h2>查询与候选覆盖</h2><p class="meta">覆盖缺口单独列示；查询失败不自动提高风险，有限零结果不等于全面排除。</p>' + _list_html(data.get("coverage_notes"), diagnostics="business_completion" in overall)
+    if _partial_report(data):
+        coverage += _query_trace_html(data)
+    if data.get("verification_basis"):
+        coverage += '<h3>尚未官方核验的事项及阻碍</h3>' + _list_html(_limitation_notes(data), diagnostics=True)
     for scope in data["coverage"].get("scopes", []):
         coverage += '<details class="fold"><summary>' + e((str(scope["scenario_id"]) + ' · ' if scope.get("scenario_id") else '') + str(scope.get("jurisdiction", "")) + ' · ' + str(scope.get("right_type", "")) + ' · ' + str(scope.get("status", "范围覆盖记录"))) + '</summary><div class="fold-content"><pre style="white-space:pre-wrap;overflow-wrap:anywhere">' + e(json.dumps(_scope_display(scope, data), ensure_ascii=False, sort_keys=True, indent=2)) + '</pre>' + (_list_html(_scope_queue_notes(scope, data)) + '<a href="report-data.json">离线完整决定及查询台账</a>' if data.get("report_model_revision") else '') + '</div></details>'
     gaps = _gaps_html(data)
@@ -1081,7 +1369,7 @@ def render_html(data: dict, output_dir: Path) -> str:
             names = '、'.join(driver_names[:3]) + ('等 ' + str(len(driver_names)) + ' 项' if len(driver_names) > 3 else '')
             modules += '<p><strong>主要驱动：</strong>' + e(names) + '</p>'
             if len(drivers) == 1:
-                summary = drivers[0].get('reasoning', '')
+                summary = _reason_value(drivers[0], 'reasoning') or ''
                 modules += '<p>' + e(summary[:180] + ('…' if len(summary) > 180 else '')) + '</p>'
             else:
                 modules += '<p class="meta">以上为该模块最高适用风险；其他候选的排除数量不稀释其等级。</p>'
@@ -1101,9 +1389,13 @@ def render_html(data: dict, output_dir: Path) -> str:
     candidate = '<h2>候选追溯与逐项推论</h2><div class="table-wrap" role="region" aria-label="逐项风险判断，可横向滚动" tabindex="0"><table class="candidate-table"><thead><tr><th>候选／评价对象</th><th>风险／置信度</th><th>当前推论与调整条件</th><th>证据引用</th></tr></thead><tbody>'
     for i, row in enumerate(_display_rows(data)):
         label = row.get("title") or row.get("candidate_id") or row.get("scope", "评价对象")
-        candidate += '<tr data-assessment-index="' + str(i) + '"><td><strong>' + e(label) + '</strong>' + ('<p class="scope-line">' + e(row.get("scenario_title") or row["scenario_id"]) + '</p>' if row.get("scenario_id") else '') + '<p>' + e(str(row.get("jurisdiction", "")) + ' · ' + str(row.get("right_type", ""))) + '</p><p class="scope-line">' + e(row.get("scope", "")) + '</p></td><td>' + (_pill(row.get("risk")) if _is_scored(row) else '<span class="badge">' + _unscored_text(row) + '</span>') + ('<p>置信度 ' + e(_confidence(row)) + '</p>' if _is_scored(row) else '') + '</td><td>' + _reason_html(row) + '</td><td>' + _refs_html(row, data) + '</td></tr>'
+        candidate += '<tr data-assessment-index="' + str(i) + '"><td><strong>' + e(label) + '</strong>' + ('<p class="scope-line">' + e(row.get("scenario_title") or row["scenario_id"]) + '</p>' if row.get("scenario_id") else '') + '<p>' + e(str(row.get("jurisdiction", "")) + ' · ' + str(row.get("right_type", ""))) + '</p><p class="scope-line">' + e(row.get("scope", "")) + '</p></td><td>' + (_pill(row.get("risk")) if _is_scored(row) else '<span class="badge">' + _unscored_text(row) + '</span>') + ('<p>置信度 ' + e(_confidence(row)) + '</p>' if _is_scored(row) else '') + '</td><td>' + _reason_html(row) + ('<h4>事实依据与未核验项</h4>' + _list_html(_basis_notes(data, row)) if data.get("verification_basis") else '') + '</td><td>' + _refs_html(row, data) + (_source_html(data, row) if data.get("verification_basis") else '') + '</td></tr>'
+        if _partial_report(data) and _is_scored(row):
+            candidate += '<tr><td colspan="4"><p class="scope-line">' + e(_risk_basis_note(row)) + ('审阅／核验工作状态仍为未完成。' if row.get("assessment_status") == "pending" else '') + '</p></td></tr>'
     candidate += '</tbody></table></div>'
     trace = '<h2>可复现数据绑定</h2><p>本版采用 ' + POLICY + '。重新定级基于已列证据与主审论证；策略变化不表示新增事实或新查得权利。</p>' + facts([(key, '<code>' + e(value) + '</code>') for key, value in sorted(data["trace"]["input_digests"].items())]) + '<p>' + e(data.get("review_method", "")) + '</p><p><a href="report-data.json">统一报告数据</a> · <a href="report-manifest.json">图证与产物校验清单</a> · <a href="report-findings.csv">逐项 CSV</a></p>'
+    if data.get("verification_basis"):
+        trace += '<h3>取证来源与原始时点</h3>' + _source_html(data)
     panels = [product_body, decision, coverage, gaps, modules, visual, candidate, trace]
     nav = ''.join('<a href="#' + key + '">' + label + '</a>' for key, label in zip(SECTION_ORDER, SECTION_LABELS))
     sections = ''.join('<section id="' + key + '" class="panel' + (' trace' if key == 'trace' else '') + '">' + text + '</section>' for key, text in zip(SECTION_ORDER, panels))
@@ -1130,7 +1422,11 @@ def _blocks_md(blocks: list[dict]) -> str:
 
 def render_markdown(data: dict) -> str:
     overall = data["overall"]
-    lines = ['# 知识产权风险筛查报告', '**' + _risk_text(overall) + '／' + overall["confidence"] + '置信度**', '## 产品快照', _text(data["product"].get("title")), 'ASIN：' + data["product"].get("asin", ""), _text(data.get("scope", ""))]
+    lines = ['# 知识产权风险筛查报告', '**' + _report_risk_text(data) + '／' + overall["confidence"] + '置信度**', '## 产品快照', _text(data["product"].get("title")), 'ASIN：' + data["product"].get("asin", ""), _text(data.get("scope", ""))]
+    if _partial_report(data):
+        lines[2:2] = [_partial_warning(data), _risk_basis_note(overall)]
+    if data.get("verification_basis"):
+        lines.extend([_delivery_text(data), data["verification_basis"]["note"]])
     if not data.get("scenario_summaries") and overall.get("business_completion") == "incomplete" and overall.get("known_scoped_risk"):
         lines.append('已评范围最高风险：' + overall["known_scoped_risk"] + '；不代表整项排查完成。')
     for scenario in data.get("scenario_summaries", []):
@@ -1145,6 +1441,20 @@ def render_markdown(data: dict) -> str:
         scope_text += '\n\n' + '\n'.join('- ' + note for scope in scopes for note in _scope_queue_notes(scope, data))
         scope_text += '\n\n[离线完整决定及查询台账](report-data.json)'
     lines.extend(['## 筛查结论', _inline(data.get("lead"), True), '\n'.join('- ' + _text(reason) for reason in overall.get("reasons", [])), _inline(data.get("summary"), True), '评级策略：' + POLICY, '**总体置信度依据**：' + _text(data['overall_confidence_basis']), '证据截止：' + _text(data['evidence_cutoff']) + '；本版生成：' + data['generated_at'], _text(data['change_note']), '## 覆盖情况', _text(data.get("coverage_notes")), scope_text, '## 人工核查与注意事项', '人工核查及升降级条件随逐项推论列示；未纳入范围事项不赋予法律风险等级。'])
+    if _partial_report(data):
+        from report_query_trace import query_notes, unfinished_notes
+        query_lines = ['### 逐维查询事实与单项结论', data['query_trace']['note']]
+        for dimension in data['query_trace']['dimensions']:
+            query_lines.append('#### ' + html.escape(_query_dimension_label(dimension)))
+            for index in dimension['query_indices']:
+                query_lines.append('\n'.join('- ' + html.escape(note) for note in query_notes(data['query_trace']['queries'][index])))
+            for row in dimension['conclusions']:
+                query_lines.append('单项结论：' + html.escape(_text(row.get('title') or row.get('candidate_id')) + ' · ' + (_text(row.get('risk')) + '风险' if row.get('risk') and not row.get('out_of_scope') else '未纳入本次风险评价') + '；' + _risk_basis_note(row) + '；' + _text(_reason_value(row, 'reasoning') or row.get('pending_reasoning'))))
+        position = lines.index('## 人工核查与注意事项')
+        lines[position:position] = query_lines
+        lines.extend(['### 未完成的查询及核验步骤', '\n'.join('- ' + html.escape(note) for note in unfinished_notes(data['query_trace']))])
+    if data.get("verification_basis"):
+        lines.append('尚未官方核验事项及阻碍：' + _text(_limitation_notes(data)))
     for row in _display_rows(data):
         if row.get("out_of_scope"):
             lines.append('- ' + _text(row.get("title")) + '：' + _text(row.get("scope_reasoning")))
@@ -1159,6 +1469,8 @@ def render_markdown(data: dict) -> str:
     lines.append('## 候选追溯与逐项推论')
     for row in _display_rows(data):
         lines.extend(['### ' + (row.get("title") or row.get("candidate_id") or row.get("right_type", "范围")), ('**' + row["risk"] + '风险／' + _confidence(row) + '置信度**') if _is_scored(row) else _unscored_text(row), '法域／范围：' + str(row.get("jurisdiction", "")) + ' · ' + str(row.get("scope", ""))])
+        if _partial_report(data) and _is_scored(row):
+            lines.append(_risk_basis_note(row) + ('审阅／核验工作状态仍为未完成。' if row.get('assessment_status') == 'pending' else ''))
         if row.get("scenario_id"):
             lines.append('情景：' + str(row.get("scenario_title") or row["scenario_id"]))
             if row.get("comparison", {}).get("claims"):
@@ -1172,6 +1484,9 @@ def render_markdown(data: dict) -> str:
             target = item.get('path') or item.get('source_url')
             references.append('[' + identifier + '](' + quote(target, safe='/:#?=&') + ')' if target else identifier)
         lines.append('证据引用：' + '；'.join(references))
+        if data.get("verification_basis"):
+            lines.extend(['事实依据与未核验项：\n\n' + '\n'.join('- ' + note for note in _basis_notes(data, row)),
+                          '取证来源：\n\n' + '\n'.join('- ' + note for note in _source_notes(data, row))])
     lines.extend(['## 数据绑定', '本版评级变化来自评价策略和主审推论调整；不代表新增证据。', '```json\n' + json.dumps(data["trace"], ensure_ascii=False, sort_keys=True, indent=2) + '\n```', data["footer"]])
     return '\n\n'.join(line for line in lines if line) + '\n'
 
@@ -1181,17 +1496,35 @@ def render_findings_csv(data: dict) -> str:
     fields = [*CSV_FIELDS, *(["scenario_id", "scenario_sha256", "conditional", "business_completion", "retrieval_status", "triage_status", "verification_status", "assessment_status", "assessment_completion", "comparison"] if data.get("scenario_summaries") else [])]
     if data.get("visual_policy_revision"):
         fields.extend(["visual_evidence_refs", "visual_sources", "visual_gaps"])
+    if data.get("verification_basis"):
+        fields.extend(["delivery_mode", "delivery_status", "delivery_limitations", "verification_basis", "unverified_facts", "source_disclosures"])
+    if _partial_report(data):
+        fields.extend(["risk_basis", "risk_aggregation_included", "query_id", "run_id", "provider", "operation", "search_dimension", "search_language", "plan_entry_sha256", "scenario_bindings", "planned_query", "actual_query", "actual_query_basis", "query_status", "latest_status", "has_prior_findings", "query_status_label", "submission_state", "source_checked_at", "total_hits", "retrieved_hits", "reported_total", "reviewed_hits", "pages_retrieved", "completeness", "coverage_complete", "count_contradiction", "truncated", "unfinished_step_count", "effective_search_count", "work_id", "work_state", "work_reason", "query_facts", "query_sources"])
     writer = csv.DictWriter(stream, fieldnames=fields, lineterminator='\n')
     writer.writeheader()
     overall = data["overall"]
     driver_rows = _overall_drivers(overall, data["assessments"])
-    total = {"row_type": "overall", "title": "总体风险预判" if overall.get("risk") else "阶段性报告 · 整项尚未定级", "risk": overall["risk"], "confidence": overall["confidence"], "reasoning": _text(overall.get("reasons")), "aggregation_included": overall.get("risk") in RISKS}
+    total = {"row_type": "overall", "title": "总体风险预判" if overall.get("risk") else "来源取证报告 · 整项尚未定级" if data.get("verification_basis") and data.get("publication", {}).get("mode") == "evidence" else "阶段性报告 · 整项尚未定级", "risk": overall["risk"], "confidence": overall["confidence"], "reasoning": _text(overall.get("reasons")), "aggregation_included": overall.get("risk") in RISKS}
     for key, _ in EXPLANATION_FIELDS:
         if key != 'reasoning':
             total[key] = '\n'.join((row.get('title') or row.get('candidate_id', '决定总评的事项')) + '：' + _text(_reason_value(row, key)) for row in driver_rows)
     total['confidence_reasoning'] = _text(data['overall_confidence_basis'])
     total['evidence_refs'] = ';'.join(_refs(driver_rows))
     values = [total]
+    if _partial_report(data):
+        from report_query_trace import query_notes
+        total.update(risk_basis=overall.get('risk_basis'), **{key: data['query_trace']['summary'][key] for key in ('unfinished_step_count', 'effective_search_count')})
+        total['assumptions'] = _unique_notes(total.get('assumptions'), _partial_warning(data), _risk_basis_note(overall))
+        for query in data['query_trace']['queries']:
+            for attempt in query['attempts'] or [{}]:
+                values.append({**query, **attempt, 'row_type': 'query_attempt' if attempt else 'query_plan',
+                    'query_status': attempt.get('status', query['status']), 'source_checked_at': attempt.get('checked_at', ''),
+                    'query_status_label': query['status_label'],
+                    'query_facts': query_notes({**query, 'attempts': [attempt] if attempt else []}),
+                    'query_sources': attempt.get('sources', []), 'aggregation_included': False})
+        for work in data['query_trace']['unfinished_work']:
+            values.append({**work, 'row_type': 'unfinished_work', 'work_state': work['status'],
+                'work_reason': work.get('reason') or work.get('reasoning'), 'aggregation_included': False})
     if data.get("scenario_summaries"):
         primary = next(item for item in data["scenario_summaries"] if item["scenario_id"] == overall["scenario_id"])
         total.update(scenario_id=overall["scenario_id"], scenario_sha256=overall["scenario_sha256"],
@@ -1203,6 +1536,7 @@ def render_findings_csv(data: dict) -> str:
             values.append({"row_type": "scenario", "title": scenario["title"], "scenario_id": scenario["scenario_id"],
                 "scenario_sha256": scenario["scenario_sha256"], "conditional": scenario["conditional"], "risk": scenario["risk"],
                 "confidence": scenario["confidence"], "aggregation_included": scenario["primary"] and scenario["risk"] in RISKS,
+                "risk_basis": scenario.get("risk_basis"),
                 "reasoning": _scenario_summary_text(scenario, data.get("coverage", {}).get("triage", {}).get("counts")), "assumptions": scenario["assumptions"],
                 "business_completion": completion["status"], "retrieval_status": completion["retrieval"],
                 "triage_status": completion["triage"], "verification_status": completion["verification"],
@@ -1213,11 +1547,16 @@ def render_findings_csv(data: dict) -> str:
                        "aggregation_included": False, "evidence_refs": _refs(driver_rows)})
     for module in data['modules']:
         drivers = [row for row in module['rows'] if _is_scored(row) and row['risk'] == module['risk']]
-        values.append({'row_type': 'module', 'title': module['label'], 'scope': module['confidence_reasoning'], 'risk': module['risk'] or '', 'confidence': module['confidence'] or '', 'aggregation_included': False, **{key: '\n'.join((row.get('title') or row.get('candidate_id', '评价对象')) + '：' + _text(_reason_value(row, key)) for row in drivers) for key, _ in EXPLANATION_FIELDS}, 'evidence_refs': _refs(drivers)})
+        values.append({'row_type': 'module', 'title': module['label'], 'scope': module['confidence_reasoning'], 'risk': module['risk'] or '', 'confidence': module['confidence'] or '', 'risk_basis': module.get('risk_basis'), 'aggregation_included': False, **{key: '\n'.join((row.get('title') or row.get('candidate_id', '评价对象')) + '：' + _text(_reason_value(row, key)) for row in drivers) for key, _ in EXPLANATION_FIELDS}, 'evidence_refs': _refs(drivers)})
     for row in _display_rows(data):
         values.append({**row, 'row_type': 'out_of_scope' if row.get('out_of_scope') else 'assessment' if _is_scored(row) else 'pending' if row.get('assessment_status') == 'pending' else 'supplemental', 'risk': row.get('risk') if _is_scored(row) else '', 'confidence': _confidence(row) if _is_scored(row) else '', 'evidence_refs': _refs(row)})
     evidence_index = {item.get('evidence_id'): item for item in data['evidence_index']}
     for row in values:
+        if data.get("verification_basis"):
+            row.update(delivery_mode=data["publication"].get("mode"), delivery_status=data["publication"].get("delivery_status"),
+                       delivery_limitations=_limitation_notes(data),
+                       verification_basis=_basis_notes(data, row), unverified_facts=_basis_item(data, row).get("unverified_facts", []),
+                       source_disclosures=_source_notes(data, row))
         if data.get("visual_policy_revision"):
             media = _row_visuals(data, row)
             row["visual_evidence_refs"] = list(dict.fromkeys(item["evidence_id"] for item in media))
@@ -1241,6 +1580,12 @@ def bundle_bytes(data: dict, output_dir: Path) -> dict[str, bytes]:
 
 def _manifest(data: dict, payloads: dict[str, bytes]) -> dict:
     manifest = {'report_schema': REPORT_SCHEMA, 'assessment_policy': POLICY, 'task_id': data['task_id'], 'generated_at': data['generated_at'], 'overall': {'risk': data['overall']['risk'], 'confidence': data['overall']['confidence']}, 'section_order': SECTION_ORDER, 'input_digests': data['trace']['input_digests'], 'report_content_digest': data['trace']['report_content_digest'], 'template_css_sha256': data['trace']['template_css_sha256'], 'artifacts': {name: {'path': name, 'bytes': len(payload), 'sha256': _sha(payload)} for name, payload in payloads.items()}, 'images': data['visual_evidence'], 'evidence_index': data['evidence_index'], 'linked_files': data['linked_files'], 'offline_policy': data['offline_policy']}
+    if data.get('assessment_revision'):
+        manifest['assessment_revision'] = data['assessment_revision']
+    if _partial_report(data):
+        manifest['overall']['risk_basis'] = data['overall'].get('risk_basis')
+        manifest['query_trace'] = {'path': 'report-data.json', 'json_pointer': '/query_trace',
+            'sha256': _digest(data['query_trace']), **data['query_trace']['summary']}
     if "business_completion" in data["overall"]:
         manifest["business_completion"] = data["overall"]["business_completion"]
         manifest["overall"]["known_scoped_risk"] = data["overall"].get("known_scoped_risk")
@@ -1264,6 +1609,13 @@ def _manifest(data: dict, payloads: dict[str, bytes]) -> dict:
         manifest["completion_policy_revision"] = data["completion_policy_revision"]
         manifest["publication"] = {"path": "report-data.json", "json_pointer": "/publication",
             "sha256": _digest(data["publication"])}
+    if data.get("verification_basis"):
+        manifest["delivery_mode"] = data["publication"].get("mode")
+        manifest["delivery_status"] = data["publication"].get("delivery_status")
+        manifest["delivery_limitations"] = deepcopy(data["publication"].get("limitations", []))
+        manifest["verification_basis"] = {"path": "report-data.json", "json_pointer": "/verification_basis",
+            "sha256": _digest(data["verification_basis"]), "fact_counts": data["verification_basis"]["fact_counts"],
+            "source_evidence_refs": [item["evidence_id"] for item in data["verification_basis"]["sources"]]}
     manifest['content_digest'] = _digest(manifest)
     return manifest
 
@@ -1271,7 +1623,7 @@ def _manifest(data: dict, payloads: dict[str, bytes]) -> dict:
 def build_bundle(task_dir: Path, task: dict, evidence: dict, assessment: dict, candidates: dict, journal: dict, plan: dict, *, output_dir: Path | None = None, report_content: dict | None = None) -> tuple[dict, dict]:
     out = Path(output_dir or task_dir).resolve()
     data = build_report_data(Path(task_dir), task, evidence, assessment, candidates, journal, plan, output_dir=out, report_content=report_content)
-    return _write_bundle(data, out)
+    return _write_delivery_bundle(data, out, task_dir=task_dir, task=task, assessment=assessment)
 
 
 def build_bundle_from_verified_context(context, *, task_dir, output_dir, journal=None, report_content=None):
@@ -1287,7 +1639,44 @@ def build_bundle_from_verified_context(context, *, task_dir, output_dir, journal
         inputs["candidates"], actual_journal, inputs["plan"], output_dir=Path(output_dir),
         report_content=report_content, verify_assessment=False)
     context.validate(task_dir=task_dir, output_dir=output_dir)
-    return _write_bundle(data, Path(output_dir).resolve())
+    return _write_delivery_bundle(data, Path(output_dir).resolve(), task_dir=task_dir,
+        task=context.output_task, assessment=context.assessment)
+
+
+def _write_delivery_bundle(data: dict, out: Path, *, task_dir: Path, task: dict, assessment: dict) -> tuple[dict, dict]:
+    """v2 delivers only bytes which passed the same independent bundle validator.
+
+    No persisted 'validation passed' flag is trusted. Standalone finalize keeps
+    readiness only; standalone build and publish use this identical boundary.
+    Legacy writes retain their original bytes and execution behavior.
+    """
+    from completion_policy import evidence_delivery_enabled
+    if not evidence_delivery_enabled(task):
+        return _write_bundle(data, out)
+    assessment_path = out / "assessment.json"
+    if assessment_path.is_file() and json.loads(assessment_path.read_text()) != assessment:
+        raise ValueError("REPORT_ASSESSMENT_CHANGED_BEFORE_DELIVERY")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".ipr-report-validation-", dir=out.parent) as temporary:
+        stage = Path(temporary)
+        atomic_write_json(stage / "assessment.json", assessment)
+        atomic_write_json(stage / "task.json", task)
+        result, manifest = _write_bundle(data, stage)
+        errors = validate_run(Path(task_dir), task, output_dir=stage)
+        if errors:
+            raise ValueError("REPORT_DELIVERY_VALIDATION_FAILED: " + "; ".join(errors))
+        # Publish the exact staged bytes, never reread source media after QA.
+        # HTML is last so a new visible report cannot precede its attachments.
+        files = list(_unique_file_records(data["visual_evidence"] + data["evidence_index"] + data["linked_files"]))
+        names = ([name for name in ("assessment.json", "task.json") if not (out / name).exists()]
+            + [item["path"] for item in files] + ["report-data.json", "report.md",
+            "report-findings.csv", "report-manifest.json", "report.html"])
+        for name in dict.fromkeys(names):
+            path = _resolve(stage, name)
+            target = _resolve(out, name)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_bytes(target, path.read_bytes())
+    return result, manifest
 
 
 def _unique_file_records(items: list[dict], *, source=False):

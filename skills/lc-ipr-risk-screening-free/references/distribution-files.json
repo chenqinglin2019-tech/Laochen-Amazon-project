@@ -3,6 +3,30 @@
   "package_name": "lc-ipr-risk-screening-free",
   "files": [
     {
+      "path": "scripts/report_query_trace.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_partial_evidence_rating.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_partial_evidence_report.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_partial_evidence_publication.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
       "path": ".env.example",
       "kind": "text",
       "required": true,
@@ -52,6 +76,12 @@
     },
     {
       "path": "config.example.json",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "fixtures/evidence-delivery-products.json",
       "kind": "text",
       "required": true,
       "mode": "0644"
@@ -239,6 +269,48 @@
     },
     {
       "path": "scripts/common.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/completion_policy.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_completion_policy_v2.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_api_first_v2.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_evidence_delivery_completion.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_evidence_delivery_integration.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_report_delivery_transaction.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_report_evidence_delivery.py",
       "kind": "text",
       "required": true,
       "mode": "0644"

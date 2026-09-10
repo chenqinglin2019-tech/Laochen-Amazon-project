@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import unicodedata
 from typing import Any
+from completion_policy import supported as necessary_work_enabled, evidence_delivery_enabled
 
 from common import (
     CURRENT_SCHEMA_VERSION, EU_COUNTRIES, EU_UTILITY_MODEL_COUNTRIES,
@@ -220,7 +221,7 @@ def browser_submitted_failure_state(task: dict, evidence: dict, provider: str, r
     actions retain their existing policies. The append-only source runs are the
     counter; changing a status file or browser implementation cannot reset it.
     """
-    if (task.get("completion_policy_revision") != "necessary-work-v1"
+    if (not necessary_work_enabled(task)
             or not (provider.endswith("_browser") or provider == "uspto_tsdr")):
         return None
     digest = sha256_json(row)
@@ -276,7 +277,7 @@ def browser_partial_recovery_state(task: dict, evidence: dict, provider: str, ro
     limit, but it cannot erase already recorded attempts. No local credential
     or implementation lookup is involved in offline publication validation.
     """
-    if (task.get("completion_policy_revision") != "necessary-work-v1"
+    if (not necessary_work_enabled(task)
             or not (provider.endswith("_browser") or provider == "uspto_tsdr")):
         return None
     from assessment_v24 import bound_runs, NON_PRODUCTION
@@ -340,6 +341,7 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
     """
     from decision_workflow import decision_snapshot, triage_summary
     from assessment_v24 import scenario_coverage_by_scope
+    from runtime_v24 import operation_accepted
     if not correction_enabled(task):
         return {"revision": None, "status": "legacy", "entries": [], "counts": {}}
     with decision_snapshot(task, evidence, candidates, plan, ledger, supplement):
@@ -382,7 +384,7 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                 material = scenario_reading_material(task, plan, evidence, candidates, ledger, provider, row,
                     supplement=supplement, evidence_root=evidence_root, task_dir=task_dir) if not block or block.get("reason") in TEMPORARY_DISPATCH_CODES else None
                 external_actions = result.get("external_information_actions")
-                if (task.get("completion_policy_revision") == "necessary-work-v1" and provider == "asset_provenance"
+                if (necessary_work_enabled(task) and provider == "asset_provenance"
                         and not block and result.get("investigation_status") == "completed"
                         and result.get("retrieval_complete") is True and isinstance(external_actions, list) and external_actions):
                     # query_coverage validates the completed public investigation
@@ -404,7 +406,7 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                 elif provider == "asset_provenance":
                     state, reason = "ready", "AGENT_INVESTIGATION_REQUIRED"
                 else:
-                    if (task.get("completion_policy_revision") == "necessary-work-v1"
+                    if (necessary_work_enabled(task)
                             and (current.get("dispatch") == "rate_limit_deferred" or current.get("phase") == "await_source_retry")
                             and str(current.get("error_code") or current.get("source_error_code") or "").upper()
                                 in {"BROWSER_RATE_LIMITED", "BROWSER_RATE_LIMIT_COOLDOWN", "BROWSER_RATE_LIMIT_RECOVERY_EXHAUSTED",
@@ -433,7 +435,8 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                         state, reason = "blocked", current.get("error_code") or "SOURCE_ROUTE_UNAVAILABLE"
                     elif current.get("dispatch") == "rate_limit_deferred":
                         state, reason = "awaiting_access", current.get("error_code") or "SOURCE_RETRY_CONDITION_REQUIRED"
-                    elif provider in capabilities and not capabilities[provider].get("executable"):
+                    elif (provider in capabilities and not capabilities[provider].get("executable")
+                          and not (evidence_delivery_enabled(task) and operation_accepted(capabilities[provider], row))):
                         reason = capabilities[provider].get("reason") or "SOURCE_CAPABILITY_UNAVAILABLE"
                         # A local route/acceptance check is Agent work. It does
                         # not establish an accepted source or require a login.
@@ -492,6 +495,60 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                 "completion_meaning": "necessary_investigation_and_triage_only; independent risk reviews remain separate"}
 
 
+def resolved_work_view(task, evidence, candidates, plan, ledger, *, supplement=None,
+                       evidence_root=None, task_dir=None, coverage=None, browser_status=None,
+                       source_capabilities=None):
+    """One frozen-input work projection for v2 dispatch, delivery and validation."""
+    from necessary_completion import refine_work_view, sanitize_snapshots, capability_map
+    from runtime_v24 import resolved_capabilities
+    snapshots = {"source-capabilities.json": {"task_id": task["task_id"],
+        "sources": list((source_capabilities or {}).values())}}
+    if browser_status is not None:
+        snapshots["browser-execution-status.json"] = browser_status
+    snapshots = sanitize_snapshots(task, snapshots)
+    caps = resolved_capabilities(task, evidence, plan,
+        capability_map(task, snapshots["source-capabilities.json"]), task_dir,
+        browser_status=snapshots.get("browser-execution-status.json"))
+    browser_status = snapshots.get("browser-execution-status.json")
+    result = derive_work_view(task, evidence, candidates, plan, ledger,
+        supplement=supplement, evidence_root=evidence_root, task_dir=task_dir,
+        coverage=coverage, browser_status=browser_status, source_capabilities=caps)
+    if api_first_enabled(task):
+        from api_first_planning import next_work_entries
+        additions = next_work_entries(task, plan, evidence, candidates, ledger, supplement,
+            task_dir=task_dir, source_capabilities=caps, browser_status=browser_status)
+        result["entries"].extend(additions)
+    result = refine_work_view(task, result, plan, caps, evidence=evidence, candidates=candidates,
+        ledger=ledger, supplement=supplement, task_dir=task_dir, coverage=coverage)
+    plan_index = plan_row_index(plan)
+    unique = {}
+    for original in result["entries"]:
+        entry = deepcopy(original)
+        identity = {key: entry.get(key) for key in ("scenario_id", "jurisdiction", "right_type",
+            "kind", "query_id", "candidate_id", "action_id", "requirement_id", "dimension",
+            "search_dimension", "discovery_intent_id", "planning_gap")}
+        if not entry.get("query_id") and not entry.get("action_id"):
+            identity["reason"] = entry.get("reason")
+        entry["work_id"] = "WORK-" + sha256_json(identity)[:24]
+        matches = plan_index.get(entry.get("query_id"), [])
+        if len(matches) == 1:
+            provider, row = matches[0]
+            linked = [{"run_id": run["run_id"], "sha256": sha256_json(run)}
+                for run in evidence.get("source_runs", []) if run.get("query_id") == row["query_id"]
+                and run.get("provider") == provider and run.get("plan_entry_sha256") == sha256_json(row)]
+            entry["source_run_refs"] = sorted({sha256_json(ref): ref for ref in
+                [*entry.get("source_run_refs", []), *linked]}.values(),
+                key=lambda ref: (str(ref.get("run_id", "")), str(ref.get("sha256", ""))))
+        if entry.get("provider") in caps:
+            entry["capability_sha256"] = sha256_json(caps[entry["provider"]])
+        unique[sha256_json(entry)] = entry
+    result["entries"] = sorted(unique.values(), key=lambda entry: (entry["work_id"], sha256_json(entry)))
+    result["counts"] = {state: sum(entry["state"] == state for entry in result["entries"])
+        for state in ("ready", "awaiting_review", "awaiting_access", "awaiting_user", "submission_unknown", "blocked")}
+    result["status"] = "incomplete" if result["entries"] or result.get("unresolved_scopes") else "complete"
+    return result
+
+
 def work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabilities=None,
                        first_review=None, second_review=None) -> dict:
     from decision_workflow import decision_snapshot
@@ -513,6 +570,14 @@ def work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabiliti
         from assessment_v24 import scenario_coverage_by_scope
         scopes = scenario_coverage_by_scope(task, evidence, candidates, plan, ledger=ledger,
             supplement=supplement, evidence_root=task_dir)
+    if evidence_delivery_enabled(task):
+        result = resolved_work_view(task, evidence, candidates, plan, ledger,
+            supplement=supplement, evidence_root=task_dir, task_dir=task_dir, coverage=scopes,
+            browser_status=browser_status, source_capabilities=source_capabilities)
+        result["work_view_sha256"] = sha256_json(result)
+        result["review_work"] = review_work(task, evidence, candidates, plan, ledger, scopes,
+            first_review, second_review, supplement=supplement, evidence_root=task_dir)
+        return result
     result = derive_work_view(task, evidence, candidates, plan, ledger, supplement=supplement, task_dir=task_dir,
         coverage=scopes, browser_status=browser_status, source_capabilities=source_capabilities)
     if strict_completion:
@@ -757,6 +822,15 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
         from api_first_planning import dispatch_block
         api_block = dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supplement)
         if api_block:
+            if evidence_delivery_enabled(task):
+                temporary = {"API_DISCOVERY_MERGE_REQUIRED": "TRIAGE_REVIEW_REQUIRED",
+                    "API_DISCOVERY_TRIAGE_REQUIRED": "TRIAGE_REVIEW_REQUIRED",
+                    "API_DISCOVERY_CARD_IDENTITY_REVIEW_REQUIRED": "TRIAGE_REVIEW_REQUIRED",
+                    "API_DISCOVERY_SUBMISSION_UNKNOWN_NO_RETRY": "TRIAGE_ATTEMPT_STATE_UNKNOWN"}
+                if api_block in temporary:
+                    # Keep the authorized row while its independent review or
+                    # submission audit is pending; do not append cancellation.
+                    return {**blocked(temporary[api_block]), "cause": api_block}
             return blocked(api_block)
     if (task.get("specialty_workflow_revision") == "asset-scope-v1"
             and provider == "uspto_tmsearch_browser" and row.get("jurisdiction") == "US"
@@ -1133,7 +1207,7 @@ def brand_byline_disposition(task: dict[str, Any]) -> dict[str, Any] | None:
     byline and a derived reason in the plan; independently observed marks with
     the same spelling never inherit this source-specific disposition.
     """
-    if task.get("completion_policy_revision") != "necessary-work-v1":
+    if not necessary_work_enabled(task):
         return None
     product = task.get("product") or {}
     raw = product.get("brand_byline_raw")
@@ -1480,7 +1554,7 @@ def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
                 if strategy == "phrase" and (len(str(value).split()) > 8 or re.search(r'["\n\r]', str(value))):
                     raise ValueError(f"query_terms[{i}] phrase must be a short unquoted phrase")
                 if strategy == "boolean":
-                    if task.get("completion_policy_revision") == "necessary-work-v1":
+                    if necessary_work_enabled(task):
                         # Normalize only supported operators outside quoted
                         # phrases. Source query_terms remain unchanged.
                         value = re.sub(r'"[^"\n]+"|\b(?:AND|OR|NOT)\b',
@@ -1795,7 +1869,7 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
                 scheduled_now = 0
                 for term in [t for t in eligible if _dimension(t) == dimension]:
                     compiler_revision = ("ppubs-boolean-v2" if
-                        task.get("completion_policy_revision") == "necessary-work-v1"
+                        necessary_work_enabled(task)
                         and route["provider"] == "uspto_patent_browser"
                         and term.get("strategy") == "boolean" and dimension != "classification" else None)
                     if compiler_revision:

@@ -1,23 +1,21 @@
-> 分发说明：以下保留发送者历史记录；本机路径及恢复命令已脱敏，不提供接收者可执行的历史恢复命令。
-
 # 2.4 优化交付与验证记录
 
 > 本文为 `automation-first-v1` 原始升级验收记录，保留当时结果。文中“新版”、无法判断与发布门禁不代表后续 `evidence-estimate-v1`；新评级规则见 [risk-estimate-rules.md](risk-estimate-rules.md)，本记录不冒充新策略验收。
 
 2026-09-06 后续审计更正：下文 EPS 线上 passed 仅剩摘要，本次未在 Skill/工作区找到原始响应及收据，现行清单已标为“历史摘要待补证”。原文保留以区分当时记录与当前可复核状态；本次未补造历史证据，也未重新联网。现行离线统一验收入口为 `scripts/verify_skill.py --mode fast|release --output-dir /new/empty/directory`，release 要求布局检查实际运行且没有 skip。
 
-实施日期：2026-09-06。已修改安装目录 `发送者历史本机路径已脱敏`，新任务使用 2.4；历史任务不迁移。
+实施日期：2026-09-06。已修改安装目录 `/Users/laochen/.codex/skills/lc-ipr-risk-screening-free`，新任务使用 2.4；历史任务不迁移。
 
 ## 备份与恢复
 
-完整原版位于 `发送者历史本机路径已脱敏`。原目录 279 个条目、227 个常规文件、40,985,361 字节；复制后逐文件 SHA-256、类型、权限及符号链接对照通过，备份上层目录权限 0700。
+完整原版位于 `/Users/laochen/.codex/skill-backups/lc-ipr-risk-screening-free_20260906-081757+0800/skill/`。原目录 279 个条目、227 个常规文件、40,985,361 字节；复制后逐文件 SHA-256、类型、权限及符号链接对照通过，备份上层目录权限 0700。
 
-恢复说明（发送者历史本机路径已脱敏） 与 恢复脚本（发送者历史本机路径已脱敏） 位于备份目录。脚本先重新核验备份，然后将当时整个 Skill 移到 `before-restore-时间戳`，再恢复并核验原版，因此保留优化后新增运行数据。
+[恢复说明](/Users/laochen/.codex/skill-backups/lc-ipr-risk-screening-free_20260906-081757+0800/RESTORE.md) 与 [恢复脚本](/Users/laochen/.codex/skill-backups/lc-ipr-risk-screening-free_20260906-081757+0800/restore.py) 位于备份目录。脚本先重新核验备份，然后将当时整个 Skill 移到 `before-restore-时间戳`，再恢复并核验原版，因此保留优化后新增运行数据。
 
 只验证备份：
 
-```text
-发送者历史本机恢复命令已脱敏；不适用于接收者环境。
+```bash
+python3 /Users/laochen/.codex/skill-backups/lc-ipr-risk-screening-free_20260906-081757+0800/restore.py --verify-only
 ```
 
 确需回退时运行同一命令并去掉 `--verify-only`。本次已在隔离临时目录做完整复制与清单验证的恢复演练；没有对当前版本执行回退。历史 runs、依赖目录和鉴权二进制未修改或删除。

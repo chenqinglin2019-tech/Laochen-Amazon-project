@@ -3,8 +3,9 @@
 
 This is a validator and deterministic aggregator of reasoned review judgments,
 not a similarity score or an automatic legal conclusion. Strict recall-integrity
-tasks retain unsupported scopes as pending and incomplete; historical policies
-keep their original grading behavior. Corrupt review contracts are input errors.
+tasks retain unsupported evidence scopes as pending and incomplete. An explicit
+rating revision can add bounded display grades without closing those gaps;
+historical policies keep their original behavior. Corrupt inputs remain errors.
 """
 from __future__ import annotations
 
@@ -29,6 +30,7 @@ from assessment_v24 import (candidate_applies, coverage_by_scope, evidence_index
                            NON_PRODUCTION, RESULTS, CONFIDENCE_FACTS)
 
 POLICY = "evidence-estimate-v1"
+PARTIAL_EVIDENCE_REVISION = "partial-evidence-v1"
 SCHEMA = "2.4-free"
 CONTRACT = "EVIDENCE-ESTIMATE/1.0"
 RISKS = ("极低", "低", "中", "高", "极高")
@@ -41,6 +43,15 @@ MODULE_RIGHTS = {
     "figurative_trade_dress": {"trademark_figurative", "trade_dress"},
     "copyright_ip": {"copyright"}, "enforcement": {"enforcement"},
 }
+
+
+def partial_evidence_enabled(task):
+    """An explicit rating-only opt-in; unknown revisions never use old rules."""
+    if "assessment_revision" not in task:
+        return False
+    if task["assessment_revision"] != PARTIAL_EVIDENCE_REVISION:
+        raise ValueError("UNSUPPORTED_ASSESSMENT_REVISION")
+    return True
 
 
 def _decision_enabled(task):
@@ -59,6 +70,8 @@ def review_digest(evidence, candidates, ledger, plan, task, supplement=None) -> 
     payload = {"assessment_policy": POLICY,
                         "base_evidence_digest": legacy_review_digest(evidence, candidates, ledger, plan, task),
                         "supplement": supplement}
+    if partial_evidence_enabled(task):
+        payload["assessment_revision"] = task["assessment_revision"]
     if "assessment_scope_exclusions" in task:
         payload["assessment_scope_exclusions"] = task["assessment_scope_exclusions"]
     if "screening_revision" in task:
@@ -235,6 +248,17 @@ def validate_inputs(task, evidence, candidates, plan, ledger, *, evidence_root=N
     assert_active_free_policy(task)
     if task.get("assessment_policy") != POLICY:
         raise ValueError("RATING_POLICY_NOT_SELECTED")
+    if partial_evidence_enabled(task):
+        if not recall_integrity_enabled(task) or not _decision_enabled(task):
+            raise ValueError("PARTIAL_EVIDENCE_REQUIRES_RECALL_INTEGRITY_AND_SCENARIO_WORKFLOW")
+        # Identity confirmation is distinct from readiness to plan a query.
+        # Missing search terms or unavailable routes must remain reported gaps.
+        from workflow_v24 import product_identity_digest
+        product = task.get("product") or {}
+        analysis = product.get("analysis") or {}
+        if (not isinstance(analysis, dict) or analysis.get("status") != "confirmed"
+                or analysis.get("identity_sha256") != product_identity_digest(product, task=task)):
+            raise ValueError("PARTIAL_EVIDENCE_PRODUCT_IDENTITY_NOT_CONFIRMED")
     if _correction_enabled(task) and plan.get("workflow_correction_revision") != task["workflow_correction_revision"]:
         raise ValueError("SEARCH_PLAN_WORKFLOW_CORRECTION_REVISION_MISMATCH")
     if task.get("decision_workflow_revision") not in (None, "scenario-triage-v1"):
@@ -1158,14 +1182,87 @@ def _compute_scenario_assessment(task, evidence, candidates, plan, ledger, first
         "paid_recommendations": [], **supplemental}
 
 
+def _apply_partial_evidence_revision(task, result):
+    """Derive display ratings without rewriting evidence or completion state.
+
+    The unmodified engine first validates and adjudicates the original reviews.
+    Pending evidence rows and work queues remain pending even when this explicit
+    policy supplies a low display rating. Consumers aggregate display risk with
+    risk_aggregation_included, never infer completed work from a non-null risk.
+    """
+    if not partial_evidence_enabled(task):
+        return result
+    result["assessment_revision"] = task["assessment_revision"]
+    incomplete = result["status"] != "completed"
+    rows = result["assessments"]
+
+    def current(row):
+        return not (row.get("out_of_scope") or _future_labeled(row)
+                    or row.get("right_type") == "enforcement"
+                    or row.get("triage_decision") not in (None, "selected"))
+
+    for row in rows:
+        row["risk_aggregation_included"] = current(row) and (incomplete or bool(row.get("aggregation_included")))
+        if not current(row):
+            continue
+        original_risk = row.get("risk")
+        supported = original_risk in RISKS and row.get("assessment_status") != "pending"
+        row["risk_basis"] = "evidence_supported" if supported else "policy_fallback"
+        if incomplete:
+            if not supported or original_risk not in {"中", "高", "极高"}:
+                row["risk"] = "低"
+                if not supported or original_risk != "低":
+                    row["risk_basis"] = "policy_fallback"
+            row["evidence_supported_risk"] = original_risk if supported else None
+            row["evidence_confidence"] = "低"
+            row["confidence_reasoning"] = "查询未完成，按 partial-evidence-v1 将本次报告的评级置信度统一限制为低。"
+            if row["risk_basis"] == "policy_fallback":
+                row["risk_reasoning"] = "在已审阅信息中未确认中、高或极高风险，按规则输出低风险；这不是权属核实或排除侵权的结论。"
+            else:
+                row["risk_reasoning"] = row.get("reasoning", "")
+
+    def risk_summary(summary, selected):
+        if not incomplete:
+            if summary.get("risk") in RISKS:
+                summary["risk_basis"] = "evidence_supported"
+            return
+        included = [row for row in selected if row.get("risk_aggregation_included")]
+        highest = max((row["risk"] for row in included), key=RISKS.index, default="低")
+        drivers = [row for row in included if row["risk"] == highest]
+        summary.update(risk=highest, confidence="低", coverage_confidence_cap="低",
+            risk_basis="evidence_supported" if highest in {"中", "高", "极高"}
+                and any(row["risk_basis"] == "evidence_supported" for row in drivers) else "policy_fallback",
+            drivers=[{key: row.get(key) for key in ("scenario_id", "scenario_sha256", "jurisdiction", "right_type", "candidate_id", "module_id", "title", "risk", "evidence_confidence", "risk_basis")} for row in drivers])
+        if "known_scoped_confidence" in summary and summary["known_scoped_confidence"] is not None:
+            summary["known_scoped_confidence"] = "低"
+        summary["coverage_confidence_reasoning"] = ["整体查询未完成；所有评级置信度统一为低，真实完成状态及未完成步骤保持原记录。"]
+        summary["reasons"] = ["基于已审阅证据保留中、高或极高风险；其余当前适用项目按规则输出低风险。",
+                              "低风险不表示查询完成、权属已核实或已排除侵权；未执行、失败和截断不作为降低风险的反证。"]
+
+    summaries = result.get("scenario_summaries", [])
+    for summary in summaries:
+        risk_summary(summary, [row for row in rows if row.get("scenario_id") == summary["scenario_id"]])
+    overall = result["overall"]
+    primary_rows = [row for row in rows if row.get("scenario_id") == overall.get("scenario_id")] if summaries else rows
+    risk_summary(overall, primary_rows)
+    if incomplete:
+        prefix = next((item["title"] + "：" for item in summaries if item.get("primary")), "")
+        overall["report_lead"] = prefix + f"{overall['risk']}风险／低置信度；查询未完成"
+        overall["report_summary"] = " ".join(overall["reasons"])
+        for value in result.get("module_confidence_caps", {}).values():
+            value.update(confidence="低", reasoning="整体查询未完成；本次报告评级置信度统一为低。")
+    return result
+
+
 def compute_assessment(task, evidence, candidates, plan, ledger, first, second=None,
                        adjudication=None, *, supplement=None, evidence_root=None,
                        generated_at=None, task_dir=None) -> dict[str, Any]:
     from decision_workflow import decision_snapshot
     with decision_snapshot(task, evidence, candidates, plan, ledger, supplement):
-        return _compute_assessment(task, evidence, candidates, plan, ledger, first, second,
+        result = _compute_assessment(task, evidence, candidates, plan, ledger, first, second,
             adjudication, supplement=supplement, evidence_root=evidence_root, generated_at=generated_at,
             task_dir=task_dir)
+        return _apply_partial_evidence_revision(task, result)
 
 
 def _compute_assessment(task, evidence, candidates, plan, ledger, first, second=None,
@@ -1410,6 +1507,7 @@ def report_input_context(task_dir, task, output_dir):
             or effective.get("assessment_policy") not in (None, POLICY)):
         raise ValueError("REPORT_OUTPUT_TASK_IDENTITY_CONFLICT")
     effective = {**effective, "assessment_policy": POLICY}
+    partial_evidence_enabled(effective)
     source = Path(effective.get("outputs", {}).get("assessment_input_dir") or task_dir).resolve()
     if task_dir not in (source, output_dir):
         raise ValueError("REPORT_SOURCE_DIRECTORY_CONFLICT")
@@ -1467,7 +1565,8 @@ class VerifiedAssessmentContext:
 
 def finalize(task_dir, task, first_path, second_path=None, *, adjudication_path=None,
              supplement_path=None, output_dir=None, evidence_root=None,
-             return_context=False, publication_mode=None, stop_reason=None) -> dict[str, Any] | VerifiedAssessmentContext:
+             return_context=False, publication_mode=None, stop_reason=None,
+             assessment_revision=None) -> dict[str, Any] | VerifiedAssessmentContext:
     task_dir = Path(task_dir).resolve()
     destination = Path(output_dir) if output_dir else task_dir
     source_hashes = {}
@@ -1477,11 +1576,20 @@ def finalize(task_dir, task, first_path, second_path=None, *, adjudication_path=
         source_hashes[path] = hashlib.sha256(raw).hexdigest()
         return ensure_object(json.loads(raw), label)
     source_task_path = task_dir / "task.json"
-    if return_context:
+    if return_context or assessment_revision is not None:
         saved_task = read_object(source_task_path, "task.json")
         allowed_task = {**saved_task, "assessment_policy": POLICY} if saved_task.get("assessment_policy") is None else saved_task
         if allowed_task != task:
             raise ValueError("VERIFIED_ASSESSMENT_TASK_NOT_LOADED_FROM_SOURCE")
+    if assessment_revision is not None:
+        partial_evidence_enabled({"assessment_revision": assessment_revision})
+        partial_evidence_enabled(saved_task)
+        if saved_task.get("assessment_revision") not in (None, assessment_revision):
+            raise ValueError("ASSESSMENT_REVISION_CONFLICT")
+        if (destination.resolve() == task_dir
+                or (destination.exists() and (not destination.is_dir() or any(destination.iterdir())))):
+            raise ValueError("ASSESSMENT_REVISION_REQUIRES_NEW_OUTPUT_DIRECTORY")
+        task = {**deepcopy(task), "assessment_revision": assessment_revision}
     evidence = read_object(task_dir / "evidence.json", "evidence.json")
     candidates = read_object(task_dir / "normalized-candidates.json", "normalized-candidates.json")
     plan = read_object(task_dir / "search-plan.json", "search-plan.json")

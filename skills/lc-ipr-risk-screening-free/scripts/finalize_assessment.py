@@ -1567,10 +1567,13 @@ def main() -> None:
     parser.add_argument("--first-review", type=Path, required=True)
     parser.add_argument("--second-review", type=Path)
     parser.add_argument("--assessment-policy", choices=("evidence-estimate-v1",))
+    parser.add_argument("--assessment-revision", choices=("partial-evidence-v1",))
     parser.add_argument("--adjudication", type=Path)
     parser.add_argument("--supplement", type=Path)
     parser.add_argument("--evidence-root", type=Path)
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument("--mode", choices=("auto", "final", "evidence", "stage"))
+    parser.add_argument("--stop-reason")
     args = parser.parse_args()
     task_dir = args.task_dir.resolve()
     task = ensure_object(load_json(task_dir / "task.json"), "task.json")
@@ -1590,10 +1593,12 @@ def main() -> None:
             task_dir, task, args.first_review, args.second_review,
             adjudication_path=args.adjudication, supplement_path=args.supplement,
             evidence_root=args.evidence_root, output_dir=args.output_dir,
+            publication_mode=args.mode, stop_reason=args.stop_reason,
+            assessment_revision=args.assessment_revision,
         )
         print(result["status"])
         return
-    if any((args.adjudication, args.supplement, args.evidence_root, args.output_dir)):
+    if any((args.adjudication, args.supplement, args.evidence_root, args.output_dir, args.mode, args.stop_reason, args.assessment_revision)):
         parser.error("Supplement/adjudication/output options require evidence-estimate-v1")
     if task.get("schema_version") == "2.4-free":
         from assessment_v24 import finalize
