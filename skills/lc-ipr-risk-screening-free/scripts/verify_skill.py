@@ -159,6 +159,22 @@ def _main():
                                            *map(str, arguments[1:])], output, env=env))
             if results[-1]["status"] != "passed":
                 break
+        evidence_fixture = output / "evidence-delivery-fixture"
+        results.append(run_check("evidence-delivery-pipeline", [sys.executable, "-c",
+            "import json,sys; from pathlib import Path; "
+            "from test_evidence_delivery_integration import build_evidence_delivery_fixture; "
+            "print(json.dumps(build_evidence_delivery_fixture(Path(sys.argv[1])), ensure_ascii=False))",
+            str(evidence_fixture)], output, cwd=ROOT / "scripts", env=env))
+        evidence_variants = {}
+        for scenario in ("all_discovery_failed", "mixed_high", "summary_only", "browser_scope_high",
+                         "browser_scope_failed", "browser_scope_unknown"):
+            directory = output / ("evidence-" + scenario)
+            evidence_variants[scenario] = directory
+            results.append(run_check("evidence-" + scenario, [sys.executable, "-c",
+                "import json,sys; from pathlib import Path; "
+                "from test_evidence_delivery_integration import build_evidence_delivery_fixture; "
+                "print(json.dumps(build_evidence_delivery_fixture(Path(sys.argv[1]), scenario=sys.argv[2]), ensure_ascii=False))",
+                str(directory), scenario], output, cwd=ROOT / "scripts", env=env))
     node = shutil.which("node")
     if node:
         tests = sorted((ROOT / "tools/cdp").glob("*.test.mjs"))
@@ -175,6 +191,16 @@ def _main():
                             "REPORT_SCREENSHOTS_DIR": str(output / "scenario-screenshots")}
             results.append(run_check("scenario-layout", [node, "--test", "--test-reporter=tap",
                 str(ROOT / "tools/cdp/report-estimate-layout.test.mjs")], output, cwd=ROOT / "tools/cdp", env=scenario_env))
+            evidence_env = {**env, "REPORT_ESTIMATE_HTML": str(evidence_fixture / "report/report.html"),
+                            "REPORT_SCREENSHOTS_DIR": str(output / "evidence-delivery-screenshots")}
+            results.append(run_check("evidence-delivery-layout", [node, "--test", "--test-reporter=tap",
+                str(ROOT / "tools/cdp/report-estimate-layout.test.mjs")], output, cwd=ROOT / "tools/cdp", env=evidence_env))
+            for scenario in ("all_discovery_failed", "mixed_high", "browser_scope_high",
+                             "browser_scope_failed", "browser_scope_unknown"):
+                variant_env = {**env, "REPORT_ESTIMATE_HTML": str(evidence_variants[scenario] / "report/report.html"),
+                    "REPORT_SCREENSHOTS_DIR": str(output / ("evidence-" + scenario + "-screenshots"))}
+                results.append(run_check("evidence-" + scenario + "-layout", [node, "--test", "--test-reporter=tap",
+                    str(ROOT / "tools/cdp/report-estimate-layout.test.mjs")], output, cwd=ROOT / "tools/cdp", env=variant_env))
     else:
         results.append({"name": "javascript", "status": "incomplete", "reason": "Node unavailable"})
     complete = all(item["status"] == "passed" for item in results)

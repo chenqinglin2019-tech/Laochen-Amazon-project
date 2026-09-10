@@ -2,7 +2,7 @@
 
 新任务同时绑定 `workflow_correction_revision=workflow-correction-v1`；作用域摘要、统一补充加载、必要审阅、提交恢复以及 `core-risk-evidence-v2/compact-evidence-v1` 数据增量集中见[纠错契约](workflow-correction.md)。下文原修订用于兼容历史；新记录不得沿用失效的旧摘要或回执。
 
-新任务另绑定 `completion_policy_revision=necessary-work-v1`，发布模式、范围双审、`review_work` 与 `publication` 的冻结来源能力及待办绑定按[必要工作发布契约](workflow-correction.md#必要工作发布门禁necessary-work-v1)执行。无此字段的历史任务不原地迁移。
+新任务绑定 `completion_policy_revision=necessary-work-v2`，发布模式、范围双审、review_work 与 publication 的冻结来源能力及待办绑定按[有界交付契约](workflow-correction.md#有界取证交付necessary-work-v2)执行。旧 necessary-work-v1 和无标记任务保持原语义，不原地迁移。v2 使用 final/evidence/stage，auto 仅为选择入口；来源证据交付不修改原 risk、assessment.status、coverage 或 source authority。
 
 采集流程使用 `task.schema_version=2.4-free`、`free_policy_revision=automation-first-v1`；评级另以 `assessment_policy` 分派。新任务默认 `evidence-estimate-v1`，历史任务缺少该字段时继续旧行为。`2.3-free` 的计划、来源选择和旧报告分支保留；新建仅 2.4，测试工具可创建 2.3 fixture，不能将历史任务改版本迁移。
 
@@ -106,7 +106,7 @@ assessment 使用 `SCOPED-IPR/1.0`。assessments[] 各自有 risk、evidence_con
 
 ## evidence-estimate-v1 审阅与主审
 
-策略定义见 [risk-estimate-rules.md](risk-estimate-rules.md)。两轮审阅各保留 `reviewer`、`review_context={session_id,evidence_digest,first_review_visible:false}` 和 `assessments`；两轮 reviewer/session 必须不同，第二轮不得读取首轮结论。旧审阅文件不能直接覆盖为新意见；重评产出新的审阅和主审记录。
+策略定义见 [risk-estimate-rules.md](risk-estimate-rules.md)。两轮审阅各保留 `reviewer`、`review_context={session_id,evidence_digest,first_review_visible:false}` 和 `assessments`；两轮 reviewer/session 必须不同，第二轮不得读取首轮结论。旧审阅文件不能直接覆盖为新意见；重评产出新的审阅和主审记录。新任务默认 `assessment_revision=partial-evidence-v1`；完整任务保持原评级，只有不完整报告生成下述派生评级。
 
 `risk` 的数据枚举为 `极低、低、中、高、极高`，`evidence_confidence` 与 `coverage_confidence_cap` 为 `低、中、高`。每个纳入范围的 assessment 必须提供：
 
@@ -126,7 +126,7 @@ assessment 使用 `SCOPED-IPR/1.0`。assessments[] 各自有 risk、evidence_con
 
 若主审主张总体极低，还须提供 `overall_decisive_exclusion={scope,reasoning,evidence_refs}`，明确整体而非单件排除范围。只有总体裁决而无逐项 decisions 时，在主审顶层提供 `review_refs={first,second}` 绑定实际双审文件；整体置信度调整同样受此绑定。
 
-新策略审阅 digest 绑定原 `assessment_v24.review_digest` 的全部输入、策略及补充证据清单。源文件错误、产品混用、引用缺失、哈希不符仍导致验证失败，不能通过调低置信度放行。
+新策略审阅 digest 绑定原 `assessment_v24.review_digest` 的全部输入、策略、`assessment_revision` 及补充证据清单。源文件错误、产品混用、引用缺失、哈希不符仍导致验证失败，不能通过调低置信度放行。`partial-evidence-v1` 的派生项另记录 `risk_basis:evidence_supported|policy_fallback`，但不改写 review 中的 `risk:null/assessment_status:pending`、`right_state:unknown` 或真实完成状态；它们由新的冻结摘要、盲双审和主审共同绑定。
 
 ## 显式重评与真实补充证据
 
@@ -173,15 +173,23 @@ TSDR 的归一化 raw 可能按既有脱敏规则移除 URL 片段；此时可�
 
 候选与补充原文的 EV 编号不必相同，但实质比较必须有精确身份绑定。对经过本地文件校验的 `patent_document/design_drawings`，仅在 `authority_scope=published_document_only`、国家、权利类型和完整公开号一致时允许绑定；保留 kind code，不能按标题、部分数字、申请号或同族关系替代。哈希只证明留存字节一致，原文号码与保护内容仍需实际阅读。该绑定仅供内容比较，不补齐检索覆盖，也不证明当前效力。
 
-现有 `2.4-free` 历史输入按以下入口显式重评；task、plan、evidence、candidates 必须同属该 schema。`--output-dir` 必须是新的目录，原 task-dir 只作输入。2.1/2.2/2.3 继续原分支，本入口未提供跨 schema 迁移；不能改版本号绕过校验。新任务默认策略不需要再次传 `--assessment-policy`。
+现有 `2.4-free` 历史输入可显式重评；task、plan、evidence、candidates 必须同属该 schema。启用 `partial-evidence-v1` 还须原任务已采用 `recall-integrity-v1` 与 `scenario-triage-v1`，且产品身份已确认；不兼容时明确报错，不补改旧任务的采集或执行修订。`--output-dir` 必须是新的目录，原 task-dir 只作输入。2.1/2.2/2.3 继续原分支，不跨 schema 迁移。
+
+推荐直接发布（与下方分步方式二选一，不能先 finalize 后向同一目录 publish）：
 
 ```bash
-python scripts/finalize_assessment.py --assessment-policy evidence-estimate-v1 --task-dir /absolute/original-run --first-review /absolute/reassessment/first-review.json --second-review /absolute/reassessment/second-review.json --adjudication /absolute/reassessment/adjudication.json --supplement /absolute/reassessment/supplement.json --evidence-root /absolute/evidence-root --output-dir /absolute/reassessment/output
+python scripts/publish_report.py --assessment-policy evidence-estimate-v1 --assessment-revision partial-evidence-v1 --task-dir /absolute/original-run --first-review /absolute/reassessment/first-review.json --second-review /absolute/reassessment/second-review.json --adjudication /absolute/reassessment/adjudication.json --mode auto --output-dir /absolute/reassessment/output
+```
+
+或分步定稿、构建和校验：
+
+```bash
+python scripts/finalize_assessment.py --assessment-policy evidence-estimate-v1 --assessment-revision partial-evidence-v1 --task-dir /absolute/original-run --first-review /absolute/reassessment/first-review.json --second-review /absolute/reassessment/second-review.json --adjudication /absolute/reassessment/adjudication.json --supplement /absolute/reassessment/supplement.json --evidence-root /absolute/evidence-root --output-dir /absolute/reassessment/output
 python scripts/build_report.py --task-dir /absolute/original-run --output-dir /absolute/reassessment/output --report-content /absolute/reassessment/report-content.json
 python scripts/validate_run.py --task-dir /absolute/original-run --output-dir /absolute/reassessment/output
 ```
 
-`--supplement` 和 `--evidence-root` 用于存在真实补充资料的场景；仅原任务证据的重评省略它们。`--report-content` 用于补充模板正文/图证，不代替评级或产品身份；普通构建可省略。build/validate 根据输出 assessment 的 `assessment_policy` 自动分派，不修改旧 schema_version。
+`--supplement` 和 `--evidence-root` 用于存在真实补充资料的场景；仅原任务证据的重评省略它们。`--report-content` 用于补充模板正文/图证，不代替评级或产品身份；普通构建可省略。`partial-evidence-v1` 只能在新输出目录中显式重评，使用新摘要和盲双审；不得原地改 task、plan、evidence、原审阅或旧产物。未带该修订的历史任务继续原行为。
 
 展示内容的 `product_facts` 只能与冻结 `task.product` 一致；主图须匹配 `task.product.main_visual` 或 task.images 中已冻结主图的路径与哈希。lead/summary 来自 canonical overall；范围来自 `task.product.report_scope/intended_use`；模块置信度上限由 `adjudication.module_confidence_caps` 裁决。展示文件必须已登记于任务/证据，来源 URL 必须与登记值绑定，不能为同一文件换成未登记网址。旧宽松输入若不满足新校验，应修复输入后在新目录重评，不回退策略规避，也不改旧导出原件。
 
@@ -189,15 +197,21 @@ python scripts/validate_run.py --task-dir /absolute/original-run --output-dir /a
 
 新策略结论合同为 `EVIDENCE-ESTIMATE/1.0`。每个纳入评价的最终项均有五级 risk 和三级 evidence_confidence。总体 `overall` 包括 `risk`、`confidence`、`drivers`、`reasons`、`coverage_confidence_cap`、`provisional:true`、`all_scope_clearance:false`；`drivers` 追溯最高适用当前风险，未纳入范围及补充信号不参与聚合。没有覆盖整个未知权利空间的“清白”字段推断。
 
-仅 `recall-integrity-v1` 且无 decision_workflow_revision 的历史任务保留整体未就绪时 `overall.risk:null` 和 `overall.known_scoped_risk` 行为。两种合同的阶段性项均可用 `risk:null,assessment_status:pending,pending_reasoning` 保留事实；pending 不是 out_of_scope 或第六级风险。无候选低风险仍需 search_comparison={reasoning,evidence_refs}，绑定已完成的同国同权利召回与比较。
+`assessment_revision=partial-evidence-v1` 在全任务 `status:incomplete` 时启用兜底，`risk_basis` 区分证据结论与规则回退。有证据支持的中／高／极高保留 `evidence_supported`；有效同国同权利检索及比较支持的单项低风险可保留 `evidence_supported`；其余当前适用项为 `低/policy_fallback`，所有派生置信度均为低。不完整模块、情景及总体若仅汇总到低风险，均为 `policy_fallback`，不能据局部排除推定整个范围已排除风险。原始双审的 pending/null、权属 unknown 和完成状态不变。报告必须显示“未排除侵权风险”，不能把低风险解释成无权利或可安全销售。
+
+无新评级修订、仅 `recall-integrity-v1` 而无情景修订的历史任务保留整体未就绪时 `overall.risk:null` 和 `overall.known_scoped_risk` 行为；历史情景策略保留已有中高风险及其原置信度。原始阶段性项仍可用 `risk:null,assessment_status:pending,pending_reasoning` 保留事实；pending 不是 out_of_scope 或第六级风险。无候选的 `evidence_supported` 低风险仍需 search_comparison={reasoning,evidence_refs}，绑定已完成的同国同权利召回与比较；失败、未执行、截断或提交未知只能作为 `policy_fallback` 的缺口说明。
 
 `scenario-triage-v1` 两轮及主审的每个判断再绑定 scenario_id/scenario_sha256；不能把跨情景判断当作评级分歧合并。scenario_confidence_caps 按情景声明摘要、confidence、reasoning、evidence_refs，避免全局缺口重复压低已核实单项。专利实施方案和独立权利项合同集中见 [评级规则](risk-estimate-rules.md)。
 
-新合同 `overall.risk` 是主情景有证据支持的当前风险预判，`status/business_completion` 独立表示工作状态。scenario_summaries 分别呈现各情景的风险、置信度及分流/必要核验/必要召回完成度，条件情景不参加主情景最大值。有效的局部中高风险在 incomplete 时仍保留；只有局部排除不能外推全情景低风险。未入选与已审未来申请不算当前漏评；未审、待补充、真实截断和缺失必要证据仍算工作缺口。
+新合同 `overall.risk` 表示主情景当前预判：完整任务及历史策略按证据规则，新修订不完整时区分证据支持的中高极高与规则兜底的低。`status/business_completion` 独立表示工作状态。scenario_summaries 分别呈现各情景的风险、置信度及分流/必要核验/必要召回完成度，条件情景不参加主情景最大值。有效的局部中高风险在 incomplete 时仍保留；只有局部排除不能证明全情景低风险，规则兜底也不作此证明。未入选与已审未来申请不算当前漏评；未审、待补充、真实截断和缺失必要证据仍算工作缺口。
 
 新修订 CSV 的 `assessment_status` 与 JSON 相同，表示已有当前预判或待评（assessed/pending）；`assessment_completion` 单独表示必要评级工作的 complete/incomplete，不能混用。overall 行的 `business_completion` 表示全任务完成度，其余工作状态对应主情景。摘要区分必要范围分流、本情景全量台账及全任务分流台账；跨情景及权利范围记录不等于独立候选数，未纳入必要工作范围也不是法律排除。
 
-继续生成 `report-data.json`、`report.html`、`report.md`、`report-findings.csv`、`report-manifest.json`。HTML/Markdown/CSV 从同一数据模型生成；八章节、七模块及真实图证保持一致。主摘要显示总风险和置信度，“人工核查与注意事项”展示有针对性的核查及升降级条件，证据缺口仍独立可见。
+继续生成 `report-data.json`、`report.html`、`report.md`、`report-findings.csv`、`report-manifest.json`。HTML/Markdown/CSV 从同一数据模型生成；八章节、七模块及既有 CSS/真实图证保持一致。主摘要显示总风险、置信度、risk_basis 与“未排除侵权风险”；“人工核查与注意事项”展示有针对性的核查及升降级条件。报告逐项单列 `已查、命中、无命中、失败、未执行、截断、提交未知`，不得将未执行描述为受阻或把任何非成功状态写成无命中。
+
+不完整报告的只读 `query_trace` 由现有计划、历次回执和待办生成，不另建查询队列；每维按国家、权利及情景版本列实际来源/语句/时点、命中事实、成功无命中与覆盖边界、未完成步骤及原因和单项结论。普通计划词或复制到回执的 `q` 不等于实际提交语义，缺少实际语义时如实标未记录。后一次失败不隐藏前次命中；计数与已留存材料矛盾时列冲突，不报告无命中。首页显示查询未完成、总风险、低置信度及未完成步骤数，明细留在覆盖和注意事项章节。
+
+有界 API 发现的 `response_complete` 只表示已校验该次来源响应，`coverage_complete` 单独记录召回覆盖；没有官方召回字段不能抹掉真实来源无命中，也不能因此声称官方覆盖完成。只读复用原来源文件/卡片校验，空响应可记已获取 0、总量未知；`effective_search_count` 计有效留存查询/发现回执，不表示查询全面、权利已核实或业务已完成。来源回执的相对路径始终按原任务目录解析，不改旧路径或回执。
 
 验证同时检查五级字段、完整推论、主审及双审阅绑定、原始来源/计划/补充媒体哈希、链接和离线产物。风险重评不伪装成新查询；历史策略回归、负例和新策略验证分别记录。
 

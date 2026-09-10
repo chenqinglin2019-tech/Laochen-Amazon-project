@@ -11,6 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
+from completion_policy import supported as necessary_work_enabled
 
 from common import assert_active_free_policy, ensure_object, load_json, now_iso, path_within, sha256_file
 from provider_utils import record_result, sanitized_request_params
@@ -200,7 +201,7 @@ def external_information_actions(task: dict, payload: dict, query: dict, scenari
     This is a projection of the current retained investigation, not another
     blocker ledger. Unknown facts alone never create a user dependency.
     """
-    if (task.get("completion_policy_revision") != "necessary-work-v1"
+    if (not necessary_work_enabled(task)
             or not specialty_enabled(task) or not isinstance(payload, dict)
             or not isinstance(registry, dict)):
         return []

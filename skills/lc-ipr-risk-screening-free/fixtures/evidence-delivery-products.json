@@ -1,0 +1,54 @@
+{
+  "schema": "IPR-PLANNING-CORPUS/1.0",
+  "purpose": "Offline scheduling regression from retained product descriptions. Not source receipts, evidence, live recall acceptance, or legal conclusions.",
+  "products": [
+    {
+      "asin": "B0GCK5V6R3", "category": "inside_pipe_cutter", "brand": "Oreilet",
+      "title": "Inside Pipe Cutter for PVC Pipe, 1/4 Inch Shank Inside PVC ABS Cutting Tool",
+      "origin": "us_B0GCK5V6R3_20260909/task.json",
+      "structure": ["inside pipe cutting assembly driven by a 1/4-inch hex shank", "elongated cylindrical cutting shaft with marked adjustable cutting depth", "distal radial diamond-grit circular cutting disc", "central adjustable depth-guide collar with a transparent circular guard plate", "perpendicular blue knurled handle", "spring-loaded quick-release hex-shank end"],
+      "terms": [["product", "inside pipe cutter", 0], ["synonym", "inside PVC pipe cutting tool", 0], ["structural_feature", "adjustable depth pipe cutter", 1], ["structural_feature", "cutting depth gauge", 1], ["structural_feature", "diamond grit cutting disc", 2], ["function", "internal pipe rotary cutting disc", 2], ["structural_feature", "pipe cutter transparent guard plate", 3], ["structural_feature", "perpendicular handle pipe cutter", 4], ["structural_feature", "spring loaded hex shank pipe cutter", 5], ["design", "inside pipe cutter adjustable depth gauge", 1], ["function", "internal PVC ABS pipe cutting", 2]],
+      "expected_first_rights": ["patent", "design", "trademark_word"]
+    },
+    {
+      "asin": "B07HQL3SPZ", "category": "lid_securing_strap", "brand": "Mella",
+      "title": "Lid Latch the reusable universal lid securing strap",
+      "origin": "runs-free/B07HQL3SPZ_20260907_workflow_correction_v1/task.json",
+      "structure": ["Flexible elongated silicone strap retaining a cookware lid during transport", "Flat strip with rounded ends and elongated rounded apertures", "Strap aperture engages a lid knob"],
+      "terms": [["structural_feature", "lid strap", 0], ["structural_feature", "elastic strap apertures", 1], ["function", "strap knob", 2], ["design", "securing strap", 0], ["design", "perforated strap", 1]],
+      "expected_first_rights": ["patent", "design", "trademark_word"]
+    },
+    {
+      "asin": "B0H6M1FRVS", "category": "sewing_pattern_kit", "brand": "Generic",
+      "title": "Patchwork Gnome DIY Kit Christmas Cozy Gnome Sewing Craft Set (01-Blue)",
+      "origin": "runs-free/B0H6M1FRVS_US_20260906/task.json",
+      "structure": ["stuffed fabric gnome doll", "Patchwork pointed drooping hat; round nose; long white beard; two oval brown feet", "Blue and cream patchwork with visible blanket stitching"],
+      "terms": [["synonym", "gnome doll", 0], ["synonym", "fabric gnome", 0], ["design", "gnome", 1], ["design", "stuffed doll", 0], ["ocr", "Patchwork Gnome", 2]],
+      "expected_first_rights": ["patent", "design", "copyright"]
+    },
+    {
+      "asin": "B0H4Z2HDKG", "category": "cleaning_brush", "brand": "TAQIYEZ",
+      "title": "Fan Cleaning Brush, Bendable Microfiber Head Dusting Brushes",
+      "origin": "runs-free/B0H4Z2HDKG_US_20260906/task.json",
+      "structure": ["43 cm handheld cleaning brush with long narrow cylindrical dense blue microfiber head", "Flexible bendable brush head", "Light-colored slim handle with terminal hanging hole; internal core and attachment unknown"],
+      "terms": [["structural_feature", "bendable microfiber fan cleaning brush", 0], ["synonym", "flexible dusting brush", 1], ["function", "fan vent cleaning brush", 0], ["design", "long cylindrical cleaning brush", 0]],
+      "expected_first_rights": ["patent", "design", "trademark_word"]
+    },
+    {
+      "asin": "B0DP4D6QJC", "category": "woven_tray", "brand": "GYASVWU",
+      "title": "GYASVWU Seagrass Scalloped Tray with Handles, Round Rattan Serving Trays",
+      "origin": "runs-free/B0DP4D6QJC_20260904_030338/task.json",
+      "structure": ["Listing title describes seagrass scalloped tray with handles; construction unverified"],
+      "terms": [["product", "seagrass tray with handles", 0], ["design", "round scalloped woven tray", 0]],
+      "expected_first_rights": ["patent", "design", "trademark_word"]
+    },
+    {
+      "asin": "B09ZTK66FS", "category": "ordinary_consumable", "brand": "CeleCily",
+      "title": "Self Tanning Mitt Applicator Self Tanner Glove",
+      "origin": "runs-free/B09ZTK66FS_20260904_032952/task.json",
+      "structure": ["Listing title describes self tanning applicator mitt; internal construction unverified"],
+      "terms": [["product", "self tanning applicator mitt", 0], ["design", "tanning glove", 0]],
+      "expected_first_rights": ["patent", "design", "trademark_word"]
+    }
+  ]
+}

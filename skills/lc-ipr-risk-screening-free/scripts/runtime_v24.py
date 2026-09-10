@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from execution_lock import execution_lock
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from copy import deepcopy
 from typing import Any
 
 from common import (add_gap, add_history, assert_active_free_policy,
@@ -61,6 +62,71 @@ def capabilities(task: dict, config: dict) -> list[dict]:
                         "checked_at": now_iso(), "cost_ceiling_usd": 0,
                         "human_actions": ["login", "captcha", "mfa", "consent", "qr"], "manual_business_work": False})
     return results
+
+
+def operation_accepted(capability, row):
+    """Acceptance is exact to the operation and compiler, not provider-wide."""
+    keys = ("jurisdiction", "right_type", "operation", "query_compiler_revision")
+    return any(all(operation.get(key, "") == row.get(key, "") for key in keys)
+               for operation in (capability or {}).get("operations", []))
+
+
+def resolved_capabilities(task, evidence, plan, source_capabilities, task_dir, *, browser_status=None):
+    """Derive exact, receipt-backed operation acceptance without upgrading a site.
+
+    Frozen callers supply all status inputs. This does not read credentials,
+    mutate preflight snapshots, or claim official coverage/current legal status.
+    """
+    from completion_policy import evidence_delivery_enabled
+    result = deepcopy(source_capabilities or {})
+    if not evidence_delivery_enabled(task):
+        return result
+    for cap in result.values():
+        cap.pop("operations", None)  # Revalidate, never trust a saved derived assertion.
+    if task_dir is None or not isinstance(browser_status, dict):
+        return result
+    if any(value.get("task_id") != task.get("task_id") for value in (evidence, plan, browser_status)):
+        return result
+    from run_browser_plan import completed_capture
+    from assessment_v24 import NON_PRODUCTION
+    root = Path(task_dir).resolve()
+    indexes = {}
+    for provider, rows in plan.get("queries", {}).items():
+        for row in rows:
+            indexes.setdefault(row.get("query_id"), []).append((provider, row))
+    for saved in browser_status.get("queries", []):
+        matches = indexes.get(saved.get("query_id"), [])
+        if len(matches) != 1:
+            continue
+        provider, row = matches[0]
+        if provider not in result or not completed_capture(root, task, provider, row, saved):
+            continue
+        runs = [run for run in evidence.get("source_runs", [])
+            if run.get("provider") == provider and run.get("query_id") == row.get("query_id")
+            and run.get("plan_entry_sha256") == sha256_json(row)
+            and run.get("operation") == row.get("operation")
+            and run.get("jurisdiction") == row.get("jurisdiction")
+            and run.get("right_type") == row.get("right_type")
+            and run.get("status") in {"success", "no_result"}
+            and run.get("submission_state") == "submitted"
+            and not run.get("fixture") and not run.get("test_only")
+            and str(run.get("source_environment") or "").casefold() not in
+                NON_PRODUCTION | {"unit_test_only", "non_production", "synthetic", "offline"}
+            and source_files_complete(root, evidence, run)]
+        if not runs:
+            continue
+        run = runs[-1]
+        operation = {key: row.get(key, "") for key in (
+            "jurisdiction", "right_type", "operation", "query_compiler_revision", "query_id")}
+        operation.update(plan_entry_sha256=sha256_json(row), source_run_id=run["run_id"],
+                         source_run_sha256=sha256_json(run))
+        accepted = result[provider].setdefault("operations", [])
+        if operation not in accepted:
+            accepted.append(operation)
+    for cap in result.values():
+        if "operations" in cap:
+            cap["operations"].sort(key=sha256_json)
+    return result
 
 
 def preflight_credentials(task_dir: Path) -> str:
@@ -409,8 +475,13 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
     if cancelled:
         output["counts"]["cancelled"] = cancelled
     if correction_enabled(task):
+        from completion_policy import evidence_delivery_enabled
         output["batch_status"] = output["status"]
-        output["work_view"] = work_view_from_dir(task_dir, source_capabilities=caps)
+        # Live credentials still guard each submission. Delivery and next-work
+        # use the same task-bound snapshot as CLI/freeze/independent validation;
+        # a transient config read must not silently replace that evidence.
+        output["work_view"] = (work_view_from_dir(task_dir) if evidence_delivery_enabled(task)
+            else work_view_from_dir(task_dir, source_capabilities=caps))
         output["work_status"] = output["work_view"]["status"]
     atomic_write_json(task_dir / "execution-status.json", output)
     return output

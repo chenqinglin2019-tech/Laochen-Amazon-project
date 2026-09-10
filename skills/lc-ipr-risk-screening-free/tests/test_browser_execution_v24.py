@@ -46,6 +46,7 @@ class BrowserExecutionTests(unittest.TestCase):
             return result.stdout
         command(skill / "scripts/create_task.py", "--url", "https://www.amazon.com/dp/B000000001", "--jurisdictions", "US", "--output-dir", root)
         task = load_json(root / "task.json")
+        task.pop("assessment_revision", None)  # This test pins the historical rating contract.
         task.pop("decision_workflow_revision", None)  # Frozen receipt contract predates scenario actions.
         task.pop("recall_planning_revision", None)
         task.pop("specialty_workflow_revision", None)

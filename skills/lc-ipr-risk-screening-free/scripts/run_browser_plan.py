@@ -13,6 +13,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from completion_policy import supported as necessary_work_enabled
 
 from common import (assert_active_free_policy, atomic_write_json, load_json,
                     now_iso, path_within, plan_free_policy_matches_task, sha256_file, load_skill_config,
@@ -451,7 +452,7 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                 row["submitted_failure_recovery"] = failed_submission
             if recall_integrity_enabled(task):
                 row["partial_resume_attempts"] = partial_resumes
-                if task.get("completion_policy_revision") == "necessary-work-v1":
+                if necessary_work_enabled(task):
                     row["partial_resume_limit"] = partial_limit
                 if partial_resumes:
                     row["retained_partial_capture"] = retained_partial
@@ -556,7 +557,11 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
         from workflow_v24 import work_view_from_dir
         report["batch_status"] = report["status"]
         report["batch_query_ids"] = sorted(batch_ids)
-        report["work_view"] = work_view_from_dir(task_dir, browser_status={"queries": list(rows.values())})
+        from completion_policy import evidence_delivery_enabled
+        status_input = ({"schema_version": task["schema_version"], "task_id": task["task_id"],
+            "queries": list(rows.values()), "provider_pauses": report.get("provider_pauses", {})}
+            if evidence_delivery_enabled(task) else {"queries": list(rows.values())})
+        report["work_view"] = work_view_from_dir(task_dir, browser_status=status_input)
         report["work_status"] = report["work_view"]["status"]
     report["finished_at"] = now_iso()
     report["dispatcher_elapsed_ms"] = round((time.monotonic() - run_started) * 1000)

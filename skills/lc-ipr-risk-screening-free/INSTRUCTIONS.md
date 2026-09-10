@@ -1,6 +1,6 @@
 # LC IPR Risk Screening Free 启动门禁
 
-本 Skill 的云端鉴权以用户指定的原始 `lc-ipr-risk-screening-free-auth-gated-20260811(1).zip` 为唯一基准。协议、四个平台组件及验证基线见 [鉴权冻结契约](references/auth-contract.md)。API 优先检索、双审、发布门禁和报告内容及布局保持现有规则。
+本 Skill 的云端鉴权以用户指定的原始 `lc-ipr-risk-screening-free-auth-gated-20260811(1).zip` 为唯一基准。协议、四个平台组件及验证基线见 [鉴权冻结契约](references/auth-contract.md)。检索与报告按任务冻结的业务修订执行；v2 来源证据交付不改变本文件任何鉴权逻辑、调用时机、凭据规则或失败行为。
 
 ## 1. 强制第一步
 
