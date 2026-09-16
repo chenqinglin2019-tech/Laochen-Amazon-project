@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:lc-ipr-risk-screening:supplemental-evidence-input:0.1",
+  "title": "Candidate Supplemental Evidence Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "candidate_id",
+    "kind",
+    "source",
+    "description",
+    "recorded_by",
+    "file"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "0.1"
+    },
+    "task_id": {
+      "type": "string",
+      "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"
+    },
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^C-[A-Za-z0-9_-]{4,100}$"
+    },
+    "kind": {
+      "enum": [
+        "patent_drawings",
+        "product_view",
+        "source_document"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2000
+    },
+    "description": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 3000
+    },
+    "recorded_by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "id",
+        "session_id"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "agent",
+            "human",
+            "backend",
+            "reviewer"
+          ]
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "session_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "file": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    }
+  }
+}

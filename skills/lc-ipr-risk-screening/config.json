@@ -1,7 +1,4 @@
 {
-  "backend_url": "https://mcp.yixunkuajing.com",
   "backend_token": "",
-  "auth": {
-    "timeout_seconds": 20
-  }
+  "backend_url": "https://mcp.yixunkuajing.com"
 }
