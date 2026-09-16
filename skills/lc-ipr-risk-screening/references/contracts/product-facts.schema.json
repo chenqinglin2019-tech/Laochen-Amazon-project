@@ -109,6 +109,19 @@
       }
     },
     "frozen_at": {"type": "string", "format": "date-time"},
-    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+    "digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "search_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product_facts_digest", "brand", "word_marks", "rationale", "evidence_refs", "actor"],
+      "properties": {
+        "product_facts_digest": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "brand": {"type": "string", "maxLength": 120},
+        "word_marks": {"type": "array", "maxItems": 8, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 120}},
+        "rationale": {"type": "string", "minLength": 1, "maxLength": 3000},
+        "evidence_refs": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+        "actor": {"type": "object", "additionalProperties": false, "required": ["type", "id"], "properties": {"type": {"enum": ["user", "agent", "cli", "backend", "reviewer"]}, "id": {"type": "string", "minLength": 1, "maxLength": 128}}}
+      }
+    }
   }
 }

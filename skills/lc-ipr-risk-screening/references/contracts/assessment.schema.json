@@ -32,6 +32,123 @@
       "type": "object", "additionalProperties": false,
       "required": ["finding_id", "title", "candidate_id", "jurisdiction", "official_status", "owner", "similarities", "differences", "evidence_refs", "verification_refs", "recommended_actions"],
       "properties": {
+        "comparison": {
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "overall_impression",
+    "target_coverage",
+    "candidate_coverage",
+    "drawing_review",
+    "limitations",
+    "missing_evidence",
+    "reassessment_conditions",
+    "supplemental_refs",
+    "viewed_assets"
+  ],
+  "properties": {
+    "overall_impression": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 5000
+    },
+    "target_coverage": {
+      "enum": [
+        "limited",
+        "sufficient"
+      ]
+    },
+    "candidate_coverage": {
+      "enum": [
+        "limited",
+        "complete"
+      ]
+    },
+    "drawing_review": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 3000
+    },
+    "limitations": {
+      "type": "array",
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 3000
+      }
+    },
+    "missing_evidence": {
+      "type": "array",
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 3000
+      }
+    },
+    "reassessment_conditions": {
+      "type": "array",
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 3000
+      },
+      "minItems": 1
+    },
+    "supplemental_refs": {
+      "type": "array",
+      "maxItems": 100,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      }
+    },
+    "viewed_assets": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 100,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "role",
+          "path",
+          "sha256",
+          "viewed_scope"
+        ],
+        "properties": {
+          "role": {
+            "enum": [
+              "target",
+              "candidate"
+            ]
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "viewed_scope": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        }
+      }
+    }
+  }
+},
         "finding_id": {"type": "string", "pattern": "^F-[A-Za-z0-9_-]{4,100}$"},
         "title": {"type": "string", "minLength": 1, "maxLength": 500},
         "candidate_id": {"type": ["string", "null"], "pattern": "^C-[A-Za-z0-9_-]{4,100}$"},
@@ -51,6 +168,7 @@
         "confidence_before_constraints": {"enum": ["low", "medium", "high"]},
         "risk": {"enum": ["very_low", "low", "medium", "high", "critical"]},
         "confidence": {"enum": ["low", "medium", "high"]},
+        "confidence_reason": {"type": "string", "minLength": 1, "maxLength": 3000},
         "reasoning": {"type": "string", "minLength": 1, "maxLength": 20000},
         "findings": {"type": "array", "items": {"$ref": "#/$defs/finding"}},
         "recommended_actions": {"$ref": "#/$defs/string_list"}

@@ -6,6 +6,114 @@
   "additionalProperties": false,
   "required": ["schema_version", "task_id", "report_mode", "product", "overview", "coverage", "gaps", "modules", "candidates", "constraints", "trace", "generated_at", "digest"],
   "properties": {
+  "supplemental_evidence": {
+    "type": "array",
+    "items": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "kind",
+        "source",
+        "description",
+        "recorded_by",
+        "evidence_id",
+        "path",
+        "sha256",
+        "bytes",
+        "media_type",
+        "recorded_at"
+      ],
+      "properties": {
+        "candidate_id": {
+          "type": "string",
+          "pattern": "^C-[A-Za-z0-9_-]{4,100}$"
+        },
+        "kind": {
+          "enum": [
+            "patent_drawings",
+            "product_view",
+            "source_document"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 3000
+        },
+        "recorded_by": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "type",
+            "id",
+            "session_id"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "agent",
+                "human",
+                "backend",
+                "reviewer"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "session_id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        },
+        "evidence_id": {
+          "type": "string",
+          "pattern": "^SUP-[a-f0-9]{24}$"
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^supplemental/assets/[a-f0-9]{64}\\.(pdf|png|jpg|gif|webp)$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 33554432
+        },
+        "media_type": {
+          "enum": [
+            "application/pdf",
+            "image/png",
+            "image/jpeg",
+            "image/gif",
+            "image/webp"
+          ]
+        },
+        "recorded_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  },
+  "risk_policy_version": {
+    "enum": [
+      1,
+      2
+    ]
+  },
     "schema_version": {"const": "0.1"},
     "task_id": {"type": "string", "pattern": "^ipr_[A-Za-z0-9_-]{8,80}$"},
     "report_mode": {"enum": ["formal", "draft"]},
@@ -21,7 +129,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["candidate_id", "module", "jurisdiction", "record_number", "title", "owner", "similarity", "reason", "image_path", "image_sha256"],
+        "required": ["candidate_id", "module", "jurisdiction", "record_number", "title", "owner", "similarity", "reason", "disposition", "review_rationale", "image_path", "image_sha256"],
         "properties": {
           "candidate_id": {"type": "string"},
           "module": {"type": "string"},
@@ -31,6 +139,8 @@
           "owner": {"type": ["string", "null"]},
           "similarity": {"type": "string"},
           "reason": {"type": "string"},
+          "disposition": {"enum": ["material", "not_material", "needs_review"]},
+          "review_rationale": {"type": "string", "minLength": 1},
           "image_path": {"type": "string", "pattern": "^us-screen/evidence-images/.+\\.img$"},
           "image_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
         }
