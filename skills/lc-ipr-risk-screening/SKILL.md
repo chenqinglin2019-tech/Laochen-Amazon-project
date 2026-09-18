@@ -1,6 +1,6 @@
 ---
 name: lc-ipr-risk-screening
-description: 对单个美国 Amazon 商品执行知识产权风险筛查。冻结商品事实，经老陈云端完成商品详情和知识产权候选发现；有 SERPER_API_KEY 时本机补公开网页检索，没有也不阻断。再做全批次候选处置、七模块审阅和离线报告。不是法律意见；未检出不等于安全。
+description: 针对单个美国、欧洲 Amazon 商品汇总云端与公开网页候选，完成七模块知识产权风险审阅并输出离线报告。
 ---
 
 # LC IPR Risk Screening（US）
@@ -20,7 +20,7 @@ description: 对单个美国 Amazon 商品执行知识产权风险筛查。冻�
 ## 正式流程
 
 1. 按输入路由采集并冻结商品事实。先在技能包外指定尚不存在的 `ipr_screening_YYYYMMDD_HHMMSS/`，禁止把任务写进技能包根目录。ASIN 路径由 `collect-product` 使用 `LAOCHEN_BACKEND_TOKEN` 经云端补齐资料。
-2. 先看商品文字和实际图片，判断哪些文字是在作为品牌或字标使用，按 `references/input-routing.md` 用 `record-search-identity` 记录，再做 ASIN 语义核对、初始化任务和查询计划。品牌栏不是检索指令：占位值、通用描述、内部型号/SKU 不自动当商标。其中完整值为 `Generic`（忽略大小写和首尾空格）固定作为通用品牌占位排除，不作为品牌或字标查询；其他词仍按图文证据判断。明确没有可识别字标时不发文字商标查询，其余筛查照常；看不清不能冒充没有。
+2. 先看商品文字和实际图片，判断哪些文字是在作为品牌或字标使用，按 `references/input-routing.md` 用 `record-search-identity` 记录，ASIN 路径再用 `record-product-corroboration` 记录语义核对，由 CLI 计算摘要，随后初始化任务和查询计划。品牌栏不是检索指令：占位值、通用描述、内部型号/SKU 不自动当商标。其中完整值为 `Generic`（忽略大小写和首尾空格）固定作为通用品牌占位排除，不作为品牌或字标查询；其他词仍按图文证据判断。明确没有可识别字标时不发文字商标查询，其余筛查照常；看不清不能冒充没有。
 3. 先运行 `prepare-us-screen`、`us-screen` 和 `import-us-screen-evidence`。本地主图会在这一阶段上传到专属后端并绑定受控 HTTPS 地址。云端知识产权发现不依赖 `SERPER_API_KEY`。
 4. 再运行 `prepare-serper-run` 与 `run-serper-plan`。有 `SERPER_API_KEY` 则本机跑完整公开网页检索。返回 `SERPER_SKIPPED_NO_KEY` 时问用户一次；用户把 Key 发在对话里就注入当前会话环境变量并立刻重跑 `run-serper-plan`，不要让用户去设系统变量或重启 Agent。用户明确没有就跳过公开网页、继续候选审阅。禁止把 Key 写入 `config.json`、命令参数、任务目录或报告。
 5. 进入候选审阅，对工作区中的全部候选一次性完成 `material`、`not_material` 或 `needs_review` 处置。不得遗漏来源条目。审阅 JSON 必须保持 UTF-8；连续 `????` 或替换字符会使整批失败，Windows 写入工具不能可靠保存中文时直接使用可读英文理由。检索相似度只用于排序；外观设计、图形商标/商业外观、版权图片等视觉候选若可能进入 `material`，Agent 必须调用图像查看能力实际打开 `input-images/` 中的目标图和候选摘要 `image_ref` 对应的图片，分别记录共同点、关键差异与整体视觉印象。候选图不可读取时使用 `needs_review`，不得凭分数判高风险。文字商标还必须同时确认文字近似与商品/服务类别重叠。
