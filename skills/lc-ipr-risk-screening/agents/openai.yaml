@@ -1,4 +1,4 @@
 interface:
-  display_name: "易逊-知识产权排查（付费接口）"
-  short_description: "针对单个美国、欧洲 Amazon 商品汇总云端与公开网页候选，完成七模块知识产权风险审阅并输出离线报告。"
-  default_prompt: "Use $lc-ipr-risk-screening to screen one US Amazon product through cloud-managed discovery, complete full-batch candidate review, and deliver an evidence-bound seven-module risk report."
+  display_name: "易逊-付费知识产权排查"
+  short_description: "汇总美国、欧洲 Amazon 商品知识产权候选，完成七模块风险审阅并输出离线报告。"
+  default_prompt: "使用 $lc-ipr-risk-screening 汇总单个美国或欧洲 Amazon 商品的云端与公开网页知识产权候选，完成七模块风险审阅并输出离线报告。"
