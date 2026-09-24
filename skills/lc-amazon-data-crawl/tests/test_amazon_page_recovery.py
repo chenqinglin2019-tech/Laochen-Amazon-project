@@ -58,14 +58,14 @@ class ForbiddenRng:
 
 
 class ScheduleValidationTests(unittest.TestCase):
-    def test_default_schedule_has_four_waits_for_five_attempts(self) -> None:
+    def test_default_schedule_has_one_wait_for_two_attempts(self) -> None:
         self.assertEqual(
             DEFAULT_RETRY_SCHEDULE_SECONDS,
-            ((180, 300), (180, 300), (1800, 1800), (3600, 3600)),
+            ((60, 60),),
         )
         self.assertEqual(
             retry_schedule_from_config({}),
-            ((180.0, 300.0), (180.0, 300.0), (1800.0, 1800.0), (3600.0, 3600.0)),
+            ((60.0, 60.0),),
         )
 
     def test_valid_custom_schedule_is_normalized(self) -> None:
@@ -73,6 +73,7 @@ class ScheduleValidationTests(unittest.TestCase):
             parse_retry_schedule([[0, 0.5], [1, 2], [3.0, 3], [4, 5]]),
             ((0.0, 0.5), (1.0, 2.0), (3.0, 3.0), (4.0, 5.0)),
         )
+        self.assertEqual(parse_retry_schedule([[60, 60]]), ((60.0, 60.0),))
 
     def test_present_null_is_not_treated_as_default(self) -> None:
         with self.assertRaises(RetryConfigurationError):
@@ -84,7 +85,6 @@ class ScheduleValidationTests(unittest.TestCase):
         invalid_values = [
             "180,300",
             [],
-            [[1, 1]] * 3,
             [[1, 1]] * 5,
             [[1]] * 4,
             [[1, 2, 3]] * 4,
@@ -218,6 +218,34 @@ class PageHealthClassificationTests(unittest.TestCase):
 
 
 class RetryControllerTests(unittest.TestCase):
+    def test_rate_probe_with_no_retry_schedule_attempts_original_stage_once(self) -> None:
+        clock = FakeClock()
+        callbacks, _, _, _, _, _, _, _ = self.make_callbacks(clock=clock)
+        controller = self.controller(clock, callbacks, schedule=())
+        attempts = []
+
+        def unavailable(attempt):
+            attempts.append(attempt.attempt_number)
+            raise TransientAmazonPageUnavailable("HTTP 503", reason="http_503")
+
+        with self.assertRaises(AmazonPageRetryExhausted):
+            controller.run(unavailable)
+        self.assertEqual(attempts, [1])
+        self.assertEqual(clock.waits, [])
+
+    def test_rate_probe_with_prefailed_first_attempt_does_not_retry(self) -> None:
+        clock = FakeClock()
+        callbacks, writes, _, _, _, _, _, _ = self.make_callbacks(clock=clock)
+        controller = self.controller(clock, callbacks, schedule=())
+
+        with self.assertRaises(AmazonPageRetryExhausted):
+            controller.run(
+                lambda _attempt: self.fail("rate probe must not retry"),
+                initial_failure=TransientAmazonPageUnavailable("HTTP 503", reason="http_503"),
+            )
+        self.assertEqual(writes[-1]["attempts_completed"], 1)
+        self.assertEqual(clock.waits, [])
+
     def make_callbacks(
         self,
         *,
@@ -280,7 +308,7 @@ class RetryControllerTests(unittest.TestCase):
             waiter=waiter or clock.wait,
         )
 
-    def test_exactly_five_attempts_and_four_default_waits(self) -> None:
+    def test_exactly_two_attempts_and_one_default_wait(self) -> None:
         clock = FakeClock()
         rng = LowerBoundRng()
         callbacks, writes, clears, cleanups, cooldowns, _, _, _ = self.make_callbacks(
@@ -303,20 +331,20 @@ class RetryControllerTests(unittest.TestCase):
         with self.assertRaises(AmazonPageRetryExhausted) as raised:
             controller.run(always_fails)
 
-        self.assertEqual(attempts, [(1, 1), (1, 2), (1, 3), (1, 4), (1, 5)])
+        self.assertEqual(attempts, [(1, 1), (1, 2)])
         self.assertEqual(
             rng.calls,
-            [(180.0, 300.0), (180.0, 300.0), (1800.0, 1800.0), (3600.0, 3600.0)],
+            [(60.0, 60.0)],
         )
-        self.assertAlmostEqual(sum(clock.waits), 5760.0)
+        self.assertAlmostEqual(sum(clock.waits), 60.0)
         self.assertTrue(all(0 <= item <= 60 for item in clock.waits))
-        self.assertEqual(len(cleanups), 5)
+        self.assertEqual(len(cleanups), 2)
         self.assertFalse(clears)
-        self.assertEqual([item[0] for item in cooldowns], ["begin", "end"] * 4)
+        self.assertEqual([item[0] for item in cooldowns], ["begin", "end"])
         self.assertEqual(
             writes[-1]["status"], "manual_resume_required"
         )
-        self.assertEqual(writes[-1]["attempts_completed"], 5)
+        self.assertEqual(writes[-1]["attempts_completed"], 2)
         self.assertEqual(
             raised.exception.failure_code,
             "amazon_page_unavailable_retry_exhausted",
@@ -376,7 +404,7 @@ class RetryControllerTests(unittest.TestCase):
         self.assertEqual(waiting["next_retry_at"], 1125.0)
         self.assertEqual(len(clears), 1)
 
-    def test_heartbeat_chunks_never_exceed_sixty_seconds(self) -> None:
+    def test_heartbeat_chunks_never_exceed_thirty_seconds(self) -> None:
         clock = FakeClock()
         callbacks, _, _, _, _, heartbeats, _, _ = self.make_callbacks(clock=clock)
         controller = self.controller(
@@ -394,8 +422,8 @@ class RetryControllerTests(unittest.TestCase):
             return 42
 
         self.assertEqual(controller.run(operation), 42)
-        self.assertEqual(clock.waits, [60.0, 60.0, 5.0])
-        self.assertEqual(len(heartbeats), 3)
+        self.assertEqual(clock.waits, [30.0, 30.0, 30.0, 30.0, 5.0])
+        self.assertEqual(len(heartbeats), 5)
         self.assertEqual(heartbeats[-1]["remaining_wait_seconds"], 0.0)
 
     def test_restart_respects_saved_deadline_without_resampling(self) -> None:
@@ -431,7 +459,7 @@ class RetryControllerTests(unittest.TestCase):
             return "resumed"
 
         self.assertEqual(controller.run(operation), "resumed")
-        self.assertEqual(clock.waits, [60.0, 60.0, 30.0])
+        self.assertEqual(clock.waits, [30.0] * 5)
         self.assertEqual(seen, [(2, 2)])
         self.assertEqual(len(cleanups), 1)
         self.assertEqual(len(clears), 1)
@@ -498,7 +526,7 @@ class CooldownAndRedactionTests(unittest.TestCase):
             "www.amazon.com",
             lambda domain, remaining: heartbeats.append((domain, remaining)),
         )
-        self.assertEqual(clock.waits, [60.0, 60.0, 30.0])
+        self.assertEqual(clock.waits, [30.0] * 5)
         self.assertEqual(registry.remaining("www.amazon.com"), 0)
         self.assertTrue(all(item[0] == "www.amazon.com" for item in heartbeats))
 

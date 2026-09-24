@@ -24,15 +24,13 @@ from urllib.parse import urlsplit, urlunsplit
 
 RETRY_SCHEDULE_CONFIG_KEY = "amazon_page_unavailable_retry_schedule_seconds"
 DEFAULT_RETRY_SCHEDULE_SECONDS: Tuple[Tuple[int, int], ...] = (
-    (180, 300),
-    (180, 300),
-    (1800, 1800),
-    (3600, 3600),
+    (60, 60),
 )
 # Descriptive alias for callers that keep several retry schedules.
 DEFAULT_AMAZON_PAGE_RETRY_SCHEDULE_SECONDS = DEFAULT_RETRY_SCHEDULE_SECONDS
-MAX_ATTEMPTS = 5
+MAX_ATTEMPTS = 2
 MAX_HEARTBEAT_SECONDS = 60.0
+DEFAULT_HEARTBEAT_SECONDS = 30.0
 
 PAGE_KINDS = frozenset(
     {"product", "search_category", "lens_upload", "lens_results"}
@@ -95,15 +93,15 @@ def _schedule_number(value: object, location: str) -> float:
 
 
 def parse_retry_schedule(value: object) -> RetrySchedule:
-    """Strictly validate the four waits that separate five attempts."""
+    """Validate one to four retry waits, for two to five total attempts."""
 
     if isinstance(value, (str, bytes)) or not isinstance(value, (list, tuple)):
         raise RetryConfigurationError(
-            f"{RETRY_SCHEDULE_CONFIG_KEY} 必须是包含 4 项的数组。"
+            f"{RETRY_SCHEDULE_CONFIG_KEY} 必须是包含 1-4 项的数组。"
         )
-    if len(value) != 4:
+    if not 1 <= len(value) <= 4:
         raise RetryConfigurationError(
-            f"{RETRY_SCHEDULE_CONFIG_KEY} 必须固定包含 4 项，对应 5 次尝试之间的等待。"
+            f"{RETRY_SCHEDULE_CONFIG_KEY} 必须包含 1-4 项，对应 2-5 次尝试之间的等待。"
         )
     result = []
     for index, pair in enumerate(value, start=1):
@@ -200,7 +198,9 @@ _TRANSIENT_TEXT_SIGNATURES: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
         (
             "sorry, something went wrong on our end",
             "sorry, we couldn't find that page",
+            "sorry! we couldn't find that page",
             "sorry, we couldn’t find that page",
+            "sorry! we couldn’t find that page",
             "meet the dogs of amazon",
             "dogs of amazon",
             "the web address you entered is not a functioning page",
@@ -279,6 +279,15 @@ def classify_page_snapshot(snapshot: PageSnapshot) -> PageHealthAssessment:
         return PageHealthAssessment(
             PageHealthStatus.TRANSIENT_UNAVAILABLE,
             f"http_{status_code}",
+            snapshot.page_kind,
+        )
+    if (
+        _is_amazon_host(urlsplit(str(snapshot.url or "")).hostname or "")
+        and " ".join(str(snapshot.title or "").lower().split()) == "page not found"
+    ):
+        return PageHealthAssessment(
+            PageHealthStatus.TRANSIENT_UNAVAILABLE,
+            "amazon_dog_error",
             snapshot.page_kind,
         )
 
@@ -373,7 +382,7 @@ class TransientAmazonPageUnavailable(RuntimeError):
 
 
 class AmazonPageRetryExhausted(RuntimeError):
-    """Raised after the fifth transient failure; the job must pause for rerun."""
+    """Raised after the configured transient retries; the job must pause."""
 
     failure_code = "amazon_page_unavailable_retry_exhausted"
 
@@ -381,7 +390,7 @@ class AmazonPageRetryExhausted(RuntimeError):
         self.state = copy.deepcopy(dict(state))
         self.last_error = last_error
         super().__init__(
-            f"{self.failure_code}: 五次页面尝试均失败，已保存断点，需用户手动继续。"
+            f"{self.failure_code}: 页面重试已耗尽，已保存断点，需用户手动继续。"
         )
 
 
@@ -429,7 +438,7 @@ T = TypeVar("T")
 
 
 class AmazonPageRetryController:
-    """Serialize and persist a five-attempt recovery cycle for one work stage."""
+    """Serialize and persist a bounded recovery cycle for one work stage."""
 
     def __init__(
         self,
@@ -443,7 +452,7 @@ class AmazonPageRetryController:
         clock: Callable[[], float] = time.time,
         rng: Optional[Any] = None,
         waiter: Callable[[float], Any] = time.sleep,
-        heartbeat_seconds: float = MAX_HEARTBEAT_SECONDS,
+        heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
     ) -> None:
         self.domain = str(domain or "").strip().lower()
         self.work_key = str(work_key or "").strip()
@@ -455,7 +464,10 @@ class AmazonPageRetryController:
             raise ValueError("work_key 不能为空。")
         if not self.stage:
             raise ValueError("stage 不能为空。")
-        self.schedule = parse_retry_schedule(schedule)
+        # An expired rate-limit pause probes its original item once. The
+        # config parser still rejects an empty schedule for normal runs.
+        self.schedule = () if not schedule else parse_retry_schedule(schedule)
+        self.max_attempts = len(self.schedule) + 1
         self.callbacks = callbacks or RetryCallbacks()
         if not callable(clock) or not callable(waiter):
             raise TypeError("clock 和 waiter 必须可调用。")
@@ -555,14 +567,14 @@ class AmazonPageRetryController:
         status = str(saved.get("status") or "")
         if status == "manual_resume_required":
             # Re-running the same command is the manual resume action.  It
-            # starts a fresh five-attempt cycle only for this exact work/stage.
+            # starts a fresh bounded cycle only for this exact work/stage.
             self._clear()
             return cycle + 1, 1, None
         if status not in {"waiting", "attempting"}:
             return 1, 1, None
         next_attempt = self._safe_positive_int(saved.get("next_attempt"), 1)
-        if next_attempt > MAX_ATTEMPTS:
-            next_attempt = MAX_ATTEMPTS
+        if next_attempt > self.max_attempts:
+            next_attempt = self.max_attempts
         return cycle, next_attempt, saved
 
     def _attempt_state(
@@ -612,7 +624,7 @@ class AmazonPageRetryController:
         state = self._identity_state(status="manual_resume_required", cycle=cycle)
         state.update(
             {
-                "attempts_completed": MAX_ATTEMPTS,
+                "attempts_completed": self.max_attempts,
                 "next_attempt": 1,
                 "selected_wait_seconds": None,
                 "next_retry_at": None,
@@ -644,7 +656,7 @@ class AmazonPageRetryController:
         *,
         initial_failure: Optional[TransientAmazonPageUnavailable] = None,
     ) -> T:
-        """Run ``operation`` until success or the fifth transient failure.
+        """Run ``operation`` until success or the configured transient limit.
 
         Only :class:`TransientAmazonPageUnavailable` is retried.  Any other
         normal exception is cleaned up, clears this retry record, and is
@@ -687,6 +699,10 @@ class AmazonPageRetryController:
 
             if saved is None and initial_failure is not None:
                 self.callbacks.cleanup()
+                if not self.schedule:
+                    manual_state = self._manual_state(cycle=cycle, error=initial_failure)
+                    self._persist(manual_state)
+                    raise AmazonPageRetryExhausted(manual_state, initial_failure) from initial_failure
                 minimum, maximum = self.schedule[0]
                 wait_seconds = self._uniform(minimum, maximum)
                 deadline = float(self.clock()) + wait_seconds
@@ -702,7 +718,7 @@ class AmazonPageRetryController:
                 self._wait_until(waiting_state, deadline)
                 attempt_number = 2
 
-            while attempt_number <= MAX_ATTEMPTS:
+            while attempt_number <= self.max_attempts:
                 attempts_completed = attempt_number - 1
                 self._persist(
                     self._attempt_state(cycle, attempt_number, attempts_completed)
@@ -710,7 +726,7 @@ class AmazonPageRetryController:
                 attempt = RetryAttempt(
                     cycle=cycle,
                     attempt_number=attempt_number,
-                    max_attempts=MAX_ATTEMPTS,
+                    max_attempts=self.max_attempts,
                     domain=self.domain,
                     work_key=self.work_key,
                     stage=self.stage,
@@ -720,7 +736,7 @@ class AmazonPageRetryController:
                     result = operation(attempt)
                 except TransientAmazonPageUnavailable as exc:
                     self.callbacks.cleanup()
-                    if attempt_number == MAX_ATTEMPTS:
+                    if attempt_number == self.max_attempts:
                         manual_state = self._manual_state(cycle=cycle, error=exc)
                         self._persist(manual_state)
                         raise AmazonPageRetryExhausted(manual_state, exc) from exc
@@ -761,7 +777,7 @@ class DomainCooldownRegistry:
         *,
         clock: Callable[[], float] = time.time,
         waiter: Callable[[float], Any] = time.sleep,
-        heartbeat_seconds: float = MAX_HEARTBEAT_SECONDS,
+        heartbeat_seconds: float = DEFAULT_HEARTBEAT_SECONDS,
     ) -> None:
         self.clock = clock
         self.waiter = waiter

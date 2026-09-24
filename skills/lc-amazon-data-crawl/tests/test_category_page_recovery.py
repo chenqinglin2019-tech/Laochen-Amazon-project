@@ -140,7 +140,7 @@ class CategoryRecoveryConfigTests(unittest.TestCase):
             "delivery_location_enabled": False,
         }
 
-    def test_runtime_uses_shared_default_schedule(self) -> None:
+    def test_runtime_uses_one_conservative_retry(self) -> None:
         configured = category.build_runtime_config(
             self.base_config(),
             SKILL_ROOT / "unused.json",
@@ -148,13 +148,12 @@ class CategoryRecoveryConfigTests(unittest.TestCase):
         )
         self.assertEqual(
             configured.amazon_page_retry_schedule,
-            tuple((float(a), float(b)) for a, b in DEFAULT_RETRY_SCHEDULE_SECONDS),
+            ((60.0, 60.0),),
         )
 
     def test_runtime_rejects_non_strict_schedule_during_dry_run_config_build(self) -> None:
         invalid_values = (
             None,
-            [[1, 1]] * 3,
             [[True, 1]] * 4,
             [[2, 1]] * 4,
             [[float("inf"), float("inf")]] * 4,
@@ -196,23 +195,23 @@ class CategoryRecoveryIntegrationTests(unittest.TestCase):
                 **kwargs,
             )
 
-    def test_four_dog_pages_back_off_then_fifth_attempt_succeeds(self) -> None:
+    def test_one_dog_page_waits_then_second_attempt_succeeds(self) -> None:
         clock = FakeClock()
         rng = LowerRng()
-        driver = FakeCategoryDriver([dog_page()] * 4 + [healthy_page()])
+        driver = FakeCategoryDriver([dog_page(), healthy_page()])
         assessment = self.load(driver, runtime(clock, rng=rng))
 
         self.assertEqual(assessment.status, PageHealthStatus.HEALTHY)
-        self.assertEqual(len(driver.get_calls), 5)
+        self.assertEqual(len(driver.get_calls), 2)
         self.assertEqual(
             rng.calls,
-            [(180.0, 300.0), (180.0, 300.0), (1800.0, 1800.0), (3600.0, 3600.0)],
+            [(60.0, 60.0)],
         )
-        self.assertEqual(sum(clock.waits), 5760.0)
+        self.assertEqual(sum(clock.waits), 60.0)
         self.assertTrue(all(seconds <= 60 for seconds in clock.waits))
-        self.assertEqual(len(driver.snapshots), 5)
-        self.assertEqual(len(driver.closed_since), 5)
-        self.assertGreaterEqual(driver.restore_count, 5)
+        self.assertEqual(len(driver.snapshots), 2)
+        self.assertEqual(len(driver.closed_since), 2)
+        self.assertGreaterEqual(driver.restore_count, 2)
 
     def test_navigation_errors_and_blank_timeout_use_the_same_recovery(self) -> None:
         clock = FakeClock()
@@ -359,7 +358,7 @@ class CategoryRecoveryIntegrationTests(unittest.TestCase):
             domain_cooldowns=registry,
         )
         self.assertEqual(assessment.status, PageHealthStatus.HEALTHY)
-        self.assertEqual(clock.waits, [60.0, 60.0, 5.0])
+        self.assertEqual(clock.waits, [30.0, 30.0, 30.0, 30.0, 5.0])
         self.assertEqual(len(driver.get_calls), 1)
 
     def test_whole_page_transaction_retries_extraction_and_pagination_failures(self) -> None:
@@ -369,7 +368,7 @@ class CategoryRecoveryIntegrationTests(unittest.TestCase):
 
         def operation(attempt):
             calls.append(attempt.attempt_number)
-            if attempt.attempt_number < 5:
+            if attempt.attempt_number < 2:
                 raise category.WebDriverException("pagination context lost")
             return category.CategoryPageWorkResult(
                 node={"url": self.page_url, "path": ["Home"]},
@@ -385,10 +384,10 @@ class CategoryRecoveryIntegrationTests(unittest.TestCase):
             operation=operation,
         )
         self.assertEqual(result.node["path"], ["Home"])
-        self.assertEqual(calls, [1, 2, 3, 4, 5])
-        self.assertEqual(sum(clock.waits), 5760.0)
+        self.assertEqual(calls, [1, 2])
+        self.assertEqual(sum(clock.waits), 60.0)
         self.assertTrue(all(seconds <= 60 for seconds in clock.waits))
-        self.assertEqual(len(driver.closed_since), 5)
+        self.assertEqual(len(driver.closed_since), 2)
 
 
 class CategoryRetryPersistenceTests(unittest.TestCase):
@@ -425,21 +424,21 @@ class CategoryRetryPersistenceTests(unittest.TestCase):
                 retry_callbacks=callbacks,
             )
 
-    def test_fifth_failure_persists_manual_resume_and_logs_once(self) -> None:
+    def test_second_failure_persists_manual_resume_and_logs_once(self) -> None:
         clock = FakeClock()
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             state = self.make_state(root)
             retry_key = category._retry_entry_key(self.work_key, "category_page")
             callbacks = category.state_retry_callbacks(state, retry_key)
-            driver = FakeCategoryDriver([dog_page()] * 5)
+            driver = FakeCategoryDriver([dog_page()] * 2)
             with self.assertRaises(AmazonPageRetryExhausted) as raised:
                 self.load(driver, runtime(clock), callbacks)
 
             stored = state.data["amazon_page_retry"]
             self.assertEqual(stored["status"], "manual_resume_required")
-            self.assertEqual(stored["attempts_completed"], 5)
-            self.assertEqual(len(driver.get_calls), 5)
+            self.assertEqual(stored["attempts_completed"], 2)
+            self.assertEqual(len(driver.get_calls), 2)
 
             failures_path = root / "failures.jsonl"
             node = {
@@ -571,7 +570,7 @@ class CategoryRetryPersistenceTests(unittest.TestCase):
             assert stored is not None
             self.assertEqual(stored["status"], "waiting")
             self.assertEqual(stored["next_attempt"], 2)
-            self.assertEqual(stored["next_retry_at"], 1180.0)
+            self.assertEqual(stored["next_retry_at"], 1060.0)
 
             resumed_runtime = runtime(clock, rng=ForbiddenRng(), waiter=clock.wait)
             assessment = self.load(
@@ -580,7 +579,7 @@ class CategoryRetryPersistenceTests(unittest.TestCase):
                 callbacks,
             )
             self.assertEqual(assessment.status, PageHealthStatus.HEALTHY)
-            self.assertEqual(clock.waits, [60.0, 60.0, 60.0])
+            self.assertEqual(clock.waits, [30.0] * 2)
             self.assertNotIn("amazon_page_retry", state.data)
 
     def test_concurrent_worker_events_ack_atomic_state_before_return(self) -> None:

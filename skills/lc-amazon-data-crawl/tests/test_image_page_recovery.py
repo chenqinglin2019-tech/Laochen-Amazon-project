@@ -198,6 +198,9 @@ class LensHealthIntegrationTests(unittest.TestCase):
 
 class ImageWorkflowRecoveryTests(unittest.TestCase):
     def setUp(self) -> None:
+        pacing = patch("safety_control.LocalSafetyController._wait_until")
+        pacing.start()
+        self.addCleanup(pacing.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.products = self.root / "products.csv"
@@ -232,7 +235,11 @@ class ImageWorkflowRecoveryTests(unittest.TestCase):
                 ],
             }
         )
-        return image.build_image_runtime_config(template, no_resume=False)
+        runtime = image.build_image_runtime_config(template, no_resume=False)
+        # Workflow fixtures exercise legacy checkpoint recovery without real waits;
+        # operation-policy timing has its own virtual-clock tests.
+        runtime.amazon_page_unavailable_retry_schedule_seconds = ((0, 0),) * 4
+        return runtime
 
     def test_ambiguous_empty_exhausts_once_then_same_command_resumes_current(self) -> None:
         runtime = self.runtime()

@@ -4,53 +4,12 @@ set -euo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_DIR="${1:-$PWD/lc-amazon-data-crawl-runner}"
 
-select_setup_auth_bin() {
-  local os arch ext
-  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
-  ext=""
-  case "$os" in
-    linux*) os="linux" ;;
-    darwin*) os="darwin" ;;
-    mingw*|msys*|cygwin*) os="windows"; ext=".exe" ;;
-    *) echo "unsupported os for auth gate: $os" >&2; return 2 ;;
-  esac
-  case "$arch" in
-    x86_64|amd64) arch="amd64" ;;
-    arm64|aarch64) arch="arm64" ;;
-    *) echo "unsupported arch for auth gate: $arch" >&2; return 2 ;;
-  esac
-  if [[ "$os" == "windows" ]]; then
-    arch="amd64"
-  fi
-  echo "$SKILL_DIR/tools/bin/lc-auth-check-$os-$arch$ext"
-}
-
-require_setup_auth() {
-  local auth_bin
-  auth_bin="$(select_setup_auth_bin)"
-  if [[ ! -f "$auth_bin" ]]; then
-    echo "云端鉴权工具缺失，本轮不继续执行。" >&2
-    exit 2
-  fi
-  case "$(uname -s | tr '[:upper:]' '[:lower:]')" in
-    darwin*)
-      xattr -dr com.apple.quarantine "$SKILL_DIR/tools/bin" 2>/dev/null || true
-      chmod +x "$SKILL_DIR"/tools/bin/lc-auth-check-darwin-* 2>/dev/null || true
-      ;;
-  esac
-  chmod +x "$auth_bin" 2>/dev/null || true
-  if ! "$auth_bin" --config "$SKILL_DIR/config.json" >/dev/null; then
-    echo "云端鉴权未通过，本轮不继续执行。" >&2
-    exit 4
-  fi
-}
-
-require_setup_auth
+bash "$SKILL_DIR/scripts/check_auth.sh"
 
 mkdir -p "$TARGET_DIR/scripts" "$TARGET_DIR/config" "$TARGET_DIR/inputs" "$TARGET_DIR/outputs" "$TARGET_DIR/chrome_profiles" "$TARGET_DIR/tools/bin"
 
 cp "$SKILL_DIR"/scripts/*.py "$TARGET_DIR/scripts/"
+cp "$SKILL_DIR/scripts/check_auth.sh" "$TARGET_DIR/scripts/check_auth.sh"
 cp "$SKILL_DIR/assets/requirements.txt" "$TARGET_DIR/requirements.txt"
 for config_file in "$SKILL_DIR"/assets/config/*.json; do
   config_name="$(basename "$config_file")"
@@ -90,16 +49,26 @@ for ignored_path in 'outputs/' 'chrome_profiles/' '_archive/'; do
     printf '%s\n' "$ignored_path" >> "$RUNNER_GITIGNORE"
   fi
 done
+for ignored_path in '.venv/' '.venv-scrapling/' 'inputs/' 'config.local.json'; do
+  if ! grep -Fqx "$ignored_path" "$RUNNER_GITIGNORE"; then
+    printf '%s\n' "$ignored_path" >> "$RUNNER_GITIGNORE"
+  fi
+done
 if [[ ! -f "$TARGET_DIR/config.json" ]]; then
   cp "$SKILL_DIR/config.json" "$TARGET_DIR/config.json"
 fi
 chmod 600 "$TARGET_DIR/config.json" 2>/dev/null || true
+if [[ -f "$SKILL_DIR/config.local.json" && ! -f "$TARGET_DIR/config.local.json" ]]; then
+  (umask 077; cp "$SKILL_DIR/config.local.json" "$TARGET_DIR/config.local.json")
+fi
+if [[ -f "$TARGET_DIR/config.local.json" ]]; then
+  chmod 600 "$TARGET_DIR/config.local.json" 2>/dev/null || true
+fi
 if ! grep -Fqx 'config.json' "$RUNNER_GITIGNORE"; then
   printf 'config.json\n' >> "$RUNNER_GITIGNORE"
 fi
 if [[ -d "$SKILL_DIR/tools/bin" ]]; then
   cp "$SKILL_DIR"/tools/bin/* "$TARGET_DIR/tools/bin/"
-  chmod +x "$TARGET_DIR"/tools/bin/* 2>/dev/null || true
 fi
 
 for input_file in "$SKILL_DIR"/assets/inputs/*; do
@@ -112,70 +81,37 @@ done
 if [[ ! -f "$TARGET_DIR/config/amazon_front_crawler.json" ]]; then
   cp "$TARGET_DIR/config/amazon_front_keyword_search.json" "$TARGET_DIR/config/amazon_front_crawler.json"
 fi
+python3 "$SKILL_DIR/scripts/migrate_operation_config.py" "$TARGET_DIR/config"
 
 cat > "$TARGET_DIR/lc-amazon-data-crawl.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+VENV_DIR="$ROOT_DIR/.venv"
+if [[ -x "$ROOT_DIR/.venv-scrapling/bin/python" ]]; then
+  VENV_DIR="$ROOT_DIR/.venv-scrapling"
+fi
+PYTHON_BIN="$VENV_DIR/bin/python"
 
 usage() {
   cat <<'USAGE'
 Usage:
   ./lc-amazon-data-crawl.sh install
   ./lc-amazon-data-crawl.sh doctor
-  ./lc-amazon-data-crawl.sh amazon-front-dry-run [--config config/amazon_front_keyword_search.json]
-  ./lc-amazon-data-crawl.sh amazon-front-run [--config config/amazon_front_storefront.json]
+  ./lc-amazon-data-crawl.sh amazon-front-dry-run [--config config/amazon_front_keyword_search.json] [--operation-mode supervised|unattended]
+  ./lc-amazon-data-crawl.sh amazon-front-run [--config config/amazon_front_storefront.json] [--operation-mode supervised|unattended]
   ./lc-amazon-data-crawl.sh category-rank-dry-run [--config config/category_rank_crawler.json]
-  ./lc-amazon-data-crawl.sh category-rank-run [--config config/category_rank_crawler.json]
+  ./lc-amazon-data-crawl.sh category-rank-run [--config config/category_rank_crawler.json] [--operation-mode supervised|unattended]
   ./lc-amazon-data-crawl.sh image-competitor-dry-run [--config config/amazon_image_competitors.json]
-  ./lc-amazon-data-crawl.sh image-competitor-run [--config config/amazon_image_competitors.json]
+  ./lc-amazon-data-crawl.sh image-competitor-run [--config config/amazon_image_competitors.json] [--operation-mode supervised|unattended]
   ./lc-amazon-data-crawl.sh cdp-browser-start --config <config-file>
   ./lc-amazon-data-crawl.sh sellersprite-check --config <config-file>
 USAGE
 }
 
-select_auth_bin() {
-  local os arch ext
-  os="$(uname -s | tr '[:upper:]' '[:lower:]')"
-  arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
-  ext=""
-  case "$os" in
-    linux*) os="linux" ;;
-    darwin*) os="darwin" ;;
-    mingw*|msys*|cygwin*) os="windows"; ext=".exe" ;;
-    *) echo "unsupported os for auth gate: $os" >&2; return 2 ;;
-  esac
-  case "$arch" in
-    x86_64|amd64) arch="amd64" ;;
-    arm64|aarch64) arch="arm64" ;;
-    *) echo "unsupported arch for auth gate: $arch" >&2; return 2 ;;
-  esac
-  if [[ "$os" == "windows" ]]; then
-    arch="amd64"
-  fi
-  echo "$ROOT_DIR/tools/bin/lc-auth-check-$os-$arch$ext"
-}
-
 require_cloud_auth() {
-  local auth_bin
-  auth_bin="$(select_auth_bin)"
-  if [[ ! -f "$auth_bin" ]]; then
-    echo "云端鉴权工具缺失，本轮不继续执行。" >&2
-    exit 2
-  fi
-  case "$(uname -s | tr '[:upper:]' '[:lower:]')" in
-    darwin*)
-      xattr -dr com.apple.quarantine "$ROOT_DIR/tools/bin" 2>/dev/null || true
-      chmod +x "$ROOT_DIR"/tools/bin/lc-auth-check-darwin-* 2>/dev/null || true
-      ;;
-  esac
-  chmod +x "$auth_bin" 2>/dev/null || true
-  if ! "$auth_bin" --config "$ROOT_DIR/config.json" >/dev/null; then
-    echo "云端鉴权未通过，本轮不继续执行。" >&2
-    exit 4
-  fi
+  bash "$ROOT_DIR/scripts/check_auth.sh"
 }
 
 ensure_installed() {
@@ -186,14 +122,24 @@ ensure_installed() {
 }
 
 install_runner() {
-  local python3_bin
-  python3_bin="$(command -v python3 || true)"
+  local python3_bin candidate version
+  python3_bin=""
+  for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
+    candidate="$(command -v "$candidate" || true)"
+    [[ -n "$candidate" ]] || continue
+    version="$($candidate -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
+    case "$version" in 3.10|3.11|3.12|3.13|3.14) python3_bin="$candidate"; break ;; esac
+  done
   if [[ -z "$python3_bin" ]]; then
-    echo "python3 is required." >&2
+    echo "Scrapling requires Python 3.10 or newer." >&2
     exit 2
   fi
-  if [[ ! -d "$ROOT_DIR/.venv" ]]; then
-    "$python3_bin" -m venv "$ROOT_DIR/.venv"
+  if [[ -x "$PYTHON_BIN" ]] && ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
+    VENV_DIR="$ROOT_DIR/.venv-scrapling"
+    PYTHON_BIN="$VENV_DIR/bin/python"
+  fi
+  if [[ ! -x "$PYTHON_BIN" ]]; then
+    "$python3_bin" -m venv "$VENV_DIR"
   fi
   "$PYTHON_BIN" -m pip install --upgrade pip
   "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"

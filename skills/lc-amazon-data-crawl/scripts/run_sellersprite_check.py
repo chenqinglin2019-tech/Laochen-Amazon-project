@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
@@ -25,11 +26,13 @@ from amazon_front_crawler import (
     build_front_runtime_config,
     build_initial_queue,
     prepare_storefront_page,
+    wait_for_storefront_plugin_page,
 )
 from amazon_image_competitor_crawler import (
     build_image_runtime_config,
     load_products,
 )
+from safety_control import LocalSafetyController, SafetyPausedError
 
 
 def resolve_check_target(raw: Dict[str, Any], config_path: Path) -> Tuple[Any, str, Dict[str, Any]]:
@@ -63,6 +66,7 @@ def exit_code_for_status(status: str) -> int:
         "plugin_absent": 3,
         "login_required": 4,
         "data_loading": 5,
+        "timeout": 5,
         "blocked": 6,
     }.get(status, 7)
 
@@ -79,7 +83,11 @@ def main() -> int:
     runtime, target_url, current = resolve_check_target(raw, config_path)
     driver = None
     final_status = "browser_unreachable"
+    safety = LocalSafetyController()
     try:
+        safety.acquire()
+        safety.begin()
+        setattr(runtime, "safety", safety)
         driver = start_driver(runtime)
         open_amazon_page(driver, target_url, runtime)
         if getattr(runtime, "mode", "") == "storefront":
@@ -88,12 +96,20 @@ def main() -> int:
             wait_for_amazon_products(driver, runtime)
         except TimeoutException:
             pass
-        plugin_status = wait_for_sellersprite_data(driver, runtime)
-        report = safe_sellersprite_readiness(get_sellersprite_readiness(driver))
+        if getattr(runtime, "mode", "") == "storefront":
+            plugin_status = wait_for_storefront_plugin_page(
+                driver, runtime, time.monotonic() + runtime.plugin_timeout
+            )
+        else:
+            plugin_status = wait_for_sellersprite_data(driver, runtime)
+        full_report = get_sellersprite_readiness(driver)
+        report = safe_sellersprite_readiness(full_report)
+        if getattr(runtime, "mode", "") == "storefront":
+            report["pending_asins"] = full_report.get("pending_asins", {})
         final_status = str(report.get("status") or plugin_status)
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return exit_code_for_status(final_status)
-    except (UserFacingError, WebDriverException) as exc:
+    except (SafetyPausedError, UserFacingError, WebDriverException) as exc:
         report = {
             "status": "browser_unreachable",
             "message": str(exc),
@@ -109,6 +125,7 @@ def main() -> int:
                     driver.quit()
             except WebDriverException:
                 pass
+        safety.release()
 
 
 if __name__ == "__main__":

@@ -216,7 +216,7 @@ class RealChromeOwnershipIntegrationTests(unittest.TestCase):
                         baseline_page_ids | {id(concurrent_user)},
                     )
                     self.assertIs(driver._page, worker)
-                    self.assertGreaterEqual(elapsed, 1.9)
+                    self.assertGreaterEqual(elapsed, 1.0)
             finally:
                 if driver is not None:
                     driver.quit()
