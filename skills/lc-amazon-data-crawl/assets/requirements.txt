@@ -3,3 +3,6 @@ charset-normalizer>=3.0.0
 selenium>=4.20.0
 playwright>=1.60.0,<2
 openpyxl>=3.1.0
+# Used only for local parsing of browser-rendered card fragments.  It never
+# owns Chrome, makes provider requests, or changes CDP/session handling.
+scrapling==0.4.15

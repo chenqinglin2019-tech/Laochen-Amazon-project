@@ -46,17 +46,25 @@ browser.
 
 `browser_tab_concurrency` controls how many crawl tabs may work at once:
 
-- Default `1`; accepted range `1` to `3`, with `2` recommended for parallel
-  front/category work.
-- A value above `1` requires `browser_mode` set to `reuse` or `attach`; launch
-  mode rejects that combination during config validation instead of silently
-  downgrading it.
-- Only independent queued sources run concurrently, such as different
-  keyword/sort pairs, store/sort pairs, or independently queued category
-  nodes. Pages within one source remain serial so pagination, repeated-page
-  detection, and checkpoints stay ordered.
-- Actual active tabs may be lower than the configured value when fewer
-  independent sources are available.
+- It is fixed at `1` for SellerSprite-enabled front and category runs. A
+  higher value fails dry-run rather than creating extra browser traffic.
+- The crawler uses one visible Chrome Profile and one crawler-owned working
+  tab. This local process boundary does not control other computers or manual
+  browser activity using the same account.
+
+`page_extraction_engine` selects how configured `field_selectors` are read
+from an already-rendered product card:
+
+- `browser` (default): use the existing in-page browser selector extraction.
+- `scrapling`: export a card's HTML only when at least one custom selector is
+  configured, then parse those selectors locally with Scrapling. Missing fields
+  fall back to the existing browser extraction. This mode makes no network
+  request and does not open or control a second browser.
+
+Scrapling requires Python 3.10 or newer. `install` automatically creates and
+uses `.venv-scrapling` when the runner's existing `.venv` is older. This does
+not alter authentication, browser-profile state, SellerSprite login, or any
+provider/API settings.
 
 Common fields:
 
@@ -116,7 +124,7 @@ after a list of handles was sampled.
   working tab instead.
 - Close owned result tabs and descendant popups after each product is committed
   or abandoned, before a retry or long wait, and during exception, `Ctrl-C`, or
-  normal-exit cleanup. Re-scan every 500 milliseconds for up to 2 seconds so
+  normal-exit cleanup. Re-scan every 100 milliseconds for up to 250 milliseconds so
   delayed popups are included; retry an individual close once and log failures.
 - On startup, close only leftovers that carry a verifiable crawler ownership
   marker. Unknown pages and pages owned by the user remain untouched.
@@ -127,46 +135,79 @@ ownership baseline must be initialized before an operation can register or
 close child tabs; an exception before initialization must never cause all
 existing browser tabs to be treated as crawler-created.
 
+## Safety Pause, Page Availability And Retry
+
+Front and category runs use one shared local safety record at
+`~/.lc-amazon-data-crawl/safety/risk-pause.json`, independent of `job_id`.
+The runner records only platform, reason, time, wait-until and a redacted page
+URL. It never stores cookies, extension tokens, credentials, or page HTML.
+
+- Every crawler-owned navigation or refresh checks this record first. Amazon
+  403/429, CAPTCHA/robot/abnormal-traffic/access-denied pages and explicit
+  SellerSprite rate-limit, account-restriction, verification or quota messages
+  stop new navigation, refresh, plugin clicks and scrolling immediately.
+- `operation_mode` is `supervised` by default and can be overridden with
+  `--operation-mode supervised|unattended` (CLI wins). Select it at startup;
+  checkpoint and restart to switch modes. The shared persistent attempt counter
+  survives mode changes and job changes. Existing rest deadlines never shrink.
+- Supervised: 20–30-second navigation spacing; 3–5-minute rest before the next
+  navigation after every 20 attempts, except every 100th uses 10–12 minutes.
+  Unattended: 45–75-second spacing and 15–20 minutes after every 10 attempts.
+  Failed attempts count; page commits do not. No next navigation means no rest.
+- Supervised temporary page faults retry once after 60 seconds. Unattended
+  faults retry twice after 2 and 5 minutes, then defer the work item and
+  continue independent work; three consecutive failures or five in the most
+  recent 20 stop the run. Both retain a 90-second page-load timeout.
+- The storefront plugin keeps its 40-second total budget and 10-second stable
+  check. Other supervised lists wait 40 seconds, extending once to 80 only on
+  new cards or required fields in the last 10 seconds. Image Find Similar waits
+  20 seconds, Lens 40 seconds or at most 60 on valid progress, and image plugin
+  gate 20 seconds. Unattended required plugin data waits up to 180 seconds on
+  the original page, without this extension. Supervised pre-scroll uses 2
+  seconds per round, at most 18 rounds and 2 stable bottom rounds.
+- First 429 or explicit rate limit pauses at least 30 minutes (longer trusted
+  `Retry-After` wins), then permits one probe of the original pending item.
+  A repeat within 24 hours requires at least 24 hours and manual review. 403,
+  abnormal traffic and account restriction also require 24-hour manual review.
+  Daytime CAPTCHA waits for human clearance then cools 10 minutes; nighttime
+  CAPTCHA saves the checkpoint and stops. Use `--resume-after-review` after
+  resolving manual pauses. Risk and rest state persist across restarts.
+- Long waits update `run_heartbeat.json` every 30 seconds. `run_summary.json`
+  records operational counts separately from business exports.
+
 ## Amazon Page Availability And Retry
 
-All five crawler templates share this optional field and default:
+Front and category templates use this fixed conservative policy:
 
 ```json
-"amazon_page_unavailable_retry_schedule_seconds": [
-  [180, 300],
-  [180, 300],
-  [1800, 1800],
-  [3600, 3600]
-]
+"amazon_page_unavailable_retry_schedule_seconds": [[60, 60]]
 ```
 
-The initial navigation is attempt 1. Each of the four entries controls the wait
-before attempts 2 through 5, so there are exactly five attempts in one retry
-cycle. A pair is an inclusive random `[minimum, maximum]` range in seconds.
-Config validation requires exactly four pairs of finite, non-negative numbers
-with `minimum <= maximum`; invalid values fail dry-run before Chrome opens.
-Omitting the field uses the same default. The retry schedule is operational
-policy and is not added to crawl-plan or provider fingerprints, so changing it
-alone does not invalidate an existing checkpoint.
+The initial navigation is attempt 1. A confirmed temporary page-transport
+failure may wait 60 seconds and retry once. A second failure stops and preserves
+the pending page. Risk signals never use this retry path; they use the hard
+safety pause above. The retry schedule is operational policy and is not added
+to crawl-plan or provider fingerprints.
 
 The shared page-health classifier is stage-aware. Product pages, search and
 category pages, Amazon Lens upload pages, and Lens result pages each require
 their expected content DOM after the configured timeout. These conditions are
 retryable page-unavailable failures:
 
-- Amazon dog/error pages, rate-limit pages, Access Denied, and HTTP 429 or 5xx;
-- network, DNS, connection, or navigation failures;
+- non-risk Amazon dog/error pages and temporary 5xx transport failures;
+- network, DNS, connection, or navigation failures that do not contain a
+  risk marker;
 - an empty/blank response, or a page that still lacks the stage's expected DOM
   after timeout.
 
 Text such as `sorry` inside an otherwise healthy product page does not by
 itself make the page unavailable. Only a stage-specific, explicit Amazon or
 Lens no-results state is a valid empty result; an ambiguous blank or partial
-page must never be committed as a zero count. CAPTCHA/Robot Check remains a
-manual-action pause and does not turn into a zero result. An Amazon buyer
-sign-in wall is terminal and uses the documented sign-in message instead of
-this retry schedule. SellerSprite data stalls continue to use the independent
-plugin retry and relaunch settings under **Stall Handling**.
+page must never be committed as a zero count. CAPTCHA/Robot Check, 403/429,
+rate-limit and Access Denied are risk pauses, not automatic retries. An Amazon
+buyer sign-in wall is terminal and uses the documented sign-in message instead
+of this retry schedule. SellerSprite data stalls wait on the existing page and
+then require manual handling; they never relaunch Chrome automatically.
 
 Before every long wait, the crawler closes owned result/popup tabs, chooses the
 actual wait once, and atomically persists it. `state.json` may include:
@@ -180,8 +221,8 @@ actual wait once, and atomically persists it. `state.json` may include:
   "cycle": 1,
   "attempts_completed": 1,
   "next_attempt": 2,
-  "selected_wait_seconds": 247,
-  "remaining_wait_seconds": 247,
+  "selected_wait_seconds": 60,
+  "remaining_wait_seconds": 60,
   "next_retry_at": 1788336247.0,
   "url": "https://www.amazon.com/...",
   "error": "redacted retryable summary"
@@ -202,13 +243,13 @@ that domain. A worker whose page had already loaded may complete local
 extraction and its single atomic commit. Navigation to a different domain is
 not blocked.
 
-If attempt 5 still fails, the crawler closes tabs owned by that work item,
+If attempt 2 still fails, the crawler closes tabs owned by that work item,
 leaves that item and all other unfinished work pending, writes no page/product
 record, count, completion shard, or inferred zero, and appends one deduplicated
 `amazon_page_unavailable_retry_exhausted` event to `failures.jsonl`. It then
 sets the checkpoint to `manual_resume_required` and exits. Re-running the same
 runner command is the manual continuation action: completed work remains
-committed, while only the current pending work item starts a new five-attempt
+committed, while only the current pending work item starts a new two-attempt
 cycle. If the previous process was merely interrupted during a scheduled wait,
 the remaining persisted wait takes precedence and the current cycle continues.
 
@@ -221,7 +262,8 @@ All five crawler templates enable marketplace-specific delivery selection:
   `config/amazon_delivery_locations.json`.
 - `delivery_location_timeout`: automatic attempt timeout in seconds; default
   `20`.
-- `manual_pause_timeout`: existing manual-action timeout; default `900`.
+- `manual_pause_timeout`: supervised manual-action timeout `900` seconds;
+  unattended mode saves its checkpoint and exits immediately (`0`).
 
 The mapping file has a `locations` object keyed by exact Amazon domain. Each
 entry supplies `city`, string-valued `postal_code`, and `strategy`. See
@@ -246,6 +288,16 @@ Profile. It may change price, availability, delivery promises, and search
 results.
 
 ## SellerSprite Readiness
+
+Storefront mode applies a per-ASIN rendered-card gate before its existing page
+extraction. The 40-second `plugin_timeout` covers scrolling and a 10-second
+stable period (`storefront_plugin_stable_seconds`). Each selected Amazon ASIN
+must have a visible SellerSprite card without active loading indicators. Parent
+and child 30-day sales, FBA fee, and gross margin must show rendered values;
+`N/A`, `0`, and `< 5` count as rendered. Hidden optional fields do not block.
+Timeout preserves the unfinished page checkpoint without writing its records.
+The `sellersprite_min_enriched_records` and `sellersprite_stable_checks` settings
+continue to govern other front modes.
 
 Use these fields for SellerSprite-enriched modes:
 
@@ -487,6 +539,12 @@ Input file columns:
 - `主图URL`
 - `本地图片路径`
 
+If Amazon explicitly shows `Page Not Found` for a source product, the image
+crawler checks its canonical `/dp/ASIN` URL before skipping that source. A
+confirmed unavailable source is recorded with `processing_status` set to
+`source_unavailable`; the same-product count stays blank. Temporary page
+failures still follow the selected operation mode's retry policy.
+
 Important fields:
 
 - `marketplace`: for example `美国站`.
@@ -632,12 +690,10 @@ and [Ark multimodal embeddings API](https://api.volcengine.com/api-docs/view?act
 
 The crawler configs include:
 
-- `plugin_retry_attempts`: default 5.
-- `plugin_retry_wait_seconds_min`: default 10.
-- `plugin_retry_wait_seconds_max`: default 20.
-- `plugin_relaunch_retry_attempts`: retry count after closing/relaunching Chrome.
-- `plugin_relaunch_wait_seconds`: first relaunch sleep, usually 300 seconds.
-- `plugin_second_relaunch_retry_attempts`: retry count after second close/relaunch.
-- `plugin_second_relaunch_wait_seconds`: second relaunch sleep, usually 600 seconds.
+- `plugin_timeout`: storefront default 40 seconds including scrolling and
+  stability checks; other front modes retain their 120-second default.
+- `plugin_retry_attempts` and the relaunch fields remain accepted only for old
+  config compatibility and default to `0`; the SellerSprite workflow does not
+  automatically refresh, relaunch Chrome or click plugin controls.
 
 If the page stops taking crawl actions for more than 3 minutes, inspect terminal output, `state.json`, the Chrome page, and `failures.jsonl` if present, then report the cause before continuing.

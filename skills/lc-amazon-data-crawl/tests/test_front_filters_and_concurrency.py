@@ -32,13 +32,13 @@ class FrontConfigTests(unittest.TestCase):
         )
         return raw
 
-    def test_tab_concurrency_range_and_backend_contract(self) -> None:
+    def test_safety_policy_requires_one_browser_worker(self) -> None:
         raw = self.base_config()
-        raw["browser_tab_concurrency"] = 3
+        raw["browser_tab_concurrency"] = 1
         runtime = front.build_front_runtime_config(raw, no_resume=False)
-        self.assertEqual(runtime.browser_tab_concurrency, 3)
+        self.assertEqual(runtime.browser_tab_concurrency, 1)
 
-        for invalid in (0, 4):
+        for invalid in (0, 2, 4):
             invalid_raw = dict(raw, browser_tab_concurrency=invalid)
             with self.assertRaises(front.UserFacingError):
                 front.build_front_runtime_config(invalid_raw, no_resume=False)

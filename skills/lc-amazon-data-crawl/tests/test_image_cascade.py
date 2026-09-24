@@ -390,6 +390,9 @@ class MiniStrictJsonTests(unittest.TestCase):
 
 class CascadeConfigFingerprintAndOutputTests(unittest.TestCase):
     def setUp(self) -> None:
+        pacing = patch("safety_control.LocalSafetyController._wait_until")
+        pacing.start()
+        self.addCleanup(pacing.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
         self.products = self.root / "products.csv"

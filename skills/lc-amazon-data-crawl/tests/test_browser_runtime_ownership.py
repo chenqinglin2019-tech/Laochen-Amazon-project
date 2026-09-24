@@ -47,6 +47,7 @@ class FakePage:
         self.default_navigation_timeout = 0
         self.goto_status = goto_status
         self.goto_error = goto_error
+        self.reload_status = goto_status
 
     def opener(self) -> Optional["FakePage"]:
         return self._opener
@@ -78,6 +79,13 @@ class FakePage:
         if self.goto_status is None:
             return None
         return FakeResponse(self.goto_status)
+
+    def reload(self, *_args: object, **_kwargs: object) -> object:
+        if self.goto_error is not None:
+            raise self.goto_error
+        if self.reload_status is None:
+            return None
+        return FakeResponse(self.reload_status)
 
     def is_closed(self) -> bool:
         return self._closed
@@ -260,7 +268,7 @@ class CdpPageOwnershipTests(unittest.TestCase):
         self.assertFalse(user_page.is_closed())
         self.assertFalse(concurrent_user_page.is_closed())
         self.assertIs(driver._page, worker_page)
-        self.assertEqual(clock.sleeps, [0.5, 0.5, 0.5, 0.5])
+        self.assertGreaterEqual(sum(clock.sleeps), 1.0)
 
     def test_action_scope_claims_matching_noopener_but_preserves_user_page(self) -> None:
         worker_page = FakePage("worker")
@@ -452,6 +460,22 @@ class CdpPageOwnershipTests(unittest.TestCase):
 
         self.assertIsNone(driver.last_http_status)
         self.assertEqual(driver.last_navigation_error, "net::ERR_TIMED_OUT")
+
+    def test_refresh_replaces_previous_http_status(self) -> None:
+        worker_page = FakePage("worker", goto_status=429)
+        context = FakeContext([worker_page])
+        driver = make_attached_driver(context, worker_page)
+        driver.get("https://www.amazon.com/s?k=test")
+        self.assertEqual(driver.last_http_status, 429)
+
+        worker_page.reload_status = 200
+        driver.refresh()
+        self.assertEqual(driver.last_http_status, 200)
+        self.assertEqual(driver.last_navigation_error, "")
+
+        worker_page.reload_status = 429
+        driver.refresh()
+        self.assertEqual(driver.last_http_status, 429)
 
 
 if __name__ == "__main__":

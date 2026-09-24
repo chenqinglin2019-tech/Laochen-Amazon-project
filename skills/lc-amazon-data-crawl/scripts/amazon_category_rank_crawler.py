@@ -47,6 +47,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from browser_runtime import CdpWebDriver
+from scrapling_adapter import ScraplingUnavailable, extract_card_fields, scrapling_available
 from amazon_page_recovery import (
     AmazonPageRetryController,
     AmazonPageRetryExhausted,
@@ -61,6 +62,18 @@ from amazon_page_recovery import (
     TransientAmazonPageUnavailable,
     classify_page_snapshot,
     retry_schedule_from_config,
+)
+from safety_control import (
+    LocalSafetyController,
+    RiskSignal,
+    SafetyPausedError,
+    apply_operation_policy,
+    write_run_summary,
+    record_operational_outcome,
+    classify_amazon_risk,
+    classify_sellersprite_risk,
+    operation_mode,
+    policy_description,
 )
 
 try:  # POSIX process lock
@@ -266,6 +279,10 @@ class VerificationUnconfirmedError(UserFacingError):
     """Stop the whole crawl when Amazon or SellerSprite verification times out."""
 
     pass
+
+
+class PluginDataTimeout(UserFacingError):
+    """One page has incomplete extension fields after its passive wait budget."""
 
 
 class ConcurrentWorkerCancelled(UserFacingError):
@@ -1059,6 +1076,9 @@ class RuntimeConfig:
     sellersprite_stable_checks: int
     save_debug_snapshots: bool
     field_selectors: Dict[str, List[str]] = field(default_factory=dict)
+    page_extraction_engine: str = "browser"
+    safety: Optional[LocalSafetyController] = field(default=None, repr=False, compare=False)
+    resume_after_review: bool = False
 
 
 @dataclass
@@ -1097,7 +1117,12 @@ class CategoryPageWorkResult:
 MANUAL_INTERACTION_LOCK = threading.Lock()
 
 
-def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: bool) -> RuntimeConfig:
+def build_runtime_config(
+    config: Dict[str, Any],
+    config_path: Path,
+    no_resume: bool,
+    resume_after_review: bool = False,
+) -> RuntimeConfig:
     start_url = config_text(config, "start_url")
     if not start_url:
         raise UserFacingError("配置项 `start_url` 不能为空。")
@@ -1118,20 +1143,18 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         )
     browser_tab_concurrency = config_int(config, "browser_tab_concurrency", 1)
     browser_tab_concurrency = 1 if browser_tab_concurrency is None else browser_tab_concurrency
-    if browser_tab_concurrency < 1 or browser_tab_concurrency > 3:
-        raise UserFacingError("配置项 `browser_tab_concurrency` 必须是 1-3 的整数。")
-    if browser_tab_concurrency > 1 and not (
-        browser_backend == "cdp" and browser_mode in {"attach", "reuse"}
-    ):
+    if browser_tab_concurrency != 1:
         raise UserFacingError(
-            "browser_tab_concurrency 大于 1 时只支持 browser_backend=cdp，"
-            "且 browser_mode 必须是 attach 或 reuse。"
+            "为保护 Amazon 与卖家精灵账号，`browser_tab_concurrency` 必须固定为 1。"
         )
 
     try:
-        amazon_page_retry_schedule = retry_schedule_from_config(config)
+        retry_schedule_from_config(config)
     except RetryConfigurationError as exc:
         raise UserFacingError(str(exc)) from exc
+    # A normal transport failure gets one delayed retry. Risk signals are
+    # handled before this path and instead create the cross-job hard pause.
+    amazon_page_retry_schedule: RetrySchedule = ((60.0, 60.0),)
 
     chrome_binary = config_text(config, "chrome_binary")
     chrome_user_data_dir = resolve_path(config_text(config, "chrome_user_data_dir", "chrome_profiles/category-rank-sellersprite"))
@@ -1142,18 +1165,18 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
     if browser_mode == "launch" and extension_path_text and not extension_path.exists():
         raise UserFacingError(f"没有找到卖家精灵扩展目录：{extension_path}")
 
-    min_delay = config_float(config, "delay_seconds_min", 4)
-    max_delay = config_float(config, "delay_seconds_max", 9)
+    min_delay = max(config_float(config, "delay_seconds_min", 20), 20)
+    max_delay = max(config_float(config, "delay_seconds_max", 20), min_delay)
     if max_delay < min_delay:
         max_delay = min_delay
-    batch_pages_min = config_int(config, "batch_pause_pages_min", 20) or 0
-    batch_pages_max = config_int(config, "batch_pause_pages_max", 30) or 0
+    batch_pages_min = min(config_int(config, "batch_pause_pages_min", 20) or 20, 20)
+    batch_pages_max = min(config_int(config, "batch_pause_pages_max", 20) or 20, 20)
     if batch_pages_min < 0 or batch_pages_max < 0:
         raise UserFacingError("配置项 batch_pause_pages_min / batch_pause_pages_max 不能小于 0。")
     if batch_pages_max and batch_pages_max < batch_pages_min:
         batch_pages_max = batch_pages_min
-    batch_seconds_min = config_float(config, "batch_pause_seconds_min", 60)
-    batch_seconds_max = config_float(config, "batch_pause_seconds_max", 180)
+    batch_seconds_min = max(config_float(config, "batch_pause_seconds_min", 180), 0)
+    batch_seconds_max = max(config_float(config, "batch_pause_seconds_max", 300), batch_seconds_min)
     if batch_seconds_min < 0 or batch_seconds_max < 0:
         raise UserFacingError("配置项 batch_pause_seconds_min / batch_pause_seconds_max 不能小于 0。")
     if batch_seconds_max < batch_seconds_min:
@@ -1189,12 +1212,17 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         for key, value in raw_selectors.items():
             if isinstance(value, list):
                 field_selectors[key] = [str(item).strip() for item in value if str(item).strip()]
+    page_extraction_engine = config_text(config, "page_extraction_engine", "browser").lower()
+    if page_extraction_engine not in {"browser", "scrapling"}:
+        raise UserFacingError("配置项 `page_extraction_engine` 只支持 browser 或 scrapling。")
+    if page_extraction_engine == "scrapling" and not scrapling_available():
+        raise UserFacingError("已选择 Scrapling 解析，但当前 Python 环境未安装 scrapling；请先运行 install。")
 
     include_root = config_bool(config, "include_root", False)
     max_depth = config_int(config, "max_depth")
     max_pages_per_category = config_int(config, "max_pages_per_category")
 
-    return RuntimeConfig(
+    runtime = RuntimeConfig(
         start_url=start_url,
         job_id=slugify(job_id),
         outputs_root=outputs_root,
@@ -1211,7 +1239,7 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         max_pages_per_category=max_pages_per_category,
         max_categories=config_int(config, "max_categories"),
         resume=False if no_resume else config_bool(config, "resume", True),
-        activate_plugin=config_bool(config, "activate_plugin", True),
+        activate_plugin=config_bool(config, "activate_plugin", False),
         page_timeout=config_int(config, "page_timeout", 90) or 90,
         amazon_page_retry_schedule=amazon_page_retry_schedule,
         plugin_timeout=config_int(config, "plugin_timeout", 120) or 120,
@@ -1259,7 +1287,11 @@ def build_runtime_config(config: Dict[str, Any], config_path: Path, no_resume: b
         ),
         save_debug_snapshots=config_bool(config, "save_debug_snapshots", True),
         field_selectors=field_selectors,
+        page_extraction_engine=page_extraction_engine,
+        resume_after_review=resume_after_review,
     )
+    apply_operation_policy(runtime, operation_mode(config.get("operation_mode")))
+    return runtime
 
 
 class StateStore:
@@ -1483,7 +1515,7 @@ class StateStore:
         if not queue:
             return None
         node = queue.pop(0)
-        current = {
+        current = node["_deferred_current"] if "_deferred_current" in node else {
             "node": node,
             "page_number": 1,
             "page_url": node["url"],
@@ -1494,6 +1526,21 @@ class StateStore:
         self.data["current"] = current
         self.flush()
         return current
+
+    def defer_current(self, reason: str) -> None:
+        current = self.data.get("current")
+        if current:
+            self.data.setdefault("deferred_pages", []).append({"current": copy.deepcopy(current), "reason": reason})
+            self.data["current"] = None
+            self.flush()
+
+    def restore_deferred(self) -> None:
+        deferred = list(self.data.pop("deferred_pages", []) or [])
+        if deferred:
+            self.data["queue"] = [
+                {"_deferred_current": item["current"]} for item in deferred
+            ] + list(self.data.get("queue") or [])
+            self.flush()
 
     def prepare_concurrent_resume(self) -> None:
         """Recover stale work and migrate the legacy single-current checkpoint."""
@@ -1850,6 +1897,61 @@ def materialize_category_records(state: StateStore, records_path: Path) -> int:
     return len(records)
 
 
+def maybe_materialize_category_records(
+    state: StateStore,
+    records_path: Path,
+    *,
+    force: bool = False,
+) -> int:
+    """Rebuild the aggregate at bounded intervals; page shards remain the truth."""
+
+    completed = len(state.data.get("completed_page_order") or [])
+    previous_count = int(getattr(state, "_materialized_page_count", -1))
+    previous_at = float(getattr(state, "_materialized_at", 0.0))
+    now = time.monotonic()
+    if not force and completed - previous_count < 10 and now - previous_at < 60:
+        return int(state.data.get("records_count") or 0)
+    result = materialize_category_records(state, records_path)
+    setattr(state, "_materialized_page_count", completed)
+    setattr(state, "_materialized_at", now)
+    return result
+
+
+def write_quality_report(records_path: Path, output_path: Path) -> None:
+    """Write a compact, non-Excel report without changing the field contract."""
+
+    records = read_jsonl(records_path)
+    partial = 0
+    missing_by_field: Dict[str, int] = {field: 0 for field in REQUESTED_DATA_FIELDS}
+    zero_unconfirmed_by_field: Dict[str, int] = {
+        field: 0 for field in REQUESTED_DATA_FIELDS
+    }
+    for record in records:
+        statuses = record.get("_field_statuses") if isinstance(record, dict) else {}
+        statuses = statuses if isinstance(statuses, dict) else {}
+        has_gap = False
+        for field_name in REQUESTED_DATA_FIELDS:
+            status = str(statuses.get(field_name) or "")
+            if status == "missing":
+                missing_by_field[field_name] += 1
+                has_gap = True
+            elif status == "zero_unconfirmed":
+                zero_unconfirmed_by_field[field_name] += 1
+                has_gap = True
+        if has_gap:
+            partial += 1
+    payload = {
+        "generated_at": now_iso(),
+        "total_records": len(records),
+        "partial_records": partial,
+        "complete_records": len(records) - partial,
+        "missing_by_field": missing_by_field,
+        "zero_unconfirmed_by_field": zero_unconfirmed_by_field,
+    }
+    ensure_dir(output_path.parent)
+    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
 def start_driver(runtime: RuntimeConfig) -> WebDriver:
     if runtime.browser_mode == "applescript":
         return AppleScriptChromeDriver(runtime.page_timeout)  # type: ignore[return-value]
@@ -2180,6 +2282,10 @@ class BatchPauseScheduler:
         return random.randint(min_pages, max_pages)
 
     def after_completed_page(self) -> None:
+        # Safety-managed crawls rest before the next navigation, counting failed
+        # attempts too. This legacy scheduler is inactive when safety is present.
+        if isinstance(getattr(self.runtime, "safety", None), LocalSafetyController):
+            return
         with self._lock:
             if not self.next_pause_after:
                 return
@@ -2427,7 +2533,7 @@ return values.join(' ').replace(/\s+/g, ' ').trim();
 """
     try:
         return normalize_space(str(driver.execute_script(script) or ""))
-    except (JavascriptException, WebDriverException):
+    except (AttributeError, JavascriptException, WebDriverException):
         return ""
 
 
@@ -2997,6 +3103,11 @@ def handle_amazon_verification(
         # controller applies the configured long backoff; they are not manual
         # CAPTCHA tasks.
         return
+    if getattr(runtime, "operation_mode", "supervised") == "unattended":
+        safety = getattr(runtime, "safety", None)
+        if isinstance(safety, LocalSafetyController) and reason == "amazon_robot_check":
+            safety.trip(RiskSignal("amazon", "captcha_or_robot_check", "Amazon 要求人工验证。"), page_url=safe_driver_current_url(driver))
+        raise VerificationUnconfirmedError(verification_unconfirmed_message(reason))
     if on_manual_pause:
         on_manual_pause(reason, str(getattr(driver, "current_url", "") or ""))
     timeout = int(getattr(runtime, "manual_pause_timeout", 900) or 900)
@@ -3007,6 +3118,9 @@ def handle_amazon_verification(
     )
     if not cleared:
         raise VerificationUnconfirmedError(verification_unconfirmed_message(reason))
+    safety = getattr(runtime, "safety", None)
+    if isinstance(safety, LocalSafetyController) and reason == "amazon_robot_check":
+        safety.captcha_cleared(page_url=safe_driver_current_url(driver))
     if on_manual_resume:
         on_manual_resume()
 
@@ -3093,7 +3207,9 @@ def _reopen_amazon_target(
         try:
             if before_navigation is not None:
                 before_navigation()
+            safety_before_remote_action(runtime, "重新导航 Amazon 页面")
             driver.get(target_url)
+            observe_amazon_risk(driver, runtime)
             last_error = None
             break
         except WebDriverException as exc:
@@ -3301,6 +3417,8 @@ def ensure_amazon_delivery_location(
 
     validate_page_before_manual_delivery()
     reason = "delivery_location_unconfirmed"
+    if getattr(runtime, "operation_mode", "supervised") == "unattended":
+        raise DeliveryLocationUnconfirmedError("配送地址需要人工确认；夜间已保存断点并退出。")
     if on_manual_pause:
         on_manual_pause(reason, safe_driver_current_url(driver, target_url))
     print(
@@ -3352,7 +3470,9 @@ def open_amazon_page(
     defer_delivery: bool = False,
 ) -> None:
     _raise_if_stop_requested(stop_event)
+    safety_before_remote_action(runtime, "导航 Amazon 页面")
     driver.get(url)
+    observe_amazon_risk(driver, runtime)
     handle_amazon_verification(
         driver,
         runtime,
@@ -3506,6 +3626,63 @@ def safe_driver_current_url(driver: WebDriver, fallback: str = "") -> str:
         return str(getattr(driver, "current_url", "") or fallback)
     except Exception:
         return str(fallback or "")
+
+
+def safety_before_remote_action(runtime: Any, action: str) -> None:
+    """Block crawler-owned traffic when the shared local risk pause is active."""
+
+    safety = getattr(runtime, "safety", None)
+    if isinstance(safety, LocalSafetyController):
+        safety.before_remote_action(action)
+
+
+def observe_amazon_risk(driver: WebDriver, runtime: Any) -> None:
+    """Persist a high-confidence Amazon risk observation before any retry path."""
+
+    safety = getattr(runtime, "safety", None)
+    if not isinstance(safety, LocalSafetyController):
+        return
+    try:
+        title = str(driver.title or "")
+    except Exception:
+        title = ""
+    try:
+        status = getattr(driver, "last_http_status", None)
+        status = int(status) if status is not None else None
+    except (TypeError, ValueError, WebDriverException):
+        status = None
+    signal = classify_amazon_risk(
+        http_status=status,
+        title=title,
+        body_text=safe_find_text(driver),
+        retry_after=str(getattr(driver, "last_retry_after", "") or ""),
+    )
+    if signal is not None:
+        if signal.reason == "captcha_or_robot_check" and safety.mode == "supervised":
+            return
+        safety.trip(signal, page_url=safe_driver_current_url(driver))
+
+
+def sellersprite_visible_text(driver: WebDriver) -> str:
+    """Read only extension-owned visible text to avoid Amazon-page false positives."""
+
+    script = r"""
+const selector = [
+  '[id*="sellersprite" i]', '[class*="sellersprite" i]',
+  '[id*="seller-sprite" i]', '[class*="seller-sprite" i]',
+  '[id*="__ss" i]', '[class*="vxe-" i]', '[class*="ss-" i]',
+  '[class*="sprite" i]'
+].join(',');
+return [...document.querySelectorAll(selector)]
+  .map(node => node.innerText || node.textContent || '')
+  .join(' ')
+  .replace(/\s+/g, ' ')
+  .slice(0, 20000);
+"""
+    try:
+        return normalize_space(str(driver.execute_script(script) or ""))
+    except (AttributeError, JavascriptException, WebDriverException):
+        return ""
 
 
 def _handle_assessment_interaction(
@@ -3791,7 +3968,9 @@ def load_category_page_attempt(
 
     def navigate_with_delivery() -> PageHealthAssessment:
         try:
+            safety_before_remote_action(runtime, "导航 Amazon 页面")
             driver.get(page_url)
+            observe_amazon_risk(driver, runtime)
         except (TimeoutException, WebDriverException) as exc:
             assessment = category_page_assessment(
                 driver,
@@ -3868,7 +4047,7 @@ def load_category_page_with_recovery(
     delivery_lock: Optional[threading.Lock] = None,
     domain_cooldowns: Optional[DomainCooldownRegistry] = None,
 ) -> PageHealthAssessment:
-    """Navigate and validate one category page with the shared five-attempt policy."""
+    """Navigate and validate one category page with the selected retry policy."""
 
     domain = (urlparse(page_url).hostname or "unknown").lower()
     attempt_snapshot: List[Optional[FrozenSet[str]]] = [None]
@@ -4084,8 +4263,16 @@ def safe_sellersprite_readiness(report: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) -> Dict[str, Any]:
+    observe_amazon_risk(driver, runtime)
+    safety = getattr(runtime, "safety", None)
+    plugin_signal = classify_sellersprite_risk(sellersprite_visible_text(driver))
+    if plugin_signal is not None and isinstance(safety, LocalSafetyController):
+        if not (plugin_signal.reason == "verification_required" and safety.mode == "supervised"):
+            safety.trip(plugin_signal, page_url=safe_driver_current_url(driver))
     blocked_reason = detect_block(driver)
-    cards = extract_product_cards(driver)
+    engine = str(getattr(runtime, "page_extraction_engine", "browser") or "browser")
+    use_scrapling = engine == "scrapling" and bool(runtime.field_selectors)
+    cards = extract_product_cards(driver, include_html=use_scrapling)
     rows = extract_table_rows(driver)
     product_asins = {
         normalize_space(str(item.get("asin") or "")).upper()
@@ -4093,6 +4280,7 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
         if normalize_space(str(item.get("asin") or ""))
     }
     field_counts_by_asin: Dict[str, int] = {}
+    field_values_by_asin: Dict[str, Dict[str, str]] = {}
     bsr_ranks_by_asin: Dict[str, List[Dict[str, Any]]] = {}
     fulfillment_by_asin: Dict[str, str] = {}
     table_fulfillment_by_asin: Dict[str, Tuple[str, str]] = {}
@@ -4101,6 +4289,13 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
         if not asin:
             continue
         parsed = parse_table_row_fields(row)
+        field_values_by_asin.setdefault(asin, {}).update(
+            {
+                field: normalize_space(str(value))
+                for field, value in parsed.items()
+                if field in SELLERSPRITE_EVIDENCE_FIELDS and value
+            }
+        )
         table_evidence = (
             parsed.get("fulfillment_method"),
             parsed.get("fulfillment_method_raw"),
@@ -4138,7 +4333,7 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
             continue
         text = str(card.get("text") or "")
         selector_values = (
-            extract_by_selectors(driver, card, fulfillment_selector_map)
+            extract_by_selectors(driver, card, fulfillment_selector_map, engine)
             if fulfillment_selector_map
             else {}
         )
@@ -4158,10 +4353,21 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
             if field_name != "fulfillment_method"
             and parse_sellersprite_inline_field(field_name, text)
         ) + int(bool(fulfillment_evidence[0] or fulfillment_evidence[1]))
+        inline_values = {
+            field: parse_sellersprite_inline_field(field, text)
+            for field in SELLERSPRITE_EVIDENCE_FIELDS
+            if field != "fulfillment_method"
+        }
+        field_values_by_asin.setdefault(asin, {}).update(
+            {field: normalize_space(str(value)) for field, value in inline_values.items() if value}
+        )
         field_counts_by_asin[asin] = max(field_counts_by_asin.get(asin, 0), count)
         fulfillment_method, fulfillment_raw = fulfillment_evidence
         if fulfillment_method or fulfillment_raw:
             fulfillment_by_asin[asin] = fulfillment_method or f"raw:{fulfillment_raw}"
+            field_values_by_asin.setdefault(asin, {})["fulfillment_method"] = (
+                fulfillment_method or fulfillment_raw
+            )
         card_bsr_text = str(card.get("bsr_text") or "")
         card_ranks = parse_subcategory_bsr_ranks(card_bsr_text or text)
         if card_ranks:
@@ -4169,14 +4375,32 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
                 [*(bsr_ranks_by_asin.get(asin) or []), *card_ranks]
             )
 
+    field_statuses_by_asin = {
+        asin: {
+            field_name: sellersprite_field_status(field_name, values.get(field_name, ""))
+            for field_name in SELLERSPRITE_EVIDENCE_FIELDS
+        }
+        for asin, values in {
+            asin: field_values_by_asin.get(asin, {}) for asin in product_asins
+        }.items()
+    }
+    field_counts_by_asin = {
+        asin: sum(
+            status in {"value", "explicit_unavailable"}
+            for status in statuses.values()
+        )
+        for asin, statuses in field_statuses_by_asin.items()
+    }
     min_fields = max(int(getattr(runtime, "sellersprite_min_fields_per_record", 2) or 2), 1)
     enriched_records = sum(1 for count in field_counts_by_asin.values() if count >= min_fields)
+    plugin_nodes = plugin_node_count(driver)
     signature = "|".join(
         [
-            str(plugin_node_count(driver)),
+            str(plugin_nodes),
             str(len(product_asins)),
             str(len(rows)),
             ",".join(f"{asin}:{count}" for asin, count in sorted(field_counts_by_asin.items())),
+            json.dumps(field_values_by_asin, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
             json.dumps(fulfillment_by_asin, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
             json.dumps(bsr_ranks_by_asin, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
         ]
@@ -4185,7 +4409,7 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
         "status": "data_loading",
         "checked_at": now_iso(),
         "page_url": safe_driver_current_url(driver),
-        "plugin_nodes": plugin_node_count(driver),
+        "plugin_nodes": plugin_nodes,
         "login_required": sellersprite_login_required(driver),
         "product_count": len(product_asins),
         "enriched_records": enriched_records,
@@ -4194,12 +4418,28 @@ def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) ->
         "signature": signature,
         "blocked": bool(blocked_reason),
         "blocked_reason": blocked_reason or "",
+        "field_statuses_by_asin": field_statuses_by_asin,
     }
     report["status"] = classify_sellersprite_snapshot(
         report,
         int(getattr(runtime, "sellersprite_min_enriched_records", 1) or 1),
         min_fields,
     )
+    # The readiness check has already read the complete rendered evidence.  On
+    # a stable page, reuse that exact snapshot for the immediate write phase
+    # instead of repeating the two large DOM scans.
+    if report["status"] == "ready_candidate":
+        setattr(
+            driver,
+            "_lc_sellersprite_evidence_cache",
+            {
+                "page_url": report["page_url"],
+                "page_epoch": getattr(driver, "page_epoch", None),
+                "cards": cards,
+                "rows": rows,
+                "field_statuses_by_asin": field_statuses_by_asin,
+            },
+        )
     return report
 
 
@@ -4222,12 +4462,6 @@ def wait_for_user_plugin_action(
     )
     if not continued:
         return False
-    try:
-        if before_refresh:
-            before_refresh()
-        driver.refresh()
-    except WebDriverException:
-        pass
     return True
 
 
@@ -4321,6 +4555,8 @@ def wait_for_sellersprite_data_or_prompt(
 
     def handle_block(current_driver: WebDriver) -> Optional[str]:
         reason = sellersprite_block_reason(current_driver)
+        if getattr(runtime, "operation_mode", "supervised") == "unattended":
+            return "blocked"
         if on_manual_pause:
             on_manual_pause(reason, safe_driver_current_url(current_driver))
         cleared = (
@@ -4394,40 +4630,10 @@ def wait_for_sellersprite_data_or_prompt(
                 return blocked_result
             continue
 
-        status, driver = retry_with_refresh(driver, runtime.plugin_retry_attempts, "卖家精灵数据未成功加载，自动重试")
-        if status == "ok":
-            return status
-        if status == "blocked":
-            return status
-
-        if restart_driver is not None and runtime.plugin_relaunch_retry_attempts > 0:
-            page_url = driver.current_url
-            print(
-                f"连续 {runtime.plugin_retry_attempts} 次仍未加载卖家精灵数据，关闭窗口并等待 "
-                f"{runtime.plugin_relaunch_wait_seconds / 60:.1f} 分钟后重新拉起。"
-            )
-            driver = restart_driver(driver, page_url, runtime.plugin_relaunch_wait_seconds)
-            status, driver = retry_with_refresh(driver, runtime.plugin_relaunch_retry_attempts, "重启浏览器后自动重试")
-            if status == "ok":
-                return status
-            if status == "blocked":
-                return status
-
-        if restart_driver is not None and runtime.plugin_second_relaunch_retry_attempts > 0:
-            page_url = driver.current_url
-            print(
-                f"重启后仍未加载卖家精灵数据，再次关闭窗口并等待 "
-                f"{runtime.plugin_second_relaunch_wait_seconds / 60:.1f} 分钟后重新拉起。"
-            )
-            driver = restart_driver(driver, page_url, runtime.plugin_second_relaunch_wait_seconds)
-            status, driver = retry_with_refresh(driver, runtime.plugin_second_relaunch_retry_attempts, "第二次重启浏览器后自动重试")
-            if status == "ok":
-                return status
-            if status == "blocked":
-                return status
-
         report = get_sellersprite_readiness(driver)
         status = str(report.get("status") or status)
+        if getattr(runtime, "operation_mode", "supervised") == "unattended":
+            return "blocked" if status in {"plugin_absent", "login_required", "blocked"} else "timeout"
         manual_reason = "sellersprite_manual_action"
         if on_manual_pause:
             on_manual_pause(manual_reason, str(getattr(driver, "current_url", "") or ""))
@@ -4441,7 +4647,6 @@ def wait_for_sellersprite_data_or_prompt(
             continued = wait_for_user_plugin_action(
                 driver,
                 action_reason,
-                before_refresh=before_navigation,
                 manual_pause_timeout=int(
                     getattr(runtime, "manual_pause_timeout", 900) or 900
                 ),
@@ -4462,8 +4667,10 @@ def extract_product_cards(
     driver: WebDriver,
     *,
     strict: bool = False,
+    include_html: bool = False,
 ) -> List[Dict[str, Any]]:
     script = r"""
+const includeHtml = Boolean(arguments[0]);
 const asinRe = /\b([A-Z0-9]{10})\b/;
 const asinUrlRe = /\/(?:dp|gp\/product)\/([A-Z0-9]{10})(?:[/?#]|$)/i;
 const norm = (text) => (text || '').replace(/\s+/g, ' ').trim();
@@ -4555,7 +4762,8 @@ for (const selector of selectors) {
       rank: getRank(el),
       seller_country_flag_code: getSellerCountryFlagCode(el),
       bsr_text: getBsrText(el),
-      text: norm(el.innerText || el.textContent || '')
+      text: norm(el.innerText || el.textContent || ''),
+      html: includeHtml ? el.outerHTML : ''
     });
   }
 }
@@ -4568,7 +4776,7 @@ for (const card of cards) {
 return [...byAsin.values()];
 """
     try:
-        return list(driver.execute_script(script) or [])
+        return list(driver.execute_script(script, include_html) or [])
     except (JavascriptException, WebDriverException):
         if strict:
             raise
@@ -4626,9 +4834,31 @@ return rows;
         return []
 
 
-def extract_by_selectors(driver: WebDriver, card: Dict[str, Any], selectors: Dict[str, List[str]]) -> Dict[str, str]:
+def extract_by_selectors(
+    driver: WebDriver,
+    card: Dict[str, Any],
+    selectors: Dict[str, List[str]],
+    engine: str = "browser",
+) -> Dict[str, str]:
     if not selectors:
         return {}
+    scrapling_values: Dict[str, str] = {}
+    if engine == "scrapling" and card.get("html"):
+        try:
+            scrapling_values = extract_card_fields(str(card["html"]), selectors)
+        except ScraplingUnavailable:
+            raise
+        except Exception:
+            # Keep browser parsing as the compatibility fallback; never drop a
+            # configured SellerSprite field because an lxml selector differs.
+            scrapling_values = {}
+        if len(scrapling_values) == len(selectors):
+            return scrapling_values
+    remaining_selectors = {
+        name: values for name, values in selectors.items() if name not in scrapling_values
+    }
+    if not remaining_selectors:
+        return scrapling_values
     asin = card.get("asin") or ""
     script = r"""
 const asin = arguments[0];
@@ -4659,7 +4889,8 @@ for (const [field, selectors] of Object.entries(selectorMap)) {
 return output;
 """
     try:
-        return dict(driver.execute_script(script, asin, selectors) or {})
+        browser_values = dict(driver.execute_script(script, asin, remaining_selectors) or {})
+        return {**scrapling_values, **browser_values}
     except (JavascriptException, WebDriverException):
         return {}
 
@@ -4699,6 +4930,26 @@ def first_regex(text: str, patterns: Sequence[str]) -> str:
     return ""
 
 
+def sellersprite_field_status(field_name: str, value: Any) -> str:
+    """Keep missing, provider-declared unavailable and rendered-zero distinct."""
+
+    normalized = normalize_space(str(value or ""))
+    if not normalized:
+        return "missing"
+    if normalized.casefold() in {"n/a", "na", "--", "-", "暂无", "无数据"}:
+        return "explicit_unavailable"
+    # SellerSprite's rendered UI can collapse an absent source value to 0.
+    # Preserve the value for audit, but do not treat it as confirmed evidence.
+    if normalized in {"0", "0.0", "0%"} and field_name in {
+        "sales_30_days_child",
+        "sales_30_days_parent",
+        "organic_keywords_count",
+        "ad_keywords_count",
+    }:
+        return "zero_unconfirmed"
+    return "value"
+
+
 def parse_field_from_text(field_name: str, text: str) -> str:
     text = normalize_space(text)
     if not text:
@@ -4722,8 +4973,22 @@ def parse_field_from_text(field_name: str, text: str) -> str:
         return first_regex(text, [r"毛利率[:：]\s*(N/A|[\d,.]+%)", r"([\d,.]+%)\s*(?:gross margin|margin|毛利率)", r"(?:gross margin|margin|毛利率)\D{0,12}([\d,.]+%)"])
     if field_name == "fulfillment_method":
         return parse_fulfillment_method(text)
-    if field_name in {"organic_keywords_count", "ad_keywords_count"}:
-        return first_regex(text, [r"([\d,]+)\s*(?:keywords?|词)"])
+    if field_name == "organic_keywords_count":
+        return first_regex(
+            text,
+            [
+                r"(?:organic|natural)\s*(?:search\s*)?(?:keywords?|terms?)\D{0,12}([\d,]+)",
+                r"(?:自然(?:搜索)?词)\D{0,12}([\d,]+)",
+            ],
+        )
+    if field_name == "ad_keywords_count":
+        return first_regex(
+            text,
+            [
+                r"(?:sponsored|advertis(?:ing|ed)|ad)\s*(?:search\s*)?(?:keywords?|terms?)\D{0,12}([\d,]+)",
+                r"(?:广告(?:搜索|流量)?词)\D{0,12}([\d,]+)",
+            ],
+        )
 
     labels = HEADER_ALIASES.get(field_name, [])
     labelled = value_near_labels(text, labels)
@@ -4815,11 +5080,24 @@ def merge_product_data(
     page_number: int,
     plugin_status: str,
 ) -> List[Dict[str, Any]]:
-    cards = extract_product_cards(driver, strict=True)
-    table_rows = extract_table_rows(
-        driver,
-        strict=bool(getattr(runtime, "sellersprite_required", True)),
-    )
+    engine = str(getattr(runtime, "page_extraction_engine", "browser") or "browser")
+    use_scrapling = engine == "scrapling" and bool(runtime.field_selectors)
+    cache = getattr(driver, "_lc_sellersprite_evidence_cache", None)
+    current_url = safe_driver_current_url(driver)
+    current_epoch = getattr(driver, "page_epoch", None)
+    if (
+        isinstance(cache, dict)
+        and cache.get("page_url") == current_url
+        and cache.get("page_epoch") == current_epoch
+    ):
+        cards = list(cache.get("cards") or [])
+        table_rows = list(cache.get("rows") or [])
+    else:
+        cards = extract_product_cards(driver, strict=True, include_html=use_scrapling)
+        table_rows = extract_table_rows(
+            driver,
+            strict=bool(getattr(runtime, "sellersprite_required", True)),
+        )
     table_by_asin: Dict[str, Dict[str, Any]] = {}
     for row in table_rows:
         asin = str(row.get("asin") or "")
@@ -4888,7 +5166,9 @@ def merge_product_data(
         record["subcategory_bsr_ranks"] = normalize_subcategory_bsr_ranks(
             table_by_asin.get(asin, {}).get("subcategory_bsr_ranks")
         )
-        selector_values = extract_by_selectors(driver, card, runtime.field_selectors)
+        selector_values = extract_by_selectors(
+            driver, card, runtime.field_selectors, engine
+        )
         for field_name, value in selector_values.items():
             if field_name in REQUESTED_DATA_FIELDS and value:
                 if field_name == "fulfillment_method":
@@ -4931,11 +5211,21 @@ def merge_product_data(
         )
         if not record.get("seller_country"):
             record["seller_country"] = country_from_flag_code_or_text(str(card.get("seller_country_flag_code") or ""))
-        missing_count = sum(1 for field_name in REQUESTED_DATA_FIELDS if not record.get(field_name))
+        field_statuses = {
+            field_name: sellersprite_field_status(field_name, record.get(field_name))
+            for field_name in REQUESTED_DATA_FIELDS
+        }
+        record["_field_statuses"] = field_statuses
+        incomplete_fields = [
+            field_name
+            for field_name, status in field_statuses.items()
+            if status in {"missing", "zero_unconfirmed"}
+        ]
         if plugin_status != "ok":
             record["note"] = "插件数据加载超时，已保存页面可见数据"
-        elif missing_count == len(REQUESTED_DATA_FIELDS):
-            record["note"] = "插件未展示或选择器未匹配"
+        elif incomplete_fields:
+            record["load_status"] = "partial"
+            record["note"] = "字段待确认：" + ", ".join(incomplete_fields)
         records.append(record)
     return records
 
@@ -5081,15 +5371,41 @@ def wait_for_sellersprite_data(
         return "not_required"
     if runtime.activate_plugin:
         try_activate_plugin(driver)
+    storefront_started = time.time() if getattr(runtime, "mode", "") == "storefront" else None
     preload_page_data_with_scroll(driver, runtime)
     timeout = runtime.plugin_timeout if timeout_seconds is None else max(float(timeout_seconds), 1)
-    deadline = time.time() + timeout
+    deadline = (storefront_started if storefront_started is not None else time.time()) + timeout
+    base_deadline = deadline
+    last_progress_at = 0.0
+    highest_progress = (0, 0, 0)
+    extended = False
     stable_seen = 0
     last_signature = ""
     last_status = "data_loading"
-    while time.time() < deadline:
+    while True:
+        if time.time() >= deadline:
+            if (
+                not extended
+                and timeout_seconds is None
+                and getattr(runtime, "operation_mode", "supervised") == "supervised"
+                and getattr(runtime, "mode", "") != "storefront"
+                and last_progress_at >= base_deadline - 10
+            ):
+                deadline = base_deadline + 40
+                extended = True
+                print("卖家精灵仍有有效加载进展，原页延长等待至 80 秒。", flush=True)
+            else:
+                break
         _raise_if_stop_requested(stop_event)
         report = inspect_sellersprite_readiness(driver, runtime)
+        progress = (
+            int(report.get("product_count") or 0),
+            int(report.get("enriched_records") or 0),
+            int(report.get("max_fields_per_record") or 0),
+        )
+        if any(current > previous for current, previous in zip(progress, highest_progress)):
+            last_progress_at = time.time()
+            highest_progress = tuple(max(a, b) for a, b in zip(progress, highest_progress))
         status = str(report.get("status") or "data_loading")
         if status == "blocked":
             set_sellersprite_readiness(driver, report)
@@ -5617,6 +5933,8 @@ def _wait_for_page_without_worker_writes(
 ) -> None:
     block_reason = detect_block(driver)
     if block_reason:
+        if getattr(runtime, "operation_mode", "supervised") == "unattended":
+            raise VerificationUnconfirmedError(verification_unconfirmed_message(block_reason))
         manual_gate.pause(block_reason, str(getattr(driver, "current_url", "") or ""))
         cleared = wait_for_manual_clear(
             driver,
@@ -5672,7 +5990,8 @@ def crawl_category_source(
             raise ConcurrentWorkerCancelled("并发任务正在停止，已取消页面导航。")
         domain = (urlparse(target_url).hostname or "unknown").lower()
         def before_navigation() -> None:
-            navigation_throttle.wait()
+            if not isinstance(getattr(runtime, "safety", None), LocalSafetyController):
+                navigation_throttle.wait()
             _raise_if_stop_requested(stop_event)
 
         assessment = load_category_page_attempt(
@@ -5828,7 +6147,7 @@ def crawl_category_source(
                                 domain_cooldowns.wait(
                                     (urlparse(page_url).hostname or "unknown").lower()
                                 ),
-                                navigation_throttle.wait(),
+                                navigation_throttle.wait() if not isinstance(getattr(runtime, "safety", None), LocalSafetyController) else None,
                                 _raise_if_stop_requested(stop_event),
                             ),
                             recover_amazon_page=recover_plugin_page,
@@ -6007,7 +6326,7 @@ def _commit_category_batch(
             print(f"主线程提交时发现页面已完成，跳过：{page.key}")
             continue
         committed_pages += 1
-        materialize_category_records(state, records_path)
+        maybe_materialize_category_records(state, records_path)
         written_count = len(
             {
                 str(record.get("asin") or "")
@@ -6257,6 +6576,7 @@ def run_crawl_concurrent(
     else:
         executor.shutdown(wait=True)
         _drain_worker_events(events, state)
+        maybe_materialize_category_records(state, records_path, force=True)
 
 
 def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
@@ -6290,7 +6610,8 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
 
     state = StateStore(state_path, runtime)
     state.load_or_create()
-    materialize_category_records(state, records_path)
+    state.restore_deferred()
+    maybe_materialize_category_records(state, records_path, force=True)
     if runtime.browser_tab_concurrency > 1:
         run_crawl_concurrent(
             runtime,
@@ -6299,6 +6620,8 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
             failures_path,
             debug_dir,
         )
+        maybe_materialize_category_records(state, records_path, force=True)
+        write_quality_report(records_path, job_dir / "quality_report.json")
         write_workbook(records_path, failures_path, output_xlsx)
         print(f"已生成 Excel：{output_xlsx}")
         return 0
@@ -6364,6 +6687,8 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
             node = current["node"]
             page_number = int(current.get("page_number") or 1)
             page_url = str(current.get("page_url") or node["url"])
+            if isinstance(getattr(runtime, "safety", None), LocalSafetyController):
+                runtime.safety.set_work_key(page_key(node, page_number, page_url))
             print(f"处理类目：{' > '.join(node.get('path') or [])} / 第 {page_number} 页")
 
             try:
@@ -6463,6 +6788,8 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
                                 "sellersprite_verification_unconfirmed: "
                                 "人工处理超时，任务已停止且未提取当前页数据。"
                             )
+                        if plugin_status == "timeout":
+                            raise PluginDataTimeout("卖家精灵字段等待到期，当前页保留待补采。")
                         active_driver = current_driver()
                         post_plugin_health = wait_for_category_page_health(
                             active_driver,
@@ -6540,13 +6867,18 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
                     added = state.enqueue_children(children)
                     print(f"发现下级类目 {len(children)} 个，新增 {added} 个；跳过当前中间节点。")
                     state.finish_current_category()
+                    record_operational_outcome(state, True)
                     processed_in_this_run += 1
-                    sleep_between_pages(runtime)
+                    if not isinstance(getattr(runtime, "safety", None), LocalSafetyController):
+                        sleep_between_pages(runtime)
                     continue
 
                 if page_result.page is not None:
                     state.commit_page_batch(page_result.page)
-                    materialize_category_records(state, records_path)
+                    record_operational_outcome(state, True)
+                    if isinstance(getattr(runtime, "safety", None), LocalSafetyController):
+                        runtime.safety.complete_review_success()
+                    maybe_materialize_category_records(state, records_path)
                     if page_result.page.plugin_status == "verified_empty":
                         print("页面明确显示无商品，已合法提交空页断点。")
                     else:
@@ -6574,7 +6906,8 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
                 else:
                     state.finish_current_category()
                     processed_in_this_run += 1
-                sleep_between_pages(runtime)
+                if not isinstance(getattr(runtime, "safety", None), LocalSafetyController):
+                    sleep_between_pages(runtime)
             except AmazonPageRetryExhausted as exc:
                 log_amazon_retry_exhausted_once(
                     failures_path,
@@ -6591,7 +6924,20 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
                         debug_dir,
                         f"amazon_page_retry_exhausted_{extract_node_id(page_url)}_{page_number}",
                     )
+                if runtime.operation_mode == "unattended":
+                    state.clear_amazon_page_retry(retry_key)
+                    state.defer_current(exc.failure_code)
+                    if record_operational_outcome(state, False):
+                        raise UserFacingError("夜间失败达到阈值；剩余任务保留在断点中。") from exc
+                    continue
                 raise UserFacingError(str(exc)) from exc
+            except PluginDataTimeout as exc:
+                if runtime.operation_mode == "unattended":
+                    state.defer_current("plugin_data_timeout")
+                    if record_operational_outcome(state, False):
+                        raise UserFacingError("夜间失败达到阈值；剩余任务保留在断点中。") from exc
+                    continue
+                raise
             except DeliveryLocationUnconfirmedError as exc:
                 log_failure(
                     failures_path,
@@ -6624,6 +6970,8 @@ def _run_crawl_unlocked(runtime: RuntimeConfig, dry_run: bool) -> int:
         except WebDriverException:
             pass
 
+    maybe_materialize_category_records(state, records_path, force=True)
+    write_quality_report(records_path, job_dir / "quality_report.json")
     write_workbook(records_path, failures_path, output_xlsx)
     print(f"已生成 Excel：{output_xlsx}")
     return 0
@@ -6633,8 +6981,26 @@ def run_crawl(runtime: RuntimeConfig, dry_run: bool) -> int:
     if dry_run:
         return _run_crawl_unlocked(runtime, dry_run=True)
     job_dir = runtime.outputs_root / runtime.job_id
-    with JobRunLock(job_dir / ".run.lock"):
-        return _run_crawl_unlocked(runtime, dry_run=False)
+    safety = LocalSafetyController(
+        batch_pause_pages_min=runtime.batch_pause_pages_min,
+        batch_pause_pages_max=runtime.batch_pause_pages_max,
+        batch_pause_seconds_min=runtime.batch_pause_seconds_min,
+        batch_pause_seconds_max=runtime.batch_pause_seconds_max,
+        mode=runtime.operation_mode,
+    )
+    safety.acquire()
+    safety.status_path = job_dir / "run_heartbeat.json"
+    try:
+        safety.begin(resume_after_review=runtime.resume_after_review)
+        if safety.rate_probe_active:
+            runtime.amazon_page_retry_schedule = ()
+        runtime.safety = safety
+        with JobRunLock(job_dir / ".run.lock"):
+            return _run_crawl_unlocked(runtime, dry_run=False)
+    finally:
+        safety.fail_review()
+        write_run_summary(job_dir, runtime.operation_mode, safety)
+        safety.release()
 
 
 def wait_for_page_or_manual(
@@ -6649,6 +7015,8 @@ def wait_for_page_or_manual(
 ) -> None:
     block_reason = detect_block(driver)
     if block_reason:
+        if getattr(runtime, "operation_mode", "supervised") == "unattended":
+            raise VerificationUnconfirmedError(verification_unconfirmed_message(block_reason))
         state.mark_manual_pause(block_reason, driver.current_url)
         cleared = wait_for_manual_clear(driver, block_reason, runtime.manual_pause_timeout)
         if cleared:
@@ -6668,18 +7036,33 @@ def main() -> int:
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="配置文件路径")
     parser.add_argument("--dry-run", action="store_true", help="只检查配置，不打开浏览器")
     parser.add_argument("--no-resume", action="store_true", help="忽略已有断点，重新开始任务")
+    parser.add_argument("--operation-mode", choices=("supervised", "unattended"))
+    parser.add_argument(
+        "--resume-after-review",
+        action="store_true",
+        help="风险暂停到期且已人工复核后，仅尝试恢复原待处理页面一次",
+    )
     args = parser.parse_args()
 
     config_path = Path(args.config).expanduser()
     if not config_path.is_absolute():
         config_path = ROOT_DIR / config_path
-    runtime = build_runtime_config(load_json(config_path), config_path, args.no_resume)
+    raw_config = load_json(config_path)
+    if args.operation_mode:
+        raw_config["operation_mode"] = args.operation_mode
+    runtime = build_runtime_config(
+        raw_config,
+        config_path,
+        args.no_resume,
+        args.resume_after_review,
+    )
+    print(policy_description(runtime), flush=True)
     return run_crawl(runtime, args.dry_run)
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except UserFacingError as exc:
+    except (UserFacingError, SafetyPausedError) as exc:
         print(f"运行失败：{exc}", file=sys.stderr)
         raise SystemExit(2)

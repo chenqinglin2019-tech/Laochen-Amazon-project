@@ -112,8 +112,8 @@ class CdpWebDriver:
     """
 
     is_cdp_driver = True
-    owned_page_close_interval_seconds = 0.5
-    owned_page_close_stabilize_seconds = 2.0
+    owned_page_close_interval_seconds = 0.1
+    owned_page_close_stabilize_seconds = 1.25
 
     def __init__(
         self,
@@ -157,6 +157,7 @@ class CdpWebDriver:
         self._ownership_close_failures: List[str] = []
         self._last_http_status: Optional[int] = None
         self._last_navigation_error = ""
+        self._page_epoch = 0
         self._sleep_fn: Callable[[float], None] = time.sleep
         self._monotonic_fn: Callable[[], float] = time.monotonic
         self.switch_to = CdpSwitchTo(self)
@@ -237,6 +238,8 @@ class CdpWebDriver:
             self._last_http_status = None
         if not hasattr(self, "_last_navigation_error"):
             self._last_navigation_error = ""
+        if not hasattr(self, "_page_epoch"):
+            self._page_epoch = 0
         if not hasattr(self, "_sleep_fn"):
             self._sleep_fn = time.sleep
         if not hasattr(self, "_monotonic_fn"):
@@ -487,9 +490,18 @@ class CdpWebDriver:
         return self._last_http_status
 
     @property
+    def last_retry_after(self) -> str:
+        return str(getattr(self, "_last_retry_after", "") or "")
+
+    @property
     def last_navigation_error(self) -> str:
         self._ensure_ownership_state()
         return self._last_navigation_error
+
+    @property
+    def page_epoch(self) -> int:
+        self._ensure_ownership_state()
+        return int(self._page_epoch)
 
     def set_page_load_timeout(self, timeout: int) -> None:
         self._page_timeout = max(int(timeout), 1)
@@ -499,6 +511,7 @@ class CdpWebDriver:
     def get(self, url: str) -> None:
         self._ensure_ownership_state()
         self._last_http_status = None
+        self._last_retry_after = ""
         self._last_navigation_error = ""
         try:
             response = self._require_page().goto(
@@ -510,17 +523,30 @@ class CdpWebDriver:
             self._last_http_status = (
                 int(raw_status) if raw_status is not None else None
             )
+            self._last_retry_after = str((getattr(response, "headers", {}) or {}).get("retry-after", "") if response else "")
+            self._page_epoch += 1
         except Exception as exc:
             self._last_navigation_error = str(exc)
             raise self._translate(exc) from exc
 
     def refresh(self) -> None:
+        self._ensure_ownership_state()
+        self._last_http_status = None
+        self._last_retry_after = ""
+        self._last_navigation_error = ""
         try:
-            self._require_page().reload(
+            response = self._require_page().reload(
                 wait_until="domcontentloaded",
                 timeout=self._page_timeout * 1000,
             )
+            raw_status = getattr(response, "status", None)
+            self._last_http_status = (
+                int(raw_status) if raw_status is not None else None
+            )
+            self._last_retry_after = str((getattr(response, "headers", {}) or {}).get("retry-after", "") if response else "")
+            self._page_epoch += 1
         except Exception as exc:
+            self._last_navigation_error = str(exc)
             raise self._translate(exc) from exc
 
     def execute_script(self, script: str, *args: Any) -> Any:
@@ -743,8 +769,9 @@ class CdpWebDriver:
     def close_owned_since(self, snapshot: FrozenSet[str] | Set[str]) -> int:
         """Close only crawler-owned popup pages created after ``snapshot``.
 
-        The worker page is never closed here. After a two-second stabilization
-        window, the worker is restored (or recreated if it disappeared).
+        The worker page is never closed here. After the short configurable
+        stabilization window, the worker is restored (or recreated if it
+        disappeared).
         """
         before = {str(handle) for handle in snapshot}
         worker_id = id(self._worker_page) if self._worker_page is not None else None

@@ -20,7 +20,10 @@ from typing import Any, Dict, List
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_CONFIG = ROOT_DIR / "config" / "amazon_image_competitors.json"
 CRAWLER = ROOT_DIR / "scripts" / "amazon_image_competitor_crawler.py"
-VENV_PYTHON = ROOT_DIR / ".venv" / "bin" / "python"
+VENV_PYTHONS = (
+    ROOT_DIR / ".venv-scrapling" / "bin" / "python",
+    ROOT_DIR / ".venv" / "bin" / "python",
+)
 
 
 class LauncherError(RuntimeError):
@@ -37,12 +40,13 @@ def load_json(path: Path) -> Dict[str, Any]:
 
 
 def pick_python() -> str:
-    if VENV_PYTHON.exists():
-        return str(VENV_PYTHON)
+    for candidate in VENV_PYTHONS:
+        if candidate.exists():
+            return str(candidate)
     return sys.executable
 
 
-def build_command(config_path: Path, dry_run: bool, no_resume: bool) -> List[str]:
+def build_command(config_path: Path, dry_run: bool, no_resume: bool, operation_mode: str = "", resume_after_review: bool = False) -> List[str]:
     command = [
         pick_python(),
         "-u",
@@ -54,6 +58,10 @@ def build_command(config_path: Path, dry_run: bool, no_resume: bool) -> List[str
         command.append("--dry-run")
     if no_resume:
         command.append("--no-resume")
+    if operation_mode:
+        command.extend(("--operation-mode", operation_mode))
+    if resume_after_review:
+        command.append("--resume-after-review")
     return command
 
 
@@ -62,13 +70,15 @@ def main() -> int:
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="本地配置文件路径")
     parser.add_argument("--dry-run", action="store_true", help="只检查配置，不打开浏览器")
     parser.add_argument("--no-resume", action="store_true", help="忽略已有断点，重新开始任务")
+    parser.add_argument("--operation-mode", choices=("supervised", "unattended"))
+    parser.add_argument("--resume-after-review", action="store_true")
     args = parser.parse_args()
 
     config_path = Path(args.config).expanduser()
     if not config_path.is_absolute():
         config_path = ROOT_DIR / config_path
     load_json(config_path)
-    command = build_command(config_path, args.dry_run, args.no_resume)
+    command = build_command(config_path, args.dry_run, args.no_resume, args.operation_mode or "", args.resume_after_review)
     print(f"配置文件：{config_path}")
     completed = subprocess.run(command, cwd=str(ROOT_DIR))
     return int(completed.returncode)

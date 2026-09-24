@@ -603,19 +603,19 @@ class ConfigAndPersistenceTests(unittest.TestCase):
             "start_url": "https://www.amazon.com/gp/new-releases/home-garden/1063238/",
             "browser_backend": "cdp",
             "browser_mode": "reuse",
-            "browser_tab_concurrency": 2,
+            "browser_tab_concurrency": 1,
             "delivery_location_enabled": False,
             "sellersprite_required": True,
         }
 
-    def test_concurrency_requires_safe_cdp_mode_and_range(self) -> None:
+    def test_safety_policy_requires_one_browser_worker(self) -> None:
         runtime = category.build_runtime_config(
             self.base_config(),
             SKILL_ROOT / "assets" / "config" / "category_rank_crawler.json",
             False,
         )
-        self.assertEqual(runtime.browser_tab_concurrency, 2)
-        for invalid in (0, 4):
+        self.assertEqual(runtime.browser_tab_concurrency, 1)
+        for invalid in (0, 2, 4):
             with self.assertRaises(category.UserFacingError):
                 category.build_runtime_config(
                     dict(self.base_config(), browser_tab_concurrency=invalid),
@@ -625,12 +625,6 @@ class ConfigAndPersistenceTests(unittest.TestCase):
         with self.assertRaises(category.UserFacingError):
             category.build_runtime_config(
                 dict(self.base_config(), browser_backend="selenium"),
-                SKILL_ROOT / "unused.json",
-                False,
-            )
-        with self.assertRaises(category.UserFacingError):
-            category.build_runtime_config(
-                dict(self.base_config(), browser_mode="launch"),
                 SKILL_ROOT / "unused.json",
                 False,
             )
@@ -645,12 +639,7 @@ class ConfigAndPersistenceTests(unittest.TestCase):
     def test_crawl_plan_fingerprint_excludes_concurrency_but_tracks_inputs(self) -> None:
         base = self.base_config()
         first = category.build_runtime_config(base, SKILL_ROOT / "unused.json", False)
-        sequential = category.build_runtime_config(
-            dict(base, browser_tab_concurrency=1),
-            SKILL_ROOT / "unused.json",
-            False,
-        )
-        self.assertEqual(first.crawl_plan_fingerprint, sequential.crawl_plan_fingerprint)
+        self.assertEqual(first.browser_tab_concurrency, 1)
         changed_url = category.build_runtime_config(
             dict(base, start_url="https://www.amazon.com/gp/new-releases/kitchen/1234567/"),
             SKILL_ROOT / "unused.json",

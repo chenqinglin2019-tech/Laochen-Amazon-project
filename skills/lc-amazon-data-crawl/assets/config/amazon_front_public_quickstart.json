@@ -1,8 +1,18 @@
 {
   "operation_mode": "supervised",
-  "start_url": "https://www.amazon.com/gp/new-releases/home-garden/1063238/",
-  "job_id": "category-rank-crawl-safe-v2",
+  "mode": "keyword_search",
+  "job_id": "amazon-front-public-quickstart",
   "outputs_root": "outputs",
+  "keywords_file": "inputs/keywords.example.csv",
+  "store_urls_file": "inputs/storefronts.example.csv",
+  "start_url": "",
+  "max_pages_per_keyword": 7,
+  "include_sponsored": false,
+  "keyword_sort_orders": [
+    "Featured"
+  ],
+  "store_page_limit": "",
+  "store_sort_orders": [],
   "browser_backend": "cdp",
   "browser_mode": "reuse",
   "browser_tab_concurrency": 1,
@@ -11,11 +21,7 @@
   "chrome_user_data_dir": "chrome_profiles/lc-amazon-data-crawl-cft",
   "chrome_profile_directory": "Default",
   "debugger_address": "127.0.0.1:9222",
-  "extension_path": "auto",
-  "include_root": false,
-  "max_depth": "",
-  "max_pages_per_category": "",
-  "max_categories": "",
+  "extension_path": "",
   "resume": true,
   "activate_plugin": false,
   "page_timeout": 90,
@@ -32,7 +38,7 @@
   "page_scroll_step_ratio": 0.85,
   "page_scroll_wait_seconds": 2.0,
   "page_scroll_stable_rounds": 2,
-  "sellersprite_required": true,
+  "sellersprite_required": false,
   "sellersprite_min_enriched_records": 1,
   "sellersprite_min_fields_per_record": 2,
   "sellersprite_stable_checks": 3,
@@ -43,7 +49,12 @@
     "require_subcategory_rank": false
   },
   "manual_pause_timeout": 900,
-  "amazon_page_unavailable_retry_schedule_seconds": [[60, 60]],
+  "amazon_page_unavailable_retry_schedule_seconds": [
+    [
+      60,
+      60
+    ]
+  ],
   "delivery_location_enabled": true,
   "delivery_locations_file": "config/amazon_delivery_locations.json",
   "delivery_location_timeout": 20,
