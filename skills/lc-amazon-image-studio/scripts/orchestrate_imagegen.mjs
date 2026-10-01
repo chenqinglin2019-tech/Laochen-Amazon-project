@@ -71,6 +71,10 @@ export async function runImagegenQueue(options) {
       phase = "transition";
       attempt = await call(["transition", "--job", entry.id, "--status", "generating",
         "--reason", "Dispatching the pre-read bound prompt to the built-in image tool"]);
+      if (attempt.status !== "generating" || attempt.dispatch_refused) {
+        // A spent retry/repair budget is persisted as blocked/failed; never spend a model call.
+        throw new Error(`Dispatch refused for ${entry.id}: ${attempt.dispatch_refused || attempt.status}`);
+      }
       if (!attempt.attempt_id || attempt.prompt_hash !== entry.prompt_hash) {
         throw new Error("Dispatch binding changed after pre-read; re-plan this job before generation");
       }

@@ -1,0 +1,649 @@
+{
+ "schema_version": 1,
+ "about": "Controlled vocabulary for product profiles and user template families (V7). Categories are Amazon-style buying groups; aliases map free text and v1 family categories onto them.",
+ "categories": {
+  "kitchen_dining": {
+   "group": "home",
+   "aliases": [
+    "kitchen",
+    "dining",
+    "cookware",
+    "drinkware",
+    "tableware",
+    "mug",
+    "cup",
+    "bottle",
+    "tumbler",
+    "pan",
+    "pot",
+    "knife",
+    "cutting board",
+    "coffee",
+    "tea",
+    "lunch box",
+    "food storage",
+    "utensil",
+    "bakeware",
+    "kettle"
+   ]
+  },
+  "home_decor": {
+   "group": "home",
+   "aliases": [
+    "home decor",
+    "decor",
+    "vase",
+    "candle",
+    "wall art",
+    "figurine",
+    "ornament",
+    "frame",
+    "rug",
+    "cushion",
+    "pillow cover",
+    "seasonal decor",
+    "celebrations"
+   ]
+  },
+  "home_organization": {
+   "group": "home",
+   "aliases": [
+    "home organization",
+    "organization",
+    "organizer",
+    "storage",
+    "basket",
+    "bin",
+    "shelf",
+    "rack",
+    "hanger",
+    "drawer",
+    "vanity organization",
+    "cable organizer"
+   ]
+  },
+  "bedding_bath": {
+   "group": "home",
+   "aliases": [
+    "bedding",
+    "bath",
+    "towel",
+    "sheet",
+    "duvet",
+    "blanket",
+    "shower",
+    "bath mat",
+    "pillow"
+   ]
+  },
+  "furniture": {
+   "group": "home",
+   "aliases": [
+    "furniture",
+    "chair",
+    "table",
+    "desk",
+    "stool",
+    "sofa",
+    "cabinet",
+    "bench"
+   ]
+  },
+  "lighting": {
+   "group": "home",
+   "aliases": [
+    "lighting",
+    "lamp",
+    "desk lamp",
+    "light",
+    "led",
+    "lantern",
+    "night light",
+    "string lights",
+    "bulb"
+   ]
+  },
+  "tools_hardware": {
+   "group": "diy",
+   "aliases": [
+    "tools",
+    "tool",
+    "hardware",
+    "drill",
+    "screwdriver",
+    "wrench",
+    "tape measure",
+    "workshop",
+    "fastener",
+    "repair"
+   ]
+  },
+  "garden_outdoor": {
+   "group": "diy",
+   "aliases": [
+    "garden",
+    "outdoor",
+    "patio",
+    "planter",
+    "hose",
+    "yard",
+    "lawn",
+    "bird feeder",
+    "grill"
+   ]
+  },
+  "automotive": {
+   "group": "diy",
+   "aliases": [
+    "automotive",
+    "car",
+    "car holder",
+    "car mount",
+    "vehicle",
+    "truck",
+    "motorcycle",
+    "bike",
+    "bicycle",
+    "car seat"
+   ]
+  },
+  "sports_fitness": {
+   "group": "active",
+   "aliases": [
+    "sports",
+    "fitness",
+    "gym",
+    "yoga",
+    "yoga mat",
+    "dumbbell",
+    "resistance band",
+    "running",
+    "cycling",
+    "exercise"
+   ]
+  },
+  "outdoor_recreation": {
+   "group": "active",
+   "aliases": [
+    "camping",
+    "hiking",
+    "fishing",
+    "hunting",
+    "tent",
+    "backpacking",
+    "climbing",
+    "beach"
+   ]
+  },
+  "travel_luggage": {
+   "group": "active",
+   "aliases": [
+    "travel",
+    "luggage",
+    "suitcase",
+    "backpack",
+    "packing cube",
+    "travel pillow",
+    "passport"
+   ]
+  },
+  "apparel": {
+   "group": "fashion",
+   "aliases": [
+    "apparel",
+    "clothing",
+    "shirt",
+    "dress",
+    "jacket",
+    "hoodie",
+    "pants",
+    "socks",
+    "hat",
+    "scarf",
+    "winter jacket"
+   ]
+  },
+  "shoes_bags": {
+   "group": "fashion",
+   "aliases": [
+    "shoes",
+    "sneakers",
+    "boots",
+    "sandals",
+    "bag",
+    "handbag",
+    "wallet",
+    "tote",
+    "purse"
+   ]
+  },
+  "jewelry_accessories": {
+   "group": "fashion",
+   "aliases": [
+    "jewelry",
+    "necklace",
+    "ring",
+    "bracelet",
+    "earrings",
+    "watch",
+    "sunglasses",
+    "hair accessory"
+   ]
+  },
+  "beauty_personal_care": {
+   "group": "care",
+   "aliases": [
+    "beauty",
+    "cosmetics",
+    "personal care",
+    "skincare",
+    "makeup",
+    "hair dryer",
+    "brush",
+    "shaver",
+    "nail",
+    "fragrance",
+    "mirror"
+   ]
+  },
+  "health_household": {
+   "group": "care",
+   "aliases": [
+    "health",
+    "household",
+    "cleaning",
+    "supplement",
+    "massager",
+    "first aid",
+    "laundry",
+    "dish",
+    "humidifier"
+   ]
+  },
+  "baby_kids": {
+   "group": "care",
+   "aliases": [
+    "baby",
+    "kids",
+    "toddler",
+    "nursery",
+    "stroller",
+    "diaper",
+    "feeding",
+    "infant"
+   ]
+  },
+  "toys_games": {
+   "group": "play",
+   "aliases": [
+    "toys",
+    "toy",
+    "games",
+    "game",
+    "puzzle",
+    "plush",
+    "doll",
+    "building blocks",
+    "hobbies",
+    "rabbit plush"
+   ]
+  },
+  "party_seasonal": {
+   "group": "play",
+   "aliases": [
+    "party supplies",
+    "party",
+    "balloon",
+    "halloween",
+    "christmas",
+    "easter",
+    "birthday",
+    "gift wrapping",
+    "decorations"
+   ]
+  },
+  "gifts": {
+   "group": "play",
+   "aliases": [
+    "gifts",
+    "gift",
+    "gift set",
+    "giftable",
+    "present",
+    "tabletop gifting"
+   ]
+  },
+  "arts_crafts": {
+   "group": "play",
+   "aliases": [
+    "crafts",
+    "craft kits",
+    "arts",
+    "paint",
+    "sewing",
+    "knitting",
+    "scrapbook",
+    "yarn"
+   ]
+  },
+  "electronics_accessories": {
+   "group": "tech",
+   "aliases": [
+    "electronics",
+    "audio",
+    "tech accessories",
+    "headphones",
+    "earbuds",
+    "charger",
+    "cable",
+    "phone case",
+    "speaker",
+    "keyboard",
+    "mouse",
+    "power bank"
+   ]
+  },
+  "office_stationery": {
+   "group": "tech",
+   "aliases": [
+    "office accessories",
+    "office",
+    "stationery",
+    "pen",
+    "notebook",
+    "desk organizer",
+    "planner",
+    "label maker"
+   ]
+  },
+  "pet_supplies": {
+   "group": "pets",
+   "aliases": [
+    "pet supplies",
+    "pet",
+    "dog",
+    "cat",
+    "leash",
+    "collar",
+    "pet bed",
+    "litter",
+    "aquarium",
+    "bird"
+   ]
+  }
+ },
+ "attributes": {
+  "material": [
+   "plastic",
+   "metal",
+   "wood",
+   "glass",
+   "ceramic",
+   "fabric",
+   "leather",
+   "silicone",
+   "paper",
+   "stone",
+   "rubber",
+   "mixed"
+  ],
+  "color_tone": [
+   "light",
+   "dark",
+   "neutral",
+   "warm",
+   "cool",
+   "vivid",
+   "pastel",
+   "metallic",
+   "transparent"
+  ],
+  "size_class": [
+   "tiny",
+   "small",
+   "medium",
+   "large",
+   "oversized"
+  ],
+  "style_mood": [
+   "minimal",
+   "modern",
+   "natural",
+   "luxury",
+   "playful",
+   "technical",
+   "rustic",
+   "festive",
+   "bold",
+   "cozy",
+   "clinical",
+   "sporty",
+   "elegant",
+   "vintage"
+  ],
+  "audience": [
+   "women",
+   "men",
+   "kids",
+   "parents",
+   "pet_owners",
+   "professionals",
+   "outdoor_enthusiasts",
+   "home_cooks",
+   "students",
+   "seniors",
+   "gamers",
+   "general"
+  ],
+  "use_environment": [
+   "kitchen",
+   "living_room",
+   "bedroom",
+   "bathroom",
+   "office",
+   "outdoor",
+   "car",
+   "gym",
+   "travel",
+   "garden",
+   "workshop",
+   "studio",
+   "party",
+   "nursery"
+  ],
+  "price_tier": [
+   "budget",
+   "mid",
+   "premium"
+  ]
+ },
+ "ordered_attributes": {
+  "size_class": [
+   "tiny",
+   "small",
+   "medium",
+   "large",
+   "oversized"
+  ],
+  "price_tier": [
+   "budget",
+   "mid",
+   "premium"
+  ]
+ },
+ "slot_roles": [
+  "main",
+  "size_or_components",
+  "primary_use_case",
+  "compatibility_or_installation",
+  "material_or_detail",
+  "storage_or_package",
+  "problem_solution",
+  "a_plus_header",
+  "a_plus_feature",
+  "a_plus_detail",
+  "a_plus_lifestyle",
+  "a_plus_comparison",
+  "a_plus_story"
+ ],
+ "slot_similarity": {
+  "size_or_components": [
+   "storage_or_package",
+   "material_or_detail",
+   "compatibility_or_installation",
+   "a_plus_feature"
+  ],
+  "primary_use_case": [
+   "problem_solution",
+   "a_plus_lifestyle",
+   "compatibility_or_installation"
+  ],
+  "compatibility_or_installation": [
+   "size_or_components",
+   "primary_use_case",
+   "a_plus_feature"
+  ],
+  "material_or_detail": [
+   "a_plus_detail",
+   "size_or_components",
+   "a_plus_feature"
+  ],
+  "storage_or_package": [
+   "size_or_components",
+   "material_or_detail"
+  ],
+  "problem_solution": [
+   "primary_use_case",
+   "a_plus_comparison",
+   "a_plus_lifestyle"
+  ],
+  "a_plus_header": [
+   "a_plus_lifestyle",
+   "primary_use_case",
+   "a_plus_story"
+  ],
+  "a_plus_feature": [
+   "size_or_components",
+   "material_or_detail",
+   "a_plus_detail"
+  ],
+  "a_plus_detail": [
+   "material_or_detail",
+   "a_plus_feature"
+  ],
+  "a_plus_lifestyle": [
+   "primary_use_case",
+   "a_plus_header"
+  ],
+  "a_plus_comparison": [
+   "problem_solution",
+   "size_or_components"
+  ],
+  "a_plus_story": [
+   "a_plus_header",
+   "a_plus_lifestyle",
+   "primary_use_case"
+  ],
+  "main": []
+ },
+ "a_plus_module_keywords": {
+  "a_plus_header": [
+   "header",
+   "hero",
+   "banner",
+   "brand",
+   "logo"
+  ],
+  "a_plus_feature": [
+   "feature",
+   "grid",
+   "benefit",
+   "highlight",
+   "four",
+   "three",
+   "icon"
+  ],
+  "a_plus_detail": [
+   "detail",
+   "close",
+   "material",
+   "spec"
+  ],
+  "a_plus_lifestyle": [
+   "lifestyle",
+   "scene",
+   "use",
+   "image-text"
+  ],
+  "a_plus_comparison": [
+   "comparison",
+   "compare",
+   "chart",
+   "table",
+   "versus"
+  ],
+  "a_plus_story": [
+   "story",
+   "about",
+   "mission",
+   "brand-story"
+  ]
+ },
+ "text_roles": [
+  "eyebrow",
+  "headline",
+  "body",
+  "label",
+  "feature",
+  "badge"
+ ],
+ "palette_roles": [
+  "background",
+  "surface",
+  "ink",
+  "muted",
+  "accent",
+  "accent_text"
+ ],
+ "font_roles": [
+  "display",
+  "text",
+  "label"
+ ],
+ "font_faces": [
+  "noto_sans",
+  "noto_serif",
+  "montserrat",
+  "poppins",
+  "oswald",
+  "bebas_neue",
+  "nunito",
+  "libre_baskerville",
+  "pacifico"
+ ],
+ "font_face_fallback": {
+  "montserrat": "noto_sans",
+  "poppins": "noto_sans",
+  "oswald": "noto_sans",
+  "bebas_neue": "noto_sans",
+  "nunito": "noto_sans",
+  "libre_baskerville": "noto_serif",
+  "pacifico": "noto_sans"
+ },
+ "shadow_types": [
+  "none",
+  "contact",
+  "soft_drop",
+  "reflection",
+  "hard"
+ ],
+ "recipes": [
+  "photo_overlay",
+  "header_footer",
+  "photo_sidebar",
+  "scene_grid",
+  "detail_callouts",
+  "steps",
+  "none"
+ ]
+}

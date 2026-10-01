@@ -1,73 +1,60 @@
-# Built-in ImageGen orchestration adapter
+# 内置 image_gen 薄适配（V7）
 
-This is a thin adapter over the existing pipeline, not another scheduler, model backend, authentication implementation or review authority. All production operations keep the authentication requirements in `SKILL.md` unchanged. Run the original gate at its original production boundary before using this adapter. Maintenance tests use only synthetic callbacks and never run real authentication or ImageGen.
+适配器 `scripts/orchestrate_imagegen.mjs` 只把已绑定的提示交给内置 `image_gen`，不是另一个调度器、模型后端、鉴权或审核机构。生产前提（鉴权、`verify`）见 SKILL.md。维护测试只用合成回调：`node --test scripts/test_orchestrate_imagegen.mjs`。
 
-## Adapter lifecycle
+## 调用
 
-Follow the single [production workflow](../SKILL.md#生产主流程); this section only defines tool handoff. Read the adapter source once and execute `runImagegenQueue` in an awaited tool-enabled JavaScript cell, starting from the existing plan or current read-only status result. `readInput` reads the bound prompt unchanged and inspects local references before transition. Use the tool's actual reported concurrency; do not impose capacity 1 without evidence. Explicit capacity uses `--tool-capacity`, `--tool-capacity-source` and `--tool-capacity-reason` on the existing plan command.
-
-The adapter reserves each attempt with `transition`, invokes the actual built-in ImageGen tool immediately, records the real invocation timestamp while that call runs, and captures the actual settlement timestamp inside the promise callback. A result is ingested before entering the independent review queue. A slow image or review notification does not hold up the next admitted generation.
-
-The adapter never invents annotations, transcripts or verdicts. The first anchor still needs genuine QA before siblings become eligible. Resume from `status --json` after actual review submissions; only changed inputs, stale preparation or a controlled repair require a new plan.
-
-`runImagegenQueue` stops when no new generation/local-compose job is presently admitted. Its `review_ready` result is a request for actual review, not a claim that the whole suite is finished. An adapter invocation attempts a given job/prompt binding at most once; existing retry and repair budgets remain authoritative. Record a real tool failure through the existing transition/diagnostic path, follow the reported retry delay, then resume from status. Never rewrite statuses or attempt hashes manually.
-
-## Functions tool-cell integration
-
-The module has no imports or ambient filesystem/network dependencies. Read its trusted source using the normal local command tool and store it in the current tool session. For example, in a `functions.exec` cell, with `skillRoot` already resolved from the active skill catalog:
+在可用工具的 JavaScript 单元里，先用本地命令读取适配器源码，保存为 `lcImagegenAdapter`。读取时使用选定 Python 的 argv（`P -X utf8 -c <读文件>`），Windows 用 PowerShell 引号规则。然后执行：
 
 ```javascript
-// isWindows comes from the observed host. Use PowerShell on Windows and the
-// normal POSIX shell on macOS. selectedPython comes from runtime verification.
-const quote = value => "'" + String(value).replace(/'/g, isWindows ? "''" : "'\\''") + "'";
-const reader = "from pathlib import Path; import sys; sys.stdout.write(Path(sys.argv[1]).read_text(encoding='utf-8'))";
-const argv = [selectedPython, "-X", "utf8", "-c", reader,
-  skillRoot + "/scripts/orchestrate_imagegen.mjs"];
-const source = await tools.exec_command({
-  cmd: (isWindows ? "& " : "") + argv.map(quote).join(" "),
-  max_output_tokens: 16000
-});
-if (source.exit_code !== 0) throw new Error("Adapter source could not be read");
-store("lcImagegenAdapter", source.output);
-```
-
-The production cell injects **existing** local command and image-tool callbacks. [Runtime setup](runtime-setup.md) must pass `verify` for this run (or the identical verification at the end of install); inspect alone only confirms dependency presence/version. This requires the existing doctor, actual Pillow/NumPy imports and browser launch, without replacing account authentication. `pipeline(args)` must use the returned Python and `LC_LAYOUT_*` environment, append the current `--manifest` and `--json`, parse the single JSON result, and await any command session to completion. Do not install into a venv and then launch the system Python. `readBoundInput` reads `entry.prompt_file` and resolves `entry.generation_reference_paths` against the project directory, displays each required local image once, and returns exactly `{prompt, referenced_image_paths}` (omit the paths field for a truly new image). It must reject truncated prompt reads. `actualArtifactPath` selects the actual local path from the tool's returned metadata/text; it must not guess a destination or serialize the image payload.
-
-```javascript
-// @exec: {"yield_time_ms": 120000, "max_output_tokens": 2000}
-const adapter = new Function(
-  load("lcImagegenAdapter").replace(/^export /gm, "") +
-  "\nreturn {runImagegenQueue, safeImageSummary};"
-)();
+const adapter = new Function(load("lcImagegenAdapter").replace(/^export /gm, "") +
+  "\nreturn {runImagegenQueue, safeImageSummary};")();
 const result = await adapter.runImagegenQueue({
-  initialPlan: preparedPlan, // The one existing plan result, or a fresh status result.
-  command: pipeline,
-  readInput: readBoundInput,
-  imagegen: args => tools.image_gen__imagegen(args), // Actual built-in tool; no CLI/API substitute.
-  selectArtifact: actualArtifactPath,
-  showImage: result => generatedImage(result),
-  onReviewReady: item => notify({review_ready: item.job, artifact: item.artifact}),
-  onProgress: progress => notify(progress),
-  onFailure: recordExistingWorkflowFailure
+  initialPlan: planResult,                          // 本轮唯一一次 plan 的结果（或一次 status 结果）
+  command: pipeline,                                // 执行 lc_image_pipeline.py <args> --manifest M --json，解析单个 JSON
+  readInput: readBoundInput,                        // 返回 {prompt, referenced_image_paths}
+  imagegen: args => tools.image_gen__imagegen(args),// 实际内置工具，不用 CLI/API 替代
+  selectArtifact: actualArtifactPath,               // 从工具返回元数据取真实绝对路径
+  showImage: r => generatedImage(r),
+  onReviewReady: item => notify(item), onProgress: p => notify(p),
+  onFailure: recordFailure
 });
-text(result); // Contains paths/status only, never Base64 or the raw tool object.
+text(result); // 只含路径/状态，不含 Base64 或原始工具对象
 ```
 
-The callback names in this snippet are explicit adapters to the active tool's observed return schema and the already-selected runtime/project, not additional services. A missing/ambiguous artifact path is a recoverable handoff failure: keep the returned image and attempt, resolve its real path, then call the existing ingest command with the captured timestamps. Do not start another model call for that handoff error.
+## 回调约定
 
-The pipeline emits UTF-8 JSON, including Windows redirected streams. Decode command output as UTF-8 and preserve Unicode paths. Accept actual absolute drive/UNC paths returned by the tool; never convert them using POSIX-only quoting or `sed`. Use the selected Python's argv interface wherever the host tool supports it. UNC handoff support does not certify a network filesystem's cross-process locking; keep mutable projects on a local volume until that share has been tested.
+- `pipeline(args)`：使用 `verify` 返回的 Python（`LC_LAYOUT_*` 已从 selection.json 自动补齐），追加 `--manifest` 和 `--json`，按 UTF-8 解码，等待命令结束。命令退出码非零或 `ok:false` 视为失败。
+- `readBoundInput(entry)`：
+  - 原样读取 `entry.prompt_file`，读到截断内容时拒绝。
+  - 把 `entry.generation_reference_paths` 按项目目录解析，按顺序给出：商品参考在前，风格底板（`design/plates/…`）在最后。
+  - 新图没有附件时省略 paths 字段。不得增强文字，不得在 transition 之后再拼参考。
+- `actualArtifactPath`：
+  - 返回工具实际写出的绝对路径（接受 Windows 盘符/UNC 路径），不猜目标位置，不序列化图片。
+  - 路径缺失或有歧义属于可恢复的交接失败：保留该图和 attempt，找到真实路径后手动 `ingest`，**不再生图**。
+- 原生图片用 `generatedImage`/`image` 展示；需要文字诊断时用 `safeImageSummary`；禁止对原始工具结果 `JSON.stringify`。
+- 单元内的 promise 必须等全部已发起的模型调用落定后才能结束，包括出错路径；不 fire-and-forget，不起系统后台进程。
 
-Keep the tool cell's promise awaited until every started model call is settled, including error paths. Use the product's yielded-cell wait mechanism; never fire-and-forget model promises or launch an OS background worker. Deliver native images with `generatedImage` / `image`, and use `safeImageSummary` only when a compact text diagnostic is needed. Do not use `text(result)` or `JSON.stringify(result)` on the raw image-tool result.
+## 适配器做什么
 
-## State, diagnostics and timing contracts
+1. 对 plan/status 的 `dispatch` 列表中 `image_gen`/`compose` 项，按 `scheduler.effective_concurrency` 放行：
+   - 跳过 `next_actions` 里标为 diagnose 的图。
+   - 同一 job+prompt 绑定在一次调用里最多尝试一次。
+2. 先 `readInput`，再 `transition --status generating`。**只有返回 `status == "generating"` 且没有 `dispatch_refused` 时才调用 image_gen。**
+   - 预算用尽或被拒时，命令退出码 2、`ok:false`，状态会持久化为 blocked/failed，不花模型调用。
+   - `prompt_hash` 与预读不一致时，要求重新 plan 该图。
+3. 调用开始后用 `attempt-event --event tool_started` 记录真实开始时间，结果返回时立刻 `ingest --tool-returned-at <epoch>`。`--tool-returned-at` 可选，缺少开始事件时只把计时标为不可用，图照常入库。
+4. 每完成一张，只做一次只读 `status` 来补槽位，不等同批最慢的图或审核。agent 自己不要再逐图调用 `status`。
+5. 返回的 `review_ready` 表示“需要真实审核”，不代表整套完成；`retry_after_seconds` 和 `next_actions` 照原样执行。
 
-- `lc_runtime_status.build_status(manifest, base, now=None, detail=False)` is read-only: a private snapshot, no prepare/render, filesystem writes, lock creation or recovery mutation. It reports counts, actual capacity evidence, in-flight attempts, eligible dispatch, review queue, blockers, next actions and timing coverage.
-- `set_tool_capacity(manifest, capacity, source=..., reason=..., now=...)` retains the historical integer capacity and records evidence separately. Old integer-only manifests remain valid; absent evidence is reported as absent, never fabricated as a tool observation.
-- Command failures are recorded with the current business-input fingerprint, command and job scope. Two successive identical failures on unchanged inputs raise `diagnosis_required`; they do not change any job, consume repair budget, certify QA or stop independent dispatch. A real success clears that scope's streak. These diagnostic fields are excluded from visual dependencies.
-- Structurally invalid manifests, retired backends and unknown job scopes retain their original atomic rejection: no diagnostic write to the rejected project. Recoverable production failures bind actual source-file hashes, including missing inputs. The fingerprint also includes lightweight installed-runtime identities (Python/Pillow, Node, Playwright package/lock and Chromium path metadata), so restoring a source or repairing dependencies unlocks the next valid attempt without editing the Manifest. This check does not start a browser or run doctor.
-- Explicit attempt start/return events measure actual tool calls. `timing_summary` unions overlapping intervals and reports per-call sums separately. Missing historical boundaries remain `null`. A complete explicit observation window is needed to compute an unclassified gap; that gap must not be described as measured model or agent reasoning time. Duration-only legacy records are never retroactively placed on a timeline.
-- An existing immutable successful product-review submission may keep the anchor scheduling gate open during local-only rework, after verifying its bytes and current product/raw/evidence/annotations/rules. This does not pass final QA or delivery. Changed raw, provenance, product facts or composition closes that proof; legacy fallback with a project base still checks the current final and QA bindings.
+锚点图入库后：看 raw，然后 `anchor-approve --job J --notes "..."`（或 `--verdicts` 覆盖 geometry/material/components/clarity），再从 `status` 续跑放行兄弟图。适配器不代写注释、转录或结论。
 
-## Maintenance checks
+## 没有 JS 工具单元时（手动顺序）
 
-Run the Python scheduler/runtime-status tests and `node --test scripts/test_orchestrate_imagegen.mjs`. Fixtures cover capacity 1/2/4, first-result refill, slow review notification, out-of-order returns, independent failure, event-write recovery, stale dispatch, missing timing and payload suppression. These are no-model tests and do not establish an end-to-end production speedup.
+1. `plan --manifest M --json`，得到 `dispatch`（每项含 prompt_file、generation_reference_paths、prompt_hash）。
+2. `transition --manifest M --job J --status generating --reason "dispatch" --json`：返回 `status` 不是 `generating`（退出码 2）时停止这张图。
+3. 调用 `image_gen`：提示为 prompt_file 原文，附件按 generation_reference_paths 顺序。
+4. 返回后立即 `ingest --manifest M --job J --artifact <绝对路径> --attempt-id <A> --tool-returned-at <epoch> --json`。
+5. `status --manifest M --json` 取下一批 dispatch，重复 2–5；锚点入库后先 `anchor-approve`。
+
+失败时照 `retry_after_seconds` 等待后从 `status` 续跑。不得手改状态或 attempt 哈希；诊断规则见 [maintenance.md](maintenance.md#状态诊断与计时契约)。

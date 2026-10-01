@@ -39,7 +39,7 @@ def _clean_error(error):
 def diagnostic_input_fingerprint(manifest, command, job_ids=(), parameters=None):
     """Ignore telemetry, not business inputs; identical failures can be grouped."""
     excluded = {"runtime_diagnostics", "timings", "transaction_timings", "metrics",
-                "network_health", "concurrency"}
+                "network_health", "concurrency", "plan_issues", "layout_alternatives"}
     def stable(value):
         if isinstance(value, dict):
             return {key: stable(child) for key, child in value.items() if key not in excluded}
@@ -51,6 +51,23 @@ def diagnostic_input_fingerprint(manifest, command, job_ids=(), parameters=None)
     scope["jobs"] = [job for job in manifest.get("jobs", []) if not selected or job.get("id") in selected]
     return _digest({"command": command, "jobs": sorted(selected), "parameters": parameters,
                     "inputs": stable(scope)})
+
+
+DIAGNOSIS_TTL_SECONDS = 600
+_TRANSIENT = re.compile(r"timed? ?out|timeout|temporarily unavailable|ebusy|winerror 32|used by another process|"
+                        r"econnreset|econnrefused|connection (?:reset|refused)|browser has been closed|"
+                        r"target (?:page|browser|context)[^\n]*closed|\b429\b|rate[ _-]?limit", re.I)
+
+
+def is_transient_error(error) -> bool:
+    """Environment hiccups (timeouts, file locks, network) never demand a diagnosis."""
+    return bool(_TRANSIENT.search(str(error or "")))
+
+
+def diagnosis_expired(record, now=None) -> bool:
+    now = time.time() if now is None else now
+    recorded = record.get("recorded_at")
+    return not _number(recorded) or now - recorded > DIAGNOSIS_TTL_SECONDS
 
 
 def record_command_failure(manifest, command, input_fingerprint, error, *, job_ids=(), now=None):
@@ -65,11 +82,13 @@ def record_command_failure(manifest, command, input_fingerprint, error, *, job_i
     error_hash = _digest(str(error))
     records = manifest.setdefault("runtime_diagnostics", {}).setdefault("command_failures", [])
     old = next((entry for entry in reversed(records) if entry.get("scope") == scope), None)
-    same = old and old.get("input_fingerprint") == input_fingerprint and old.get("error_hash") == error_hash
-    count = old.get("consecutive_count", 0) + 1 if same else 1
+    transient = is_transient_error(error)
+    same = (old and old.get("input_fingerprint") == input_fingerprint and old.get("error_hash") == error_hash
+            and not diagnosis_expired(old, when))
+    count = 1 if transient else (old.get("consecutive_count", 0) + 1 if same else 1)
     record = {"scope": scope, "command": command, "jobs": jobs, "input_fingerprint": input_fingerprint,
               "error_hash": error_hash, "error": _clean_error(error), "consecutive_count": count,
-              "recorded_at": when, "diagnosis_required": count >= 2}
+              "recorded_at": when, "diagnosis_required": count >= 2, "transient": transient}
     records.append(record)
     del records[:-64]
     return copy.deepcopy(record)
@@ -91,6 +110,7 @@ def active_diagnostics(manifest, base=None):
     if base is not None:
         from lc_command_diagnostics import diagnostic_is_current
     return [copy.deepcopy(record) for record in latest.values() if record.get("diagnosis_required")
+            and not diagnosis_expired(record)
             and (base is None or diagnostic_is_current(manifest, base, record))]
 
 
@@ -192,6 +212,7 @@ def build_status(manifest, base, *, now=None, detail=False):
     next_actions = [{"action": "diagnose", "jobs": value["jobs"], "command": value["command"],
                      "error": value["error"], "consecutive_count": value["consecutive_count"]}
                     for value in diagnoses]
+    next_actions += plan.get("next_actions", [])  # blocked-job gates with the concrete command to run
     next_actions += [{"action": entry["action"], "job": entry["id"]} for entry in plan["dispatch"]]
     next_actions += [{"action": "review-prepare", "job": value} for value in plan["deterministic_resume"]]
     next_actions += [{"action": "review", "job": value} for value in plan["review_pending"]]

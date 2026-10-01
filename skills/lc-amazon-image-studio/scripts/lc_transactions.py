@@ -40,7 +40,7 @@ _GLOBAL_FILES = {"execution_plan.json", "qa_report.json", "delivery_report.json"
 _SKIP_DIRS = {_AREA, ".lc-compaction", ".git", "revision", "__pycache__", "node_modules"}
 _SKIP_SUFFIXES = {".zip", ".html", ".lock", ".tmp"}
 _JOB_ARTIFACT_DIRS = ("review/layouts", "review/image_layers", "review/packets",
-                      "review/submissions", "prompts", "repairs")
+                      "review/submissions", "review/sheets", "prompts", "repairs")
 
 
 def _json(path):
@@ -330,15 +330,21 @@ def _map_outputs(value, source, target, *, all_strings=False):
     return value
 
 
-def _canonicalize_text(text, source, target):
-    """Rebase decoded JSON paths, including escaped Windows backslashes."""
+def _canonicalize_text(text, source, target, *, compact=False):
+    """Rebase decoded JSON paths, including escaped Windows backslashes.
+
+    Project files keep their historical indented form (their bytes are hashed);
+    CLI stdout uses one compact line to save the caller's tokens.
+    """
     try:
         value = json.loads(text)
     except ValueError:
         return _map_outputs(text, source, target, all_strings=True)
     mapped = _map_outputs(value, source, target, all_strings=True)
-    if mapped == value:
+    if mapped == value and not compact:
         return text  # Do not reformat/hash unchanged review artifacts.
+    if compact:
+        return json.dumps(mapped, ensure_ascii=False, separators=(",", ":")) + ("\n" if text.endswith("\n") else "")
     return json.dumps(mapped, ensure_ascii=False, indent=2) + ("\n" if text.endswith("\n") else "")
 
 
@@ -415,7 +421,7 @@ def _refresh_dispatch_output(stream, command_name, plan):
         return
     stream.seek(0)
     stream.truncate()
-    stream.write(json.dumps(value, ensure_ascii=False, indent=2) + payload[offset:])
+    stream.write(json.dumps(value, ensure_ascii=False, separators=(",", ":")) + payload[offset:])
 
 
 def recover_pending(manifest_path):
@@ -665,6 +671,6 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
         raise
     finally:
         if stdout.getvalue():
-            print(_canonicalize_text(stdout.getvalue(), stage, base), end="")
+            print(_canonicalize_text(stdout.getvalue(), stage, base, compact=True), end="")
         if stderr.getvalue():
             print(_canonicalize_text(stderr.getvalue(), stage, base), end="", file=sys.stderr)
