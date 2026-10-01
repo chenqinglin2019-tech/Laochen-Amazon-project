@@ -1,4 +1,4 @@
-version: '2.0'
+version: '2.2'
 domain: product_facts
 contract_ref: ../data_contract.md
 policy_ref: ../quality_policy.json
@@ -7,27 +7,28 @@ rules:
 - id: facts_source
   type: required
   source_id: user_product_identity
-  prompt_fragment: product_identity 保留原始名称、目标语言名称与完整必保短语；facts 记录 fact_id、field、value、source_ref 和 confirmed/unknown/conflict
-    状态。图中可辨认的外观可作为证据，不从图像外观补造材质牌号、规格、性能或认证。
+  prompt_fragment: product_identity 保留原始名称、目标语言名称和完整必保短语。facts 记录 fact_id、field、value、source_ref 以及 confirmed/unknown/conflict 状态。图中能看清的外观可以作为证据，但不能据此补造材质牌号、规格、性能或认证。
 - id: measurements_source
   type: required
   source_id: user_unit_localization
-  prompt_fragment: 每个参数保存原始十进制数字字符串、单位、subject、label、kind 和来源；产品、包装、适配范围分开。缺单位或数值不默认；未知信息若影响标题或子体识别须补全再完成交付。
-- id: length_conversion
+  prompt_fragment: 每个参数保存原始十进制字符串、单位、subject、label、kind 和来源；产品、包装、适配对象分开记录。缺单位或数值时不默认；影响标题或子体识别的未知参数须先补全。
+- id: us_units
   type: required
   source_id: nist_length_conversion
-  prompt_fragment: normalize 是普通长度展示值的唯一计算入口。US 将 mm/cm/m/in/ft 转换为 in；cm 除以 2.54，展示最多两位小数并去除末尾零，数值发生舍入时保留
-    approximate 标识及对应约数表达。其他站点首版保留来源单位。
+  prompt_fragment: normalize 是展示值的唯一计算入口。US：公制长度 <120 in 用 in，否则用 ft；重量 <1 lb 用 oz，否则用 lb；容量 <1 gal 用 fl oz，否则用 gal；来源已是英制则保留原单位；结果保留两位小数并标记 approximate。按英尺销售的品类（线缆、软管、绳、延长线、梯子等）设 preferred_unit=ft，杯壶类可设 oz 或 fl oz。正文可写"US 值 (原值 原单位)"。其他站点保留来源单位。
 - id: measurement_exceptions
   type: required
   source_id: user_unit_localization
-  prompt_fragment: nominal 与 size 保留公称规格和尺码，不机械转换。重量和容量首版保留来源单位并检查类型，oz 不能作为 fl oz 使用；不能把数量、型号或包装长宽当成产品尺寸。
+  prompt_fragment: nominal 与 size 保留公称规格和尺码，不换算。oz 不能当 fl oz 用。数量、型号和包装尺寸不能当成产品尺寸。随附配件数量用 accessory_count 登记，与购买数量分开。
 - id: measurement_reuse
   type: required
   source_id: user_unit_localization
-  prompt_fragment: 不在标题、Highlight、正文和上图文案分别重新算数；从同一 measurement_id 引用 display_text。子体属性的 measurement_id
-    必须来自根级共性或本子体，维度标签不丢失、不互换。
+  prompt_fragment: 标题、Highlight、正文和图片文字都从同一个 measurement_id 引用 display_text，不各自重算。子体属性只能引用根级或本子体的参数。
+- id: intent_map
+  type: required
+  source_id: cosmo_paper
+  prompt_fragment: 把已确认的产品与意图关系写进 intent_map：function/capability（用途/能做什么）、activity（活动/事件）、audience（人群）、location（地点）、season（季节/场合）、body_part、companion（搭配品）、product_type（别称/上位类）、interest。每项写一个目标语言 expression 并引用依据；资料没有的关系不写。
 - id: claim_evidence
   type: required
   source_id: user_product_identity
-  prompt_fragment: 每个前台字段有 claims 记录；含规格的字段列 measurement_ids，其他可核查声明列 confirmed 且有来源的 fact_ids。空引用的普通场景文字由语义复审说明，不利用空引用绕过产品事实。
+  prompt_fragment: 每个前台字段都要有 claims 记录：含规格的列 measurement_ids，其他可核查声明列 confirmed 且有来源的 fact_ids。引用为空的普通场景文字由语义复审说明。

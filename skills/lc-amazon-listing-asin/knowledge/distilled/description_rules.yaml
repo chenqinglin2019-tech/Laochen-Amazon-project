@@ -1,4 +1,4 @@
-version: '2.0'
+version: '2.2'
 domain: description
 contract_ref: ../data_contract.md
 policy_ref: ../quality_policy.json
@@ -7,25 +7,24 @@ rules:
 - id: description_information_first
   type: editorial
   source_id: skill_editorial_v2
-  prompt_fragment: 先明确产品及适用任务，再补充使用方法、适配条件、包装内容和必要限制。可以自然描述场景，不强制故事开头、反问句或固定场景数量。
+  prompt_fragment: 先说明产品和适用任务，再补使用方法、适配条件、包装清单、保养和必要限制。不重写标题和全部五点，不写泛泛的故事开头或长串场景清单。
+- id: description_answerable_facts
+  type: editorial
+  source_id: amazon_rufus_attributes
+  prompt_fragment: 每句都是能独立理解的事实陈述（哪个产品或部件、什么能力、什么条件下适用），能直接回答 who/what/when/where/why/how。Amazon 建议在描述中回答常见问题，购物助手会读取商品详情。
+- id: description_specific_evidence
+  type: editorial
+  source_id: geo_paper
+  prompt_fragment: GEO 实验中效果最好的是具体数据、可核验来源和流畅易懂的表达，关键词堆砌无效。迁移到 listing 上，就是用真实参数、已确认的认证或标准、清楚的适用条件来写，不添加无依据的统计、引文或权威口吻。
 - id: description_grounded_detail
   type: required
   source_id: user_product_identity
-  prompt_fragment: 详情补足买家做决定所需信息，不重写标题和全部五点。不因泛化场景或高流量词扩大用途；每项参数使用同一规范化展示值并保持维度标签。
-- id: description_ai_answerability
-  type: editorial
-  source_id: skill_ai_answerability
-  prompt_fragment: 事实陈述应能独立理解，明确是哪一个产品或部件、具备什么能力、在什么条件下适用。问题形式或陈述形式由可读性决定；不声称某种句式必然被 AI 引用。
-- id: description_geo_boundary
-  type: editorial
-  source_id: geo_paper
-  prompt_fragment: GEO 论文可启发流畅、具体、有证据的表达，不能将通用实验的提升幅度或引用策略视为 Amazon 排名机制。不要往 Listing 添加无依据统计、虚假引用或名人背书来迎合
-    GEO。
+  prompt_fragment: 不因泛化场景或高流量词扩大用途。参数使用同一个规范化展示值，并保留维度标签。
 - id: description_family_scope
   type: required
   source_id: user_family_rules
-  prompt_fragment: 共享长描只写系列共性；需要写具体变体参数时生成对应 content_overrides.description，并为解析后的完整描述写 claims。不得用一个子体的尺寸代表整个系列。
+  prompt_fragment: 共用长描只写系列共性；具体变体参数写进对应的 content_overrides.description，并为解析后的完整描述写 claims。
 - id: description_format
   type: editorial
   source_id: skill_editorial_v2
-  prompt_fragment: 默认输出纯文本段落；Markdown 只用于报告结构。用户明确要求 HTML 时，先核验目标字段和类目实际支持的标记再生成，不假设所有站点支持同一标签集合。
+  prompt_fragment: 默认纯文本段落。用户明确要求 HTML 时，先核验目标字段和类目支持的标记再生成。

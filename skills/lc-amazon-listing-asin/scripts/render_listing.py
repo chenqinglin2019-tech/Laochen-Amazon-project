@@ -24,6 +24,7 @@ FILES = {
     "qa": "06_qa.json", "listing": "07_listing.json", "validation": "08_validation.json",
     "review": "08_semantic_review.json", "backend": "08_backend_validation.json",
     "kw_pending": "03_kw_pending.json", "keyword_decisions": "03_keyword_decisions.json",
+    "coverage": "07_keyword_coverage.json",
 }
 FIELDS = ("bullets", "description", "search_terms")
 LABELS = {
@@ -566,6 +567,27 @@ def render_coverage(doc, listing):
         doc.html.append('<ol class="coverage-list">' + "".join("<li>" + html.escape(text) + "</li>" for text in texts) + "</ol>")
 
 
+def render_attributes(doc, listing):
+    """Backend structured-attribute suggestions (filters and Alexa for Shopping read them)."""
+    suggestions = listing.get("attribute_suggestions")
+    if not isinstance(suggestions, list) or not suggestions:
+        return
+    doc.heading("后台属性建议")
+    texts = []
+    for item in suggestions:
+        if not isinstance(item, dict):
+            continue
+        scope = item.get("applies_to")
+        scope_text = "" if scope in (None, ["all"]) else "（适用：" + "、".join(map(as_text, scope)) + "）"
+        note = item.get("note")
+        texts.append(f"{as_text(item.get('attribute'))}：{as_text(item.get('value'))}{scope_text}" + (f" —— {as_text(note)}" if note else ""))
+    doc.md.append("\n".join("- " + md_escape(text) for text in texts))
+    if doc.report_view:
+        doc.html.extend(f"<p>{html.escape(text)}</p>" for text in texts)
+    else:
+        doc.html.append("<ul>" + "".join("<li>" + html.escape(text) + "</li>" for text in texts) + "</ul>")
+
+
 def render_listing(profile, listing, report_view=False):
     doc, gaps = Document(report_view=report_view), []
     mode = listing.get("listing_mode", profile.get("listing_mode", "single"))
@@ -604,6 +626,7 @@ def render_listing(profile, listing, report_view=False):
             for key in FIELDS:
                 if key in overrides:
                     doc.field(key, overrides[key])
+    render_attributes(doc, listing)
     render_media(doc, profile, listing, ordered, gaps)
     render_coverage(doc, listing)
     for key in ("excluded_claims", "claim_controls"):
@@ -635,7 +658,7 @@ def build_report(run_dir: Path, generated_at=None):
     for key in ("kw_removed", "kw_filtered", "kw_tagged", "kw_pending"):
         if data[key] is not None:
             ensure_array(data[key], FILES[key])
-    for key in ("kw_raw", "title_keywords", "review", "backend"):
+    for key in ("kw_raw", "title_keywords", "review", "backend", "coverage"):
         if data[key] is not None:
             ensure_object(data[key], FILES[key])
     doc, gaps = render_listing(profile, listing)
@@ -664,7 +687,7 @@ def build_report(run_dir: Path, generated_at=None):
     report_doc, _ = render_listing(profile, listing, report_view=True)
     _, listing_html = report_doc.result()
     metadata = {"generated_at": stamp, "missing_files": [name for name, raw in snapshots.items() if raw is None], "fingerprints": fingerprints, "evidence_fingerprints": evidence_fingerprints}
-    replacements = {"__DATA_" + key.upper() + "__": script_json(data[key]) for key in ("profile", "kw_raw", "kw_removed", "kw_filtered", "kw_tagged", "title_keywords", "qa", "kw_pending")}
+    replacements = {"__DATA_" + key.upper() + "__": script_json(data[key]) for key in ("profile", "kw_raw", "kw_removed", "kw_filtered", "kw_tagged", "title_keywords", "qa", "kw_pending", "coverage")}
     replacements.update({"__DATA_META__": script_json(metadata), "__DATA_LISTING__": script_json(listing),
                          "__DATA_VALIDATION__": script_json(validation),
                          "__DATA_EVIDENCE__": script_json({key: data[key] for key in ("validation", "review", "backend", "keyword_decisions")}),

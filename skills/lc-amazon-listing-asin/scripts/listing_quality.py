@@ -31,7 +31,8 @@ SAFE_ID = re.compile(r"^[A-Za-z0-9_-]+$")
 LENGTH_UNITS = {"mm", "cm", "m", "in", "ft"}
 UNIT_ALIASES = {"inch": "in", "inches": "in", '"': "in", "centimeter": "cm",
                 "centimeters": "cm", "millimeter": "mm", "millimeters": "mm",
-                "meter": "m", "meters": "m", "feet": "ft", "foot": "ft",
+                "meter": "m", "meters": "m", "feet": "ft", "foot": "ft", "lbs": "lb",
+                "milliliter": "ml", "milliliters": "ml", "liter": "l", "liters": "l", "gram": "g", "grams": "g",
                 "fluid ounces": "fl oz", "fluid ounce": "fl oz", "floz": "fl oz"}
 
 
@@ -92,9 +93,57 @@ def _contains(text, phrase):
     return bool(phrase) and re.search(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", _norm(text)) is not None
 
 
+INTENT_RELATIONS = ("function", "capability", "activity", "audience", "location", "season", "body_part",
+                    "companion", "product_type", "interest")
+TITLE_REPEAT_EXEMPT = {
+    "a", "an", "the", "and", "or", "nor", "but", "for", "with", "without", "in", "on", "of", "to", "by", "at",
+    "from", "into", "onto", "over", "under", "as", "per", "vs", "x", "&",
+    "der", "die", "das", "und", "oder", "mit", "für", "fur", "von", "zu", "im", "in", "ein", "eine",
+    "le", "la", "les", "un", "une", "des", "de", "du", "et", "ou", "pour", "avec", "en", "à",
+    "el", "los", "las", "y", "o", "para", "con", "del", "il", "lo", "gli", "e", "per", "di", "da", "con",
+}
+PROHIBITED_BULLET_SYMBOLS = re.compile("[™®©\U0001F300-\U0001FAFF\u2600-\u27BF]")
+
+
+def _words(text):
+    return [w.casefold() for w in re.findall(r"[^\W_]+(?:['’][^\W_]+)*", str(text))]
+
+
+def _has_lowercase(text):
+    # German ß (and similar letters) has no single-character capital in Python; it is allowed.
+    return any(ch != ch.upper() and len(ch.upper()) == 1 for ch in text)
+
+
+def _strip_phrases(text, phrases):
+    """Blank out intact protected phrases so their words are not read as variant values."""
+    result = _norm(text)
+    for phrase in sorted((_norm(p) for p in phrases if isinstance(p, str) and p.strip()), key=len, reverse=True):
+        if re.search(r"[\u3040-\u30ff\u3400-\u9fff]", phrase):
+            result = result.replace(phrase, " | ")
+        else:
+            result = re.sub(r"(?<!\w)" + re.escape(phrase) + r"(?!\w)", " | ", result)
+    return result
+
+
 def _decimal_text(value):
     result = format(value, "f")
     return result.rstrip("0").rstrip(".") if "." in result else result
+
+
+US_PREFERRED_UNITS = {"length": ("in", "ft"), "weight": ("oz", "lb"), "volume": ("fl oz", "gal")}
+# Exact factors to the US base unit of each kind (inch, ounce, US fluid ounce).
+TO_US_BASE = {
+    "length": {"mm": Decimal("1") / Decimal("25.4"), "cm": Decimal("1") / Decimal("2.54"),
+               "m": Decimal("100") / Decimal("2.54"), "in": Decimal("1"), "ft": Decimal("12")},
+    "weight": {"mg": Decimal("0.001") / Decimal("28.349523125"), "g": Decimal("1") / Decimal("28.349523125"),
+               "kg": Decimal("1000") / Decimal("28.349523125"), "oz": Decimal("1"), "lb": Decimal("16")},
+    "volume": {"ml": Decimal("1") / Decimal("29.5735295625"), "cl": Decimal("10") / Decimal("29.5735295625"),
+               "l": Decimal("1000") / Decimal("29.5735295625"), "fl oz": Decimal("1"), "gal": Decimal("128")},
+}
+US_LARGE_UNIT = {"length": ("ft", Decimal("12"), Decimal("120")),   # metric >= 10 ft reads as feet
+                 "weight": ("lb", Decimal("16"), Decimal("16")),     # metric >= 1 lb reads as pounds
+                 "volume": ("gal", Decimal("128"), Decimal("128"))}  # metric >= 1 gal reads as gallons
+METRIC_UNITS = {"mm", "cm", "m", "mg", "g", "kg", "ml", "cl", "l"}
 
 
 def _measurement_display(record, site):
@@ -115,27 +164,32 @@ def _measurement_display(record, site):
         raise ValueError("measurement value is not a decimal") from None
     if not number.is_finite() or number <= 0 or number.adjusted() > 12 or number.adjusted() < -12:
         raise ValueError("measurement must be a finite positive practical value")
-    if kind == "weight" and unit not in ("mg", "g", "kg", "oz", "lb", "lbs"):
+    if kind == "weight" and unit not in ("mg", "g", "kg", "oz", "lb"):
         raise ValueError("weight unit is unsupported (oz is mass; fl oz is volume)")
     if kind == "volume" and unit not in ("ml", "l", "cl", "fl oz", "gal", "qt", "pt", "cup", "cups"):
         raise ValueError("volume unit is unsupported (fl oz is volume; oz is mass)")
+    if kind == "length" and unit not in LENGTH_UNITS:
+        raise ValueError("unsupported length unit")
+    preferred = record.get("preferred_unit")
+    if preferred is not None and (site != "US" or preferred not in US_PREFERRED_UNITS[kind]):
+        raise ValueError("preferred_unit is only for US and must be one of %s for %s" % (US_PREFERRED_UNITS[kind], kind))
     approximate = False
     with localcontext() as context:
         context.prec = 50
-        if kind == "length":
-            if unit not in LENGTH_UNITS:
-                raise ValueError("unsupported length unit")
-            if site == "US":
-                # Divide by the exact conversion constant instead of a rounded reciprocal.
-                exact = {"mm": lambda: number / Decimal("25.4"),
-                         "cm": lambda: number / Decimal("2.54"),
-                         "m": lambda: number * 100 / Decimal("2.54"),
-                         "ft": lambda: number * 12, "in": lambda: number}[unit]()
-                number = exact.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-                if number == 0:
-                    raise ValueError("length rounds to zero inches; needs an explicit precision exception")
-                approximate = number != exact
-                unit = "in"
+        # US: metric values are converted; imperial source units stay as supplied unless a
+        # preferred US unit is declared (e.g. 6 ft cables, 16 oz tumblers). Other sites keep source.
+        if site == "US" and unit in TO_US_BASE[kind]:
+            exact = number
+            if unit in METRIC_UNITS or preferred:
+                base = number * TO_US_BASE[kind][unit]
+                large_unit, factor, threshold = US_LARGE_UNIT[kind]
+                small_unit = US_PREFERRED_UNITS[kind][0]
+                unit = preferred or (large_unit if base >= threshold else small_unit)
+                exact = base / factor if unit == large_unit else base
+            number = exact.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if number == 0:
+                raise ValueError("value rounds to zero in US units; needs an explicit precision exception")
+            approximate = number != exact
     shown = _decimal_text(number)
     return {"display_value": shown, "display_unit": unit,
             "display_text": shown + " " + unit, "approximate": approximate}
@@ -493,12 +547,32 @@ def _check_local(profile, listing, qa=None):
 
     length_token = re.compile(r'(?<![A-Za-z0-9_.])(\d+(?:\.\d+)?)\s*[-‐‑]?\s*(centimeters?|millimeters?|meters?|inches|inch|in|cm|mm|m|feet|foot|ft|")(?![A-Za-z])', re.I)
 
+    def _dual_source_display(text, match, number, unit, allowed_owners):
+        before = text[:match.start()].rstrip()
+        if not before.endswith("("):
+            return False
+        before = before[:-1].rstrip()
+        for owner_id, measurement in measurements.values():
+            try:
+                same_source = (Decimal(str(measurement.get("value"))) == number
+                               and UNIT_ALIASES.get(str(measurement.get("unit", "")).strip().lower(), str(measurement.get("unit", "")).strip().lower()) == unit)
+            except InvalidOperation:
+                same_source = False
+            shown = measurement.get("display_text")
+            if owner_id in allowed_owners and same_source and isinstance(shown, str) and before.casefold().endswith(shown.casefold()):
+                return True
+        return False
+
     def scan_measurements(text, allowed_owners, path):
         matching_groups = []
         if not isinstance(text, str):
             return matching_groups
         for match in length_token.finditer(text):
             number, unit = Decimal(match[1]), UNIT_ALIASES.get(match[2].lower(), match[2].lower())
+            if unit == "in" and re.match(r"\s*[-‐‑]?\s*\d", text[match.end():]):
+                continue  # "2 in 1" / "3-in-1" is a product claim, not a length.
+            if site == "US" and unit in ("mm", "cm", "m") and _dual_source_display(text, match, number, unit, allowed_owners):
+                continue  # "5.91 in (15 cm)": the source unit shown after its US display.
             matches, own, nominal = [], [], []
             for mid, (owner_id, measurement) in measurements.items():
                 shown_unit = measurement.get("display_unit")
@@ -514,7 +588,7 @@ def _check_local(profile, listing, qa=None):
                         own.append(mid)
                         if measurement.get("kind") in ("nominal", "size"):
                             nominal.append(mid)
-            if site == "US" and unit != "in" and not nominal:
+            if site == "US" and unit in ("mm", "cm", "m") and not nominal:
                 add("source_unit_leak", path, "Ordinary US lengths must use normalized inches, including compact or reformatted numeric units")
             elif not own:
                 if matches:
@@ -527,11 +601,16 @@ def _check_local(profile, listing, qa=None):
 
     # Package counts are facts, not lengths or arbitrary digits in materials/models.
     quantity_fields = {"quantity", "package_quantity", "unit_count", "pack_count", "number_of_items"}
-    quantities = {}
+    # Included accessories are counted separately and never satisfy the purchase quantity.
+    accessory_fields = {"accessory_count", "included_quantity", "component_count"}
+    quantities, accessory_counts = {}, {}
     for fid, (owner_id, fact) in facts.items():
         if fact.get("field") in quantity_fields and re.fullmatch(r"[1-9]\d*", str(fact.get("value", ""))):
             quantities[fid] = (owner_id, int(fact["value"]))
-    quantity_token = re.compile(r"\b(\d+)\s*[- ]?\s*(?:packs?|count|pieces?|pcs)\b|\b(?:pack|set)\s+of\s+(\d+)\b|\bquantity\s*:\s*(\d+)\b", re.I)
+        if fact.get("field") in accessory_fields and fact.get("status") == "confirmed" and re.fullmatch(r"[1-9]\d*", str(fact.get("value", ""))):
+            accessory_counts[fid] = (owner_id, int(fact["value"]))
+    # "N pieces of <item>" describes included parts, not the sellable pack size.
+    quantity_token = re.compile(r"\b(\d+)\s*[- ]?\s*(?:packs?|count|pieces?|pcs)\b(?!\s+of\b)|\b(?:pack|set)\s+of\s+(\d+)\b|\bquantity\s*:\s*(\d+)\b", re.I)
 
     def scan_quantities(text, allowed_owners, path):
         matching_groups = []
@@ -540,6 +619,9 @@ def _check_local(profile, listing, qa=None):
         for match in quantity_token.finditer(text):
             number = int(next(value for value in match.groups() if value is not None))
             own = {fid for fid, (owner_id, value) in quantities.items() if owner_id in allowed_owners and value == number}
+            if not own and re.search(r"pieces?|pcs", match[0], re.I) and any(
+                    owner_id in allowed_owners and value == number for owner_id, value in accessory_counts.values()):
+                continue  # A confirmed included-accessory count, e.g. "4 pcs felt pads".
             if not own:
                 code = "quantity_wrong_variant" if any(value == number for _, value in quantities.values()) else "quantity_unregistered"
                 add(code, path, "Package count must match a registered quantity fact for this child: " + match[0])
@@ -575,6 +657,46 @@ def _check_local(profile, listing, qa=None):
             if not source or owner_id not in source[0]:
                 add("variant_image_scope", "profile." + owner_id + ".image_ids", "Image does not belong to this child")
 
+    site_policy = policy["sites"].get(site, {}) if isinstance(policy["sites"].get(site), dict) else {}
+    search_bytes_limit = site_policy.get("search_terms_max_bytes", limits["search_terms_max_bytes"])
+    title_policy = policy.get("title_compliance", {})
+    brand_names = [b for b in (profile.get("brand"), listing.get("brand_name")) if nonempty(b)]
+    spaced_language = profile.get("listing_language_code") not in ("ja", "zh")
+
+    def check_title_compliance(value, path):
+        # Jan 2025 Amazon title rules: banned characters (unless part of the brand) and
+        # no word more than twice (articles, prepositions and conjunctions excepted).
+        unbranded = value
+        for brand in brand_names:
+            unbranded = unbranded.replace(brand, " ")
+        banned = sorted({ch for ch in unbranded if ch in title_policy.get("banned_characters", "")})
+        if banned:
+            add("title_banned_character", path, "Title contains characters Amazon disallows outside the brand name: " + " ".join(banned))
+        limit = title_policy.get("max_word_repeats")
+        if limit and spaced_language:
+            counts = {}
+            for word in _words(value):
+                if word not in TITLE_REPEAT_EXEMPT and not word.isdigit():
+                    counts[word] = counts.get(word, 0) + 1
+            repeated = sorted(word for word, count in counts.items() if count > limit)
+            if repeated:
+                add("title_word_repeat", path, "Words used more than %d times in the title: %s" % (limit, ", ".join(repeated)), "warning")
+
+    def check_search_terms(value, title, path):
+        if not spaced_language or not value.strip():
+            return
+        words = _words(value)
+        title_words = set(_words(title)) if isinstance(title, str) else set()
+        repeated_title = sorted({w for w in words if w in title_words})
+        if repeated_title:
+            wasted = sum(len(w.encode("utf-8")) + 1 for w in words if w in title_words)
+            add("search_terms_title_repeat", path, "Backend words already indexed from the title (%d bytes reusable): %s" % (wasted, ", ".join(repeated_title)), "warning")
+        duplicates = sorted({w for w in words if words.count(w) > 1})
+        if duplicates:
+            add("search_terms_duplicate", path, "Backend words repeated within search terms: " + ", ".join(duplicates), "warning")
+        if value != value.lower() or re.search(r"[,;|/!?.]", value):
+            add("search_terms_format", path, "Use lowercase words separated by spaces; punctuation is unnecessary", "warning")
+
     def check_text(target, content, parent=False):
         path = "listing." + target
         fields = ("title", "item_highlight") if parent else TEXT_FIELDS
@@ -587,8 +709,12 @@ def _check_local(profile, listing, qa=None):
             limit = limits.get(field + "_max_chars")
             if limit is not None and len(value) > limit:
                 add("field_length", path + "." + field, "Length %d exceeds %d characters" % (len(value), limit))
-            if field == "search_terms" and len(value.encode("utf-8")) > limits["search_terms_max_bytes"]:
-                add("search_bytes", path + ".search_terms", "UTF-8 search terms exceed the configured byte budget")
+            if field == "title":
+                check_title_compliance(value, path + ".title")
+            if field == "search_terms":
+                if len(value.encode("utf-8")) > search_bytes_limit:
+                    add("search_bytes", path + ".search_terms", "UTF-8 search terms use %d bytes; the %s budget is %d" % (len(value.encode("utf-8")), site, search_bytes_limit))
+                check_search_terms(value, content.get("title"), path + ".search_terms")
         for term in protected:
             if isinstance(term, str) and term and not _contains(content.get("title", ""), term):
                 add("identity_dropped", path + ".title", "Missing intact protected product phrase: " + term)
@@ -599,10 +725,13 @@ def _check_local(profile, listing, qa=None):
             valid_bullets = [b for b in _list(bullets) if isinstance(b, str)]
             for index, bullet in enumerate(valid_bullets):
                 label = re.fullmatch(r"【([^】]+)】\s*\S[\s\S]*", bullet)
-                if not label or label[1] != label[1].upper() or not label[1].strip():
+                if not label or not label[1].strip() or _has_lowercase(label[1]):
                     add("bullet_format", path + ".bullets[%d]" % index, "Use 【UPPERCASE BENEFIT LABEL】 followed by natural target-language copy; uncased scripts are allowed")
             if any(len(b) > limits["bullet_max_chars"] for b in valid_bullets) or sum(map(len, valid_bullets)) > limits["bullets_total_max_chars"]:
                 add("bullets_length", path + ".bullets", "Bullet or combined editorial budget exceeded")
+            for index, bullet in enumerate(valid_bullets):
+                if PROHIBITED_BULLET_SYMBOLS.search(bullet):
+                    add("bullet_prohibited_symbol", path + ".bullets[%d]" % index, "Amazon bullet guidelines disallow ™ ® © and emoji", "warning")
         for field in (("title", "item_highlight") if parent else FRONT_FIELDS + ("search_terms",)):
             value = _field(content, field)
             if isinstance(value, str):
@@ -642,10 +771,13 @@ def _check_local(profile, listing, qa=None):
         check_text("parent", parent, parent=True)
         for field in ("title", "item_highlight"):
             value = parent.get(field, "")
+            # Words inside the protected product phrase (e.g. "Clear" in "Clear Glass Bud Vase")
+            # are identity, not a leaked variant value.
+            unprotected = _strip_phrases(value, protected) if isinstance(value, str) else value
             for _, variant in owners[1:]:
                 for attr in _dict(variant.get("attributes")).values():
                     for phrase in (_dict(attr).get("display"), _dict(attr).get("title_value")):
-                        if isinstance(phrase, str) and _contains(value, phrase):
+                        if isinstance(phrase, str) and _contains(unprotected, phrase):
                             add("parent_variant_leak", "listing.parent." + field, "Contains a specific variant value: " + phrase)
             if field == "title" and isinstance(value, str) and re.search(r"(?:[$€£¥]\s*\d|\b\d+(?:\.\d+)?\s*(?:USD|EUR|GBP|dollars|pack|packs|pcs|pieces|count)\b|\b(?:pack\s+of|stock|inventory)\s*\d)", value, re.I):
                 add("parent_price_quantity", "listing.parent.title", "Parent title cannot contain price, inventory or concrete pack quantity")
@@ -876,6 +1008,40 @@ def _check_local(profile, listing, qa=None):
         add("main_image_coverage", "listing.image_plan", "Every supplied child needs an applicable main-image plan")
     check_media_sets(profile, listing, plan_ids, add)
 
+    # COSMO-style intent relations: structure and evidence are checked; expression is advisory.
+    if "intent_map" in profile:
+        resolved_texts = {target: " ".join(str(_field(content, field) or "") for field in FRONT_FIELDS + ("search_terms",))
+                          for target, content in resolved.items()}
+        for index, entry in enumerate(array(profile, "intent_map", "profile")):
+            path = "profile.intent_map[%d]" % index
+            if not isinstance(entry, dict) or entry.get("relation") not in INTENT_RELATIONS or not nonempty(entry.get("expression")):
+                add("intent_map_entry", path, "Each intent needs a relation (%s) and a target-language expression" % "/".join(INTENT_RELATIONS))
+                continue
+            applicable = scope(entry.get("applies_to", ["all"]), path + ".applies_to")
+            allowed = {"all"} if entry.get("applies_to", ["all"]) == ["all"] or len(applicable) != 1 else {"all"} | applicable
+            check_refs({"fact_ids": entry.get("fact_ids", []), "measurement_ids": entry.get("measurement_ids", [])}, allowed, path)
+            missing = sorted(t for t in applicable if not _contains(resolved_texts.get(t, ""), entry["expression"]))
+            if missing:
+                add("intent_unexpressed", path, "Confirmed intent is not stated in any indexed field for: " + ", ".join(missing), "warning")
+    elif profile.get("schema_version") == "2.1":
+        add("intent_map_missing", "profile.intent_map", "Map confirmed functions, audiences, places, occasions and companion products to listing text", "warning")
+    if listing.get("schema_version") == "2.1":
+        suggestions = listing.get("attribute_suggestions")
+        if suggestions is None:
+            add("attribute_suggestions_missing", "listing.attribute_suggestions", "Suggest backend structured attributes; Amazon says complete attributes help its shopping assistant", "warning")
+        for index, item in enumerate(_list(suggestions)):
+            path = "listing.attribute_suggestions[%d]" % index
+            if not isinstance(item, dict) or not nonempty(item.get("attribute")) or item.get("value") in (None, "", []):
+                add("attribute_suggestion", path, "Attribute suggestion needs an attribute name and a value")
+                continue
+            applicable = scope(item.get("applies_to", ["all"]), path + ".applies_to")
+            allowed = {"all"} if item.get("applies_to", ["all"]) == ["all"] or len(applicable) != 1 else {"all"} | applicable
+            refs = check_refs({"fact_ids": item.get("fact_ids", []), "measurement_ids": item.get("measurement_ids", [])}, allowed, path)
+            if not refs["fact_ids"] and not refs["measurement_ids"] and not item.get("fact_ids") and not item.get("measurement_ids"):
+                add("attribute_unsupported", path, "Attribute values must cite confirmed facts or measurements")
+        if len(_list(listing.get("buyer_question_coverage"))) < 6:
+            add("question_matrix_thin", "listing.buyer_question_coverage", "Cover the who/what/when/where/why/how buyer-question matrix (mark missing facts as not_claimed)", "warning")
+
     if qa is not None:
         if not isinstance(qa, dict):
             add("qa_object", "qa", "QA must be an object")
@@ -932,15 +1098,62 @@ def _check_local(profile, listing, qa=None):
     return issues
 
 
-def make_review_template(profile_path, listing_path, qa_path=None):
+MEDIA_KEYS = ("media_strategy", "image_plan", "a_plus_plan", "aplus_plan", "image_sets")
+
+
+def target_fingerprints(profile, listing, qa=None):
+    """Hash only what each review target depends on, so one child's edit does not void the rest.
+
+    Canonical JSON is used, so re-saving a file with different formatting changes nothing.
+    """
+    profile, listing = _dict(profile), _dict(listing)
+    common = {key: value for key, value in profile.items() if key != "variants"}
+    variants = {v.get("variant_id"): v for v in _list(profile.get("variants")) if isinstance(v, dict)}
+    text = {key: value for key, value in listing.items() if key not in MEDIA_KEYS + ("variants", "parent", "shared_content", "title_template")}
+    result = {}
+    resolved = resolved_listings(profile, listing)
+    if profile.get("listing_mode", "single") != "family":
+        result["single"] = canonical_sha256({"profile": common, "listing": text, "qa": qa})
+    else:
+        result["parent"] = canonical_sha256({"profile": common, "parent": listing.get("parent"),
+                                             "values": [v.get("attributes") for v in variants.values()],
+                                             "listing": text, "qa": qa})
+        listed = {v.get("variant_id"): v for v in _list(listing.get("variants")) if isinstance(v, dict)}
+        for target, content in resolved:
+            result[str(target)] = canonical_sha256({"profile": common, "variant": variants.get(target),
+                                                    "listed": listed.get(target), "content": content,
+                                                    "listing": text, "qa": qa})
+    result["media"] = canonical_sha256({"profile": profile, "media": {k: listing.get(k) for k in MEDIA_KEYS},
+                                        "content": resolved})
+    return result
+
+
+def make_review_template(profile_path, listing_path, qa_path=None, previous=None):
+    """Pending checklist; with a previous review, unchanged targets keep their verdicts."""
     profile, listing = load_json(profile_path), load_json(listing_path)
+    qa = load_json(qa_path) if qa_path else None
     policy = load_json(POLICY_PATH)
     targets = ["single"] if profile.get("listing_mode", "single") != "family" else ["parent"] + [v["variant_id"] for v in profile["variants"]]
-    records = [{"target": target, "check": check, "status": "pending", "evidence": ""}
+    current = target_fingerprints(profile, listing, qa)
+    keyword_fps = keyword_review_fingerprints(Path(listing_path).parent)
+    kept = {}
+    if isinstance(previous, dict) and isinstance(previous.get("target_fingerprints"), dict):
+        old_fps = previous["target_fingerprints"]
+        keywords_same = previous.get("keyword_fingerprints") == keyword_fps
+        for record in _list(previous.get("records")):
+            if not isinstance(record, dict) or record.get("status") not in ("pass", "fail", "not_applicable"):
+                continue
+            target, check = str(record.get("target")), record.get("check")
+            if old_fps.get(target) == current.get(target) and (check != "keyword_usage" or keywords_same):
+                kept[(target, check)] = record
+    records = [kept.get((target, check), {"target": target, "check": check, "status": "pending", "evidence": ""})
                for target in targets for check in policy["semantic_checks"]]
-    records += [{"target": "media", "check": check, "status": "pending", "evidence": ""} for check in policy["media_checks"]]
+    records += [kept.get(("media", check), {"target": "media", "check": check, "status": "pending", "evidence": ""})
+                for check in policy["media_checks"]]
     return {"schema_version": "2.1", "fingerprints": file_fingerprints(profile_path, listing_path, qa_path),
-            "keyword_fingerprints": keyword_review_fingerprints(Path(listing_path).parent),
+            "target_fingerprints": current,
+            "keyword_fingerprints": keyword_fps,
+            "carried_over": len(kept),
             "records": records,
             "limitations": "Review actual copy, facts, variants, images and keyword_usage against 03_keyword_decisions/05_title_keywords; do not mechanically mark pass. Review actual used keywords and related intents, not every unused or excluded term. Check full-intent use, paraphrases, backend word order and truthful negative mentions; references verify scope, not semantic truth."}
 
@@ -977,7 +1190,13 @@ def validate_bundle(profile, listing, qa=None, review=None, backend=None, finger
     elif not isinstance(review, dict):
         add("review_invalid", "semantic", "Semantic review must be an object")
     else:
-        if fingerprints is None or review.get("fingerprints") != fingerprints:
+        stale_targets = set()
+        if isinstance(review.get("target_fingerprints"), dict):
+            current_targets = target_fingerprints(profile, listing, qa)
+            stale_targets = {target for target, value in current_targets.items() if review["target_fingerprints"].get(target) != value}
+            if stale_targets:
+                add("review_stale", "semantic.target_fingerprints", "Content changed after review for: %s; rerun review-template to keep unchanged targets and re-review only these" % ", ".join(sorted(stale_targets)), "incomplete")
+        elif fingerprints is None or review.get("fingerprints") != fingerprints:
             add("review_stale", "semantic.fingerprints", "Review is missing current source-file fingerprints", "incomplete")
         if keywords is not None and keywords.get("status") == "passed":
             keyword_bound = {name: keywords.get("fingerprints", {}).get(name) for name in ("02_kw_raw.json", "03_keyword_decisions.json", "05_title_keywords.json")}
@@ -1063,17 +1282,32 @@ def validate_bundle(profile, listing, qa=None, review=None, backend=None, finger
             "issues": issues, "limitations": "Automated checks cover structure, registered values and reference scope; semantic review covers language, labels, factual truth, category eligibility and visual claims."}
 
 
-def run_backend(profile, listing, cli=None, timeout=120, config=None):
-    """Call only CLI validate for each sellable payload; never print raw process IO."""
+def _backend_passed(record):
+    return (isinstance(record, dict) and type(record.get("exit_code")) is int and record["exit_code"] == 0
+            and isinstance(record.get("response"), dict) and record["response"].get("ok") is True
+            and record["response"].get("errors") == [])
+
+
+def run_backend(profile, listing, cli=None, timeout=120, config=None, previous=None):
+    """Call only CLI validate for each sellable payload; never print raw process IO.
+
+    A previous passing record whose payload fingerprint is unchanged is reused, so a
+    repair round only re-validates the children whose text actually changed.
+    """
     issues = check_local(profile, listing)
     if any(issue["severity"] == "error" for issue in issues):
         return {"schema_version": "2.1", "status": "failed", "issues": issues, "records": []}
+    reusable = {r.get("target"): r for r in _list(_dict(previous).get("records")) if _backend_passed(r)}
     records = []
     for payload in build_payloads(profile, listing):
+        old = reusable.get(payload["target"])
+        if old is not None and old.get("payload_sha256") == payload["payload_sha256"]:
+            records.append(dict(old, reused=True))
+            continue
         with tempfile.TemporaryDirectory(prefix="listing-validate-") as directory:
             path = Path(directory) / payload["filename"]
             atomic_write_json(path, payload["payload"])
-            record = {"target": payload["target"], "payload_sha256": payload["payload_sha256"]}
+            record = {"target": payload["target"], "payload_sha256": payload["payload_sha256"], "reused": False}
             record.update(backend_cli.run_cli("validate", site=profile["site"], listing_file=path,
                                               cli=cli, config=config, timeout=timeout))
             records.append(record)
@@ -1093,7 +1327,10 @@ def main(argv=None):
         if name == "check":
             command.add_argument("--review")
             command.add_argument("--backend")
+        if name == "review-template":
+            command.add_argument("--fresh", action="store_true", help="Ignore an existing review instead of keeping verdicts for unchanged targets")
         if name == "backend":
+            command.add_argument("--no-reuse", action="store_true", help="Re-validate every child even when its payload and passing result are unchanged")
             command.add_argument("--cli", help="Optional CLI path; defaults to the bundled platform executable")
             command.add_argument("--config", help="Optional config path; defaults to this Skill's config.json")
             command.add_argument("--timeout", type=float, default=120)
@@ -1110,8 +1347,16 @@ def main(argv=None):
             print("normalized")
             return 0
         if args.command == "review-template":
-            atomic_write_json(args.output, make_review_template(args.profile, args.listing, args.qa))
-            print("pending semantic review template written")
+            previous = None
+            if not args.fresh and Path(args.output).exists():
+                try:
+                    previous = load_json(args.output)
+                except ValueError:
+                    previous = None
+            template = make_review_template(args.profile, args.listing, args.qa, previous)
+            atomic_write_json(args.output, template)
+            pending = sum(r["status"] == "pending" for r in template["records"])
+            print("semantic review template written: %d kept from unchanged targets, %d pending" % (template["carried_over"], pending))
             return 0
         if args.command == "check":
             result = validate_bundle(profile, listing, load_json(args.qa) if args.qa else None,
@@ -1138,10 +1383,17 @@ def main(argv=None):
                               "records": [{k: v for k, v in p.items() if k != "payload"} for p in payloads]})
             print("prepared %d sellable payloads" % len(payloads))
             return 0
-        result = run_backend(profile, listing, args.cli, timeout=args.timeout, config=args.config)
+        previous = None
+        if not args.no_reuse and Path(args.output).exists():
+            try:
+                previous = load_json(args.output)
+            except ValueError:
+                previous = None
+        result = run_backend(profile, listing, args.cli, timeout=args.timeout, config=args.config, previous=previous)
         atomic_write_json(args.output, result)
-        valid = bool(result["records"]) and all(r["exit_code"] == 0 and isinstance(r["response"], dict) and r["response"].get("ok") is True and r["response"].get("errors") == [] for r in result["records"])
-        print("backend passed" if valid else "backend failed")
+        valid = bool(result["records"]) and all(_backend_passed(r) for r in result["records"])
+        reused = sum(bool(r.get("reused")) for r in result["records"])
+        print("backend %s (%d requested, %d reused)" % ("passed" if valid else "failed", len(result["records"]) - reused, reused))
         return 0 if valid else 1
     except (OSError, ValueError, TypeError, KeyError, AttributeError) as error:
         # Do not print user file contents, environment values, or raw CLI exception IO.

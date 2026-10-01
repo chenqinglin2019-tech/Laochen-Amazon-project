@@ -64,6 +64,12 @@ def complete_media(profile, listing, strategy=None):
         listing["image_sets"]["variants"].append(child)
 
 
+QUESTION_MATRIX = [{"question": q, "status": st, "location": loc, "source": "local_editorial"} for q, st, loc in (
+    ("What is it made of?", "covered", "五点第 1 条"), ("Where does it go?", "covered", "Item Highlight"),
+    ("How tall is it?", "covered", "长描"), ("Who is it for?", "not_claimed", "未提供人群事实"),
+    ("How do I clean it?", "not_claimed", "未提供保养事实"), ("What is included?", "not_claimed", "未提供包装清单"))]
+
+
 def single_fixture():
     profile = {
         "schema_version": "2.1", "listing_mode": "single", "site": "US", "listing_language": "English",
@@ -73,10 +79,12 @@ def single_fixture():
                    "status": "confirmed", "source_ref": "user specification"}],
         "measurements": [{"measurement_id": "height", "kind": "length", "subject": "product", "label": "height",
                           "value": "15.24", "unit": "cm", "source_ref": "drawing"}],
-        "images": [{"image_id": "product-photo", "source": "fixture:reference-material", "applies_to": ["all"]}], "forbidden_terms": []}
+        "images": [{"image_id": "product-photo", "source": "fixture:reference-material", "applies_to": ["all"]}], "forbidden_terms": [],
+        "intent_map": [{"relation": "location", "expression": "desk", "fact_ids": [], "applies_to": ["all"]}]}
     profile = quality.normalize_profile(profile)
     listing = {"schema_version": "2.1", "listing_mode": "single", "site": "US", "listing_language": "English",
-               "brand_name": "ACME", "buyer_question_coverage": [], "excluded_claims": [],
+               "brand_name": "ACME", "buyer_question_coverage": QUESTION_MATRIX, "excluded_claims": [],
+               "attribute_suggestions": [{"attribute": "material", "value": "304 Stainless Steel", "fact_ids": ["material"]}],
                "listing_language_code": "en", "title": "ACME 304 Stainless Steel Pen Holder",
                "item_highlight": "Keep writing tools together on your desk.",
                "bullets": ["【MATERIAL】304 stainless steel body.", "【ORGANIZATION】Keeps pens together.", "【PLACEMENT】For a desk or shelf.",
@@ -109,7 +117,8 @@ def family_fixture():
                                         "value": cm, "unit": "cm", "source_ref": "drawing %d" % index}], "image_ids": []})
     profile = quality.normalize_profile(profile)
     listing = {"schema_version": "2.1", "listing_mode": "family", "site": "US", "listing_language": "English",
-               "brand_name": "ACME", "buyer_question_coverage": [], "excluded_claims": [],
+               "brand_name": "ACME", "buyer_question_coverage": QUESTION_MATRIX, "excluded_claims": [],
+               "attribute_suggestions": [{"attribute": "material", "value": "304 Stainless Steel", "fact_ids": ["material"]}],
                "listing_language_code": "en", "parent": {"sku": "PARENT", "title": single["title"],
                    "item_highlight": single["item_highlight"], "claims": claims()[:2]},
                "title_template": "ACME 304 Stainless Steel Pen Holder, {color}, {size}",
@@ -156,10 +165,32 @@ class NormalizationTests(unittest.TestCase):
     def test_units_and_half_up(self):
         profile, _, _ = single_fixture()
         for value, unit, expected in (("25.4", "mm", "1 in"), ("1", "m", "39.37 in"),
-                                      ("1.5", "ft", "18 in"), ("1.005", "in", "1.01 in")):
+                                      ("1.5", "ft", "1.5 ft"), ("1.005", "in", "1.01 in")):
             with self.subTest(unit=unit):
                 profile["measurements"][0].update(value=value, unit=unit)
                 self.assertEqual(quality.normalize_profile(profile)["measurements"][0]["display_text"], expected)
+
+    def test_us_large_metric_lengths_weights_and_volumes_use_us_units(self):
+        cases = (("length", "4", "m", None, "13.12 ft"), ("length", "1.8", "m", "ft", "5.91 ft"),
+                 ("length", "6", "ft", None, "6 ft"), ("length", "72", "in", "ft", "6 ft"),
+                 ("weight", "500", "g", None, "1.1 lb"), ("weight", "200", "g", None, "7.05 oz"),
+                 ("weight", "8", "oz", None, "8 oz"), ("volume", "500", "ml", None, "16.91 fl oz"),
+                 ("volume", "5", "l", None, "1.32 gal"), ("volume", "2", "cups", None, "2 cups"))
+        for kind, value, unit, preferred, expected in cases:
+            with self.subTest(value=value, unit=unit, preferred=preferred):
+                profile, _, _ = single_fixture()
+                profile["measurements"][0].update(kind=kind, value=value, unit=unit)
+                if preferred:
+                    profile["measurements"][0]["preferred_unit"] = preferred
+                self.assertEqual(quality.normalize_profile(profile)["measurements"][0]["display_text"], expected)
+
+    def test_preferred_unit_is_us_only_and_kind_specific(self):
+        for site, preferred in (("DE", "ft"), ("US", "lb")):
+            profile, _, _ = single_fixture()
+            profile["site"] = site
+            profile["measurements"][0]["preferred_unit"] = preferred
+            with self.assertRaises(ValueError):
+                quality.normalize_profile(profile)
 
     def test_non_us_preserves_metric_and_nominal_unchanged(self):
         profile, _, _ = single_fixture()
@@ -236,7 +267,7 @@ class LocalValidationTests(unittest.TestCase):
 
     def test_bullets_count_length_and_highlight_type(self):
         profile, listing, _ = single_fixture()
-        listing["bullets"] = ["x" * 201] * 5
+        listing["bullets"] = ["x" * 251] * 5
         self.assertIn("bullets_length", codes(profile, listing))
         listing["bullets"].pop()
         listing["item_highlight"] = ["not a string"]
@@ -849,3 +880,161 @@ class CLITests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def all_codes(profile, listing, severity):
+    return {issue["code"] for issue in quality.check_local(profile, listing) if issue["severity"] == severity}
+
+
+class FalsePositiveRegressionTests(unittest.TestCase):
+    """Wording that is legitimate on Amazon must not be reported as an invented fact."""
+
+    def test_two_in_one_is_not_a_length(self):
+        for phrase in ("A 2 in 1 holder.", "A 3-in-1 holder.", "Two 2 in 1 sets."):
+            with self.subTest(phrase=phrase):
+                profile, listing, _ = single_fixture()
+                listing["description"] += " " + phrase
+                self.assertNotIn("measurement_unregistered", codes(profile, listing))
+        profile, listing, _ = single_fixture()
+        listing["description"] += " It is 9 in wide."
+        self.assertIn("measurement_unregistered", codes(profile, listing))
+
+    def test_us_dual_display_allows_source_unit_in_parentheses_only(self):
+        profile, listing, _ = single_fixture()
+        listing["description"] = "This 304 stainless steel pen holder is 6 in (15.24 cm) high."
+        self.assertEqual(codes(profile, listing), set())
+        listing["description"] = "This 304 stainless steel pen holder is 6 in high, or 15.24 cm."
+        self.assertIn("source_unit_leak", codes(profile, listing))
+
+    def test_german_sharp_s_label_is_uppercase(self):
+        profile, listing, _ = single_fixture()
+        listing["bullets"][0] = "【GROßE ÖFFNUNG】304 stainless steel body."
+        self.assertNotIn("bullet_format", codes(profile, listing))
+        listing["bullets"][0] = "【Große Öffnung】304 stainless steel body."
+        self.assertIn("bullet_format", codes(profile, listing))
+
+    def test_accessory_pieces_are_not_purchase_quantity(self):
+        profile, listing, _ = single_fixture()
+        listing["description"] += " Includes 4 pieces of felt pads."
+        self.assertNotIn("quantity_unregistered", codes(profile, listing))
+        listing["description"] += " Includes 4 pcs felt pads."
+        self.assertIn("quantity_unregistered", codes(profile, listing))
+        profile["facts"].append({"fact_id": "pads", "field": "accessory_count", "value": "4",
+                                 "status": "confirmed", "source_ref": "packing list"})
+        self.assertNotIn("quantity_unregistered", codes(profile, listing))
+        listing["description"] += " Pack of 4."
+        self.assertIn("quantity_unregistered", codes(profile, listing))
+
+    def test_variant_word_inside_protected_identity_is_not_a_parent_leak(self):
+        profile, listing, _ = family_fixture()
+        profile["product_identity"]["protected_terms"] = ["Black Pen Holder"]
+        listing["parent"]["title"] = "ACME 304 Stainless Steel Black Pen Holder"
+        self.assertNotIn("parent_variant_leak", codes(profile, listing))
+        listing["parent"]["title"] = "ACME Blue 304 Stainless Steel Black Pen Holder"
+        self.assertIn("parent_variant_leak", codes(profile, listing))
+
+
+class AmazonComplianceTests(unittest.TestCase):
+    def test_title_banned_characters_except_brand(self):
+        profile, listing, _ = single_fixture()
+        listing["title"] = "ACME 304 Stainless Steel Pen Holder!"
+        self.assertIn("title_banned_character", codes(profile, listing))
+        profile["brand"] = listing["brand_name"] = "ACME!"
+        listing["title"] = "ACME! 304 Stainless Steel Pen Holder"
+        self.assertNotIn("title_banned_character", codes(profile, listing))
+
+    def test_title_word_repeats_warn_without_counting_articles(self):
+        profile, listing, _ = single_fixture()
+        listing["title"] = "ACME Pen Holder, Steel Pen Cup for Pen and the Desk"
+        self.assertIn("title_word_repeat", all_codes(profile, listing, "warning"))
+        listing["title"] = "ACME Pen Holder for the Desk and the Shelf and for Pens"
+        self.assertNotIn("title_word_repeat", all_codes(profile, listing, "warning"))
+
+    def test_search_terms_repeat_format_and_site_budget(self):
+        profile, listing, _ = single_fixture()
+        listing["search_terms"] = "Pen, stationery organizer organizer"
+        warnings = all_codes(profile, listing, "warning")
+        self.assertTrue({"search_terms_title_repeat", "search_terms_duplicate", "search_terms_format"} <= warnings)
+        listing["search_terms"] = "x" * 220
+        self.assertNotIn("search_bytes", codes(profile, listing))
+        for site, code in (("IN", "en"), ("JP", "ja")):
+            profile["site"] = listing["site"] = site
+            profile["listing_language_code"] = listing["listing_language_code"] = code
+            listing["search_terms"] = "x" * 220
+            self.assertEqual("search_bytes" in codes(profile, listing), site == "IN")
+
+    def test_bullet_prohibited_symbols_warn(self):
+        profile, listing, _ = single_fixture()
+        listing["bullets"][1] = "【ORGANIZATION】Keeps pens together™."
+        self.assertIn("bullet_prohibited_symbol", all_codes(profile, listing, "warning"))
+
+
+class IncrementalRevalidationTests(unittest.TestCase):
+    """A repair to one child must not void the review or backend results of the others."""
+
+    def write_family(self, root):
+        profile, listing, qa = family_fixture()
+        paths = [root / "01_product_profile.json", root / "07_listing.json", root / "06_qa.json"]
+        for path, value in zip(paths, (profile, listing, qa)):
+            path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+        return profile, listing, qa, paths
+
+    def test_review_template_keeps_verdicts_of_unchanged_targets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile, listing, qa, paths = self.write_family(root)
+            first = quality.make_review_template(*paths)
+            for record in first["records"]:
+                record.update(status="pass", evidence="fixture evidence")
+            listing["variants"][1]["item_highlight"] = "Holds pens upright on a desk."
+            paths[1].write_text(json.dumps(listing, indent=4), encoding="utf-8")
+            second = quality.make_review_template(*paths, previous=first)
+            pending = {r["target"] for r in second["records"] if r["status"] == "pending"}
+            self.assertEqual(pending, {"child-02", "media"})
+            result = quality.validate_bundle(profile, listing, qa, review=second, fingerprints=quality.file_fingerprints(*paths))
+            self.assertIn("review_pending", {i["code"] for i in result["issues"]})
+            self.assertNotIn("review_stale", {i["code"] for i in result["issues"]})
+            first_again = quality.make_review_template(*paths, previous=second)
+            self.assertEqual(first_again["carried_over"], second["carried_over"])
+
+    def test_reformatting_json_does_not_stale_review(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            profile, listing, qa, paths = self.write_family(root)
+            review = quality.make_review_template(*paths)
+            paths[1].write_text(json.dumps(listing, indent=8, sort_keys=True), encoding="utf-8")
+            result = quality.validate_bundle(profile, listing, qa, review=review, fingerprints=quality.file_fingerprints(*paths))
+            self.assertNotIn("review_stale", {i["code"] for i in result["issues"]})
+
+    def test_backend_reuses_unchanged_passing_children(self):
+        profile, listing, _ = family_fixture()
+        calls = []
+
+        def fake(command, **kwargs):
+            calls.append(kwargs["listing_file"].name)
+            return {"exit_code": 0, "response": {"ok": True, "errors": []}}
+        with patch.object(quality.backend_cli, "run_cli", side_effect=fake):
+            first = quality.run_backend(profile, listing)
+            self.assertEqual(len(calls), 3)
+            listing["variants"][2]["item_highlight"] = "Holds pens upright on a desk."
+            second = quality.run_backend(profile, listing, previous=first)
+        self.assertEqual(calls[3:], ["child-03.json"])
+        self.assertEqual([r["reused"] for r in second["records"]], [True, True, False])
+
+
+class IntentAndAttributeTests(unittest.TestCase):
+    def test_intent_map_entries_are_checked_and_unexpressed_intents_warn(self):
+        profile, listing, _ = single_fixture()
+        profile["intent_map"].append({"relation": "audience", "expression": "students", "fact_ids": [], "applies_to": ["all"]})
+        self.assertIn("intent_unexpressed", all_codes(profile, listing, "warning"))
+        profile["intent_map"].append({"relation": "mood", "expression": "calm"})
+        self.assertIn("intent_map_entry", codes(profile, listing))
+        profile["intent_map"][-1] = {"relation": "function", "expression": "desk", "fact_ids": ["missing-fact"]}
+        self.assertIn("reference_scope", codes(profile, listing))
+
+    def test_attribute_suggestions_need_confirmed_evidence(self):
+        profile, listing, _ = single_fixture()
+        listing["attribute_suggestions"].append({"attribute": "target_audience", "value": "students"})
+        self.assertIn("attribute_unsupported", codes(profile, listing))
+        del listing["attribute_suggestions"]
+        self.assertIn("attribute_suggestions_missing", all_codes(profile, listing, "warning"))

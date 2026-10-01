@@ -7,7 +7,9 @@ Public repository for Laochen Amazon workflow skills.
 - `skills/amazon-listing-image-studio/` - Build non-copycat Amazon listing image
   systems from product photos, selling points, and competitor references.
 - `skills/lc-amazon-listing-asin/` - Generate Amazon listings from competitor
-  ASIN sets, product images, and product descriptions.
+  ASIN sets, product images, and product descriptions, with intent-group
+  keyword decisions, coverage feedback, and incremental validation.
+  Last updated: 2026-10-01 (UTC+8).
 - `skills/lc-amazon-image-studio/` - Create Amazon Listing and A+ image sets
   from verified product assets, with user reference template intake, local
   typography, product-consistency QA, and cross-platform runtime setup (V7).

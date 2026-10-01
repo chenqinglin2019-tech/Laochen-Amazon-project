@@ -428,7 +428,14 @@ body{
     <div class="chapter-rail"><div class="idx">0<span>5</span></div><div class="tick">Title</div></div>
     <div>
       <div class="chapter-head"><h2>标题核心词</h2><div class="sub">进入标题的高相关词与泛词补充</div></div>
-      <div class="card"><div id="titleKeywords"></div></div>
+      <div class="card">
+        <div id="titleKeywords"></div>
+        <div id="coverageStats"></div>
+        <button class="collapse-btn" data-target="uncoveredDetail" id="uncoveredToggle" hidden><span class="chev">▾</span> 查看未覆盖的高流量可用词</button>
+        <div id="uncoveredDetail" class="kw-list collapsible"></div>
+        <button class="collapse-btn" data-target="unlockDetail" id="unlockToggle" hidden><span class="chev">▾</span> 查看补充事实可解锁的流量</button>
+        <div id="unlockDetail" class="kw-list collapsible"></div>
+      </div>
     </div>
   </section>
 
@@ -469,6 +476,7 @@ body{
 <script id="data-kw-removed" type="application/json">__DATA_KW_REMOVED__</script>
 <script id="data-kw-filtered" type="application/json">__DATA_KW_FILTERED__</script>
 <script id="data-kw-pending" type="application/json">__DATA_KW_PENDING__</script>
+<script id="data-coverage" type="application/json">__DATA_COVERAGE__</script>
 <script id="data-keyword-audit" type="application/json">__DATA_KEYWORD_AUDIT__</script>
 <script id="data-kw-tagged" type="application/json">__DATA_KW_TAGGED__</script>
 <script id="data-title-keywords" type="application/json">__DATA_TITLE_KEYWORDS__</script>
@@ -671,6 +679,22 @@ function render(){
       ((tk.relevant||[]).map(k=>`<span class="tag tag-relevant">${esc(k)}</span>`).join('')||'<span class="empty-note">无</span>');
   }else{
     document.getElementById('titleKeywords').innerHTML='<div class="empty-note">暂无标题核心词</div>';
+  }
+  /* 05b 关键词覆盖（仅供优化参考，不作验收门槛） */
+  const coverage=loadData('data-coverage');
+  if(coverage&&coverage.targets){
+    const rows=Object.entries(coverage.targets);
+    document.getElementById('coverageStats').innerHTML=`<div class="tag-group-label">可索引字段覆盖（按最终文案计算）</div>`+
+      rows.map(([target,c])=>`<p>${esc(target==='single'?'本品':target)}：可用词 ${c.eligible} 个，词级覆盖 ${c.token_covered} 个`+
+        (c.searches_weighted_token_coverage==null?'':`，按搜索量加权 ${Math.round(c.searches_weighted_token_coverage*100)}%`)+
+        `；后台词 ${c.search_terms.bytes}/${c.search_terms.limit} 字节</p>`).join('');
+    const uncovered=rows.flatMap(([target,c])=>(c.top_uncovered||[]).slice(0,15).map(k=>({target,...k})));
+    document.getElementById('uncoveredToggle').hidden=!uncovered.length;
+    document.getElementById('uncoveredDetail').innerHTML=uncovered.map(k=>`<span class="kw-item">${esc(k.keyword)}<span class="traffic">${k.searches==null?'流量未知':formatNum(k.searches)}${rows.length>1?' · '+esc(k.target):''}</span></span>`).join('');
+    const unlocks=coverage.fact_unlocks||[];
+    document.getElementById('unlockToggle').hidden=!unlocks.length&&!(coverage.unsupported_questions||[]).length;
+    document.getElementById('unlockDetail').innerHTML=unlocks.map(u=>`<span class="kw-item">${esc(u.fact_needed)}<span class="traffic reason">可解锁 ${u.keywords.length} 个词 · 搜索量 ${formatNum(u.searches)}：${esc(u.keywords.slice(0,6).join('、'))}</span></span>`).join('')+
+      (coverage.unsupported_questions||[]).map(q=>`<span class="kw-item">${esc(q)}<span class="traffic reason">买家问题缺少本品事实</span></span>`).join('');
   }
 
 

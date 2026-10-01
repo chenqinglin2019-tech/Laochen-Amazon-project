@@ -1,4 +1,4 @@
-version: '2.1'
+version: '2.2'
 domain: bullets
 contract_ref: ../data_contract.md
 policy_ref: ../quality_policy.json
@@ -6,33 +6,33 @@ sources_ref: ../sources.json
 rules:
 - id: bullets_budget
   type: required
-  source_id: skill_editorial_v2
-  prompt_fragment: 条数、单条字符和总字符预算读取统一政策。条数是本 skill 的交付结构，总预算是内部简洁写作预算，不宣称全类目统一平台硬限制。
+  source_id: amazon_bullet_guidelines
+  prompt_fragment: 5 条（本 skill 的交付结构），每条 ≤250 字符（帮助页转述为 10–255）。建议每条约 150–250 字符，把可索引空间用于真实信息，而不是一句话的空泛卖点。
   limit_refs:
   - default_limits.bullets_count
   - default_limits.bullet_max_chars
   - default_limits.bullets_total_max_chars
+- id: bullets_format
+  type: required
+  source_id: user_delivery_media_v21
+  prompt_fragment: 格式为【大写卖点标签】正文，标签简短具体。无大小写的语言保留自然标签；德语 ß 允许。不用 ™ ® © 或 emoji（warning），不写退款保证、联系方式或 ASIN。
 - id: bullets_decision_order
   type: editorial
   source_id: skill_editorial_v2
-  prompt_fragment: 按用户购买决策的重要性排序：先解释最能区分本品的购买理由，再解释关键结构、适配、使用方式和必要限制。以本品实际重要性决定顺序，不要求所有品类套同一模板。
-- id: bullets_one_point
+  prompt_fragment: 按购买决策的重要性排序：先写最能区分本品的理由，再写结构、适配、使用方式和必要限制。一条只讲一个购买问题，避免近义词堆砌和长串逗号。
+- id: bullets_intent_relations
   type: editorial
-  source_id: user_delivery_media_v21
-  prompt_fragment: 每条聚焦一个购买问题，使用【大写卖点标签】正文格式，标签简短、具体。无大小写文字的目标语言保留自然标签，不强行英文；避免重复、长串逗号和近义关键词堆砌。
+  source_id: cosmo_paper
+  prompt_fragment: 每条写清"能力 → 依据 → 适用场景"，并用自然语句带出 intent_map 中的关系：用途（for …）、人群（ideal for …）、地点（in the …）、时节或场合、搭配（pairs with …）、身体部位。COSMO 用这类产品与意图的关系做相关性、导航和推荐；"写出来就加分"是推断，所以只写已确认的关系。
 - id: bullets_evidence_benefit
   type: required
   source_id: user_product_identity
-  prompt_fragment: 说明真实属性怎样支持合理的使用价值；不能从铝材推导承重或永不倾倒，从可调角度推导缓解颈痛，或从棉质推导耐洗。含数字或规格时引用确认事实或 measurement_ids；缺证据就不写承诺。
-- id: bullets_cosmo_application
-  type: editorial
-  source_id: cosmo_paper
-  prompt_fragment: 在卖点规划中建立买家需求—产品能力—事实依据—使用场景的对应关系；根据表达需要分配到不同字段。COSMO 论文没有要求每条五点写完整固定句式，也没有公布卖家关键词密度公式。
+  prompt_fragment: 说明真实属性如何支持合理的使用价值。不能从铝材推出承重、从可调角度推出缓解颈痛、从棉质推出耐洗。含数字或规格时引用 confirmed 事实或 measurement_ids，缺证据就不写承诺。
 - id: bullets_questions
   type: editorial
-  source_id: skill_ai_answerability
-  prompt_fragment: 只采用 question_reviews 中相关且有本品事实支持的问题。无关问题排除；相关但无答案资料的问题记录 unsupported，不补造答案。未采集问题的站点仍可用清楚、独立可读的陈述。
+  source_id: amazon_rufus_attributes
+  prompt_fragment: 优先回答 question_reviews 中相关且有事实支持的问题，以及 5W1H 中最关键的问题；相关但无答案资料的问题记为 unsupported，不补造答案。
 - id: bullets_family_scope
   type: required
   source_id: user_family_rules
-  prompt_fragment: shared_content.bullets 仅写全系列共同事实。若某条涉及不同尺寸、包装数量或适配，使用该子体 content_overrides.bullets 替换整个数组，不能在共享正文留下首个子体的规格。
+  prompt_fragment: shared_content.bullets 只写全系列共同事实。涉及不同尺寸、数量或适配时，用该子体的 content_overrides.bullets 整组替换。
