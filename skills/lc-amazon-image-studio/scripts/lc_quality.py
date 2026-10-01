@@ -513,6 +513,12 @@ def decide_job(manifest: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
     elif candidate and ratio is not None and ratio <= (safe if job.get("requires_fine_detail") else marginal):
         if fit == "local_change":
             mode, action, reason = "reference_edit", "edit_environment", "商品清晰且视角匹配，但局部环境或光照需要调整。"
+        elif not layers:
+            # Local compositing can never run without a reviewed cutout/mask layer;
+            # recommending it would loop compose -> QUALITY_COMPOSITE -> re-plan.
+            mode, action, reason = ("reference_edit", "edit_background_keep_product",
+                                    "商品清晰且视角匹配，但还没有已审阅的抠图/遮罩；先按编辑路线保留商品、重做背景。"
+                                    "如需原像素复用，运行 cutout 生成候选遮罩、确认后填 product_layers 再 plan。")
         else:
             mode, action, reason = "pixel_composite", "reuse_verified_pixels", "选中的商品区域清晰且适配目标画面，按其实际像素与目标占比复用。"
         if ratio > safe:

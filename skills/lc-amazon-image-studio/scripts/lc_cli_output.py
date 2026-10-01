@@ -34,3 +34,15 @@ def compact_result(value, command, manifest_path=None):
     if command == "compact" and isinstance(result.get("removed"), list):
         result["removed_count"] = len(result.pop("removed"))
     return result
+
+
+def qa_summary(manifest, report):
+    """Compact QA outcome so callers need not open qa_report.json for routine runs."""
+    summary = dict((report or {}).get("summary") or {})
+    pending = []
+    for job in manifest.get("jobs", []):
+        if job.get("status") == "qa_passed":
+            continue
+        reason = job.get("blocked_reason") or job.get("failed_reason") or job.get("qa_invalidated_reason") or ""
+        pending.append({"id": job.get("id"), "status": job.get("status"), "reason": str(reason)[:200]})
+    return {"summary": summary, "not_passed": pending, "report": "qa_report.json"}

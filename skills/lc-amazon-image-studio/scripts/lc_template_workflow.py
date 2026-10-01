@@ -29,10 +29,22 @@ def validate_template_inputs(manifest):
         jobs = []
     if "design_template_policy" in manifest:
         policy = manifest["design_template_policy"]
-        if (not isinstance(policy, dict) or set(policy) != {"version", "mode"}
+        v2 = isinstance(policy, dict) and policy.get("version") == 2
+        if v2:
+            if (set(policy) - {"version", "mode", "prefer_family_ids"} or policy.get("mode") != "auto"
+                    or not isinstance(policy.get("prefer_family_ids", []), list)
+                    or any(not isinstance(v, str) or not ID.fullmatch(v) for v in policy.get("prefer_family_ids", []))):
+                errors.append("design_template_policy v2 requires {version:2,mode:auto,prefer_family_ids?:[ids]}")
+        elif (not isinstance(policy, dict) or set(policy) != {"version", "mode"}
                 or type(policy.get("version")) is not int or policy["version"] != 1
                 or policy.get("mode") != "auto"):
             errors.append("design_template_policy requires {version:1,mode:auto}")
+    if manifest.get("product_profile") is not None:
+        from lc_template_schema import validate_profile
+        errors.extend(validate_profile(manifest["product_profile"], "product_profile", family=False))
+    if "design_template_library_dir" in manifest and (not isinstance(manifest["design_template_library_dir"], str)
+                                                      or not manifest["design_template_library_dir"].strip()):
+        errors.append("design_template_library_dir must be a local folder path")
     objects = [("project", manifest, "design_template_set_id", "design_template_set_revision")]
     objects += [(str(j.get("id", "job")), j, "design_template_id", "design_template_revision")
                 for j in jobs if isinstance(j, dict)]
@@ -56,6 +68,10 @@ def validate_template_inputs(manifest):
             errors.append(f"{job.get('id')}: original design needs a nonempty reason")
         if job.get("design_template_original_reason") and (job.get("design_template_id") or job.get("design_reference_id")):
             errors.append(f"{job.get('id')}: original design and explicit template/reference are mutually exclusive")
+        if "template_slot_role" in job:
+            from lc_template_schema import taxonomy
+            if job["template_slot_role"] not in taxonomy()["slot_roles"]:
+                errors.append(f"{job.get('id')}: template_slot_role must be a taxonomy slot role")
         if "design_resolution" in job and not isinstance(job["design_resolution"], dict):
             errors.append(f"{job.get('id')}: design_resolution must be an object")
         if "design_overrides" in job:
@@ -88,6 +104,9 @@ def template_resolution_issue(job):
     resolution = job.get("design_resolution") or {}
     if resolution.get("source") not in {"template_library", "original_design"}:
         return None
+    if resolution.get("schema_version") == 2:
+        from lc_template_workflow_v2 import resolution_issue_v2
+        return resolution_issue_v2(job)
     if resolution.get("status") != "selected":
         return "design_template_needs_input"
     if resolution.get("source") == "template_library":
@@ -100,6 +119,13 @@ def template_resolution_issue(job):
 
 
 def prepare_template_briefs(manifest, base, selected):
+    if (manifest.get("design_template_policy") or {}).get("version") == 2:
+        from lc_template_workflow_v2 import prepare_template_briefs_v2
+        return prepare_template_briefs_v2(manifest, base, selected)
+    return _prepare_template_briefs_v1(manifest, base, selected)
+
+
+def _prepare_template_briefs_v1(manifest, base, selected):
     import lc_design_templates as library_api
     from lc_style_reference import ReferenceIndexError
     errors = validate_template_inputs(manifest)

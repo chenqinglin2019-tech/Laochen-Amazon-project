@@ -129,8 +129,13 @@ def ingest(manifest, base: Path, job_id, artifact: Path, attempt_id, *, tool_ret
     started = time.monotonic()
     job = _job(manifest, job_id)
     attempt = _attempt(job, attempt_id)
+    unpaired_return = None
+    if tool_returned_at is not None and "tool_started_at" not in attempt:
+        # Timing is optional evidence: a return time without a recorded start
+        # must never cost a real generated image. Keep it for audit only.
+        unpaired_return, tool_returned_at = tool_returned_at, None
     if tool_returned_at is not None:
-        # Reject a missing start, future timestamp or conflicting prior event
+        # Reject a future timestamp or conflicting prior event
         # before admitting any image bytes or changing the live attempt.
         attempt_event(copy.deepcopy(manifest), job_id, attempt_id,
                       "tool_returned", tool_returned_at)
@@ -184,6 +189,8 @@ def ingest(manifest, base: Path, job_id, artifact: Path, attempt_id, *, tool_ret
              "cached": False, "attempt_id": attempt_id, "measurement": "tool_returned_to_ingested"}])
     else:
         attempt["tool_duration_unavailable"] = True
+        if unpaired_return is not None:
+            attempt["unpaired_tool_returned_at"] = unpaired_return
     return {"job": job_id, "attempt_id": attempt_id, "idempotent": False, "status": "generated",
             "raw_output": job["raw_output"], "dispatch": p.execution_plan(manifest, base)["dispatch"]}
 
@@ -542,6 +549,10 @@ def review_prepare_many(manifest, base: Path, job_ids=None, annotations=None, *,
     """Share local preparation for jobs already ready in this invocation."""
     import lc_image_pipeline as p
     selected = p.job_selection(manifest, job_ids)
+    if job_ids is None:
+        # Implicit "all ready" never demotes images that already passed QA.
+        selected = {job_id for job_id in selected
+                    if (p.find_by_id(manifest["jobs"], job_id) or {}).get("status") != "qa_passed"}
     annotations = normalize_annotations(manifest, selected, annotations)
     return _prepare_reviews(manifest, base, selected, annotations, force=force, only_ready=True)
 
@@ -570,6 +581,17 @@ def _prepare_reviews(manifest, base, selected, annotations, *, force, only_ready
 
     def finish():
         order = {job["id"]: i for i, job in enumerate(manifest["jobs"])}
+        # V7: one sheet image + one compact todo per packet (review token savings).
+        from lc_review_sheets import write_sheet_and_todo
+        for result in results:
+            if result.get("packet"):
+                try:
+                    job = _job(manifest, result["job"])
+                    thumb = ((job.get("design_resolution") or {}).get("assets") or {}).get("reference_thumbnail") or {}
+                    reference = p.resolve_path(thumb.get("path"), base) if thumb.get("path") else None
+                    result.update(write_sheet_and_todo(base, result["packet"], reference=reference))
+                except (OSError, ValueError, KeyError) as exc:
+                    result["sheet_error"] = str(exc)[:200]
         results.sort(key=lambda result: order[result["job"]])
         errors.sort(key=lambda result: order[result["job"]])
         if results:

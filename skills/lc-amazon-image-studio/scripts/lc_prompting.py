@@ -125,8 +125,23 @@ not accidentally resurrect stale instructions embedded in resolved_prompt.
     return composition, payload, extra
 
 
+def style_plate_paths(job):
+    """V2 template style plate (project copy); never for main images or quality repairs."""
+    resolution = job.get("design_resolution") or {}
+    plate = (resolution.get("assets") or {}).get("plate") or {}
+    if (resolution.get("schema_version") != 2 or not plate.get("path") or job.get("kind") == "main"
+            or job.get("prompt_edit") or plate.get("use", "full") != "full"):
+        return []
+    return [plate["path"]]
+
+
 def ordered_references(manifest, job, paths):
-    """Resolve an edit target without treating a detail/style image as a base."""
+    """Resolve the edit target first; a V2 style plate is always attached last."""
+    ordered = _ordered_evidence(manifest, job, [path for path in paths if path not in style_plate_paths(job)])
+    return ordered + [path for path in style_plate_paths(job) if path not in ordered]
+
+
+def _ordered_evidence(manifest, job, paths):
     request = job.get("prompt_edit")
     if request:
         return list(dict.fromkeys([request["target_path"], *paths]))
@@ -153,7 +168,7 @@ def ordered_references(manifest, job, paths):
     return [target["path"], *[path for path in paths if path != target["path"]]]
 
 
-def input_image_lines(manifest, paths, *, edit_target=None, background_only=False):
+def input_image_lines(manifest, paths, *, edit_target=None, background_only=False, style_plates=()):
     from lc_quality import DETAIL_ROLES
     refs = {ref["path"]: ref for ref in manifest.get("references", [])}
     crops = {crop["path"] for detail in manifest.get("critical_details", [])
@@ -162,7 +177,11 @@ def input_image_lines(manifest, paths, *, edit_target=None, background_only=Fals
     for index, path in enumerate(paths, 1):
         ref = refs.get(path, {})
         role = ref.get("role", "whole_product_reference")
-        if path == edit_target:
+        if path in style_plates:
+            purpose = ("style plate only: match its background, props style, light, colour grade, camera angle, "
+                       "composition and negative space; its blurred/flattened areas are empty placeholders; never "
+                       "reproduce any product, text, logo or packaging from it")
+        elif path == edit_target:
             purpose = "edit target; preserve its already-correct content"
         elif path in crops:
             purpose = "critical-detail evidence; use its supported shape and physical location, not its crop framing"
@@ -203,7 +222,7 @@ def compile_image_prompt(manifest, job, paths, detail_blocks, geometry, locks):
               if editing else "Primary request: create an evidence-faithful commercial product photograph in the planned scene."),
              f"Visual objective: {job.get('selling_job', '')}", "Input images (in attachment order):",
              *input_image_lines(manifest, paths, edit_target=paths[0] if editing and paths else None,
-                                background_only=background_only),
+                                background_only=background_only, style_plates=style_plate_paths(job)),
              *_lines("Scene/backdrop", job.get("scene")),
              *_lines("Product for scale/context only" if background_only else "Subject", truth.get("product")),
              "Style/medium: photorealistic commercial photography; depict only evidenced product appearance."]

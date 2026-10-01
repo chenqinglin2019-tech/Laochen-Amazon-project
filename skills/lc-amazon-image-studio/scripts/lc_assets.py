@@ -45,6 +45,13 @@ def digest(value: Any) -> str:
                                     allow_nan=False).encode()).hexdigest()
 
 
+_BUNDLED_ASSETS = Path(__file__).resolve().parents[1] / "assets"
+
+
+def _bundled_asset(path: Path) -> bool:
+    return _BUNDLED_ASSETS in path.parents
+
+
 def file_hash(path: Path) -> str:
     requested = Path(path)
     resolved = requested.resolve(strict=True)
@@ -52,7 +59,9 @@ def file_hash(path: Path) -> str:
     # Windows ctime is creation time on supported Python versions. Equal
     # size/mtime/ctime cannot prove unchanged bytes after an in-place rewrite.
     # Keep all actual read/binding checks; only disable stat-only reuse there.
-    cache = None if os.name == "nt" else _HASH_SCOPE.get()
+    # Bundled skill assets (fonts, locks) are never rewritten by the pipeline, so
+    # they keep the per-operation reuse on Windows too (~54 MB of fonts per layout).
+    cache = None if os.name == "nt" and not _bundled_asset(resolved) else _HASH_SCOPE.get()
     saved = cache.get(str(resolved)) if cache is not None else None
     if saved is not None and saved[0] == before:
         if requested.resolve(strict=True) != resolved or _file_token(resolved.stat()) != before:

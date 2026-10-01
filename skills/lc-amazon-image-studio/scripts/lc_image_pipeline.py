@@ -24,10 +24,10 @@ from typing import Any, Iterable
 
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageOps, ImageStat
-except ImportError as exc:  # pragma: no cover - environment-specific failure
-    raise SystemExit(
-        "Pillow is required. Use the Codex bundled Python runtime or install pillow."
-    ) from exc
+except ImportError:  # pragma: no cover - environment-specific failure
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from lc_runtime_env import relaunch_with_selected_python
+    relaunch_with_selected_python(__file__)  # relaunches under the verified Python or exits with guidance
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -46,6 +46,7 @@ from lc_project_contracts import (default_style_contract, default_copy_budget, r
                                   validate_project_contracts, project_contract_report, preflight_project_contracts,
                                   preflight_layout_fit, apply_adaptive_typography)
 from lc_delivery import resolve_delivery_profile, apply_delivery_profile, artifact_sha256
+import lc_layout_style  # noqa: F401  installs opt-in style_v1 routing; other layouts reach lc_layout unchanged
 
 SCHEMA_VERSION = 3
 PIPELINE_VERSION = "3.0.0"
@@ -1068,12 +1069,14 @@ def typography_dispatch_fingerprint(manifest: dict, job: dict, base: Path) -> st
             if item.get("image"):
                 path = resolve_path(item["image"], base)
                 images[item["image"]] = sha256_file(path) if path and path.is_file() else "MISSING"
+    rules = {name: sha256_file(SCRIPT_DIR / name) for name in
+             ("lc_project_contracts.py", "lc_layout.py", "lc_layout_v3.py", "render_layout.mjs")}
+    if lc_layout_style.uses_style(job):
+        rules.update(lc_layout_style.rule_hashes(job))  # style_v1 only; other bindings stay byte-identical
     return digest({"layout": job.get("layout"), "style": resolved_style_contract(manifest),
                    "design": design_layout_payload(job), "canvas": job.get("canvas"),
                    "geometry": generation_geometry(job), "language": job.get("language", manifest.get("language")),
-                   "image_inputs": images,
-                   "rules": {name: sha256_file(SCRIPT_DIR / name) for name in
-                             ("lc_project_contracts.py", "lc_layout.py", "lc_layout_v3.py", "render_layout.mjs")}})
+                   "image_inputs": images, "rules": rules})
 
 
 def current_fingerprints(manifest: dict, job: dict, base: Path) -> dict[str, str]:
@@ -2171,8 +2174,9 @@ def delivery_check(manifest: dict[str, Any], base: Path) -> dict[str, Any]:
 
 
 def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
-                   reason: str | None, base: Path | None = None, *, retry_after_seconds=None) -> None:
-    from lc_scheduler import (adaptive, bind_attempt, record_failure, retry_after,
+                   reason: str | None, base: Path | None = None, *, retry_after_seconds=None,
+                   reset_transient: bool = False) -> None:
+    from lc_scheduler import (adaptive, bind_attempt, failure_kind, record_failure, retry_after,
                               require_capacity, source_dispatch_decision)
     retry_after(retry_after_seconds)
     if retry_after_seconds is not None and (next_status != "pending" or not reason):
@@ -2181,6 +2185,15 @@ def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
     if job is None:
         raise PipelineError(f"Unknown job: {job_id}")
     current = job.get("status", "pending")
+    if reset_transient:
+        # A user-confirmed fresh transient budget (e.g. after a service outage);
+        # quality-repair budgets and attempt history are never rewritten.
+        if next_status != "pending" or current not in {"failed", "blocked"} or not (reason or "").strip():
+            raise PipelineError("--reset-transient requires a failed/blocked job, --status pending and a reason")
+        job["transient_budget_reset_index"] = len(job.get("generation_attempts", []))
+        job.setdefault("transient_budget_resets", []).append({"at": time.time(), "reason": reason})
+        job["repair_transient_attempts"] = 0
+        job.pop("failed_reason", None)
     if next_status not in VALID_JOB_STATUS or next_status not in ALLOWED_TRANSITIONS.get(current, set()):
         raise PipelineError(f"Invalid transition: {current} -> {next_status}")
     if next_status == "generating":
@@ -2241,7 +2254,9 @@ def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
             job["repair_transient_attempts"] = 0
             attempt_kind = "quality_repair"
         elif job.get("repair_in_progress"):
-            retries = job.get("repair_transient_attempts", 0)+1
+            last = history[-1] if history else {}
+            rate_limited = last.get("failure_kind", last.get("scheduler_failure_kind")) == "rate_limit"
+            retries = job.get("repair_transient_attempts", 0) + (0 if rate_limited else 1)
             if retries > manifest.get("max_transient_retries", 2):
                 job["status"], job["failed_reason"] = "failed", "REPAIR_TRANSIENT_RETRY_LIMIT_REACHED"
                 return
@@ -2251,9 +2266,15 @@ def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
             # A completed image can start a new requested generation, while
             # consecutive failed dispatches retain their retry budget.
             trailing = 0
-            for previous_attempt in reversed(history):
-                if previous_attempt.get("status") == "ingested" or previous_attempt.get("kind") == "quality_repair":
+            reset_index = job.get("transient_budget_reset_index", 0)
+            for index in range(len(history) - 1, -1, -1):
+                previous_attempt = history[index]
+                if (index < reset_index or previous_attempt.get("status") == "ingested"
+                        or previous_attempt.get("kind") == "quality_repair"):
                     break
+                # Explicit service rate limits are waited out, not charged as retries.
+                if previous_attempt.get("failure_kind", previous_attempt.get("scheduler_failure_kind")) == "rate_limit":
+                    continue
                 trailing += 1
             if not history:
                 trailing = job.get("attempts", 0)
@@ -2313,6 +2334,9 @@ def transition_job(manifest: dict[str, Any], job_id: str, next_status: str,
             job["queued_at"] = time.time()
             attempt = next((a for a in job.get("generation_attempts", [])
                             if a.get("id") == job.get("active_attempt_id")), None)
+            if current == "generating" and attempt is not None:
+                attempt.setdefault("failure_kind", failure_kind(reason))
+                attempt.setdefault("failure_reason", str(reason)[:300])
             if current == "generating" or not adaptive(manifest):
                 record_failure(manifest, attempt, reason, retry_after_seconds=retry_after_seconds)
 
@@ -2352,6 +2376,17 @@ binds the resulting main prompt and this target via generation_reference_paths.
 
 def _prepare_impl(manifest: dict[str, Any], base: Path, job_ids: Iterable[str] | None = None) -> None:
     selected = job_selection(manifest, job_ids)
+    # Template policy v2: empty colour/font roles come from the chosen family's tokens
+    # before validation, so a new project never starts with DESIGN_COLOR_REQUIRED.
+    from lc_template_workflow_v2 import early_prefill
+    early_prefill(manifest, base)
+    # An abandoned tool call (crashed session) must not hold a model slot forever.
+    stale_generation_seconds = 1800
+    for job in manifest["jobs"]:
+        if (job["id"] in selected and job.get("status") == "generating"
+                and time.time() - float(job.get("generation_started_at") or time.time()) > stale_generation_seconds):
+            transition_job(manifest, job["id"], "pending",
+                           "GENERATION_TIMEOUT: no ingest within 30 minutes; released as a transient timeout", base)
     for job in manifest["jobs"]:
         if job["id"] in selected:
             if job.get("status") in {"generation_repair_needed", "repair_needed"}:
@@ -2392,7 +2427,10 @@ def _prepare_impl(manifest: dict[str, Any], base: Path, job_ids: Iterable[str] |
         if job["id"] not in selected:
             continue
         reason = str(job.get("blocked_reason", ""))
-        if job.get("status") == "blocked" and reason.startswith(DERIVED_BLOCK_PREFIXES):
+        # Budget exhaustion is a decision, not a derived gate: re-planning must not
+        # silently grant another model call. An explicit transition resets it.
+        terminal = reason.startswith(("QUALITY_REPAIR_LIMIT_REACHED",))
+        if job.get("status") == "blocked" and reason.startswith(DERIVED_BLOCK_PREFIXES) and not terminal:
             job["status"] = "pending"
             if reason.startswith("LOCAL_BACKGROUND:") and job.get("generated_prompt_hash") == generation_fingerprint(manifest, job, base):
                 job["status"] = "generated"
@@ -2438,6 +2476,10 @@ def _prepare_impl(manifest: dict[str, Any], base: Path, job_ids: Iterable[str] |
                     "inputs": typography_dispatch_fingerprint(manifest, job, base)}
                 if not result["passed"]:
                     job["status"], job["blocked_reason"] = "blocked", "DESIGN_COPY:TYPOGRAPHY_PREFLIGHT:" + str(result.get("issues", fit_report["issues"]))
+    # V7: surface every problem at once (source-blocked jobs are measured too) and
+    # bound layout trial-and-error; statuses of earlier gates are left untouched.
+    from lc_plan_insights import collect_plan_issues
+    collect_plan_issues(manifest, base, selected, contract_report, is_hold)
     global_reasons = list(manifest.get("shared_blockers", []))
     global_reasons.extend(contract_report.get("shared_issues", []))
     if not manifest.get("critical_detail_census_completed"):
@@ -2489,14 +2531,17 @@ def execution_plan(manifest: dict, base: Path | None = None) -> dict:
             "deterministic_resume": [j["id"] for j in manifest["jobs"] if j.get("status") in {"generated", "layout_repair_needed", "export_repair_needed"}],
             "review_pending": [j["id"] for j in manifest["jobs"] if j.get("status") == "review_pending"],
             "blocked": [{"id": j["id"], "reason": j.get("blocked_reason")} for j in manifest["jobs"] if j.get("status") == "blocked"],
-            "reused": [j["id"] for j in manifest["jobs"] if j.get("status") == "qa_passed"]}
+            "reused": [j["id"] for j in manifest["jobs"] if j.get("status") == "qa_passed"],
+            "issues": {j["id"]: j["plan_issues"] for j in manifest["jobs"] if j.get("plan_issues")},
+            "layout_alternatives": {j["id"]: j["layout_alternatives"] for j in manifest["jobs"] if j.get("layout_alternatives")},
+            "next_actions": __import__("lc_plan_insights").gate_actions(manifest)}
 
 
 def init_project(project_dir: Path, project_id: str, force: bool = False, *,
                  listing_aspect: str = "1:1", short_edge: int = 2000,
                  marketplace: str = "", language: str = "", include_a_plus: bool = False,
                  a_plus_canvas: list[int] | None = None, a_plus_module: str | None = None,
-                 a_plus_count: int = 6) -> Path:
+                 a_plus_count: int = 6, a_plus_modules: list[str] | None = None) -> Path:
     if not isinstance(project_id, str) or not SAFE_ID.fullmatch(project_id):
         raise PipelineError("Invalid project_id")
     if not isinstance(marketplace, str) or not marketplace.strip() or not isinstance(language, str) or not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*", language):
@@ -2510,13 +2555,30 @@ def init_project(project_dir: Path, project_id: str, force: bool = False, *,
     canvas = [short_edge, short_edge if listing_aspect == "1:1" else short_edge*13//10]
     if max(canvas) > 10000:
         raise PipelineError("Canvas sides may not exceed 10000 pixels")
-    if include_a_plus and (not a_plus_canvas or not a_plus_module):
-        raise PipelineError("A+ requires both --a-plus-module and --a-plus-canvas")
+    # Each A+ image plans its own module (and optionally its own canvas).
+    a_plus_plan = []
+    if a_plus_modules:
+        include_a_plus = True
+        for spec in a_plus_modules:
+            name, _, size = str(spec).strip().partition(":")
+            match = re.fullmatch(r"(\d+)x(\d+)", size) if size else None
+            if not name or (size and not match):
+                raise PipelineError(f"Invalid A+ module spec {spec!r}; use name or name:WIDTHxHEIGHT")
+            canvas_spec = [int(match.group(1)), int(match.group(2))] if match else a_plus_canvas
+            if not canvas_spec:
+                raise PipelineError(f"A+ module {name!r} needs a canvas: add :WIDTHxHEIGHT or --a-plus-canvas")
+            a_plus_plan.append((name, list(canvas_spec)))
+        a_plus_count = len(a_plus_plan)
+    if include_a_plus and not a_plus_plan and (not a_plus_canvas or not a_plus_module):
+        raise PipelineError("A+ requires --a-plus-modules, or both --a-plus-module and --a-plus-canvas")
     if type(a_plus_count) is not int or not 1 <= a_plus_count <= 20:
         raise PipelineError("a_plus_count must be an integer from 1 to 20")
-    if include_a_plus and (not isinstance(a_plus_canvas, list) or len(a_plus_canvas) != 2
-            or any(type(v) is not int or not 1 <= v <= 10000 for v in a_plus_canvas)):
-        raise PipelineError("A+ canvas requires two positive integers, each <=10000")
+    if include_a_plus and not a_plus_plan:
+        a_plus_plan = [(a_plus_module, a_plus_canvas)] * a_plus_count
+    for _, canvas_spec in a_plus_plan:
+        if (not isinstance(canvas_spec, list) or len(canvas_spec) != 2
+                or any(type(v) is not int or not 1 <= v <= 10000 for v in canvas_spec)):
+            raise PipelineError("A+ canvas requires two positive integers, each <=10000")
     template = read_json(SCRIPT_DIR.parent / "assets" / "project_manifest.template.json")
     path = project_dir / "project_manifest.json"
     if path.exists():
@@ -2529,7 +2591,7 @@ def init_project(project_dir: Path, project_id: str, force: bool = False, *,
     template.update(project_id=project_id, marketplace=marketplace, language=language,
                     scheduler_policy=default_scheduler_policy(), concurrency=2,
                     listing_profile={"aspect": listing_aspect, "short_edge": short_edge},
-                    design_template_policy={"version": 1, "mode": "auto"},
+                    design_template_policy={"version": 2, "mode": "auto"},
                     style_contract=default_style_contract(),
                     delivery_profile={"name": "compact_jpg", "jpeg_quality": 92},
                     review_dependency_version=2, review_rule_profile="scoped_v1")
@@ -2549,10 +2611,10 @@ def init_project(project_dir: Path, project_id: str, force: bool = False, *,
             layout.pop("headline", None)
             layout.pop("body", None)
     if include_a_plus:
-        for index in range(a_plus_count):
+        for index, (module_name, canvas_spec) in enumerate(a_plus_plan):
             extra = copy.deepcopy(template["jobs"][2])
             identifier = f"{8+index:02d}_a_plus"
-            extra.update(id=identifier, kind="a_plus", a_plus_module=a_plus_module, canvas=list(a_plus_canvas),
+            extra.update(id=identifier, kind="a_plus", a_plus_module=module_name, canvas=list(canvas_spec),
                          raw_output=f"raw/{identifier}.png", final_output=f"final/{identifier}.jpg")
             template["jobs"].append(extra)
     for job in template["jobs"]:
@@ -2607,6 +2669,8 @@ def parser() -> argparse.ArgumentParser:
     init.add_argument("--a-plus-module")
     init.add_argument("--a-plus-canvas", nargs=2, type=int)
     init.add_argument("--a-plus-count", type=int, default=6)
+    init.add_argument("--a-plus-modules", help="Comma-separated per-image A+ modules, each optionally name:WIDTHxHEIGHT "
+                                              "(sets the A+ count; e.g. header:1464x600,features,comparison)")
     subs.add_parser("doctor", help="Verify pinned local rendering runtime and fonts")
     for name in ("validate", "prepare", "plan", "compose", "postprocess", "qa", "finalize", "delivery-check", "deliver", "compact", "status", "migrate"):
         sub = subs.add_parser(name)
@@ -2615,6 +2679,9 @@ def parser() -> argparse.ArgumentParser:
         if name in {"prepare", "plan", "compose", "postprocess", "qa", "finalize"}:
             sub.add_argument("--jobs", nargs="+", help="Only process these job ids; preserve unrelated job outputs and reviews")
         if name == "postprocess": sub.add_argument("--force", action="store_true")
+        if name == "deliver":
+            sub.add_argument("--no-finalize", action="store_true",
+                             help="Skip the automatic whole-project finalize (overview refresh) before delivery")
         if name == "plan":
             sub.add_argument("--tool-capacity", type=int, choices=range(1, 5))
             sub.add_argument("--tool-capacity-source")
@@ -2628,12 +2695,33 @@ def parser() -> argparse.ArgumentParser:
     transition.add_argument("--status", required=True)
     transition.add_argument("--reason")
     transition.add_argument("--retry-after-seconds", type=float)
+    transition.add_argument("--reset-transient", action="store_true",
+                            help="User-confirmed fresh transient-retry budget for a failed/blocked job (requires --status pending and --reason)")
     dependencies = subs.add_parser("migrate-dependencies", help="Verify a legacy bound artifact before adopting scoped per-image dependencies")
     dependencies.add_argument("--manifest", type=Path, required=True)
     dependencies.add_argument("--source-manifest", type=Path, required=True)
     dependencies.add_argument("--source-kind", choices=["historical_snapshot", "reconstructed_verified_dependency_view"], default="historical_snapshot")
     dependencies.add_argument("--allow-project-fork", action="store_true", help="Explicitly allow a retained-source project fork; all artifact and per-image input proofs still apply")
     dependencies.add_argument("--jobs", nargs="+", required=True)
+    source_prepare = subs.add_parser("source-review-prepare", help="Prepare once and write one source-review packet + crop sheet (hashes embedded)")
+    source_prepare.add_argument("--manifest", type=Path, required=True)
+    source_prepare.add_argument("--jobs", nargs="+", help="Only these jobs (default: all)")
+    source_submit = subs.add_parser("source-review-submit", help="Bind reference reviews, cutout reviews and job assessments in one step")
+    source_submit.add_argument("--manifest", type=Path, required=True)
+    source_submit.add_argument("--packet", type=Path, required=True)
+    native = subs.add_parser("native-text-measure", help="Measure model-drawn text contrast on the final JPEG encoding (evidence for model_text_review)")
+    native.add_argument("--manifest", type=Path, required=True)
+    native.add_argument("--job", required=True)
+    native.add_argument("--blocks", type=Path, required=True, help="JSON [{id, bbox_norm:[x,y,w,h]}] transcribed from the image")
+    cutout = subs.add_parser("cutout", help="Propose a reviewed-before-use product mask for a plain-background source photo")
+    cutout.add_argument("--manifest", type=Path, required=True)
+    cutout.add_argument("--reference", required=True)
+    cutout.add_argument("--tolerance", type=float, default=24.0)
+    anchor = subs.add_parser("anchor-approve", help="Product quick-check of the ingested anchor raw; opens sibling generation")
+    anchor.add_argument("--manifest", type=Path, required=True)
+    anchor.add_argument("--job", required=True)
+    anchor.add_argument("--notes", help="What was checked (identity, geometry, material, components, clarity); all pass")
+    anchor.add_argument("--verdicts", type=Path, help="JSON {geometry|material|components|clarity: {verdict, notes}}")
     ingest = subs.add_parser("ingest", help="Immediately bind a completed model artifact and release its generation slot")
     ingest.add_argument("--manifest", type=Path, required=True)
     ingest.add_argument("--job", required=True)
@@ -2707,7 +2795,8 @@ def run_command(args) -> int:
             manifest_path = init_project(args.project_dir.resolve(), args.project_id, args.force,
                   listing_aspect=args.listing_aspect, short_edge=args.short_edge, marketplace=args.marketplace,
                   language=args.language, include_a_plus=args.include_a_plus,
-                  a_plus_canvas=args.a_plus_canvas, a_plus_module=args.a_plus_module, a_plus_count=args.a_plus_count)
+                  a_plus_canvas=args.a_plus_canvas, a_plus_module=args.a_plus_module, a_plus_count=args.a_plus_count,
+                  a_plus_modules=[item for item in (args.a_plus_modules or "").split(",") if item.strip()] or None)
             emit(manifest_path)
             return 0
         manifest_path = args.manifest.expanduser().resolve()
@@ -2715,6 +2804,12 @@ def run_command(args) -> int:
             emit(migrate_project(manifest_path, args.marketplace, args.language))
             return 0
         base = manifest_path.parent
+        if args.command in {"plan", "deliver"}:
+            # The production gate, checked before any work: a short-lived pass written by scripts/auth_gate.py.
+            from lc_auth_pass import check_pass
+            passed, auth_reason = check_pass(SCRIPT_DIR.parent)
+            if not passed:
+                raise PipelineError(auth_reason)  # manifest not loaded yet, so nothing can be rewritten
         manifest = read_json(manifest_path)
         if args.command == "status":
             errors = validate_manifest(manifest, base, check_files=False)
@@ -2746,18 +2841,35 @@ def run_command(args) -> int:
         elif args.command in {"postprocess", "compose"}:
             aspect_safe_postprocess(manifest, base, force=getattr(args, "force", False), job_ids=args.jobs)
         elif args.command == "qa":
-            quality_assurance(manifest, base, args.jobs, update_overviews=False)
+            from lc_cli_output import qa_summary
+            result = qa_summary(manifest, quality_assurance(manifest, base, args.jobs, update_overviews=False))
         elif args.command == "finalize":
+            from lc_cli_output import qa_summary
             aspect_safe_postprocess(manifest, base, job_ids=args.jobs)
             whole_project = job_selection(manifest, args.jobs) == {job["id"] for job in manifest["jobs"]}
-            quality_assurance(manifest, base, args.jobs, update_overviews=whole_project)
+            result = qa_summary(manifest, quality_assurance(manifest, base, args.jobs, update_overviews=whole_project))
             if whole_project:
                 create_final_contact_sheet(manifest, base)
+                result["overview"] = "review/contact_sheet.png"
         elif args.command == "delivery-check":
             result = delivery_check(manifest, base)
         elif args.command == "deliver":
             from lc_delivery import prepare_delivery_directory
-            result = delivery_check(manifest, base)
+            try:
+                result = delivery_check(manifest, base)
+            except PipelineError as exc:
+                issues = [line[2:] for line in str(exc).splitlines()[1:] if line.startswith("- ")]
+                overview_only = (str(exc).startswith("Delivery gate failed") and issues and all(
+                    issue.startswith(("required delivery artifact missing:", "required delivery artifact stale or modified:"))
+                    for issue in issues))
+                if not overview_only or getattr(args, "no_finalize", False):
+                    raise
+                # Only overviews/QA report are stale: refresh them exactly as a whole-project
+                # finalize would, never re-exporting an image, then run the real gate again.
+                quality_assurance(manifest, base, None, update_overviews=True)
+                create_final_contact_sheet(manifest, base)
+                result = delivery_check(manifest, base)
+                result["overview_refreshed"] = True
             result.update(prepare_delivery_directory(manifest, base, delivery_result=result, manifest_path=manifest_path))
             write_json(base / "delivery_report.json", result)
         elif args.command == "compact":
@@ -2768,10 +2880,35 @@ def run_command(args) -> int:
             write_json(base / "compaction_report.json", result)
         elif args.command == "transition":
             transition_job(manifest, args.job, args.status, args.reason, base,
-                           retry_after_seconds=getattr(args, "retry_after_seconds", None))
+                           retry_after_seconds=getattr(args, "retry_after_seconds", None),
+                           reset_transient=getattr(args, "reset_transient", False))
             job = find_by_id(manifest["jobs"], args.job)
             result = {"job": args.job, "status": job["status"], "attempt_id": job.get("active_attempt_id"),
                       "prompt_hash": job.get("prompt_hash")}
+            if args.status == "generating" and job["status"] != "generating":
+                # A refused dispatch (spent budget) is persisted but must never look
+                # like permission to call the image model.
+                refusal = job.get("blocked_reason") or job.get("failed_reason") or job["status"]
+                result.update(attempt_id=None, dispatch_refused=refusal,
+                              errors=[f"{args.job}: dispatch refused ({refusal}); do not call image_gen"])
+        elif args.command == "source-review-prepare":
+            from lc_source_review import build_packet
+            prepare(manifest, base, args.jobs)
+            result = build_packet(manifest, base, args.jobs)
+        elif args.command == "source-review-submit":
+            from lc_source_review import submit_packet
+            result = submit_packet(manifest, base, read_json(args.packet))
+        elif args.command == "cutout":
+            from lc_cutout import make_cutout
+            result = make_cutout(manifest, base, args.reference, tolerance=args.tolerance)
+        elif args.command == "native-text-measure":
+            from lc_native_text import measure
+            blocks = read_json(args.blocks)
+            result = measure(manifest, base, args.job, blocks.get("blocks", blocks) if isinstance(blocks, dict) else blocks)
+        elif args.command == "anchor-approve":
+            from lc_anchor import anchor_approve
+            result = anchor_approve(manifest, base, args.job, notes=args.notes,
+                                    verdicts=read_json(args.verdicts) if args.verdicts else None)
         elif args.command == "migrate-dependencies":
             from lc_dependencies import migrate_dependencies
             result = migrate_dependencies(manifest, base, read_json(args.source_manifest), args.jobs,
@@ -2808,7 +2945,8 @@ def run_command(args) -> int:
                 result = (review_prepare(manifest, base, args.job, annotations, force=args.force) if args.job
                           else review_prepare_many(manifest, base, args.jobs, annotations, force=args.force))
             else:
-                packet = read_json(args.packet)
+                from lc_review_sheets import expand_todos
+                packet = expand_todos(base, read_json(args.packet))  # compact todos merge into bound packets
                 result = (review_submit(manifest, base, packet) if isinstance(packet, dict) and isinstance(packet.get("job"), str)
                           else review_submit_many(manifest, base, packet))
         if args.command in {"ingest", "transition"} and getattr(args, "_manifest_lock_timing", None):
@@ -2846,7 +2984,8 @@ def _run_main_args(args) -> int:
     if path is None or args.command == "status":
         return run_command(args)
     try:
-        if args.command in {"prepare", "plan", "compose", "postprocess", "qa", "finalize", "review-prepare", "review-submit", "title-effect-prepare"}:
+        if args.command in {"prepare", "plan", "compose", "postprocess", "qa", "finalize", "review-prepare", "review-submit",
+                            "title-effect-prepare", "source-review-prepare"}:
             from lc_transactions import run_staged_command
             selected = getattr(args, "jobs", None)
             if getattr(args, "job", None):
@@ -2857,15 +2996,19 @@ def _run_main_args(args) -> int:
                 with manifest_lock(path.expanduser().resolve()):
                     current = read_json(path.expanduser().resolve())
                     from lc_workflow import review_candidate
-                    selected = [job["id"] for job in current["jobs"] if review_candidate(job)]
+                    # "All ready" never re-opens images that already passed QA.
+                    selected = [job["id"] for job in current["jobs"]
+                                if review_candidate(job) and job.get("status") != "qa_passed"]
                 if not selected:
                     print(json.dumps({"ok": True, "manifest": str(path.resolve()), "packets": [], "skipped": "no_ready_jobs"}))
                     return 0
             if args.command == "review-submit":
                 from lc_workflow import review_packet_map
+                from lc_review_sheets import expand_todos
                 with manifest_lock(path.expanduser().resolve()):
                     current = read_json(path.expanduser().resolve())
-                    selected = list(review_packet_map(current, read_json(args.packet)))
+                    selected = list(review_packet_map(current, expand_todos(path.expanduser().resolve().parent,
+                                                                            read_json(args.packet))))
             def operation(stage_manifest_path):
                 staged_args = copy.copy(args)
                 staged_args.manifest = stage_manifest_path
@@ -2894,6 +3037,9 @@ def main() -> int:
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8")
+    # Commands no longer need hand-copied runtime paths: use the verified selection.
+    from lc_runtime_env import apply_selected_runtime
+    apply_selected_runtime()
     args = parser().parse_args()
     from lc_command_diagnostics import run_observed_command
     return run_observed_command(args, lambda: _run_main_args(args))

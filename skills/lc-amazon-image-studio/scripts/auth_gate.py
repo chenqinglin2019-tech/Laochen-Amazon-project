@@ -8,6 +8,7 @@ import json
 import platform
 from pathlib import Path
 import subprocess
+import sys
 
 
 SAFE_FAILURE = "云端鉴权未通过，本轮不继续执行。"
@@ -140,9 +141,22 @@ def require_auth() -> None:
         stop(failure_reason(payload))
     if payload.get("ok") is not True or payload.get("message") != "auth_passed":
         stop("invalid_response")
+    try:
+        # Short-lived local pass (no token) checked by plan/deliver; see lc_auth_pass.
+        from lc_auth_pass import write_pass
+        write_pass(skill_root())
+    except Exception as exc:  # noqa: BLE001 - the account check itself passed
+        print(f"auth pass record not written: {type(exc).__name__}", file=sys.stderr)
 
 
 def main() -> None:
+    # Chinese failure text must survive non-Chinese Windows code pages.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8")
+            except (OSError, ValueError):
+                pass
     require_auth()
     print('{"ok":true,"message":"auth_passed"}')
 

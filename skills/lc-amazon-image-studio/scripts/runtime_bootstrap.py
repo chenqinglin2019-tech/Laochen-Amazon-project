@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.parse
 import urllib.request
 import zipfile
@@ -60,6 +61,12 @@ BROWSER_SMOKE = """const {chromium}=require(process.argv[1]);
 const p=await b.newPage();await p.setContent('<p>Runtime preflight</p>');
 await p.screenshot({type:'png'});console.log(JSON.stringify({passed:true}));
 }finally{if(b)await b.close();}})().catch(e=>{console.error(e.message);process.exitCode=1;});"""
+
+
+VERIFIED_TTL_SECONDS = 7 * 24 * 3600
+# Runtime-facing sources whose change must force a real (uncached) verification.
+VERIFIED_SOURCES = ("scripts/lc_layout.py", "scripts/render_layout.mjs", "scripts/lc_typography.py",
+                    "scripts/runtime_bootstrap.py", "assets/layout-runtime.json", "assets/fonts/manifest.json")
 
 
 class BootstrapError(RuntimeError):
@@ -327,14 +334,10 @@ class RuntimeBootstrap:
         for candidate in candidates["chromium"]:
             if not Path(candidate).is_file():
                 continue
-            try:
-                version = _run([candidate, "--version"])
-                if re.search(r"(?<![\d.])" + re.escape(self.lock["chromium_version"]) + r"(?![\d.])", version):
-                    selected["chromium"] = candidate
-                    versions["chromium"] = self.lock["chromium_version"]
-                    break
-            except BootstrapError:
-                continue
+            if self._chromium_matches(candidate, selected["modules"]):
+                selected["chromium"] = candidate
+                versions["chromium"] = self.lock["chromium_version"]
+                break
         missing = []
         if not selected["python"]:
             if not usable_python:
@@ -475,6 +478,30 @@ class RuntimeBootstrap:
         return {"installer_package": package, "installer_modules": str(installer_modules),
                 "chromium_version": self.lock["chromium_version"], "rendering_playwright_version": self.lock["playwright_version"]}
 
+    def _chromium_matches(self, candidate, modules=None):
+        """`--version` first; Windows GUI-subsystem builds may print nothing, so fall
+        back to Chrome for Testing's `<version>.manifest` or the Playwright revision."""
+        wanted = self.lock["chromium_version"]
+        try:
+            output = _run([candidate, "--version"], timeout=20)
+        except BootstrapError:
+            output = ""
+        if re.search(r"(?<![\d.])" + re.escape(wanted) + r"(?![\d.])", output):
+            return True
+        if output.strip():
+            return False  # A real, different version was reported.
+        path = Path(candidate)
+        if (path.parent / f"{wanted}.manifest").is_file():
+            return True
+        revision = next((match.group(1) for part in path.parts
+                         for match in [re.fullmatch(r"chromium(?:_headless_shell)?-(\d+)", part)] if match), None)
+        if revision and modules:
+            for package in ("playwright-core", "playwright"):
+                if self._browser_manifest_matches(Path(modules) / package / "browsers.json", wanted, revision):
+                    return True
+        return revision == BOOTSTRAP_DEPENDENCIES["browser_installer"]["chromium_revision"] and \
+            wanted == BOOTSTRAP_DEPENDENCIES["browser_installer"]["chromium_version"]
+
     @staticmethod
     def _browser_manifest_matches(path, version, revision=None):
         try:
@@ -503,14 +530,82 @@ class RuntimeBootstrap:
         _run([selected["node"], "-e", BROWSER_SMOKE, str(Path(selected["modules"]) / "playwright"), selected["chromium"]], env=env, timeout=60)
         return {"doctor_passed": True, "python_modules_passed": True, "browser_launch_passed": True}
 
-    def verified_report(self):
+    @property
+    def verified_path(self):
+        return self.cache / "verified.json"
+
+    def _identity(self, selected):
+        """Cheap identity of the verified runtime: file stats, sources and platform."""
+        def stat(value):
+            try:
+                info = Path(value).stat()
+                return [str(value), info.st_size, info.st_mtime_ns]
+            except (OSError, TypeError):
+                return [str(value), None, None]
+        fonts = []
+        try:
+            for item in _json(self.root / "assets/fonts/manifest.json")["fonts"]:
+                fonts.append(stat(self.root / "assets/fonts" / item["file"]))
+        except (OSError, ValueError, KeyError, TypeError):
+            fonts.append(["fonts", None, None])
+        sources = {name: _sha(self.root / name) if (self.root / name).is_file() else None for name in VERIFIED_SOURCES}
+        modules = selected.get("modules")
+        return {"lock": self.cache.name, "python": stat(selected.get("python")), "node": stat(selected.get("node")),
+                "playwright": stat(Path(modules) / "playwright/package.json") if modules else None,
+                "chromium": stat(selected.get("chromium")), "fonts": fonts, "sources": sources,
+                "platform": [platform.system(), platform.release(), platform.machine(), sys.version.split()[0]],
+                "env": {name: os.environ.get(name) for name in ("LC_LAYOUT_PYTHON", "LC_LAYOUT_NODE",
+                                                                "LC_LAYOUT_NODE_MODULES", "LC_LAYOUT_CHROMIUM")}}
+
+    def _publish(self, report):
+        """Publish runtime paths (never account data) plus a time-limited verified stamp."""
+        self._prepare_cache()
+        stamp = {"schema": 1, "verified_at": time.time(), "selected": report["selected"],
+                 "versions": report.get("versions", {}), "commands": report["commands"],
+                 "identity": self._identity(report["selected"])}
+        for path, payload in ((self.selection_path, report["selected"]), (self.verified_path, stamp)):
+            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=path.stem + "-", suffix=".json",
+                                             dir=self.cache, delete=False) as stream:
+                json.dump(payload, stream, ensure_ascii=False, indent=2)
+                temporary = Path(stream.name)
+            os.replace(temporary, path)
+
+    def cached_report(self):
+        """Return a still-valid verification without relaunching the browser, else None."""
+        try:
+            stamp = _json(self.verified_path)
+            if (stamp.get("schema") != 1 or time.time() - float(stamp["verified_at"]) > VERIFIED_TTL_SECONDS
+                    or stamp["identity"] != self._identity(stamp["selected"])):
+                return None
+        except (OSError, ValueError, KeyError, TypeError):
+            return None
+        return {"ready": True, "verified": True, "verification_required": False, "cached_verification": True,
+                "verified_at": stamp["verified_at"], "missing": [], "installable": [], "needs_confirmation": False,
+                "selected": stamp["selected"], "versions": stamp["versions"], "commands": stamp["commands"],
+                "cache_dir": str(self.cache),
+                "next_action": "Use commands.python and commands.env for subsequent pipeline commands"}
+
+    def invalidate(self):
+        try:
+            self.verified_path.unlink()
+        except OSError:
+            pass
+
+    def verified_report(self, fresh=False):
+        if not fresh:
+            cached = self.cached_report()
+            if cached:
+                return cached
         report = self.inspect()
         if not report["ready"]:
+            self.invalidate()
             return report
         try:
             report["verification"] = self.verify(report)
             report.update({"verified": True, "verification_required": False, "next_action": "Use commands.python and commands.env for subsequent pipeline commands"})
+            self._publish(report)
         except (BootstrapError, OSError, ValueError) as exc:
+            self.invalidate()
             report.update({"ready": False, "verified": False, "needs_confirmation": True, "error": str(exc),
                            "next_action": "Review failed runtime verification with the user; do not begin production or install system packages automatically"})
         return report
@@ -550,12 +645,7 @@ class RuntimeBootstrap:
                 raise BootstrapError("Installed runtime does not match the unchanged lock; no version downgrade is allowed")
             report["verification"] = self.verify(report)
             # Only publish paths after real doctor and browser launch succeed.
-            if installed:
-                self._prepare_cache()
-                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix="selection-", suffix=".json", dir=self.cache, delete=False) as stream:
-                    json.dump(report["selected"], stream, ensure_ascii=False, indent=2)
-                    temporary = Path(stream.name)
-                os.replace(temporary, self.selection_path)
+            self._publish(report)
             report.update({"needs_confirmation": False, "verified": True, "verification_required": False,
                            "next_action": "Use commands.python and commands.env for subsequent pipeline commands",
                            "installation_performed": bool(installed), "installation_attempted": attempted, "installed": installed,
@@ -574,12 +664,13 @@ def main(argv=None):
     parser.add_argument("--authorization", choices=("unknown", "restricted", "full-access", "user-confirmed"), default="unknown",
                         help="Explicit installer permission supplied by Agent/user; never account authentication")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--fresh", action="store_true", help="verify: ignore a still-valid cached verification")
     args = parser.parse_args(argv)
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     try:
         bootstrap = RuntimeBootstrap()
-        report = bootstrap.inspect() if args.command == "inspect" else bootstrap.verified_report() if args.command == "verify" else bootstrap.install(args.authorization)
+        report = bootstrap.inspect() if args.command == "inspect" else bootstrap.verified_report(fresh=args.fresh) if args.command == "verify" else bootstrap.install(args.authorization)
     except (BootstrapError, OSError, ValueError) as exc:
         report = {"ready": False, "missing": [], "installable": [], "needs_confirmation": True, "error": str(exc)}
     if args.json:

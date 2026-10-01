@@ -23,10 +23,10 @@ from pathlib import Path
 
 from lc_inputs import image_input_paths
 from lc_runtime_status import (diagnostic_input_fingerprint, record_command_failure,
-                               record_command_success, record_interval, _clean_error)
+                               record_command_success, record_interval, _clean_error, diagnosis_expired)
 
 
-OBSERVED_COMMANDS = {"prepare", "plan", "compose", "postprocess", "qa", "finalize",
+OBSERVED_COMMANDS = {"prepare", "plan", "compose", "postprocess", "qa", "finalize", "source-review-prepare",
                      "review-prepare", "review-submit", "delivery-check", "deliver", "compact"}
 _PARAMETERS = {"jobs", "job", "packet", "annotations", "force", "tool_capacity",
                "tool_capacity_source", "tool_capacity_reason"}
@@ -175,7 +175,14 @@ def capture_context(args):
             "file_hashes": {str(file): _sha(file) for file in paths}}
 
 
-def _failure_scope(context, error):
+# Whole-project gates list every unfinished image in their errors; naming them
+# must not freeze those images out of dispatch.
+_PROJECT_SCOPE_COMMANDS = {"deliver", "delivery-check", "compact", "finalize"}
+
+
+def _failure_scope(context, error, command=None):
+    if command in _PROJECT_SCOPE_COMMANDS and not context["jobs"]:
+        return []
     candidates = context["jobs"] or [job["id"] for job in context["manifest"].get("jobs", [])]
     mentioned = [job for job in candidates if re.search(r"(?<![\w-])" + re.escape(job) + r"(?![\w-])", error)]
     return mentioned or context["jobs"]
@@ -196,7 +203,7 @@ def persist_observation(args, context, code, started_at, finished_at, *, error=N
     if error:
         normalized = _normalized_error(error, base)
         if not failures:
-            failures.append((_failure_scope(context, normalized), normalized))
+            failures.append((_failure_scope(context, normalized, args.command), normalized))
     elif code and not failures:
         failures.append((context["jobs"], f"Command returned exit code {code} without a structured error"))
     # Compute against the pre-command view and actual pre-command bytes. A
@@ -246,10 +253,14 @@ def run_observed_command(args, operation):
         latest[record.get("scope")] = record
     for record in latest.values():
         if (record.get("command") == args.command and record.get("diagnosis_required")
+                and not diagnosis_expired(record)
                 and record.get("input_spec", {}).get("parameters") == context["parameters"]
                 and diagnostic_is_current(context["manifest"], context["path"].parent, record)):
-            message = ("REPEATED_COMMAND_DIAGNOSIS_REQUIRED: unchanged inputs produced the same failure twice; "
-                       "diagnose the affected jobs before repeating this command")
+            jobs = record.get("jobs") or []
+            message = ("REPEATED_COMMAND_DIAGNOSIS_REQUIRED: unchanged inputs produced the same failure twice "
+                       f"({record.get('error', '')[:160]}). Fix that cause"
+                       + (f", or rerun without jobs {', '.join(jobs)} so other images continue" if jobs else "")
+                       + "; the block expires after 10 minutes.")
             args._command_error = message
             print(message, file=sys.stderr)
             if getattr(args, "json", False):

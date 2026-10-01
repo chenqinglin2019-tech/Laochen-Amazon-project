@@ -1,0 +1,110 @@
+{
+ "schema_version": 1,
+ "about": "V7 display faces for the style_v1 renderer (Latin subsets, SIL OFL 1.1, no Reserved Font Name). Non-Latin text falls back to bundled Noto fonts.",
+ "faces": {
+  "montserrat": {
+   "css_family": "Montserrat",
+   "generic": "sans",
+   "weights": {
+    "400": {
+     "file": "extra/montserrat-latin-400-normal.woff2",
+     "sha256": "e66bcd2761ab6924b25ce70dafe10e57a39193c4fea1516730bd9cb5240af6c8"
+    },
+    "700": {
+     "file": "extra/montserrat-latin-700-normal.woff2",
+     "sha256": "f9d9e65b15372cebcafc3acd1e664a564c5c4b23278de4d5760de9a13c530371"
+    }
+   },
+   "license_file": "extra/OFL-Montserrat.txt",
+   "source": "npm @fontsource/montserrat@5.3.0 (Latin subset of the Google Fonts release)"
+  },
+  "poppins": {
+   "css_family": "Poppins",
+   "generic": "sans",
+   "weights": {
+    "400": {
+     "file": "extra/poppins-latin-400-normal.woff2",
+     "sha256": "7d93459d86585bfcdbb7e0376056226adb25821ee54b96236fe2123e9560929f"
+    },
+    "600": {
+     "file": "extra/poppins-latin-600-normal.woff2",
+     "sha256": "f4e80d9dfd374d02989b87a27b5ed4cb78fbb177c27f1478e9a8b0afb7513149"
+    }
+   },
+   "license_file": "extra/OFL-Poppins.txt",
+   "source": "npm @fontsource/poppins@5.3.0 (Latin subset of the Google Fonts release)"
+  },
+  "oswald": {
+   "css_family": "Oswald",
+   "generic": "sans",
+   "weights": {
+    "500": {
+     "file": "extra/oswald-latin-500-normal.woff2",
+     "sha256": "541b12882301dc44b73eaaed9e230709df1d299379c3594695870fc2f9e3ff0a"
+    },
+    "700": {
+     "file": "extra/oswald-latin-700-normal.woff2",
+     "sha256": "aae665c75af89ea7cb7d8ccc8b0911ea72267442ebcd84f6e3efa041ad3b3c16"
+    }
+   },
+   "license_file": "extra/OFL-Oswald.txt",
+   "source": "npm @fontsource/oswald@5.3.0 (Latin subset of the Google Fonts release)"
+  },
+  "bebas_neue": {
+   "css_family": "Bebas Neue",
+   "generic": "sans",
+   "weights": {
+    "400": {
+     "file": "extra/bebas-neue-latin-400-normal.woff2",
+     "sha256": "a7c90c89240c134f7fdd33d40c000ec90b79d675ea53e8cc5a6d423c073de412"
+    }
+   },
+   "license_file": "extra/OFL-BebasNeue.txt",
+   "source": "npm @fontsource/bebas-neue@5.3.0 (Latin subset of the Google Fonts release)"
+  },
+  "nunito": {
+   "css_family": "Nunito",
+   "generic": "sans",
+   "weights": {
+    "400": {
+     "file": "extra/nunito-latin-400-normal.woff2",
+     "sha256": "a5906e15ceb68f73d3b2c2076b4057c3f6ed401186d56283b45ce12944ca0735"
+    },
+    "800": {
+     "file": "extra/nunito-latin-800-normal.woff2",
+     "sha256": "2363d3ed037283ebb961e8c4b4917e40a8bc8853cf9965cf1ea7b4daa1df630a"
+    }
+   },
+   "license_file": "extra/OFL-Nunito.txt",
+   "source": "npm @fontsource/nunito@5.3.0 (Latin subset of the Google Fonts release)"
+  },
+  "libre_baskerville": {
+   "css_family": "Libre Baskerville",
+   "generic": "serif",
+   "weights": {
+    "400": {
+     "file": "extra/libre-baskerville-latin-400-normal.woff2",
+     "sha256": "3eb80fbca70498126925ce16ff5c20b2fa35e67ae7123ddb46302d2778dfbf0e"
+    },
+    "700": {
+     "file": "extra/libre-baskerville-latin-700-normal.woff2",
+     "sha256": "96fa63376eed93029fa2514a02f5cb80276b016e239426858787de6e794d8619"
+    }
+   },
+   "license_file": "extra/OFL-LibreBaskerville.txt",
+   "source": "npm @fontsource/libre-baskerville@5.3.0 (Latin subset of the Google Fonts release)"
+  },
+  "pacifico": {
+   "css_family": "Pacifico",
+   "generic": "sans",
+   "weights": {
+    "400": {
+     "file": "extra/pacifico-latin-400-normal.woff2",
+     "sha256": "99ec044ad9040a708e38f90ebd5984ca03fc46afeee26d5c77c4769c66ed89e2"
+    }
+   },
+   "license_file": "extra/OFL-Pacifico.txt",
+   "source": "npm @fontsource/pacifico@5.3.0 (Latin subset of the Google Fonts release)"
+  }
+ }
+}

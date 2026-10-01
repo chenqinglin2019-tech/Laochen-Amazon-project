@@ -1,4 +1,4 @@
 {
   "backend_url": "https://mcp.yixunkuajing.com",
-  "backend_token": "<set-local-token>"
+  "backend_token": "YOUR_BACKEND_TOKEN"
 }

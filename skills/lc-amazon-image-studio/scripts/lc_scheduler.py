@@ -125,6 +125,11 @@ def anchor_passed(manifest, base=None):
     proof = job.get("product_review_proof")
     if base is None:
         return job.get("status") == "qa_passed"
+    if job.get("anchor_product_proof"):
+        # V7 quick-check: the raw anchor product was judged; full review follows later.
+        from lc_anchor import anchor_quick_proof_valid
+        if anchor_quick_proof_valid(manifest, job, base):
+            return True
     if not proof:
         # Legacy projects have no immutable product submission. With actual
         # files available, status alone cannot authorize a changed image.

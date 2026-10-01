@@ -328,11 +328,30 @@ def _merge(builtin: dict, user: dict) -> dict:
     return _validated(merged)
 
 
+def _default_user_path() -> Path:
+    """V7: text-only user records live in the per-user library (survives upgrades)."""
+    from lc_template_library import Library
+    library = Library()
+    return library.v1_path if library.v1_path.exists() or not DEFAULT_USER.exists() else DEFAULT_USER
+
+
+def _builtin_document(builtin_path: Path, explicit: bool) -> dict:
+    """A disabled (default path only), missing, zero-byte or empty built-in file is an empty library."""
+    if not explicit:
+        from lc_template_library import Library
+        if not Library().builtin_enabled():
+            return empty_library()
+    if not builtin_path.exists() or builtin_path.stat().st_size == 0:
+        return empty_library()
+    return _validated(_read_json(builtin_path))
+
+
 def load_library(builtin_path: Path | str | None = None, user_path: Path | str | None = None) -> dict:
-    builtin_path, user_path = Path(builtin_path or DEFAULT_BUILTIN), Path(user_path or DEFAULT_USER)
+    explicit_builtin = builtin_path is not None
+    builtin_path, user_path = Path(builtin_path or DEFAULT_BUILTIN), Path(user_path or _default_user_path())
     if builtin_path.resolve() == user_path.resolve():
         raise TemplateError("Built-in and user libraries must be separate files")
-    builtin = _validated(_read_json(builtin_path))
+    builtin = _builtin_document(builtin_path, explicit_builtin)
     user = _validated(_read_json(user_path), check_references=False) if user_path.exists() else empty_library()
     return _merge(builtin, user)
 
@@ -366,11 +385,12 @@ def import_library(payload: dict, user_path: Path | str | None = None, builtin_p
     nonidentical designs are reported for agent review, not silently merged.
     """
     payload = copy.deepcopy(_validated(payload, check_references=False))
-    user_path, builtin_path = Path(user_path or DEFAULT_USER), Path(builtin_path or DEFAULT_BUILTIN)
+    explicit_builtin = builtin_path is not None
+    user_path, builtin_path = Path(user_path or _default_user_path()), Path(builtin_path or DEFAULT_BUILTIN)
     if user_path.resolve() == builtin_path.resolve():
         raise TemplateError("Import may not overwrite the built-in library")
     with _selection_lock(user_path):
-        builtin = _validated(_read_json(builtin_path))
+        builtin = _builtin_document(builtin_path, explicit_builtin)
         user = _validated(_read_json(user_path), check_references=False) if user_path.exists() else empty_library()
         merged = _merge(builtin, user)
         result = {"added": {"sources": [], "families": [], "templates": []}, "reused": {"sources": [], "families": [], "templates": []}, "source_map": {}, "family_map": [], "template_map": [], "similar_candidates": []}
@@ -648,10 +668,11 @@ def binding_issue(binding: Any) -> str | None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--builtin", type=Path, default=DEFAULT_BUILTIN)
-    parser.add_argument("--user", type=Path, default=DEFAULT_USER)
+    parser.add_argument("--builtin", type=Path, default=None, help="Explicit built-in file (default: skill file unless disabled)")
+    parser.add_argument("--user", type=Path, default=None, help="Explicit v1 user file (default: per-user library)")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("list", help="Return the merged, text-only library")
+    listing = commands.add_parser("list", help="Compact family/template index (use --full for complete records)")
+    listing.add_argument("--full", action="store_true")
     validate = commands.add_parser("validate", help="Validate the merged library or a complete JSON library")
     validate.add_argument("--input", type=Path)
     importer = commands.add_parser("import", help="Atomically add agent-reviewed JSON records")
@@ -670,7 +691,11 @@ def main(argv: list[str] | None = None) -> int:
         else:
             library = load_library(args.builtin, args.user)
             if args.command == "list":
-                result = library
+                result = library if args.full else {
+                    "families": [{"id": f["id"], "revision": f["revision"], "name": f.get("name"),
+                                  "categories": f.get("categories", [])} for f in _latest(library["families"])],
+                    "templates": [{"id": t["id"], "family_id": t["family_id"], "recipe": t.get("recipe"),
+                                   "intents": t.get("intents", [])} for t in _latest(library["templates"])]}
             elif args.command == "validate":
                 result = {"valid": True, "errors": [], "counts": {key: len(library[key]) for key in ("sources", "families", "templates")}}
             else:
@@ -678,7 +703,7 @@ def main(argv: list[str] | None = None) -> int:
                 families = rank_families(library, context)
                 family_id = args.family_id or (families[0]["id"] if families else None)
                 result = {"families": families, "templates": rank_templates(library, family_id, _read_json(args.job)) if args.job and family_id else [], "selected_family_id": family_id}
-        print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+        print(json.dumps(result, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
         return 2 if isinstance(result, dict) and result.get("valid") is False else 0
     except (TemplateError, OSError) as exc:
         print(json.dumps({"error": str(exc)}, ensure_ascii=False))

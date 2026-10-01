@@ -107,6 +107,8 @@ def rule_hashes(scope, manifest, job):
     modules = {"lc_assets.py", "lc_quality.py", "lc_design.py", "lc_project_contracts.py", "lc_review_rules.py"}
     if job.get("kind") != "main" and job.get("text_mode") != "model_native" and job.get("layout"):
         modules.update({"lc_layout.py", "lc_layout_v3.py", "lc_typography.py", "render_layout.mjs"})
+        if (job.get("layout") or {}).get("renderer") == "style_v1":
+            modules.update({"lc_layout_style.py", "render_layout_style.mjs"})
     if job.get("title_effect_state") or any(group.get("decorative_effect") for group in job.get("layout", {}).get("text_groups", [])):
         modules.add("lc_title_effects.py")
     if job.get("background_normalization") is not None:
