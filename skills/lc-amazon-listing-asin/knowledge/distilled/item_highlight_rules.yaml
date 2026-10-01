@@ -1,4 +1,4 @@
-version: '2.0'
+version: '2.2'
 domain: item_highlight
 contract_ref: ../data_contract.md
 policy_ref: ../quality_policy.json
@@ -7,25 +7,21 @@ rules:
 - id: highlight_scalar
   type: required
   source_id: user_family_rules
-  prompt_fragment: Item Highlight 始终是一个字符串，写为自然短句或短语。它与 bullets 独立；不创建重复的 subtitle 字段，不把多条五点塞入 Highlight。
+  prompt_fragment: Item Highlight 始终是一个字符串（自然短句或短语），独立于 bullets；不另建 subtitle 字段，不把多条五点塞进来。
 - id: highlight_budget
   type: required
   source_id: amazon_title_2026
-  prompt_fragment: 字符预算、适用范围与核验日期读取统一政策；计入空格。若目标类目未支持该字段，报告具体限制，不静默改成其他字段。
+  prompt_fragment: ≤125 字符（含空格）。官方定位是补充材质或推荐用途，可被搜索，并与标题一起展示。目标类目不支持该字段时报告具体限制。
   limit_ref: default_limits.item_highlight_max_chars
 - id: highlight_purchase_reason
   type: editorial
-  source_id: skill_editorial_v2
-  prompt_fragment: 补充标题未表达的主要购买理由，如已确认的材质、结构、适配范围或使用方式。避免重复整句或同一卖点，但不禁止为清楚表达而自然重复必要名词。
+  source_id: amazon_title_2026
+  prompt_fragment: 写标题没写到的已确认材质、结构、适配范围或使用场景，优先带上 intent_map 中最重要的用途或人群表达，以及标题放不下的高流量 eligible 词。不重复标题整句。
 - id: highlight_parent_scope
   type: required
   source_id: user_family_rules
-  prompt_fragment: 父 Highlight 只能用根级 confirmed 事实，不含具体子体属性值。多色可选、多种容量等文字必须由实际提供的不同属性值支持；不能从竞品系列推断本品系列。
+  prompt_fragment: 父 Highlight 只用根级 confirmed 事实，不含具体子体属性值。"多色可选"之类的表述必须有实际提供的子体支持。
 - id: highlight_variant_scope
   type: required
   source_id: user_family_rules
-  prompt_fragment: 每个子体独立输出一条对应 Highlight。只含本子体有效事实与参数；仅颜色不同且没有证据支持其他差异时，允许主体表达相同，不编造性能或人群差异。
-- id: highlight_traceable_answers
-  type: editorial
-  source_id: skill_ai_answerability
-  prompt_fragment: 可以回答与本品相关且有事实支持的购买问题。参数引用本子体规范化 display_text；问题采集状态不能代替答案证据。
+  prompt_fragment: 每个子体单独一条 Highlight，只含本子体的有效事实与参数。仅颜色不同时可以主体相同，不编造性能或人群差异。

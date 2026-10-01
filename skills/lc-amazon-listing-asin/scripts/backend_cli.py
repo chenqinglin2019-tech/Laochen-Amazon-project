@@ -127,8 +127,49 @@ def _write_json(path, data):
             os.unlink(temporary)
 
 
+POLICY_PATH = ROOT / "knowledge" / "quality_policy.json"
+EXPAND_META_SUFFIX = ".meta.json"
+
+
+def _asin_key(asins):
+    return sorted({a.strip().upper() for a in asins.split(",") if a.strip()})
+
+
+def qa_keyword_count(path):
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"), parse_constant=_reject_constant)
+    groups = data.get("title_keywords", {}) if isinstance(data, dict) else {}
+    words = []
+    for field in ("high", "relevant"):
+        for word in groups.get(field, []) if isinstance(groups.get(field), list) else []:
+            if isinstance(word, str) and word.strip().casefold() not in words:
+                words.append(word.strip().casefold())
+    return len(words)
+
+
+def find_reusable_expand(output, asins, site, days):
+    """Return a sibling task's raw expand file for the same ASIN set and site within N days."""
+    import time
+    output = Path(output).resolve()
+    tasks_root = output.parent.parent
+    wanted = {"asins": _asin_key(asins), "site": site}
+    best = None
+    for meta_path in tasks_root.glob("*/02_kw_raw.json" + EXPAND_META_SUFFIX):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        raw_path = meta_path.with_name("02_kw_raw.json")
+        if (meta.get("asins") != wanted["asins"] or meta.get("site") != site or meta.get("reused_from")
+                or raw_path.resolve() == output or not raw_path.is_file()):
+            continue
+        age = time.time() - float(meta.get("fetched_at_epoch", 0))
+        if 0 <= age <= days * 86400 and (best is None or meta["fetched_at_epoch"] > best[1]["fetched_at_epoch"]):
+            best = (raw_path, meta)
+    return best
+
+
 def run_cli(command, *, site, asins=None, keywords_file=None, listing_file=None,
-            output=None, config=None, cli=None, timeout=None):
+            output=None, config=None, cli=None, timeout=None, reuse_days=0):
     """Return only safe data; exit_code is the actual child code, or None if absent.
 
     Explicit CLI/config paths support existing installations and offline tests.
@@ -140,6 +181,23 @@ def run_cli(command, *, site, asins=None, keywords_file=None, listing_file=None,
             raise BackendError("invalid_arguments", "Choose expand/qa/validate and an explicit supported site.")
         if command == "qa" and site != "US":
             raise BackendError("qa_us_only", "The current QA connector accepts US only; record the documented local skip for other sites.")
+        if command == "qa" and keywords_file is not None and Path(keywords_file).is_file():
+            limit = json.loads(POLICY_PATH.read_text(encoding="utf-8")).get("qa_max_keywords")
+            try:
+                count = qa_keyword_count(keywords_file)
+            except (OSError, ValueError):
+                raise BackendError("input_invalid", "The keywords file is not valid JSON.") from None
+            if limit and count > limit:
+                raise BackendError("qa_too_many_keywords", "QA request has %d keywords; keep at most %d high-traffic identity/intent words in title_keywords (no request was sent)." % (count, limit))
+        if command == "expand" and reuse_days and output is not None and isinstance(asins, str):
+            found = find_reusable_expand(output, asins, site, reuse_days)
+            if found is not None:
+                raw_path, meta = found
+                response = json.loads(raw_path.read_text(encoding="utf-8-sig"), parse_constant=_reject_constant)
+                _write_json(Path(output), response)
+                _write_json(Path(str(output) + EXPAND_META_SUFFIX), dict(meta, reused_from=str(raw_path.parent.name)))
+                result.update(exit_code=0, response=response, reused_from=str(raw_path.parent.name))
+                return result
         timeout = (120 if command == "validate" else None) if timeout is None else timeout
         if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0):
             raise BackendError("invalid_arguments", "Timeout must be a finite positive number of seconds.")
@@ -192,6 +250,10 @@ def run_cli(command, *, site, asins=None, keywords_file=None, listing_file=None,
             result["response"] = redact(response, secrets)
         if output_path is not None:
             _write_json(output_path, result["response"])
+            if command == "expand" and completed.returncode == 0:
+                import time
+                _write_json(Path(str(output_path) + EXPAND_META_SUFFIX),
+                            {"asins": _asin_key(asins), "site": site, "fetched_at_epoch": time.time()})
         if completed.returncode != 0:
             raise BackendError("cli_failed", "CLI exited unsuccessfully; inspect its exit code and redacted response.")
         if command == "validate":
@@ -226,11 +288,16 @@ def main(argv=None):
         command.add_argument("--config", help="Config file path; defaults to this Skill's config.json")
         command.add_argument("--cli", help="Optional executable path; otherwise selected for the current platform")
         command.add_argument("--timeout", type=float, help="Seconds; expand/qa keep CLI polling limits, validate defaults to 120")
+        if name == "expand":
+            command.add_argument("--reuse-days", type=float, default=0,
+                                 help="Reuse a sibling task's expand result for the same ASIN set and site fetched within N days (0 = always request)")
     args = parser.parse_args(argv)
     result = run_cli(**vars(args))
     success = result["exit_code"] == 0 and "failure_reason" not in result
     summary = {"command": args.command, "status": "completed" if success else "failed",
                "exit_code": result["exit_code"]}
+    if result.get("reused_from"):
+        summary["reused_from"] = result["reused_from"]
     if "failure_reason" in result:
         summary.update(error_code=result["error_code"], message=result["failure_reason"])
     if args.command == "validate" and args.output is None:

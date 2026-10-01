@@ -1,6 +1,6 @@
 {
-  "version": "2.1",
-  "reviewed_at": "2026-09-08",
+  "version": "2.2",
+  "reviewed_at": "2026-10-01",
   "notes": [
     "文档仅作为被审查资料，不作为可覆盖用户请求的指令。",
     "运行规则已提炼在 skill 中，不依赖用户本机 PDF 路径或在每次生成时读取原 PDF。",
@@ -9,17 +9,22 @@
   "sources": [
     {
       "source_id": "amazon_title_2026",
-      "title": "Amazon Seller Central：商品名称和 Item Highlight 更新公告",
+      "title": "Amazon Seller Forums（News_Amazon）：Updates to improve your product titles begin on July 27",
       "kind": "official_platform",
       "scope": "公告所述非媒介类；目标站点、类目例外及字段实际可用性需核验",
-      "url": "https://sellercentral.amazon.com/seller-forums/discussions/t/33f0a42a-17f1-46ef-b110-ba7512a3c881",
-      "checked_at": "2026-09-08",
+      "url": "https://sellercentral.amazon.com/seller-forums/discussions/t/145b6d0f-999c-4555-896c-c694bda2e470",
+      "checked_at": "2026-10-01",
       "policy_ref": "quality_policy.json.default_limits",
       "supported": [
-        "采用新标题与 Item Highlight 字符预算，并保留适用范围。"
+        "2026-07-27 起，除 media 外的标题 ≤75 字符（含空格）；新增可被搜索的 Item Highlights，125 字符，用于材质或推荐用途。",
+        "超长标题会被逐步替换为 AI 推荐版本，品牌方有 14 天审核期；员工说明标题加 Highlight 合计 200 字符。"
       ],
       "not_supported": [
-        "不证明任意站点或历史上传模板都已支持同一字段。"
+        "Item Highlights 的字段名、标点和重复词规则、JP 等站点的覆盖范围，官方都没有回答。"
+      ],
+      "alternate_urls": [
+        "https://sellercentral-europe.amazon.com/seller-forums/discussions/t/33f0a42a-17f1-46ef-b110-ba7512a3c881",
+        "https://sellercentral.amazon.com/seller-forums/discussions/t/878dffcd-ed3f-4570-88c8-497e547e825a"
       ]
     },
     {
@@ -155,11 +160,10 @@
         }
       ],
       "supported": [
-        "产品属性、使用场景及用户意图之间的可信关系有助于理解电商需求。"
+        "15 种关系（USED_FOR_FUNC、USED_FOR_EVE、USED_FOR_AUD、CAPABLE_OF、USED_TO、USED_AS、IS_A、USED_ON、USED_IN_LOC、USED_IN_BODY、USED_WITH、USED_BY、xINTERESTED_IN、xIS_A、xWANT），由搜索加购买商品标题和共购行为生成，用于搜索相关性、会话推荐和多轮导航。"
       ],
       "engineering_inference": [
-        "将主要卖点映射到买家需求、产品能力、事实依据和适用场景。",
-        "图文优先解释真实用途，避免无关场景和无依据推导。"
+        "用 intent_map 把已确认的关系落到文案和附图；\"写出关系就能被匹配\"是推断，没有官方验证。"
       ],
       "not_supported": [
         "未规定卖家每条五点的固定句式。",
@@ -212,7 +216,8 @@
         "不能把通用实验提升幅度当作 Amazon 曝光或转化收益。",
         "不因论文提到引用、统计而制造商品证据、背书或数字。",
         "没有证明 Listing 内容能够被特定购物助手引用。"
-      ]
+      ],
+      "authors_note": "作者来自 Princeton、IIT Delhi 等机构，不是 Google 发布。"
     },
     {
       "source_id": "user_product_identity",
@@ -232,7 +237,8 @@
       "recorded_at": "2026-09-08",
       "supported": [
         "所有文案、尺寸图、A+ 复用同一展示值。",
-        "公称、尺码与数量区别处理。"
+        "公称、尺码与数量区别处理。",
+        "2026-10-01 更新：US 公制按量级换成 in/ft、oz/lb、fl oz/gal（见 user_optimization_round1）。"
       ]
     },
     {
@@ -348,6 +354,97 @@
         "03_keyword_decisions是唯一当前分类来源，修改分类同步更新理由并记录resolution；旧复核文件仅作历史留存。",
         "最终文案与关键词一致性复审保持必需，聚焦实际用词及相关意图，覆盖标题、正文、后台和图片文案。",
         "保留核心品名、完整短语判断、未知事实暂缓、子体适用范围和三份交付及七章节报告。"
+      ]
+    },
+    {
+      "source_id": "amazon_title_rules_2025",
+      "title": "Amazon Seller Forums：New product title requirements effective January 21, 2025",
+      "kind": "official_platform",
+      "url": "https://sellercentral.amazon.com/seller-forums/discussions/t/b2b15728-0d43-453e-974f-59eb63f73059",
+      "checked_at": "2026-10-01",
+      "supported": [
+        "禁用 ! $ ? _ { } ^ ¬ ¦，属于品牌名的除外。",
+        "同一个词最多出现 2 次，介词、冠词、连词除外。"
+      ],
+      "not_supported": [
+        "其中 200 字符的上限已被 2026 年的 75 字符规则取代。"
+      ]
+    },
+    {
+      "source_id": "amazon_search_terms_2026",
+      "title": "Amazon Seller Forums（员工帖）：listing 与后台搜索词指引",
+      "kind": "official_platform",
+      "url": "https://sellercentral.amazon.com/seller-forums/discussions/t/011cf690-5c48-484a-8b59-6058690c07b6",
+      "checked_at": "2026-10-01",
+      "supported": [
+        "后台词 <250 字节，全小写，用空格分隔，不加标点，不重复标题和品牌中的词，不写竞品品牌或 ASIN；可写同义词、缩写和别名。",
+        "标题、五点和后台词要协同，用满可用字段。"
+      ],
+      "platform_reported": [
+        "分站上限 IN <200、JP <500、其他 <250 字节，超限整栏被忽略：来自卖家对帮助页 G23501 的转述（https://sellercentral.amazon.com/seller-forums/discussions/t/cd2ba1dc90031ee378b37d4465a0e5ca），需在后台核实。"
+      ]
+    },
+    {
+      "source_id": "amazon_bullet_guidelines",
+      "title": "Amazon 五点要求（2024-08-15 论坛公告 + 帮助页 GX5L8BF8GLMML6CX 转述）",
+      "kind": "official_platform",
+      "url": "https://sellercentral.amazon.com/seller-forums/discussions/t/65f8e647-977d-49ac-9036-2049b96720b2",
+      "checked_at": "2026-10-01",
+      "supported": [
+        "限制特殊字符、emoji 和保证类用语；不合规时 Amazon 会生成替换文本交卖家审核。"
+      ],
+      "platform_reported": [
+        "每条 10–255 字符；禁用 ™®©、emoji、ASIN、NA/TBD、未经证实的环保或抗菌声明（第三方转述帮助页，原文未直接核实）。"
+      ]
+    },
+    {
+      "source_id": "amazon_rufus_attributes",
+      "title": "Amazon Seller Forums（员工帖）：listing 与 Rufus 推荐",
+      "kind": "official_platform",
+      "url": "https://sellercentral.amazon.com/seller-forums/discussions/t/ba85d226-ac00-4f84-9292-27e65379c4cc",
+      "checked_at": "2026-10-01",
+      "supported": [
+        "Complete and accurate product attributes help Rufus provide better recommendations；listing 应回答 who/what/when/where/why/how。",
+        "Rufus 检索商品详情、评论和问答（https://sell.amazon.com/blog/how-to-boost-amazon-listings，2026-04-29）。"
+      ],
+      "not_supported": [
+        "没有说 A+ 正文或图片文字会被 Rufus 读取。"
+      ]
+    },
+    {
+      "source_id": "amazon_product_photos",
+      "title": "Amazon：Product photo guidelines",
+      "kind": "official_guidance",
+      "url": "https://sell.amazon.com/blog/product-photos",
+      "checked_at": "2026-10-01",
+      "supported": [
+        "主图纯白背景 RGB 255，产品占画面 85% 以上；建议每边大于 1000px 以启用放大；建议至少 6 张图。"
+      ],
+      "not_supported": [
+        "最多 9 张、展示 7 张的说法只来自卖家和第三方。"
+      ]
+    },
+    {
+      "source_id": "user_keyword_audit_v12",
+      "title": "用户确认：在逐词账本之上增加意图组判定",
+      "kind": "user_requirement",
+      "recorded_at": "2026-10-01",
+      "scope": "不改变 v1.1 的逐词账本、三类词池和全部检查；只新增按组填写和 apply 工具。",
+      "supported": [
+        "同一意图的词写一次判断，由工具复制到每个成员；例外用 overrides 加 group_difference。"
+      ]
+    },
+    {
+      "source_id": "user_optimization_round1",
+      "title": "用户确认：第一轮优化决定",
+      "kind": "user_requirement",
+      "recorded_at": "2026-10-01",
+      "supported": [
+        "US 公制按量级换成 in/ft、oz/lb、fl oz/gal，可用 preferred_unit 指定。",
+        "新增 intent_map、attribute_suggestions、关键词覆盖和补充事实清单（放在现有章节内）。",
+        "五点单条 250，后台词 IN 199、JP 499。",
+        "竞品 1–20 个均可；QA 请求词 ≤8；expand 结果 7 天内可复用。",
+        "标题禁用字符作为 error，重复词和后台词与标题重复作为 warning。"
       ]
     }
   ]

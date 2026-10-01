@@ -1,4 +1,4 @@
-version: '2.0'
+version: '2.2'
 domain: general
 contract_ref: ../data_contract.md
 policy_ref: ../quality_policy.json
@@ -7,53 +7,44 @@ rules:
 - id: evidence_order
   type: required
   source_id: user_product_identity
-  prompt_fragment: 产品身份与确认事实优先于平台格式规则之外的流量建议。官方平台要求、研究论文结论、内部写作策略分开标明来源与范围；sources.json 是出处登记，quality_policy.json
-    是数字预算唯一配置。
+  prompt_fragment: 产品身份和已确认事实优先于流量建议。官方平台要求、研究论文结论和内部写作策略要分开标明来源；quality_policy.json 是数字预算的唯一配置。
 - id: identity_not_downgraded
   type: required
   source_id: user_product_identity
-  prompt_fragment: 原始品名与 protected_terms 是必保产品身份；后台商品类型枚举、竞品主词和所谓官方关键词均不能代替用户实际产品。若术语存在歧义，先核实本品身份，不为搜索量强行更名。
+  prompt_fragment: 原始品名和 protected_terms 是必保的产品身份。后台类目枚举、竞品主词或所谓官方词都不能替代用户的实际产品；术语有歧义时先核实，不为搜索量改名。
+- id: a9_coverage
+  type: editorial
+  source_id: amazon_search_terms_2026
+  prompt_fragment: 标题、五点和后台词要协同，用满可用字段（Amazon 员工指引）。目标是让高流量 eligible 词的每个词都出现在某个可索引字段里：核心词进标题，次要词进 Highlight 或五点，剩余的同义词和长尾进后台词。用 coverage 报告检查覆盖率和后台字节利用率，最多改进一轮，不把覆盖率当成堆砌关键词的理由。
+- id: cosmo_intents
+  type: editorial
+  source_id: cosmo_paper
+  prompt_fragment: COSMO 由搜索词加购买商品标题生成 15 类"产品—意图"常识关系（用途/功能、事件、人群、地点、季节、身体部位、搭配、产品类型等），用于搜索相关性、导航和推荐。按 intent_map 把已确认的关系用自然语句写进标题、Highlight、五点或长描，并让附图展示同样的场景。论文没有给出卖家字段权重，不写无依据的关系。
+- id: shopping_assistant
+  type: editorial
+  source_id: amazon_rufus_attributes
+  prompt_fragment: Alexa for Shopping（原 Rufus）从商品详情、评论和问答中检索信息。Amazon 员工指引是：完整准确的属性有助于被推荐，listing 应回答 who/what/when/where/why/how。因此要交付 attribute_suggestions 和至少 6 项问答覆盖矩阵，所有站点都适用。
 - id: keywords_candidate_pool
   type: required
   source_id: user_product_identity
-  prompt_fragment: 筛词流程必须执行 keyword_filter_rules.yaml，以统一工具导出的 eligible 词作为候选池；deferred/excluded 不进入投放或 QA。04_kw_tagged 保留旧标签以兼容接口，同时增加 role、intent_group、source、traffic_percentage 和
-    applies_to。identity 优先级不受旧 high/relevant 标签限制；05_title_keywords 记录实际投放计划，不是标题必须覆盖词数的配额。
-- id: keywords_intent_group
-  type: editorial
-  source_id: skill_editorial_v2
-  prompt_fragment: 归并同义、词序变化和同一需求表达，使用一致的保留标准。以本品相关性和实际用户词汇筛选，再参考真实流量；无流量数据标未知。每个选词说明对应本品事实或需求，不机械保留 gifts、kids
-    等泛词。
+  prompt_fragment: 只用统一工具导出的 eligible 词和有依据的本品补充词做候选；deferred/excluded 不进入投放或 QA。05 的 placement_plan 最终由 coverage --write-placement 按实际文案生成。
 - id: competitor_boundary
   type: required
   source_id: user_product_identity
-  prompt_fragment: 竞品 ASIN 整组扩词和问答仅帮助理解搜索及需求，不能证明本品材质、尺寸、认证、性能、适配或变体组合；禁止要求本品文案覆盖竞品整组共性。
-- id: seo_plain_language
-  type: editorial
-  source_id: seo_guide
-  prompt_fragment: 标题帮助识别产品，五点支持购买判断，长描补充信息，后台词补充表达。前台允许自然重复品名，不写固定字段权重、关键词重复次数或相同词序必然优于自然表达的伪官方规则。
-- id: cosmo_relation_planning
-  type: editorial
-  source_id: cosmo_paper
-  prompt_fragment: COSMO 研究表明产品与用户需求、使用场景之间的常识关系可用于电商搜索推荐。本 skill 将其转化为卖点规划：买家需求—产品能力—事实依据—适用场景。此转化是工程推导，不是论文规定的卖家字段模板或已公开排名公式。
-- id: geo_research_boundary
+  prompt_fragment: 竞品扩词和问答只帮助理解搜索需求，不能证明本品的材质、尺寸、认证、性能、适配或变体组合。不要求本品文案覆盖竞品的共性；竞品品牌词不进入本品文案。
+- id: geo_specificity
   type: editorial
   source_id: geo_paper
-  prompt_fragment: GEO 是通用生成式检索研究，采用具体、流畅、有证据的表达作为写作启发；不照搬实验百分比，不承诺 Amazon 收录或排名提升，不添加无法验证的引文、统计或权威口吻。
+  prompt_fragment: GEO 论文（Princeton/IIT Delhi 等，KDD 2024）中具体数据、来源引用和流畅表达能提升生成式引擎的可见度，关键词堆砌无效。用真实参数、已确认的认证和清晰条件句来写；该论文没有在 Amazon 上验证，不承诺收录或排名。
 - id: qa_relevance_gate
   type: required
   source_id: skill_ai_answerability
-  prompt_fragment: 06_qa.raw.json 保存 US 后端原始响应；06_qa.json 保存 requested_keywords 和逐题 question_reviews。irrelevant/uncertain
-    不写答案，相关而缺事实为 unsupported；自拟问题不得冒充后端结果。只有 answered 的问题才进入已覆盖清单。
-- id: ai_all_sites
-  type: required
-  source_id: skill_tool_scope
-  prompt_fragment: 清楚的身份、规格、适配和限制适用于所有站点。qa 接口仅在 US 启用是现有工具范围，不是非 US 不能做清晰问答表达或 AI 信息优化的依据。非 US 按契约写 skipped
-    状态，不冒用 US 采集数据。
-- id: no_image_ranking_formula
+  prompt_fragment: 06_qa.raw.json 保存 US 原始响应；06_qa.json 逐题写 question_reviews。irrelevant 或 uncertain 的问题不写答案；相关但缺事实的写 unsupported；自拟问题标 local_editorial，不冒充后端结果。
+- id: visual_boundary
   type: editorial
   source_id: amazon_visual_search
-  prompt_fragment: 视觉购物能力不等于图片嵌入关键词必然被索引或加权。用真实图片证明购买理由，关键参数同步在正文；记录画面、事实和需求的对应，不承诺搜索或 AI 排名效果。
+  prompt_fragment: Lens Live 用视觉向量匹配商品，官方没有说图片文字（OCR）、文件名或 alt 会进入检索。真实图片用来证明购买理由，关键参数同步写在正文里。
 - id: semantic_review_required
   type: required
   source_id: skill_editorial_v2
-  prompt_fragment: 机器检查只能确认结构、数值和引用范围，不能证明语序自然或营销承诺成立。生成后独立复审身份、可读性、事实、语言、子体范围、问题相关性、实际关键词使用和画面真实性；不得以文件已生成替代验收通过。
+  prompt_fragment: 机器检查只能确认结构、数值和引用范围。生成后由独立复审检查身份、可读性、事实、语言、子体范围、问题相关性、关键词实际使用和画面真实性；文件生成不等于验收通过。

@@ -268,3 +268,39 @@ class QuarantineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RequestSavingTests(unittest.TestCase):
+    def setUp(self):
+        quarantine = patch.object(backend, "_clear_quarantine"); quarantine.start(); self.addCleanup(quarantine.stop)
+        temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup); self.root = Path(temp.name)
+        self.config = self.root / "config.json"; self.config.write_text(json.dumps(CONFIG), encoding="utf-8")
+        self.cli = self.root / "fake-cli"; self.cli.write_text("fake", encoding="utf-8")
+
+    def test_qa_keyword_cap_is_enforced_before_any_request(self):
+        source = self.root / "05.json"
+        source.write_text(json.dumps({"title_keywords": {"high": ["k%d" % i for i in range(6)], "relevant": ["r%d" % i for i in range(4)]}}), encoding="utf-8")
+        with patch.object(backend.subprocess, "run") as runner:
+            result = backend.run_cli("qa", site="US", keywords_file=source, config=self.config, cli=self.cli, output=self.root / "qa.json")
+        runner.assert_not_called()
+        self.assertEqual(result["error_code"], "qa_too_many_keywords")
+
+    def test_expand_reuse_copies_recent_same_asin_set_without_request(self):
+        def run(args, **kwargs):
+            Path(args[args.index("--output") + 1]).write_text(json.dumps({"keywords": ["pen holder"]}), encoding="utf-8")
+            return subprocess.CompletedProcess(args, 0, "", "")
+        first = self.root / "listing_20261001_100000" / "02_kw_raw.json"
+        with patch.object(backend.subprocess, "run", side_effect=run):
+            backend.run_cli("expand", site="US", asins="B0002,B0001", output=first, config=self.config, cli=self.cli)
+        self.assertTrue(Path(str(first) + ".meta.json").exists())
+        second = self.root / "listing_20261001_110000" / "02_kw_raw.json"
+        with patch.object(backend.subprocess, "run") as runner:
+            result = backend.run_cli("expand", site="US", asins="B0001, b0002", output=second, config=self.config,
+                                     cli=self.cli, reuse_days=7)
+            runner.assert_not_called()
+        self.assertEqual(result["reused_from"], "listing_20261001_100000")
+        self.assertEqual(json.loads(second.read_text())["keywords"], ["pen holder"])
+        third = self.root / "listing_20261001_120000" / "02_kw_raw.json"
+        with patch.object(backend.subprocess, "run", side_effect=run) as runner:
+            backend.run_cli("expand", site="UK", asins="B0001,B0002", output=third, config=self.config, cli=self.cli, reuse_days=7)
+            runner.assert_called_once()

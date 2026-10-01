@@ -1,4 +1,4 @@
-version: '2.0'
+version: '2.2'
 domain: title
 contract_ref: ../data_contract.md
 policy_ref: ../quality_policy.json
@@ -7,26 +7,29 @@ rules:
 - id: title_identity_first
   type: required
   source_id: user_product_identity
-  prompt_fragment: 标题必须保留 product_identity.protected_terms 的完整短语。即使核心名称没有扩词流量，也不得降级、拆散或换成后台类目枚举。原始商品是配件时必须保留配件身份，不能写成主机或完整套装。
+  prompt_fragment: 标题必须完整保留 product_identity.protected_terms，即使核心名称没有扩词流量也不得降级、拆散或换成后台类目枚举。配件必须保留配件身份，不能写成主机或套装。
 - id: title_budget
   type: required
   source_id: amazon_title_2026
-  prompt_fragment: 从统一政策读取标题字符预算及适用范围；含空格计数。先为完整品名、必要规格和子体识别值预留空间，再加入最有价值的共同差异。超长时移走次要卖点，不截断品名、单位或变体值。
+  prompt_fragment: 非媒介类标题 ≤75 字符（含空格），2026-07-27 起超长标题会被 Amazon 逐步替换为 AI 推荐版本。先给完整品名、必要规格和子体识别值留出空间，超长时移走次要卖点，不截断品名、单位或变体值。
   limit_ref: default_limits.title_max_chars
-- id: title_natural_structure
+- id: title_compliance
+  type: required
+  source_id: amazon_title_rules_2025
+  prompt_fragment: 不使用 ! $ ? _ { } ^ ¬ ¦（品牌名自带的除外，机器检查为 error）；同一个词最多出现 2 次，介词、冠词、连词除外（warning）；不写促销语、价格或主观夸赞。
+- id: title_keyword_coverage
   type: editorial
-  source_id: skill_editorial_v2
-  prompt_fragment: 品牌已知时可放品牌，然后用完整商品名称说明卖的是什么，再加主要差异与必要规格。每个字段承担清楚的信息任务；不要求候选池全部进标题，不用多组近义品名拼接。写完脱离关键词表重读，确认语序自然、重点明确。
+  source_id: amazon_search_terms_2026
+  prompt_fragment: 在自然语序前提下尽量用到 60–75 字符：品牌（已知时）+ 完整品名 + 最重要的差异或规格，把高流量 eligible 词的核心词放进标题。同义品名不堆叠；其他有效词放入 Highlight、五点或后台词。写完脱离词表重读，确认一眼能看懂卖的是什么。
 - id: title_localization
   type: required
   source_id: user_unit_localization
-  prompt_fragment: 遵循目标语言的大小写、标点和自然语序；英语通常使用自然 Title Case，其他语言不套英语规则。普通尺寸必须使用规范化后的 display_text，保持 height/width/length
-    等维度对应。型号与真实品牌保持原样。
+  prompt_fragment: 遵循目标语言的大小写、标点和语序；英语用自然 Title Case。尺寸使用规范化后的 display_text，并保持维度对应。型号和真实品牌保持原样。
 - id: title_family
   type: required
   source_id: user_family_rules
-  prompt_fragment: family 模式遵循 variation_rules.yaml：父标题只用系列共性；子标题由一个 title_template 按用户输入顺序生成。按最长子体组合统一压缩共同部分，所有子体保留相同词序。
+  prompt_fragment: family 模式遵循 variation_rules.yaml：父标题只写系列共性；子标题由同一个 title_template 按输入顺序生成，按最长属性组合统一压缩共同部分。
 - id: title_verified_claims
-  type: editorial
+  type: required
   source_id: skill_editorial_v2
-  prompt_fragment: 只用有来源的本品事实，不写促销、极限评价、未经证实的兼容性或健康效果。场景仅在有助于识别和购买判断时使用，数量不机械固定。不要为了流量加入无关场景或第三方品牌。
+  prompt_fragment: 只写有来源的本品事实，不写未经证实的兼容性、健康效果或第三方品牌。场景词只在有助于识别和购买判断时使用。
