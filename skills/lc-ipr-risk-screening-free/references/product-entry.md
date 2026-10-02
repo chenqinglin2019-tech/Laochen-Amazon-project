@@ -4,7 +4,7 @@
 
 ## 使用顺序
 
-实际排查第一条业务命令仍是 `auth_gate.py`；通过前不解析业务输入。开发和离线测试不调用真实鉴权。通过后识别入口，先核对用户已有资料，只询问阻塞身份确定/当前检索所需的最小缺项。
+实际排查第一条业务命令仍是 `auth_gate.py`；通过前不解析业务输入。开发和离线测试不调用真实鉴权。通过后识别入口，先核对用户已有资料，只询问阻塞身份确定所需的最小缺项。新任务启用 `product_structure_policy=use_provided_else_unavailable_v1`，查询过程中不询问实际结构；已有用户结构资料按来源使用，未提供默认无法提供，缺少结构不阻断其他可执行查询或报告。
 
 - Amazon：`create_task.py --url URL`，国家缺省沿站点；credentials 预检后由现有 CDP 采集、录入。首次有效页可落到与请求 ASIN 不同的当前子体，不主动切变体；保存请求链接、实际页面、ASIN和选项。后续依据冻结目标核对，页面变成其他子体/选项时保留原身份并报告冲突，不能把失败记录当成替换目标。
 - 用户资料：Agent 核对一个具体产品及用途、适用变体和当前必要资料，形成下述 JSON；`create_task.py --product-input /absolute/product-input.json --jurisdictions DE`。无链接时国家必须由用户明确，不能从语言或品牌推断。credentials 预检后执行 `record_user_product.py --task-dir DIR`，再登记[对象范围与方向依赖](product-scope.md)，执行 evidence 预检和产品分析。无需运行 Amazon 采集，不伪造 ASIN、Marketplace 或浏览器记录。
@@ -38,7 +38,7 @@
 `product` 是单个对象；允许 title、purpose、brand、manufacturer、category、bullets、specifications、structure、variant、visible_ip_claims。不支持的字段拒绝。title/purpose须明确，其他字段按真实资料给出，不虚构内部结构、变体、规格或品牌。规格/变体不是通用必填清单。
 `sources` 每项有唯一 source_id，kind为 image/specification/description，path或text二选一；image必须为实际文件。相对路径以输入JSON目录解析。identity_review引用存在的来源并给出实际判断依据；程序只检查记录与文件，不证明Agent判断真实或图片充分。
 
-多个产品混杂、用途或关键变体不明时不写身份 confirmed；在身份核对前不得启动依赖身份的检索。身份已确定但局部资料不足时，readiness 显式设置 `revision=directional-readiness-v1`、`status=partial`（或 needs_info），再通过对象范围记录具体受影响事实与最小问题；未采用该版本仍要求 ready。nonblocking_gaps 只用于非关键缺项，不能把关键冲突改称非阻塞。
+多个产品混杂、用途或关键变体不明时不写身份 confirmed；在身份核对前不得启动依赖身份的检索。身份已确定但局部资料不足时，readiness 显式设置 `revision=directional-readiness-v1`、`status=partial`（或 needs_info），再通过对象范围记录具体受影响事实与内部分析问题；实际结构不足按默认不可提供处理，不生成用户待答事项；未采用该版本仍要求 ready。nonblocking_gaps 只用于非关键缺项，不能把关键冲突改称非阻塞。
 
 ## 留存、冻结与恢复
 

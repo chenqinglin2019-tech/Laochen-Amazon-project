@@ -1,9 +1,13 @@
-# 比较阶段最小事实反馈（02C）
+# 产品事实缺口与结构资料默认规则（02C）
 
-在 `product-scope-input-v2` 已交付且下游确实缺某一产品事实时，先核对现有资料。仍不足时用 `record_product_feedback.py --task-dir DIR --input INPUT` 记录 `product-feedback-v1` 请求。模块 03 的规划请求用 `stage=search_planning`，候选比较用 `stage=candidate_comparison` 并提供真实 `candidate_id`。两者均须绑定当前目标和范围摘要、已有 `direction_id`／`fact_id`、具体国家、用途 `purpose`、最小资料 `minimum_information`、精确问题、原因、请求者及真实 `source_refs`。不能在反馈中另造事实或把整份产品资料笼统推给用户。
+新任务固定 `product_structure_policy=use_provided_else_unavailable_v1`。查询过程中不询问实际结构、内部构造、工作原理或材料细节。先读取已有资料：用户已经提供的结构描述、图纸或文件按实际来源留存并使用；口头／文本说明保持 `nature=user_statement, verification=claim_only`，不得自动变成已核实结构。没有资料或资料不足，默认用户无法提供，不等待用户答复。缺失要素保持 `unknown`／无法判定，继续已有材料阅读、可执行查询、风险分级和报告；不能把未知当作不存在或已经排除。
 
-请求进入现有统一待办 `PRODUCT_FACT_FEEDBACK_PENDING`，工作编号稳定且能记录已问过的问题；待补候选不能给当前确定风险等级，其他无依赖方向继续。反馈事件、来源和当时的事实版本不可原位改写；明确换目标后旧请求保留历史，但不阻断新目标。
+结构事实和反馈按所需信息填写 `information_category=actual_structure|material_composition|product_performance`；非结构问题填 `other`。来源路径始终保持原位置（例如 `product.bullets[1]`），不能为适配策略改写出处。已规范绑定 `product.structure` 等技术字段的事实也识别为结构；历史反馈没有类别时，仅在技术权利范围按具体内部构造、独立外套、空腔、预压缩、回弹实测等请求文字分类，分类字段、命中文字和依据随限制证明保留，可复核。未知事实仍保存内部分析问题和已有材料核对；程序投影不向用户显示问题。需要记录候选比较的具体缺口时，用 `record_product_feedback.py --task-dir DIR --input INPUT` 留存 `product-feedback-v1` 输入。结构 `action=request` 会记录为 `kind=unavailable` 的不可提供回执；`question` 仅是内部待判问题，不发送给用户。
 
-取得资料后仍由 `record_product_scope.py` 提交完整 v2 范围快照：使用原 `fact_id`，提高 `version`，更新值、核对状态、来源及相关方向。比较阶段的答复必须有 `status=confirmed, verification=verified` 的事实；只把另一段未经核实声明改写进去不能关闭比较缺口。提交后用同一记录器输入 `action=resolve`，填原 `request_id`、当前目标／范围摘要、审阅者、理由和新事实的来源引用。记录器要求该事实的版本已推进且有对应的 02B 变化事件；受影响候选仍须按 02B 审阅历史材料适用性。
+输入仍须绑定当前目标／范围摘要、已有 `direction_id`／`fact_id`、具体国家、用途 `purpose`、最小资料 `minimum_information`、问题、原因、请求者及真实 `source_refs`。规划缺口为 `stage=search_planning`，比较缺口为 `stage=candidate_comparison` 并提供真实 `candidate_id`。反馈中不能另造事实。新策略启用前已经留存的结构请求按不可提供投影，原回执和事件不改写。
 
-两位独立审阅者要基于更新后的输入摘要重新比较受影响候选；旧审阅摘要不再匹配。反馈关闭不等于候选适用、检索覆盖充分或法律结论成立。补证后只复核事实实际影响的方向、查询、候选和判断；需要追加检索时沿模块 03 的原目的、版本与预算边界处理，不因反馈创建额外免费额度。
+产品结构缺口投影为 `blocked / PRODUCT_STRUCTURE_UNAVAILABLE`，带精确事实／范围／来源绑定的报告限制，不进入 `awaiting_user`。已审阅的未知专项要素须经具体 `gap` 和结果 `followup` 绑定，才可按结构资料不足投影；缺失的比较、未读材料、新未知或失效依据仍须 Agent 审阅。结构资料不足不能关闭真实权利核验、检索覆盖或独立审阅门禁。非结构的品牌意图、授权等反馈保留原定向待办逻辑。
+
+用户之后主动提供资料时，由 `record_product_scope.py` 追加完整 v2 范围快照，使用原 `fact_id`、提高 `version` 并更新来源性质。`action=resolve` 仍要求事实版本推进及对应 02B 变化事件；候选比较须有可核实事实，仅多一段未经核实声明不能关闭比较缺口。受影响候选按 02B 审阅历史材料适用性，两位独立审阅者重新比较受影响范围；其他查询、阳性证据和未受影响判断保留。
+
+历史未启用新结构策略的任务沿用原请求／反馈语义。用户明确采用本默认规则时，仍走同一记录器，输入 `{"action":"adopt_structure_policy","reviewer":"实际操作人","reason":"用户明确要求不再询问结构"}`；它核验原始范围、刷新受政策影响的派生事实交付、留审计依据并失效旧输出绑定，避免只改字段造成 `PRODUCT_DELIVERY_PROJECTION_CHANGED`。原事实、范围回执和反馈记录不改写。明确换目标后旧请求保留历史，不阻断新目标。结构限制解除不等于候选适用、检索充分或法律结论成立；追加查询仍沿原版本和预算边界处理，不创建额外免费额度。

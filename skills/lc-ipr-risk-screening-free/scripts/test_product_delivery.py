@@ -23,6 +23,7 @@ class ProductDeliveryTests(unittest.TestCase):
         # These cases target the pre-v3 browser planning contract. Keep the
         # newly created task defaults from changing their route expectations.
         task.pop('retrieval_workflow_revision',None)
+        task.pop('product_structure_policy',None)
         task['source_operation_revision']='source-operation-v1'
         from workflow_v24 import build_coverage_requirements_v24
         task['coverage_requirements']=build_coverage_requirements_v24(

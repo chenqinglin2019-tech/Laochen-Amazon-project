@@ -11,6 +11,30 @@ class StageDTests(unittest.TestCase):
         self.fx = self.previous.fx
         self.addCleanup(self.fx.tmp.cleanup)
 
+    def test_structural_gap_no_longer_asks_user_and_unread_material_stays_work(self):
+        from unittest.mock import patch
+        from distinctive_rights_stage_d import project_stage_d
+        from distinctive_rights import work_entries
+        request = {'request_id':'PF-STRUCT'}
+        gap = {'kind':'gap', 'event_id':'G-STRUCT', 'gap_id':'G1', 'action_kind':'user_fact',
+               'product_feedback_request_id':'PF-STRUCT'}
+        follow = {'kind':'followup', 'event_id':'FOLLOW', 'gap_event_id':'G-STRUCT', 'outcome':'waiting'}
+        limit = {'kind':'product_information_limit', 'state':'blocked',
+                 'reason':'PRODUCT_STRUCTURE_UNAVAILABLE', 'question':'',
+                 'delivery_limit':{'kind':'product_structure_unavailable'}}
+        with patch('product_feedback.unavailable', return_value=[request]), \
+             patch('product_feedback.structure_limitation_entry', return_value=limit):
+            view = project_stage_d({}, {}, [gap, follow], {},
+                [{'reason':'M07_MATERIAL_UNREAD', 'material_event_id':'M1'}])
+        scope = {'candidate_id':'C1', 'scenario_id':'product_entry', 'jurisdiction':'US',
+                 'right_type':'trade_dress', **view}
+        entries = work_entries({'scopes':[scope]})
+        structural = next(row for row in entries if row['reason'] == 'PRODUCT_STRUCTURE_UNAVAILABLE')
+        self.assertEqual((structural['state'], structural['question']), ('blocked', ''))
+        unread = next(row for row in entries if row['reason'] == 'M07_MATERIAL_UNREAD')
+        self.assertEqual(unread['state'], 'awaiting_review')
+        self.assertEqual(view['status'], 'in_progress')
+
     def ready(self):
         materials, facts = self.previous.trademark()
         comparison = self.previous.compare(materials, facts)

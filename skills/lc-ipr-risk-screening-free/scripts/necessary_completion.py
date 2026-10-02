@@ -1546,6 +1546,9 @@ def _delivery_limit_valid(entry, task, evidence, plan, capabilities, *, candidat
                           supplement=None, task_dir=None):
     """Validate source constraints emitted by the shared planner, not stop prose."""
     proof = entry.get("delivery_limit")
+    if isinstance(proof, dict) and proof.get("kind") == "product_structure_unavailable":
+        from product_feedback import structure_limit_valid
+        return structure_limit_valid(entry, task, evidence, task_dir)
     if isinstance(proof, dict) and proof.get('kind') == 'bounded_public_ranked_scope':
         rows = [row for row in plan.get('queries', {}).get(entry.get('provider'), [])
             if row.get('query_id') == entry.get('query_id')]

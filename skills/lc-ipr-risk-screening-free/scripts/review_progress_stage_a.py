@@ -164,11 +164,15 @@ def ledger(task: dict, evidence: dict) -> dict:
             "counting_basis": "unique_item_ids_in_current_plan; business_review_and_delivery_separate"}
 
 
-def project(task: dict, view: dict, evidence: dict | None) -> dict:
+def project(task: dict, view: dict, evidence: dict | None, *, plan=None, task_dir=None) -> dict:
     if not enabled(task) or evidence is None:
         return view
     result = deepcopy(view)
     result["review_progress"] = ledger(task, evidence)
+    if operating_progress_enabled(task) and plan is not None:
+        from query_execution_progress import build
+        result["actual_query_execution_progress"] = build(task, evidence, plan,
+            task_dir=task_dir, view=view)
     if "work_view_sha256" in result:
         result["work_view_sha256"] = sha256_json({key: value for key, value in result.items()
             if key not in {"work_view_sha256", "review_work"}})

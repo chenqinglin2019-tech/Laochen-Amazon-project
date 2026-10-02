@@ -270,6 +270,8 @@ def build_model(task_dir: Path, *, generated_at: str | None = None, view: dict |
         "identity_errors": sorted(set(identity_errors)), "view_error": view_error,
         "progress": {key: deepcopy(progress.get(key)) for key in ("status", "plan_version", "completed",
             "planned", "percentage", "excluded", "by_scope", "by_scope_module", "items")},
+        **({"actual_query_execution_progress": deepcopy(view["actual_query_execution_progress"])}
+           if "actual_query_execution_progress" in view else {}),
         "progress_cutoff": {"plan_version": progress.get("plan_version"),
             "review_progress_event_count": len(evidence.get("review_progress_events", [])),
             "source_run_count": len(evidence.get("source_runs", []))},

@@ -5,7 +5,7 @@ from common import sha256_json
 REVISION = "report-package-stage-c-v1"
 EXPORTS = {"markdown": "report.md", "csv": "report-findings.csv"}
 CORE = ("report.html", "report-data.json", "report-manifest.json")
-OPERATOR_APPENDICES = ("operator-appendix.html", "technical-audit.html")
+OPERATOR_APPENDICES = ("operator-appendix.html", "technical-audit.html", "query-progress.html", "query-progress.json")
 STAGE_CARRIERS = {"reply", "html", "markdown", "csv"}
 
 

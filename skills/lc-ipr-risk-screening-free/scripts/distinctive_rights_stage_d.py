@@ -47,7 +47,7 @@ def _gap(task, request, indexed):
     if not set(request["affected_event_ids"]) <= rows:
         raise ValueError("M07_GAP_AFFECTED_RESULT_INVALID")
     if request["action_kind"] == "user_fact":
-        from product_feedback import pending
+        from product_feedback import outstanding as pending
         if (not _text(request.get("product_feedback_request_id"))
                 or request["product_feedback_request_id"] not in
                 {row.get("request_id") for row in pending(task)}):
@@ -352,6 +352,22 @@ def project_stage_d(task, intake, related, candidate, blockers, *, unusable_fact
             elif blocker["reason"] == "M07_TRADEMARK_COMPARISON_PENDING" and blocked_comparison and not can_compare:
                 blocker.update(state="limited", source_dependency=api_limit,
                     comparison_limitation=deepcopy(blocked_comparison["unavailable_comparison"]))
+    # Only the exact product-structure gap loses its user prompt. Material reading,
+    # substantive comparisons and the scope-close review remain required.
+    from product_feedback import unavailable, structure_limitation_entry
+    requests = {row['request_id']: row for row in unavailable(task)}
+    for gap in latest_gaps.values():
+        request = requests.get(gap.get('product_feedback_request_id'))
+        follow = next((row for row in reversed(follows) if row['gap_event_id'] == gap['event_id']), {})
+        if gap.get('action_kind') != 'user_fact' or follow.get('outcome') not in {'waiting','limited'} or not request:
+            continue
+        limit = structure_limitation_entry(task, request=request)
+        if not limit: continue
+        limit['delivery_limit'].update(m07_gap_event_id=gap['event_id'],
+            m07_gap_sha256=sha256_json(gap), followup_sha256=sha256_json(follow))
+        for blocker in blockers:
+            if blocker['reason'] == 'M07_GAP_OPEN' and blocker.get('gap_event_id') == gap['event_id']:
+                blocker.update(state='limited', source_dependency=limit)
     return {"status": status, "blockers": blockers, "batch_event_ids": [row["event_id"] for row in batches],
             "handoffs": handoffs, "currently_usable_event_ids": sorted(available),
             "close_event_id": close["event_id"] if close else None}

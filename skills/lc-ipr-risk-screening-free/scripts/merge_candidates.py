@@ -1936,6 +1936,13 @@ def main() -> None:
                 item.setdefault("comparison_elements", [])
                 item.setdefault("unresolved_issues", [])
                 item.setdefault("exclusion_basis", [])
+    # Historical decisions may refer to identities retired by this merge.
+    # Supply the reviewed aliases before validating that append-only history.
+    if identity_revision:
+        candidates_payload["identity_aliases"] = [
+            *correction_view(candidates_payload, identity_ledger)["aliases"],
+            *physical_response_identity_aliases(candidates_payload),
+        ]
     materiality_ledger = load_materiality_ledger(
         task_dir, str(task.get("task_id") or ""),
         **({"task": task} if scenario_workflow_enabled(task) else {}),

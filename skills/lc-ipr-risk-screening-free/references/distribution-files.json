@@ -2666,6 +2666,18 @@
       "kind": "text",
       "required": true,
       "mode": "0644"
+    },
+    {
+      "path": "scripts/query_execution_progress.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_query_execution_progress.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
     }
   ]
 }

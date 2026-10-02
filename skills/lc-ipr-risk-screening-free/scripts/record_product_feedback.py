@@ -54,9 +54,29 @@ def record(task_dir: Path, input_path: Path):
             raise ValueError('PRODUCT_FEEDBACK_SCOPE_V2_REQUIRED')
         if task.get('product_change_pending'):
             raise ValueError('PRODUCT_FEEDBACK_CURRENT_SCOPE_REQUIRED')
+        payload = load_json(input_path)
+        if not isinstance(payload, dict):
+            raise ValueError('PRODUCT_FEEDBACK_INPUT_INVALID')
+        if payload.get('action') == 'adopt_structure_policy':
+            if (set(payload) - {'action', 'reviewer', 'reason'} or
+                    not _text(payload.get('reviewer')) or not _text(payload.get('reason'))):
+                raise ValueError('PRODUCT_STRUCTURE_POLICY_ADOPTION_BASIS_REQUIRED')
+            # The new policy changes derived gaps, never archived source facts.
+            before = sha256_json(task)
+            task['product_structure_policy'] = pf.STRUCTURE_POLICY
+            from product_delivery import project as delivery_project
+            task['product_delivery'] = delivery_project(task)
+            ps.verify(task, evidence, task_dir)
+            task.setdefault('workflow_policy_updates', []).append({
+                'policy': pf.STRUCTURE_POLICY, 'prior_task_sha256': before,
+                'reviewer': payload['reviewer'], 'reason': payload['reason'],
+                'input_sha256': sha256_json(payload), 'at': now_iso()})
+            task['updated_at'] = now_iso()
+            task.pop('outputs', None)
+            atomic_write_json(task_dir/'task.json', task)
+            return 'success'
         ps.verify(task, evidence, task_dir)
         pf.verify(task, evidence, task_dir)
-        payload = load_json(input_path)
         if not isinstance(payload, dict) or payload.get('schema_version') != pf.REVISION:
             raise ValueError('PRODUCT_FEEDBACK_INPUT_INVALID')
         known = {item.get('evidence_id') for group in evidence.get('collections',{}).values()
@@ -67,7 +87,9 @@ def record(task_dir: Path, input_path: Path):
         if payload.get('action') == 'request':
             if (set(payload)-{'schema_version','action','stage','expected_target_sha256','expected_scope_sha256',
                               'direction_id','fact_id','candidate_id','jurisdiction','purpose',
-                              'minimum_information','question','reason','requester','source_refs'}
+                              'minimum_information','question','reason','requester','source_refs','information_category'}
+                    or ('information_category' in payload and payload['information_category'] not in
+                        pf.STRUCTURE_CATEGORIES | {'other'})
                     or payload.get('stage') not in {'search_planning','candidate_comparison'}
                     or payload.get('expected_target_sha256')!=task['product_identity']['sha256']
                     or payload.get('expected_scope_sha256')!=task['product_scope']['scope_sha256']
@@ -97,13 +119,13 @@ def record(task_dir: Path, input_path: Path):
             request_id = stable_id('FDB',task['task_id'],task['product_identity']['sha256'],
                                    task['product_scope']['scope_sha256'],*key)
             existing = next((row for row in pf.history(task) if row.get('request_id')==request_id
-                             and row.get('kind')=='requested'), None)
+                             and row.get('kind') in {'requested','unavailable'}), None)
             if existing:
                 if existing.get('input_sha256') != sha256_json(payload):
                     raise ValueError('PRODUCT_FEEDBACK_REQUEST_IMMUTABLE')
                 return 'success'
             if any((row['stage'],row['direction_id'],row['fact_id'],row.get('candidate_id',''),
-                    row['jurisdiction'])==key for row in pf.pending(task)):
+                    row['jurisdiction'])==key for row in pf.outstanding(task)):
                 raise ValueError('PRODUCT_FEEDBACK_ALREADY_PENDING')
             row = {'event_id':stable_id('FDBEV','request',request_id),'request_id':request_id,
                    'kind':'requested','stage':payload['stage'],'direction_id':direction['direction_id'],
@@ -117,6 +139,11 @@ def record(task_dir: Path, input_path: Path):
                    'question':payload['question'],'reason':payload['reason'],
                    'requester':payload['requester'],'source_refs':refs,
                    'input_sha256':sha256_json(payload),'at':now_iso()}
+            if 'information_category' in payload:
+                row['information_category'] = payload['information_category']
+            if pf.structure_request_unavailable(task, row):
+                row.update(kind='unavailable', structure_policy=pf.STRUCTURE_POLICY,
+                           structure_classification=pf.structure_request_classification(task, row))
         elif payload.get('action') == 'resolve':
             if (set(payload)-{'schema_version','action','request_id','expected_target_sha256',
                               'expected_scope_sha256','reviewer','reason','source_refs'}
@@ -131,7 +158,7 @@ def record(task_dir: Path, input_path: Path):
                 if previous.get('input_sha256')!=sha256_json(payload):
                     raise ValueError('PRODUCT_FEEDBACK_RESOLUTION_IMMUTABLE')
                 return 'success'
-            request = next((row for row in pf.pending(task)
+            request = next((row for row in pf.outstanding(task)
                             if row['request_id']==payload['request_id']), None)
             if not request or request['target_sha256']!=task['product_identity']['sha256']:
                 raise ValueError('PRODUCT_FEEDBACK_REQUEST_NOT_PENDING')

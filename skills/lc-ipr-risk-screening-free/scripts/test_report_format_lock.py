@@ -34,6 +34,17 @@ class ReportFormatLockTests(unittest.TestCase):
                   for node in ast.parse(source).body if isinstance(node, ast.FunctionDef)}
         self.assertEqual(actual, expected)
 
+    def test_operator_contract_keeps_seven_sections_nine_modules_and_receipts(self):
+        from operator_report import SECTION_ORDER, RIGHTS, APPENDIX_FILES
+        root = Path(__file__).resolve().parent.parent
+        lock = json.loads((root / 'references/report-format-lock.json').read_text())
+        self.assertEqual(SECTION_ORDER, lock['operator_section_order'])
+        self.assertEqual([right for right, _ in RIGHTS], lock['operator_module_order'])
+        self.assertEqual(APPENDIX_FILES, lock['operator_required_appendices'])
+        self.assertEqual(lock['operator_metric_labels'], ['已知结果风险', '查询完成率', '报告状态'])
+        self.assertTrue(lock['operator_approved_format']['confidence_required'])
+
+
 
 if __name__ == '__main__':
     unittest.main()

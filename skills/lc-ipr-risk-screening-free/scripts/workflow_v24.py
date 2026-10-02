@@ -800,7 +800,7 @@ def resolved_work_view(task, evidence, candidates, plan, ledger, *, supplement=N
     from stage_risk_stage_b import project as stage_risk_project
     from execution_budget import project as budget_project
     return budget_project(task, evidence, plan, stage_risk_project(task, review_progress_project(task, progress_project(task, continuation_project(task,
-        continuous_project(task, project_work(task, result, plan), evidence, plan), evidence), evidence), evidence), evidence, task_dir=task_dir), task_dir)
+        continuous_project(task, project_work(task, result, plan), evidence, plan), evidence), evidence), evidence, plan=plan, task_dir=task_dir), evidence, task_dir=task_dir), task_dir)
 
 
 def work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabilities=None,
@@ -855,7 +855,7 @@ def work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabiliti
             from continuous_progress_stage_d import project as progress_project
             result = progress_project(task, result, evidence)
             from review_progress_stage_a import project as review_progress_project
-            result = review_progress_project(task, result, evidence)
+            result = review_progress_project(task, result, evidence, plan=plan, task_dir=task_dir)
             from stage_risk_stage_b import project as stage_risk_project
             result = stage_risk_project(task, result, evidence, task_dir=task_dir)
             result["work_view_sha256"] = sha256_json({key: value for key, value in result.items()
@@ -882,7 +882,7 @@ def work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabiliti
         from review_progress_stage_a import project as review_progress_project
         from stage_risk_stage_b import project as stage_risk_project
         return stage_risk_project(task, review_progress_project(task, progress_project(task, continuation_project(task,
-            continuous_project(task, result, evidence, plan), evidence), evidence), evidence), evidence, task_dir=task_dir)
+            continuous_project(task, result, evidence, plan), evidence), evidence), evidence, plan=plan, task_dir=task_dir), evidence, task_dir=task_dir)
 
 
 def scenario_row_bindings(task: dict, row: dict) -> list[dict]:

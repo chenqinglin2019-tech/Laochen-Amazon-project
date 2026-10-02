@@ -81,6 +81,8 @@ def review_digest(evidence, candidates, ledger, plan, task, supplement=None) -> 
     payload = {"assessment_policy": POLICY,
                         "base_evidence_digest": legacy_review_digest(evidence, candidates, ledger, plan, task),
                         "supplement": supplement}
+    if "product_structure_policy" in task:
+        payload["product_structure_policy"] = task["product_structure_policy"]
     if partial_evidence_enabled(task) or known_findings_enabled(task):
         payload["assessment_revision"] = task["assessment_revision"]
     from product_scope import enabled as scope_enabled
