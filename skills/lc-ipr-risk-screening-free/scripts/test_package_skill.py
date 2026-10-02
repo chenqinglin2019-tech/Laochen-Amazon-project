@@ -113,6 +113,19 @@ class PackageSkillTests(unittest.TestCase):
         self.assertEqual(before, after)
         self.assertEqual([Path(result["archive"])], [p.resolve() for p in self.output.iterdir()])
 
+    def test_generated_empty_credentials_never_copy_populated_sender(self):
+        self.put("config.json", b'{"backend_token":"synthetic-private-token-123456"}')
+        self.put(".env", b"SERPER_API_KEY=synthetic-private-api-123456\n")
+        self.entries = [self.entry("SKILL.md"),
+                        self.entry("config.json", transform="empty_credentials_v1"),
+                        self.entry(".env", transform="empty_credentials_v1")]
+        self.write_spec()
+        result = self.build()
+        with zipfile.ZipFile(result["archive"]) as archive:
+            self.assertEqual(json.loads(archive.read("portable-skill/config.json"))["backend_token"], "")
+            self.assertFalse(any(package._env_values(archive.read("portable-skill/.env")).values()))
+            self.assertFalse(any("example" in n for n in archive.namelist()))
+
     def test_required_missing_fails_without_final_or_stage(self):
         (self.source / "scripts/example.py").unlink()
         self.blocked("REQUIRED_DISTRIBUTION_FILE_MISSING")

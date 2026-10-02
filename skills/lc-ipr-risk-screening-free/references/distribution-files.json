@@ -861,12 +861,6 @@
       "mode": "0644"
     },
     {
-      "path": ".env.example",
-      "kind": "text",
-      "required": true,
-      "mode": "0644"
-    },
-    {
       "path": ".gitignore",
       "kind": "text",
       "required": true,
@@ -904,12 +898,6 @@
     },
     {
       "path": "assets/report-v2-template.html",
-      "kind": "text",
-      "required": true,
-      "mode": "0644"
-    },
-    {
-      "path": "config.example.json",
       "kind": "text",
       "required": true,
       "mode": "0644"
@@ -2675,6 +2663,44 @@
     },
     {
       "path": "scripts/test_query_execution_progress.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "config.json",
+      "kind": "text",
+      "required": true,
+      "mode": "0644",
+      "transform": "empty_credentials_v1"
+    },
+    {
+      "path": ".env",
+      "kind": "text",
+      "required": true,
+      "mode": "0644",
+      "transform": "empty_credentials_v1"
+    },
+    {
+      "path": "scripts/credential_defaults.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/configure_credentials.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_configure_credentials.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_configure_auth.py",
       "kind": "text",
       "required": true,
       "mode": "0644"

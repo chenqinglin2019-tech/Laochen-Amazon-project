@@ -43,6 +43,14 @@ class SetupSkillTests(unittest.TestCase):
             setup.initialize(self.root)
         self.assertFalse((self.root / "config.json").exists())
 
+    def test_init_without_example_files_uses_empty_defaults(self):
+        (self.root / "config.example.json").unlink()
+        (self.root / ".env.example").unlink()
+        setup.initialize(self.root)
+        self.assertEqual(json.loads((self.root / "config.json").read_text())["backend_token"], "")
+        self.assertEqual(len(setup._env_rows((self.root / ".env").read_text())), 12)
+        self.assertFalse(any(setup._env_rows((self.root / ".env").read_text()).values()))
+
     def test_env_backend_token_is_configured_without_echoing_it(self):
         setup.initialize(self.root)
         with patch.dict(os.environ,{"LAOCHEN_BACKEND_TOKEN":"synthetic-environment-secret"}):

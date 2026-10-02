@@ -37,7 +37,8 @@ Public repository for Laochen Amazon workflow skills.
   free-tier APIs, with independent final review and relevant official evidence.
   Includes the fixed seven-section risk report, evidence-based query completion,
   and a default of unavailable structural information when users supply none.
-  Preserves the authentication contract and ships empty credential templates.
+  Preserves the authentication contract and ships blank config.json and .env.
+  Credentials supplied in chat are saved locally without echoing their values.
   Last updated: 2026-10-02 (UTC+8).
   [Installation and platform validation](skills/lc-ipr-risk-screening-free/references/installation.md).
   [Download the credential-free ZIP](skills/lc-ipr-risk-screening-free.zip).

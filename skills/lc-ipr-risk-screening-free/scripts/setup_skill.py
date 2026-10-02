@@ -76,7 +76,9 @@ def _env_rows(text):
 def initialize(root=ROOT):
     """Create only absent files; existing bytes AND permissions are untouched."""
     templates = {"config.json": root / "config.example.json", ".env": root / ".env.example"}
-    payloads = {name: path.read_bytes() for name, path in templates.items()}
+    from credential_defaults import empty_credentials
+    payloads = {name: path.read_bytes() if path.exists() else empty_credentials(name)
+                for name, path in templates.items()}
     config = json.loads(payloads["config.json"].decode("utf-8-sig"))
     if not isinstance(config, dict) or config.get("backend_token") != "":
         raise ValueError("CONFIG_TEMPLATE_MUST_HAVE_EMPTY_TOKEN")
