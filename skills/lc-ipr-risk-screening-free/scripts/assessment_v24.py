@@ -169,10 +169,16 @@ def _records_accounted_for(records, candidates, review_check=None) -> bool:
     identifiers = ("publication_number", "registration_number", "application_number", "serial_number", "record_number", "candidate_id")
     def normalized(value):
         return re.sub(r"\W", "", str(value or "")).upper()
+    def original_values(item, field):
+        yield item.get(field)
+        for claim in item.get("field_claims", {}).get(field, []):
+            if isinstance(claim, dict) and claim.get("evidence_id") and claim.get("source_anchor"):
+                yield claim.get("value")
     for record in records:
         field = next((key for key in identifiers if record.get(key)), None)
         if field is None or not any((review_check or materiality_annotation_complete)(item)
-                and normalized(item.get(field)) == normalized(record[field])
+                and any(normalized(value) == normalized(record[field])
+                        for value in original_values(item, field))
                 and (not record.get("right_type") or item.get("right_type") == record["right_type"])
                 for item in candidates):
             return False

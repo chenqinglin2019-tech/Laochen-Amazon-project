@@ -26,6 +26,7 @@ TASK_FIELDS = {"task_id", "assessment_policy", "assessment_revision", "product",
 TASK_FIELDS |= {"specialty_analysis_revision", "specialty_analysis_events", "distinctive_rights_revision",
     "distinctive_rights_events", "candidate_triage_stage_events", "candidate_followup_events"}
 TASK_FIELDS.add("presentation_policy_revision")
+TASK_FIELDS.add("product_structure_policy")
 TASK_FIELDS.add("final_review_execution_revision")
 TASK_FIELDS |= {"limited_delivery_revision", "review_conflict_revision"}
 

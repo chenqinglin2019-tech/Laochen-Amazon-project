@@ -14,10 +14,11 @@
 `product-scope-input-v2` 沿用 v1 的四态、来源、对象和方向，`scope.delivery_revision=image-fact-v1`。每个事实至少保留稳定 `fact_id`、正整数 `version`、`source_path/value/status/source_refs/reason`、`applies_to.product_id`，并增加：
 
 - `nature=direct_observation|page_claim|user_statement|analysis_inference`：记录信息是什么性质；`page_claim` 必须能回指 Amazon 页面或留存文件，用户说明必须回指用户资料或留存用户表述。
-- `verification=verified|claim_only|unverified|conflict`：页面声明和分析推断不能被标为已核实结构。已确认声明文字可用 `status=confirmed, verification=claim_only` 作为带性质的查询线索，不能自动成为确定工作原理或比较结论。未知、冲突继续走方向级最小问题。
+- `verification=verified|claim_only|unverified|conflict`：页面声明和分析推断不能被标为已核实结构。已确认声明文字可用 `status=confirmed, verification=claim_only` 作为带性质的查询线索，不能自动成为确定工作原理或比较结论。结构未知或资料不足按 `product_structure_policy=use_provided_else_unavailable_v1` 默认用户无法提供，不询问实际结构；用户已提供的说明仍保留 `user_statement/claim_only` 性质，依赖未核实结构的要素保持 unknown／无法判定。其他实质范围矛盾或非结构缺项继续走方向级最小问题。
+- 结构相关事实可加 `information_category=actual_structure|material_composition|product_performance`，明确区分信息类别与真实来源路径；从页面 bullets 得到的资料仍保留原路径。非结构问题用 `other`，品牌、授权及范围意图不归入实际结构默认规则。
 - OCR 模糊但可能重要时，原文必须保留在 `product.raw_capture.ocr_text[n]`。`analysis.clue_dispositions` 对该路径可填 `disposition=needs_verification`、原文摘要、原因和精确 `question`，同时在 v2 范围登记同一路径、同原文的 `status=unknown, verification=unverified` 事实及相同问题；此时不得把该路径映射成查询词。关联方向等待核实，未绑定方向仍进入统一待办；独立方向可继续。无关 OCR 才用有理由的 `excluded`。
 - 对象继续使用一个稳定 `object_id`；同一原图通过 `image_ids` 被多个对象引用，不复制或丢弃原图。已纳入的关键视觉对象若主图不充分，必须说明具体限制。
 
 记录器从已审范围生成 `task.product_delivery` 四部分：`product_range`、`facts_and_clues`、`objects_and_marks`、`gaps_and_conflicts`，附选中主图、已知许可与可继续方向编号。事实、对象和主图可见性缺口列出受影响方向；图像路线缺口只指向图片发现动作。不得手改投影；规划前验证它与原始范围一致。实际查询行记录所用事实的 `fact_id/version/nature/verification`；事实版本变化后旧行暂停复核，旧查询和材料仍保留。针对比较或风险结论的完整历史适用性复核属于 02B，不能把 02A 的查询可用性当作结论已核实。
 
-报告在原八节七模块内显示产品角色来源“系统默认”、事实性质、主图依据与对象级限制。示例和离线 Mock 只验证协议，不证明真实商品、来源许可或视觉覆盖。
+报告按固定运营版式和九模块显示产品角色来源“系统默认”、事实性质、主图依据与对象级限制。示例和离线 Mock 只验证协议，不证明真实商品、来源许可或视觉覆盖。

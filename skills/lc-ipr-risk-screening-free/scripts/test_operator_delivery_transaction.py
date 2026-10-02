@@ -36,10 +36,14 @@ class OperatorDeliveryTransactionTests(unittest.TestCase):
                                 for row in assessment['assessments']))
             self.assertIn('风险待定', (entry / 'report.html').read_text())
             contract = data['report_package_stage_c']
-            for name in ('operator-appendix.html', 'technical-audit.html'):
+            for name in ('operator-appendix.html', 'technical-audit.html', 'query-progress.html', 'query-progress.json'):
                 self.assertIn(name, contract['required_artifacts'])
                 self.assertEqual((entry / name).read_bytes(), (directory / 'report' / name).read_bytes())
                 self.assertEqual(sha256_file(entry / name), outcome['validation_transaction']['checked_files'][name])
+            query_progress = load_json(entry / 'query-progress.json')
+            self.assertEqual(query_progress, data['actual_query_execution_progress'])
+            self.assertEqual(data['operator_view']['progress']['completed'], query_progress['completed_total']
+                             if query_progress['planned_total'] is not None else None)
             version = load_json(directory / versions.JOURNAL)['versions'][0]
             self.assertEqual(version['state'], 'delivered')
             self.assertEqual(version['attempts'][-1]['step'], 'entry_verified')
@@ -73,6 +77,11 @@ class OperatorDeliveryTransactionTests(unittest.TestCase):
         error = self._rejected_copy(lambda directory, target:
             (directory / 'product.png').write_bytes(b'changed original after validation'))
         self.assertIn('DELIVERY_ACTUAL_ENTRY_INSPECTION_FAILED', error)
+
+    def test_query_progress_copy_tamper_does_not_reuse_staged_success(self):
+        error = self._rejected_copy(lambda directory, target:
+            (target / 'query-progress.json').write_text('{"completion_percent":100}'))
+        self.assertIn('DELIVERY_ACTUAL_FILE_MISSING_OR_CHANGED', error)
 
 
 if __name__ == '__main__':

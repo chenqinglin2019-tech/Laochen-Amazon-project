@@ -771,6 +771,35 @@ class SpecialtyAnalysisTests(unittest.TestCase):
         self.assertEqual(next(row for row in self.task["specialty_analysis_events"]
                               if row["event_id"] == fact["event_id"])["outcome"], "unknown")
 
+    def test_structure_policy_limits_only_current_reviewed_unknown(self):
+        from product_feedback import STRUCTURE_POLICY
+        from specialty_analysis import work_entries
+        self.intake()
+        material = self.product_material()
+        fact = self.fact("product", material, outcome="unknown")
+        self.waiting_gap(fact)
+        self.task['product_structure_policy'] = STRUCTURE_POLICY
+        self.task['product_feedback_history'][0].update(fact_id='internal', direction_id='internal-search',
+            source_refs=['E2'], candidate_id=self.scope()['candidate_id'], jurisdiction='US')
+        self.save()
+        # Real source-bound structure receipts are covered by test_product_feedback;
+        # this fixture isolates the specialty unknown-to-limitation projection.
+        from unittest.mock import patch
+        limit = {'kind':'product_information_limit', 'state':'blocked',
+                 'reason':'PRODUCT_STRUCTURE_UNAVAILABLE', 'question':'',
+                 'delivery_limit':{'kind':'product_structure_unavailable'}}
+        with patch('product_feedback.unavailable', return_value=self.task['product_feedback_history']), \
+             patch('product_feedback.structure_limitation_entry', return_value=limit):
+            row = next(row for row in work_entries(self.view()) if row.get('fact_kind') == 'product')
+        self.assertEqual((row['state'], row['reason']), ('blocked', 'PRODUCT_STRUCTURE_UNAVAILABLE'))
+        self.assertEqual(row['question'], '')
+        self.assertEqual(row['delivery_limit']['unknown_bindings'][0]['basis_event_id'], fact['event_id'])
+        self.assertEqual(fact['outcome'], 'unknown')
+        # Newly received unknowns remain executable review; the old limitation cannot hide them.
+        self.fact('product', material, fact_id='F-new', outcome='unknown')
+        row = next(row for row in work_entries(self.view()) if row.get('fact_kind') == 'product')
+        self.assertEqual(row['state'], 'awaiting_review')
+
     def test_new_unknown_or_resolved_feedback_requires_recheck(self):
         from specialty_analysis import work_entries
         self.intake()

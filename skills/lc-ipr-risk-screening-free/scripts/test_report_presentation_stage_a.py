@@ -165,6 +165,97 @@ class OperatorReportTests(unittest.TestCase):
         self.assertEqual((overall_csv['risk'], overall_csv['listing_recommendation']), ('待定', '暂缓上架'))
 
 
+    def test_actual_query_projection_drives_all_operator_outputs(self):
+        from operator_report import project, render, render_markdown, render_csv, render_query_progress
+        self.data["presentation_stage_a"]["stage"]["progress"].update(completed=0, planned=36, percentage=0)
+        self.data["actual_query_execution_progress"] = {
+            "planned_total": 26, "completed_total": 23, "completion_percent": 1,
+            "by_scope": [{"right_type": "copyright", "scenario_id": "product_entry",
+                          "planned_total": 6, "completed_total": 5}],
+            "items": [{"provider": "epo_ops", "right_type": "patent", "completed": False,
+                       "basis": "尚未取得有效响应"}]}
+        model = self.model()
+        self.assertEqual((model["progress"]["completed"], model["progress"]["planned"]), (23, 26))
+        self.assertAlmostEqual(model["progress"]["percentage"], 23 / 26 * 100)
+        copyright = next(item for item in model["modules"] if item["right_type"] == "copyright")
+        self.assertEqual((copyright["completed"], copyright["planned"]), (5, 6))
+        self.assertEqual(model["overall"]["risk"], "低")
+        data = project(self.data, model)
+        page = render(data, self.fixture.out)
+        self.assertIn("查询完成率", page)
+        self.assertIn("88.5%", page)
+        self.assertIn("23/26", page)
+        self.assertNotIn("已验收", page)
+        self.assertIn("query-progress.html", page)
+        self.assertIn("查询完成：23/26", render_markdown(data))
+        csv_overall = next(csv.DictReader(io.StringIO(render_csv(data))))
+        self.assertEqual((csv_overall["completed"], csv_overall["planned"]), ("23", "26"))
+        detail = render_query_progress(data, self.fixture.out)
+        self.assertIn("88.5%", detail)
+        self.assertIn("状态：未完成", detail)
+        self.assertIn("尚未取得有效响应", detail)
+
+    def test_unregistered_plan_is_distinct_from_initialized_empty_plan(self):
+        from operator_report import project, render, render_query_progress, render_markdown, render_csv
+        self.data["actual_query_execution_progress"] = {
+            "planned_total": None, "completed_total": 0, "status": "plan_required"}
+        data = project(self.data, self.model())
+        for page in (render(data, self.fixture.out), render_query_progress(data, self.fixture.out)):
+            self.assertIn("查询计划未登记", page)
+            self.assertIn("查询计划尚未登记；无法计算完成百分比", page)
+            self.assertNotIn("0/0", page)
+            self.assertNotIn("不适用（无查询计划）", page)
+            self.assertNotIn("None", page)
+        self.assertIn("查询完成：查询计划未登记", render_markdown(data))
+        row = next(csv.DictReader(io.StringIO(render_csv(data))))
+        self.assertEqual((row["planned"], row["completed"]), ("", ""))
+
+    def test_query_detail_keeps_exact_receipt_ids_and_chinese_basis(self):
+        from operator_report import project, render_query_progress
+        self.data["actual_query_execution_progress"] = {"planned_total": 2, "completed_total": 1,
+            "items": [{"query_id": "QRY-EXACT", "source_run_id": "ATT-EXACT", "provider": "epo_ops",
+                       "right_type": "patent", "search_dimension": "text", "query": 'ti="toy" & pd>2020',
+                       "completed": True, "basis": "RETAINED_RESPONSE_FULLY_READ"},
+                      {"query_id": "QRY-FAILED", "completed": False, "status": "completed",
+                       "basis": "SOURCE_RESULT_FAILED"}]}
+        page = render_query_progress(project(self.data, self.model()), self.fixture.out)
+        self.assertIn("QRY-EXACT", page)
+        self.assertIn("ATT-EXACT", page)
+        self.assertIn("检索维度：<code>text</code>", page)
+        self.assertIn("ti=&quot;toy&quot; &amp; pd&gt;2020", page)
+        self.assertIn("原始响应完整留存", page)
+        self.assertIn("查询响应状态为失败", page)
+        self.assertNotIn("RETAINED_RESPONSE_FULLY_READ", page)
+        self.assertIn("状态：未完成", page)
+
+    def test_no_query_plan_has_no_fake_zero_percent(self):
+        from operator_report import project, render, render_query_progress
+        self.data["actual_query_execution_progress"] = {"planned_total": 0, "completed_total": 0}
+        data = project(self.data, self.model())
+        for page in (render(data, self.fixture.out), render_query_progress(data, self.fixture.out)):
+            self.assertIn("不适用（无查询计划）", page)
+            self.assertNotIn("0.0%", page)
+
+    def test_invalid_query_projection_counts_cannot_be_published(self):
+        for planned, completed in ((2, 3), (-1, 0), (True, 1), (2, -1), (2, None)):
+            self.data["actual_query_execution_progress"] = {"planned_total": planned,
+                                                            "completed_total": completed}
+            with self.assertRaisesRegex(ValueError, "OPERATOR_QUERY_PROGRESS_COUNTS_INVALID"):
+                self.model()
+
+    def test_fixed_sections_modules_and_dynamic_confidence(self):
+        from operator_report import project, render, SECTION_ORDER
+        self.assessment["overall"]["confidence"] = "低"
+        data = project(self.data, self.model())
+        page = render(data, self.fixture.out)
+        positions = [page.index('id="' + section + '"') for section in SECTION_ORDER]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(page.count('<h4>发现什么</h4>'), 9)
+        self.assertIn("评级置信度：低", page)
+        self.assertIn("侵权风险未排除", page)
+        self.assertIn("script-src 'none'", page)
+
+
 class PresentationStageATests(unittest.TestCase):
     def setUp(self):
         self.fixture = EstimateReportTests("test_all_formats_keep_reasons_and_grade")

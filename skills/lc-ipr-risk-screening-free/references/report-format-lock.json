@@ -1,5 +1,5 @@
 {
-  "purpose": "Explicit operator-report-v1 uses the user-approved readable nine-module format. Historical eight-section/seven-module branches retain their approved CSS and sample.",
+  "purpose": "User-approved green operator format: seven sections, nine modules, dynamic risk and confidence, actual unique-query completion, separate traceable appendices. Historical rendering remains versioned.",
   "css_path": "assets/evidence-estimate-template.css",
   "css_sha256": "b5018e1962ef53cf989863995d67068df6061a89fd47952f5b8c974b66a02319",
   "render_source_sha256": {
@@ -31,7 +31,7 @@
   "approved_logic_revision": "api-first-v3/final-double-review-v1/known-findings-risk-v1/operator-report-v1: exact Generic reference-name exemption; risk follows known facts independently of progress; operator presentation and separate complete annexes explicitly approved by user; historical rendering remains versioned.",
   "operator_revision": "operator-report-v1",
   "operator_css_path": "assets/operator-report.css",
-  "operator_css_sha256": "5912d13fa9b24e027f402ef9c6ce6ae9654e47b6de6369d3a8ef6cc8fe9708bf",
+  "operator_css_sha256": "53c83d97efbe74bcf46f8f17a43b3fa78026dfb2f8dc373ae12aa1acb5a60232",
   "operator_section_order": [
     "product",
     "decision",
@@ -43,7 +43,9 @@
   ],
   "operator_required_appendices": [
     "operator-appendix.html",
-    "technical-audit.html"
+    "technical-audit.html",
+    "query-progress.html",
+    "query-progress.json"
   ],
   "operator_render_source_sha256": {
     "enabled": "d60f47ba9373f628d94bc443343d2c9f429224add06acea0e13b4d13141358ad",
@@ -55,16 +57,45 @@
     "_candidate_key": "27b3a2dd6900fde96079c802eb4c1b73f1ca93a07426f05a208adc1c5e2b7125",
     "_pending_key": "323062ada77394ae21afba8c71988ab4896a28f2cdd46ad5fb9d8eb86d65e29e",
     "_comparison_performed": "b3fa167b77f1bef3ed9765eca730ded933409ecab83db7d6e13ed9bb19829b87",
-    "build": "a1cd9046232bddc659a2a6849d1c9ea08d3ac4dddf9fba99bc2e0c16dd123200",
+    "_display_progress": "7751cd5d66c1901d6c06611eda1311a62cf0b612ead2496515b41c84b2c7ccd4",
+    "build": "48038373f1f325cc15276c1230b5a87c91bd706010c4338eae9c81bbbf5cfc56",
     "project": "409da0182ee7ec199cf92f67c6a1825ac384cccfacb63d1f82f5c2c3792f0fc4",
     "_e": "2f935c5d7842e5db9d18f0533c3623e726cf869d6e3f8c70e1904a843ac66287",
     "_paragraphs": "66ac84a72338029700a5772ae5110878383a6ca8f069286b0c82ed11b7fbcf58",
     "_page": "0b7804910466e123153f898ccf68e23fcf64300200685f24f24f509fd1271267",
     "_figure": "b5e5bda6faba37d539375441232f1134004273c126de4ffb851797c1b7a08f64",
-    "render": "c915211babae885ffdf85ff1078be7f4258cd455eca11aafc9d762b70cf7748a",
+    "_progress_label": "5d85c202681cdcbbc70957a9db361b054b3aab015f5287f9211c866357fab28f",
+    "_progress_summary": "b5860eb1b4071839b978f8997fdfc85198f06982fd128d25b968c8312fd75b6a",
+    "_query_basis": "1e69827c2fee0eb89c0490844832b478a02622289c80c6e78a7114e34b521c9f",
+    "render": "6362cbcd657158dc054d30b7ce9337d1896f5e0577072760242f7b5ec9d6594b",
     "render_appendix": "afd3647b9925b60528b722632ad458c2e031d88dafb36d53a07af49f91862d22",
+    "render_query_progress": "019533e7886210763ef8b76493b277e89933d9c954d0e3fd13e3f1da11922659",
     "render_audit": "2b2d16ce6a13668ae36a48e87fd68d73bb61decafc874692a8c2cd7fc276b804",
-    "render_markdown": "b4dec9c08a223ea82d99c2f36935fd3e1347a40d9156dc841f4bdc3a5bbc22cc",
+    "render_markdown": "1efaa9908c2386b16e59f68c190927e5f9129fc4a47be9ad429f2906fa1fedf3",
     "render_csv": "655a20878b41b3535f4b7f9f8eb0bee9b369339782c70b18292fe3444e7ac4b0"
+  },
+  "operator_module_order": [
+    "copyright",
+    "design",
+    "patent",
+    "trade_dress",
+    "trademark_figurative",
+    "trademark_word",
+    "utility_model",
+    "unregistered_design",
+    "enforcement"
+  ],
+  "operator_metric_labels": [
+    "已知结果风险",
+    "查询完成率",
+    "报告状态"
+  ],
+  "operator_approved_format": {
+    "approved_on": "2026-10-02",
+    "reference": "User-confirmed B0H6FV1FGG US format review report; layout only, no sample conclusions or counters reused",
+    "confidence_required": true,
+    "query_progress_source": "actual_query_execution_progress",
+    "empty_plan_label": "不适用（无查询计划）",
+    "unregistered_plan_label": "查询计划未登记"
   }
 }

@@ -76,6 +76,9 @@ def validate(data):
         if state=='pending' and (not _text(obj.get('question')) or not _text(obj.get('checked_information'))):
             raise ValueError('OBJECT_TARGETED_QUESTION_REQUIRED')
     for fact in facts.values():
+        from product_feedback import STRUCTURE_CATEGORIES
+        if 'information_category' in fact and fact['information_category'] not in STRUCTURE_CATEGORIES | {'other'}:
+            raise ValueError('PRODUCT_FACT_INFORMATION_CATEGORY_INVALID')
         if fact.get('status') not in {'confirmed','unknown','conflict'} or not _text(fact.get('source_path')) or not fact.get('source_refs') or not _text(fact.get('reason')):
             raise ValueError('PRODUCT_FACT_BASIS_REQUIRED')
         if fact['status']!='confirmed' and not _text(fact.get('question')): raise ValueError('PRODUCT_FACT_MINIMUM_QUESTION_REQUIRED')
@@ -290,7 +293,9 @@ def work_entries(task):
         state=direction_state(task,d)
         if state in {'ready','out_of_scope'}: continue
         causes=[objects[o] for o in d['object_ids'] if objects[o]['scope_status']=='pending']+[facts[f] for f in d['fact_ids'] if facts[f]['status']!='confirmed']
-        questions=list(dict.fromkeys(v['question'] for v in causes if v.get('question')))
+        from product_feedback import structure_policy_enabled, structural_fact
+        questions=list(dict.fromkeys(v['question'] for v in causes if v.get('question')
+            and not (structure_policy_enabled(task) and v.get('fact_id') and structural_fact(v))))
         entries.append({'work_id':'WORK-'+sha256_json({'task':task['task_id'],'direction':d['direction_id'],'causes':causes})[:24],
             'scenario_id':d['scenario_id'],'right_type':d['right_type'],'direction_id':d['direction_id'],
             'kind':'user_information' if state=='awaiting_user' else 'product_analysis',
@@ -328,6 +333,18 @@ def work_entries(task):
             'kind':'user_information' if pending else 'product_analysis','state':'awaiting_user' if pending else 'ready',
             'reason':'PRODUCT_SCOPE_WAITING' if pending else 'PRODUCT_DIRECTION_UNREVIEWED',
             'object_ids':[obj['object_id']], 'question':obj.get('question',''), 'evidence_refs':obj['source_refs']})
+    from product_feedback import unavailable, structure_limitation_entry
+    for request in unavailable(task):
+        limit = structure_limitation_entry(task, request=request)
+        if limit: entries.append({'work_id':'WORK-feedback-'+request['request_id'], **limit})
+    # Missing structural facts remain unknown but no longer create a user question.
+    facts_by_id = {row['fact_id']: row for row in data['facts']}
+    for entry in entries:
+        if entry.get('reason') != 'PRODUCT_SCOPE_WAITING': continue
+        unknown = [fid for fid in entry.get('fact_ids', []) if facts_by_id[fid]['status'] != 'confirmed']
+        pending_objects = [oid for oid in entry.get('object_ids', []) if objects[oid]['scope_status'] == 'pending']
+        limit = structure_limitation_entry(task, fact_ids=unknown, direction_id=entry.get('direction_id'))
+        if limit and not pending_objects: entry.update(limit)
     for entry in entries: entry['question_asked']=entry['work_id'] in task.get('scope_questions_asked',[])
     return [{**entry,'jurisdiction':country} for entry in entries
             for country in ([entry['jurisdiction']] if entry.get('jurisdiction')

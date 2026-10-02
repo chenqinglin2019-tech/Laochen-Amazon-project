@@ -223,6 +223,9 @@ def main() -> None:
         task["assessment_policy"] = "evidence-estimate-v1"
         task["assessment_revision"] = "known-findings-risk-v1"
         task["presentation_policy_revision"] = "operator-report-v1"
+        task["product_structure_policy"] = "use_provided_else_unavailable_v1"
+        # Progress and scope-change history use the same initial version.
+        task["product_change_version"] = 1
         task["final_review_execution_revision"] = "module-double-review-v1"
         task["screening_revision"] = RECALL_INTEGRITY_REVISION
         task["recall_planning_revision"] = "identity-discovery-v1"

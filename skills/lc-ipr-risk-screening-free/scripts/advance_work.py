@@ -603,6 +603,8 @@ def main() -> None:
         status["consecutive_no_progress"] = None
     if task.get("review_progress_revision"):
         status["review_progress"] = after.get("review_progress")
+    if after.get("actual_query_execution_progress") is not None:
+        status["actual_query_execution_progress"] = after["actual_query_execution_progress"]
     if task.get("stage_risk_revision"):
         status["stage_risk"] = after.get("stage_risk")
     if defer_sources:
@@ -651,6 +653,8 @@ def main() -> None:
             **({"per_work_progress": _compact_per_work_progress(status["per_work_progress"]),
                 "technical_stops": status["technical_stops"]} if task.get("continuous_progress_revision") else {}),
             **({"review_progress": _compact_review_progress(status["review_progress"])} if task.get("review_progress_revision") else {}),
+            **({"actual_query_execution_progress": _compact_review_progress(status["actual_query_execution_progress"])}
+               if "actual_query_execution_progress" in status else {}),
             **({"stage_risk": _compact_stage_risk(status["stage_risk"])} if task.get("stage_risk_revision") else {}),
             **({"agent_packet_file": str(task_dir / "agent-work-packet.json")} if args.write_agent_packet else {}),
             **({"publication": publication} if publication else {}),

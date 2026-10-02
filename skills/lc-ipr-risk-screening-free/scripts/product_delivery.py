@@ -201,13 +201,22 @@ def project(task):
     gaps = [{'kind':'fact','fact_id':fact['fact_id'],'question':fact.get('question',''),
              'reason':fact['reason'], 'affected_direction_ids':affected(fact_id=fact['fact_id'])}
             for fact in scope['facts'] if fact['status']!='confirmed']
-    from product_feedback import pending as pending_feedback
+    from product_feedback import pending as pending_feedback, unavailable, structure_policy_enabled, structural_fact
+    if structure_policy_enabled(task):
+        for gap in gaps:
+            fact = next(row for row in scope['facts'] if row['fact_id'] == gap['fact_id'])
+            if structural_fact(fact): gap.update(question='', availability='unavailable', judgment='无法判定')
     gaps.extend({'kind':'downstream_fact_feedback','request_id':request['request_id'],
                  'fact_id':request['fact_id'],'candidate_id':request.get('candidate_id') or None,
                  'purpose':request['purpose'],'minimum_information':request['minimum_information'],
                  'question':request['question'],'reason':request['reason'],
                  'affected_direction_ids':[request['direction_id']]}
                 for request in pending_feedback(task))
+    gaps.extend({'kind':'downstream_fact_feedback', 'request_id':request['request_id'],
+                 'fact_id':request['fact_id'],'candidate_id':request.get('candidate_id') or None,
+                 'purpose':request['purpose'],'minimum_information':request['minimum_information'],
+                 'question':'','reason':request['reason'],'availability':'unavailable','judgment':'无法判定',
+                 'affected_direction_ids':[request['direction_id']]} for request in unavailable(task))
     gaps.extend({'kind':'object','object_id':obj['object_id'],'question':obj.get('question',''),
                  'reason':obj['reason'], 'affected_direction_ids':affected(object_id=obj['object_id'])}
                 for obj in scope['objects'] if obj['scope_status']=='pending')

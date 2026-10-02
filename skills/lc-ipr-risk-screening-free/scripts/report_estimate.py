@@ -1349,6 +1349,11 @@ def _build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: d
         from report_presentation_stage_a import project as presentation_project
         result = presentation_project(result)
     if operator_mode:
+        from query_execution_progress import build as query_progress_build
+        result["actual_query_execution_progress"] = query_progress_build(task, evidence, plan,
+            task_dir=task.get("outputs", {}).get("assessment_input_dir") or task_dir,
+            view={"entries": result.get("presentation_stage_a", {}).get("stage", {}).get("work", {}).get("entries", [])},
+            candidates=candidates)
         from operator_report import build as operator_build, project as operator_project
         expression_rows = [row for row in rows if row.get("scenario_id") == task.get("primary_scenario_id")
             and row.get("right_type") in {"copyright", "trade_dress"}]
@@ -1880,9 +1885,11 @@ def bundle_bytes(data: dict, output_dir: Path) -> dict[str, bytes]:
     required = report_files(data)
     payloads = {'report-data.json': _json(data), 'report.html': render_html(data, Path(output_dir)).encode()}
     if data.get("presentation_policy_revision") == "operator-report-v1":
-        from operator_report import render_appendix, render_audit
+        from operator_report import render_appendix, render_audit, render_query_progress
         payloads["operator-appendix.html"] = render_appendix(data, Path(output_dir)).encode()
         payloads["technical-audit.html"] = render_audit(data, Path(output_dir)).encode()
+        payloads["query-progress.html"] = render_query_progress(data, Path(output_dir)).encode()
+        payloads["query-progress.json"] = _json(data.get("actual_query_execution_progress", data["operator_view"]["progress"]))
     if 'report.md' in required:
         payloads['report.md'] = render_markdown(data).encode()
     if 'report-findings.csv' in required:
@@ -1897,6 +1904,11 @@ def _manifest(data: dict, payloads: dict[str, bytes]) -> dict:
         manifest['presentation_policy_revision'] = data['presentation_policy_revision']
         manifest['operator_view'] = {'path': 'report-data.json', 'json_pointer': '/operator_view',
             'sha256': _digest(data['operator_view'])}
+        if data.get('actual_query_execution_progress'):
+            manifest['actual_query_execution_progress'] = {'path': 'query-progress.json',
+                'sha256': _sha(payloads['query-progress.json']),
+                **{key: data['actual_query_execution_progress'][key] for key in
+                   ('completed_total', 'planned_total', 'completion_percent')}}
     if data.get('business_status_stage_b'):
         manifest['business_status_stage_b'] = {'path': 'report-data.json', 'json_pointer': '/business_status_stage_b',
             'sha256': _digest(data['business_status_stage_b']),

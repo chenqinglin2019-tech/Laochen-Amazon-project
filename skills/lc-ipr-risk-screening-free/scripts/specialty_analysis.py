@@ -871,7 +871,7 @@ def _gap(task, request, indexed, plan=None, *, evidence=None, candidates=None, l
         raise ValueError("SPECIALTY_GAP_INVALID")
     _refs(request.get("evidence_refs", []), indexed, required=False)
     if request["action_kind"] == "user_fact":
-        from product_feedback import pending
+        from product_feedback import outstanding as pending
         if (not _text(request.get("product_feedback_request_id"))
                 or request["product_feedback_request_id"] not in
                 {row.get("request_id") for row in pending(task)}):
@@ -1670,7 +1670,8 @@ def project(task: dict, evidence: dict, candidates: dict, ledger: dict, *, suppl
         # already-reviewed unknowns linked to an active product feedback request
         # become external dependencies; all other obligations remain actionable.
         if intake:
-            from product_feedback import pending
+            from product_feedback import outstanding as pending, unavailable, structure_limitation_entry
+            unavailable_feedback = {row["request_id"]: row for row in unavailable(task)}
             feedback = {row.get("request_id") for row in pending(task)}
             for gap in gaps:
                 if gap.get("action_kind") != "professional_review":
@@ -1684,11 +1685,21 @@ def project(task: dict, evidence: dict, candidates: dict, ledger: dict, *, suppl
                             blocker.update(state="awaiting_access", source_dependency=deepcopy(professional))
             for gap in gaps:
                 follow = next((row for row in reversed(follows) if row["gap_event_id"] == gap["event_id"]), {})
-                if (follow.get("outcome") != "waiting" or gap.get("action_kind") != "user_fact"
+                if (follow.get("outcome") not in {"waiting", "limited"} or gap.get("action_kind") != "user_fact"
                         or gap.get("product_feedback_request_id") not in feedback):
+                    continue
+                if follow.get("outcome") == "limited" and gap["product_feedback_request_id"] not in unavailable_feedback:
                     continue
                 dependency = {"state": "waiting", "product_feedback_request_id": gap["product_feedback_request_id"],
                               "dependency_gap_event_id": gap["event_id"]}
+                request = unavailable_feedback.get(gap["product_feedback_request_id"])
+                limit = structure_limitation_entry(task, request=request) if request else None
+                bindings = _unknown_bindings(task, gap, relevant)
+                if limit and bindings:
+                    limit["delivery_limit"].update(specialty_gap_event_id=gap["event_id"],
+                        specialty_gap_sha256=sha256_json(gap), followup_sha256=sha256_json(follow),
+                        unknown_bindings=bindings)
+                    dependency.update(state="limited", source_dependency=limit)
                 for blocker in blockers:
                     if blocker["reason"] == "SPECIALTY_GAP_OPEN" and blocker.get("gap_id") == gap["gap_id"]:
                         blocker.update(dependency)

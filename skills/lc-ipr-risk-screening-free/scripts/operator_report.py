@@ -16,7 +16,7 @@ from urllib.parse import urlsplit
 
 REVISION = "operator-report-v1"
 SECTION_ORDER = ["product", "decision", "modules", "candidates", "gaps", "coverage", "trace"]
-APPENDIX_FILES = ["operator-appendix.html", "technical-audit.html"]
+APPENDIX_FILES = ["operator-appendix.html", "technical-audit.html", "query-progress.html", "query-progress.json"]
 RIGHTS = [("copyright", "版权"), ("design", "外观专利"), ("patent", "发明专利"),
           ("trade_dress", "商业外观"), ("trademark_figurative", "图形商标"),
           ("trademark_word", "文字商标"), ("utility_model", "实用新型"),
@@ -25,7 +25,8 @@ SOURCE_NAMES = {"epo_ops": "欧洲专利局 OPS", "serpapi_google_patents": "Ser
     "serpapi_google_lens": "SerpApi 图片相似检索", "serper_web": "Serper 网页检索",
     "serper_patents": "Serper 专利", "signa": "Signa 商标",
     "public_source": "已留存公开原文", "google_patents": "Google Patents 公开记录",
-    "local_agent_review": "公开材料阅读与比较", "asset_provenance": "设计来源与授权资料调查"}
+    "local_agent_review": "公开材料阅读与比较", "asset_provenance": "设计来源与授权资料调查",
+    "uspto_patent_browser": "美国专利商标局专利核验", "uspto_trademark_browser": "美国专利商标局商标核验"}
 COUNTRIES = {"US": "美国", "GB": "英国", "FR": "法国", "DE": "德国", "IT": "意大利", "ES": "西班牙", "JP": "日本", "EU": "欧盟"}
 RISKS = ["极低", "低", "中", "高", "极高"]
 AUTO_PENDING_NOTE = "未取得对应国家和权利类型的合格检索比较或具体权利证据；保留阶段性记录，不输出最终风险结论。"
@@ -126,6 +127,34 @@ def _comparison_performed(rows):
             return True
     return False
 
+def _display_progress(data, fallback):
+    """Use the evidence-validated query projection; legacy reports retain their snapshot."""
+    execution = data.get("actual_query_execution_progress")
+    if not isinstance(execution, dict):
+        return deepcopy(fallback)
+    progress = deepcopy(execution)
+    planned = progress.get("planned_total", progress.get("planned", 0))
+    completed = progress.get("completed_total", progress.get("completed", 0))
+    if planned is None and progress.get("status") == "plan_required":
+        progress.update(planned=None, completed=None, percentage=None)
+        progress["by_scope"] = []
+        return progress
+    if (isinstance(planned, bool) or isinstance(completed, bool) or
+            not isinstance(planned, int) or not isinstance(completed, int) or
+            not 0 <= completed <= planned):
+        raise ValueError("OPERATOR_QUERY_PROGRESS_COUNTS_INVALID")
+    progress.update(planned=planned, completed=completed,
+                    percentage=(completed / planned * 100 if planned else None))
+    scopes = []
+    for row in progress.get("by_scope", []):
+        scope = {**_scope(row), **row}
+        scope["planned"] = row.get("planned_total", row.get("planned", 0))
+        scope["completed"] = row.get("completed_total", row.get("completed", 0))
+        scopes.append(scope)
+    progress["by_scope"] = scopes
+    return progress
+
+
 def build(task, evidence, assessment, candidates, data):
     if not enabled(task):
         return None
@@ -134,7 +163,7 @@ def build(task, evidence, assessment, candidates, data):
     from report_query_trace import build_query_trace
     from report_estimate import _sha
     stage = data.get("presentation_stage_a", {}).get("stage", {})
-    progress = deepcopy(stage.get("progress") or assessment.get("review_progress", {}))
+    progress = _display_progress(data, stage.get("progress") or assessment.get("review_progress", {}))
     trace = data.get("query_trace") or build_query_trace(task, evidence, assessment, candidates,
         data.pop("_operator_plan"), source_task_dir=data["trace"]["source_task_dir"])
     data["query_trace"] = trace
@@ -191,14 +220,14 @@ def build(task, evidence, assessment, candidates, data):
         finding = "已查明具体风险" if positive else "存在待判断线索" if unresolved else "本轮已查结果未发现已证实的具体风险" if performed or completed or not_applicable else "尚无本模块查询结果"
         done = []
         if planned:
-            done.append("已验收 %s/%s 个唯一计划项；该比例表示工作完成度。" % (completed, planned))
+            done.append("已完成 %s/%s 个去重查询或资料核查项；该比例表示查询工作完成度。" % (completed, planned))
         if effective:
             names = unique(SOURCE_NAMES.get(q.get("provider"), q.get("provider")) for q in entries
                            if any(a.get("effective") for a in q.get("attempts", [])))
             done.append("实际使用：" + "、".join(names) + "。有效响应按原记录及其范围使用。")
             retrieved = sum(a.get("retrieved_hits") or 0 for a in effective.values())
             if retrieved:
-                done.append("有效响应共载有 %s 条结果；重复响应按一次计算，结果条数不等于权利件数，处理情况以步骤验收为准。" % retrieved)
+                done.append("有效响应共载有 %s 条结果；重复响应按一次计算，结果条数不等于权利件数，处理范围以查询完成记录为准。" % retrieved)
         if local:
             done.append("完成留存公开材料的本地阅读、来源调查或比较；此动作无需向远程接口提交。")
         completed_steps = unique(_step(q) for q in entries if any(a.get("effective") or a.get("local_investigation_performed") for a in q.get("attempts", [])))
@@ -230,7 +259,7 @@ def build(task, evidence, assessment, candidates, data):
                     'identity': _pending_key(origin, kind, scenario, right),
                     'subject': human(origin.get('title') or actual.get(origin.get('candidate_id') or _scope(origin).get('candidate_id'), {}).get('title'))})
         if planned > completed:
-            add_missing("另有 %s 个计划项未通过完成验收；有请求记录的失败、受限或未知项并不等于完全未执行。" % (planned-completed),
+            add_missing("另有 %s 个查询项未完成；已尝试但失败、受限或状态未知的项保留为未完成。" % (planned-completed),
                         {}, 'plan_acceptance')
         for q in entries:
             last = q.get("attempts", [])[-1] if q.get("attempts") else {}
@@ -368,7 +397,7 @@ def build(task, evidence, assessment, candidates, data):
         "focus_candidates": focus, "pending_items": pending, "sources": sources,
         "delivery": {"round": "本轮报告完成" if round_closed else "当前阶段结果",
                      "meaning": "查询进度与事实缺口见各模块；实际入口由交付记录核对。"},
-        "reassessment_note": ("本版按已确认的评级与运营展示规则重新评估，复用既有查询和比较；进度按实际验收记录修正，本次未新增 API 查询。"
+        "reassessment_note": ("本版按已确认的评级与运营展示规则重新评估，复用既有查询和比较；进度按真实查询与资料核查完成记录修正，本次未新增 API 查询。"
             if (task.get("reassessment_provenance") or {}).get("kind") == "explicit_user_requested_policy_and_presentation_reassessment" else ""),
         "appendices": APPENDIX_FILES, "stylesheet_sha256": _sha(css.read_bytes())}
 
@@ -402,14 +431,61 @@ def _figure(item, output_dir):
     return re.sub(r" · SHA-256 [a-f0-9]+", "", result)
 
 
+def _progress_label(progress):
+    percentage = progress.get("percentage")
+    if isinstance(percentage, (int, float)) and not isinstance(percentage, bool):
+        return "%.1f%%" % percentage
+    if progress.get("planned") is None or progress.get("status") == "plan_required":
+        return "查询计划未登记"
+    return "不适用（无查询计划）" if progress.get("planned") == 0 else "未登记百分比"
+
+
+def _progress_summary(progress):
+    if progress.get("planned") is None or progress.get("status") == "plan_required":
+        return "查询计划尚未登记；无法计算完成百分比。"
+    return "%s/%s 个去重查询或资料核查项已完成" % (progress.get("completed", 0), progress.get("planned", 0))
+
+
+def _query_basis(value):
+    labels = {
+        "NO_BOUND_RUN": "未找到绑定本查询的执行回执。",
+        "QUERY_NOT_REGISTERED_BEFORE_EXECUTION": "查询尚未正式登记到当前计划，不能计为完成。",
+        "PRODUCT_SCOPE_REVIEW_REQUIRED": "产品或评估范围变化，需要复核查询是否仍适用。",
+        "QUERY_REOPENED_REVALIDATION_REQUIRED": "查询已重新开启，既有回执需要重新核验。",
+        "SOURCE_ROOT_UNAVAILABLE": "留存原始资料所在目录不可用，无法核验。",
+        "LOCAL_INVESTIGATION_REVALIDATED": "本地资料核查及其原始证据已重新核验，符合完成条件。",
+        "LOCAL_INVESTIGATION_INCOMPLETE": "本地资料核查或其证据验证尚未完成。",
+        "SOURCE_SUBMISSION_NOT_CONFIRMED": "尚未确认查询已提交，且没有可复用的合格原始响应。",
+        "SOURCE_ORIGINAL_INVALID": "原始响应文件缺失或未通过完整性核验。",
+        "ZERO_RESULT_UNVERIFIED": "零结果尚未取得合格原始证明。",
+        "RETAINED_RESPONSE_FULLY_READ": "原始响应完整留存，已完成取得范围内的结果阅读与处理。",
+        "RESULT_READING_INCOMPLETE": "响应已取得，结果阅读或处理尚未完成。",
+        "SOURCE_CARDS_REVIEWED": "原始响应和对应结果卡已完成阅读、处理与复核。",
+        "VERIFIED_ZERO_RESPONSE": "合格原始响应证明为零结果，查询已完成。",
+        "RESULT_READING_PROOF_MISSING": "缺少结果已完成阅读和处理的证明。",
+    }
+    value = str(value or "")
+    if value in labels:
+        return labels[value]
+    if value.startswith("SOURCE_RESULT_"):
+        status = value.removeprefix("SOURCE_RESULT_").lower()
+        return "查询响应状态为%s，尚不符合完成条件。" % {
+            "failed": "失败", "access_limited": "访问受限", "unknown": "未知",
+            "pending": "等待响应", "not_submitted": "未提交"}.get(status, "尚未有效确认")
+    if value.startswith("RECEIPT_VALIDATION_FAILED:"):
+        return "执行回执未通过证据校验，具体原因保留在完整查询记录中。"
+    if re.fullmatch(r"[A-Z][A-Z0-9_]+(?::.*)?", value):
+        return "证据或结果处理尚未通过完成核验，具体原因保留在完整查询记录中。"
+    return human(value)
+
+
 def render(data, output_dir):
     view, product = data["operator_view"], data["product"]
     overall, progress = view["overall"], view["progress"]
     grade = overall["risk"]
     grade_label = grade + "风险" if grade in RISKS else "风险待定"
     completed, planned = progress.get("completed", 0), progress.get("planned", 0)
-    percentage = progress.get("percentage")
-    progress_text = ("%.1f%%" % percentage) if isinstance(percentage, (int, float)) else "未登记百分比"
+    progress_text = _progress_label(progress)
     body_name = next((obj.get("description") for obj in product.get("scope_objects", []) if
         obj.get("kind") == "product" and obj.get("scope_status") == "included" and obj.get("description")), "")
     name = human(product.get("chinese_title") or str(body_name).split("；")[0] or product.get("title"), 140)
@@ -418,16 +494,15 @@ def render(data, output_dir):
     body = '<header><span class="eyebrow">运营知识产权筛查</span><h1>' + _e(name or "产品风险筛查") + '</h1></header>'
     scenario_text = human(product.get("scope_assumption") or "拟售情景未明确；按已登记的产品资料和市场范围判断。", 280)
     body += '<section id="product" class="hero"><div class="product-image">' + image + '</div><div><h2>本次销售情景</h2><p>' + _e(scenario_text) + '</p><dl><dt>商品</dt><dd>' + _e(product.get("asin") or product.get("requested_asin")) + '</dd><dt>市场</dt><dd>' + _e(countries) + '</dd><dt>评估日期</dt><dd>' + _e(str(data.get("generated_at", ""))[:10]) + '</dd></dl><p>未取得的产品视图、实际销售版本和授权资料以各模块缺口为准。</p></div></section>'
-    body += '<section id="decision"><h2>当前结果</h2><div class="metrics"><div class="metric"><span>已知结果风险</span><strong class="risk">' + _e(grade_label) + '</strong><small>基于本轮已查明项目</small></div><div class="metric"><span>查询计划完成率</span><strong>' + _e(progress_text) + '</strong><small>' + str(completed) + '/' + str(planned) + ' 个唯一计划项已验收</small></div><div class="metric"><span>报告状态</span><strong>' + _e(view["delivery"]["round"]) + '</strong><small>仍可按新资料补充判断</small></div></div>'
+    body += '<section id="decision"><h2>当前结果</h2><div class="metrics"><div class="metric"><span>已知结果风险</span><strong class="risk">' + _e(grade_label) + '</strong><small>基于本轮已查明项目</small></div><div class="metric"><span>查询完成率</span><strong>' + _e(progress_text) + '</strong><small>' + _e(_progress_summary(progress)) + '</small></div><div class="metric"><span>报告状态</span><strong>' + _e(view["delivery"]["round"]) + '</strong><small>仍可按新资料补充判断</small></div></div>'
     explanation = human(overall.get("screening_statement") or overall.get("reasoning") or overall.get("known_findings_reasoning"))
-    body += '<p class="decision-note">' + _e(explanation or ("尚无完成复核的适用风险判断。" if grade is None else "具体风险依据见相关模块和候选。")) + '</p><p><b>上架建议：' + _e(overall.get('listing_recommendation') or '暂缓上架') + '。</b>' + _e(overall.get('listing_reason') or '仍需核对实际销售情景与未完成事项。') + '</p><p>风险由已查明的具体项目决定；未完成事项单独列明。工作完成率表示步骤进度，不能解读为已排除侵权的比例。</p></section>'
+    body += '<p class="decision-note">评级置信度：' + _e(human(overall.get("confidence")) or "未形成") + '。侵权风险未排除。</p><p class="grade-reason">' + _e(explanation or ("尚无完成复核的适用风险判断。" if grade is None else "具体风险依据见相关模块和候选。")) + '</p><p><b>上架建议：' + _e(overall.get('listing_recommendation') or '暂缓上架') + '。</b>' + _e(overall.get('listing_reason') or '仍需核对实际销售情景与未完成事项。') + '</p><p>风险由已查明的具体项目决定；未完成事项单独列明。查询完成率表示查询和资料核查进度，不能解读为已排除侵权的比例。</p></section>'
     body += '<section id="modules"><h2>九类查询结果</h2><div class="module-grid">'
     for module in view["modules"]:
         body += '<article class="module"><div class="card-heading"><h3>' + _e(module["label"]) + '</h3><span class="badge">' + _e(module["query_status"]) + '</span></div><p class="finding">' + _e(module["finding"]) + '</p>'
         body += '<p>本项风险：<b>' + _e(module["risk_label"]) + '</b></p>'
         body += '<h4>查了什么</h4>' + _paragraphs(module["done"], 6)
-        if module["facts"]:
-            body += '<h4>发现什么</h4>' + _paragraphs(module["facts"], 2)
+        body += '<h4>发现什么</h4>' + _paragraphs(module["facts"] or [module["finding"]], 2)
         body += '<h4>尚未完成</h4>' + _paragraphs(module["unfinished"], 3)
         body += '<h4>运营关注</h4>' + _paragraphs(module["actions"] or ["后续取得对应资料时可补充判断。" if module["unfinished"] else "无新增必要动作。"], 2) + '</article>'
     body += '</div><p>同一图片响应可支持不同权利的调查，各模块按其实际用途分别说明；它不代表多个独立来源。</p></section>'
@@ -451,7 +526,7 @@ def render(data, output_dir):
     for source in view["sources"]:
         body += '<article class="source"><h3>' + _e(source["source"]) + '</h3><p>查询或阅读日期：' + _e("、".join(source["date"]) or "未记录") + '。已读取有效响应或完成本地调查 ' + str(source["valid_responses"]) + ' 次；失败、受限或尚未有效确认的记录 ' + str(source["unsuccessful"]) + ' 次。</p><p>用途：' + _e("、".join(source["operations"])) + '。</p>' + _paragraphs(source["boundaries"], 2) + '</article>'
     body += '<p>API 的有效字段按准确记录、地域和时间采信；摘要、历史事件和同族状态仅按原意使用。未取得的信息保留未知，来源查询没有穷尽承诺。</p></section>'
-    body += '<section id="trace"><h2>按需查看详细资料</h2>' + ('<p>' + _e(view.get('reassessment_note')) + '</p>' if view.get('reassessment_note') else '') + '<p><a href="operator-appendix.html">完整候选、逐要素比较与未完成清单</a></p><p><a href="technical-audit.html">技术审计与数据追溯</a></p><p>本报告适用于所列产品、销售情景、市场与评估时点；新产品资料、授权或权利状态可能改变已知结果。</p></section>'
+    body += '<section id="trace"><h2>按需查看详细资料</h2>' + ('<p>' + _e(view.get('reassessment_note')) + '</p>' if view.get('reassessment_note') else '') + '<p><a href="operator-appendix.html">完整候选、逐要素比较与未完成清单</a></p><p><a href="technical-audit.html">技术审计与数据追溯</a></p><p><a href="query-progress.html">逐项查询完成记录与统计口径</a></p><p>本报告适用于所列产品、销售情景、市场与评估时点；新产品资料、授权或权利状态可能改变已知结果。</p></section>'
     return _page("运营知识产权筛查报告", body)
 
 
@@ -483,6 +558,34 @@ def render_appendix(data, output_dir):
     return _page("候选与分析附录", body)
 
 
+def render_query_progress(data, output_dir):
+    """Readable task receipts; exact IDs and validation proofs remain in JSON/audit."""
+    view = data["operator_view"]
+    progress = view["progress"]
+    planned, completed = progress.get("planned", 0), progress.get("completed", 0)
+    label = _progress_label(progress)
+    body = '<header><h1>查询完成记录</h1><p><a href="report.html">返回运营报告</a> · <a href="query-progress.json">完整查询记录</a></p></header>'
+    body += '<section><h2>查询完成率：' + _e(label) + '</h2><p>' + _e(_progress_summary(progress)) + '</p><p>按当前查询任务及真实回执统计；重试与历史重复项不重复计数。失败、未提交、状态未知以及结果尚未完成处理的查询仍为未完成。查询完成率与侵权判断、事实是否查清和最终审阅分别记录。</p></section>'
+    items = progress.get("items", [])
+    for index, item in enumerate(items, 1):
+        scope = _scope(item)
+        right = item.get("right_type") or scope.get("right_type")
+        provider = item.get("provider") or scope.get("provider")
+        done = item.get("completed") is True if "completed" in item else item.get("state") == "completed" or item.get("status") == "completed"
+        body += '<article><h3>' + str(index) + '. ' + _e(dict(RIGHTS).get(right, "查询任务")) + ' · ' + _e(SOURCE_NAMES.get(provider, human(provider))) + '</h3><p>状态：' + ('已完成' if done else '未完成') + '</p>'
+        operation = item.get("operation") or item.get("dimension") or item.get("search_dimension") or scope.get("search_dimension")
+        body += _paragraphs([item.get("title") or item.get("label") or ("步骤：" + human(operation) if operation else ""),
+            _query_basis(item.get("reason") or item.get("completion_basis") or item.get("basis"))])
+        for key, label in [("query_id", "查询编号"), ("source_run_id", "执行回执编号"),
+                           ("search_dimension", "检索维度"), ("query", "查询表达式")]:
+            if item.get(key) is not None and item.get(key) != "":
+                body += '<p>' + label + '：<code>' + _e(item[key]) + '</code></p>'
+        body += '</article>'
+    if not items:
+        body += '<p>该历史快照未保存逐项查询明细；可在技术审计中查看原进度来源。</p>'
+    return _page("查询完成记录", body)
+
+
 def render_audit(data, output_dir):
     # Complete technical data is delivered once in its own artifact. The JSON is
     # escaped and cannot execute; configured secret guards cover this payload.
@@ -494,8 +597,10 @@ def render_audit(data, output_dir):
 def render_markdown(data):
     view = data["operator_view"]
     lines = ["# 运营知识产权筛查报告", "已知结果风险：" + (view["overall"]["risk"] or "待定"),
+        "评级置信度：" + (human(view["overall"].get("confidence")) or "未形成"),
         "上架建议：" + (view["overall"].get("listing_recommendation") or "暂缓上架"),
-        "唯一计划项完成：%s/%s" % (view["progress"].get("completed", 0), view["progress"].get("planned", 0))]
+        "查询完成：" + ("%s/%s" % (view["progress"].get("completed", 0), view["progress"].get("planned", 0))
+                         if view["progress"].get("planned") is not None else "查询计划未登记")]
     for module in view["modules"]:
         lines.extend(["## " + module["label"], "查询状态：" + module["query_status"],
             "本项风险：" + module["risk_label"], module["finding"],

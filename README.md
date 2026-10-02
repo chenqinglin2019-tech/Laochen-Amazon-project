@@ -30,12 +30,14 @@ Public repository for Laochen Amazon workflow skills.
   discovery and Ruleset 2.0 eight-module legal review, producing separate
   legal-risk, confidence, operational-action, and evidence-bound reports.
   Last updated: 2026-09-02 15:12 (UTC+8).
-- `skills/lc-ipr-risk-screening-free/` - Discover IPR candidates through free-tier
-  APIs, review candidates, and verify relevant official records. Preserves the
-  original authentication contract and supports user-supplied provider keys.
-  Includes Mac/Windows setup diagnostics and an empty `.env` template.
-  Last updated: 2026-09-09 19:07 (UTC+8).
+- `skills/lc-ipr-risk-screening-free/` - Discover and review IPR candidates through
+  free-tier APIs, with independent final review and relevant official evidence.
+  Includes the fixed seven-section risk report, evidence-based query completion,
+  and a default of unavailable structural information when users supply none.
+  Preserves the authentication contract and ships empty credential templates.
+  Last updated: 2026-10-02 (UTC+8).
   [Installation and platform validation](skills/lc-ipr-risk-screening-free/references/installation.md).
+  [Download the credential-free ZIP](skills/lc-ipr-risk-screening-free.zip).
 
 ## Install Path
 
