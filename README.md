@@ -70,3 +70,7 @@ https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/
 ## Security
 
 Do not commit backend tokens, cookies, API keys, or local credential files.
+
+The two Listing skills ship blank `config.json` files and save user-supplied
+backend tokens locally through `scripts/configure_credentials.py` without
+echoing them. They use the existing backend CLI credential route.

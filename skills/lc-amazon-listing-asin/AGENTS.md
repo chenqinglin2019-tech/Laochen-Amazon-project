@@ -11,3 +11,5 @@
 - `knowledge/distilled/*.yaml`、`knowledge/site_language_rules.yaml`：写作规则；`knowledge/style_snippets.md`：写法参考；`knowledge/examples/*.json` 仅供测试。
 
 修改脚本后运行 `python3 -m unittest discover -s tests`。语义判断不能伪装成确定性程序保证。
+
+用户明确提供本 Skill 的鉴权 token 时，用 scripts/configure_credentials.py 从标准输入接收并保存，随后使用 backend_cli.py；凭据禁止回显或进入版本库。

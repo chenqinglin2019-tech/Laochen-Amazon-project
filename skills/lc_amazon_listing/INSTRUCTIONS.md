@@ -200,3 +200,5 @@ python3 SKILL/scripts/render_listing.py --run-dir RUN
 ## 失败与交付说明
 
 失败时说明阶段、子体或字段、原因和下一步，不依赖缺失信息的部分继续整理，不伪造完整结果。最终固定提供 07_listing.md、07_listing.json、report.html 三个链接，并简述子体总数、验收状态、待补事实和可解锁流量。报告能证明内容和检查过程，不能证明 Amazon 已收录、排名会提升或 AI 必然推荐。
+
+用户在对话中提供鉴权 token 时，先按 SKILL.md 的“对话自动填写鉴权 token”保存到本 Skill 的 config.json，再继续原后端流程；不回显凭据。
