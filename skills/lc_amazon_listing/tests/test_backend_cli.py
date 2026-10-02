@@ -288,3 +288,19 @@ class QuarantineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RequestSavingTests(unittest.TestCase):
+    def setUp(self):
+        quarantine = patch.object(backend, "_clear_quarantine"); quarantine.start(); self.addCleanup(quarantine.stop)
+        temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup); self.root = Path(temp.name)
+        self.config = self.root / "config.json"; self.config.write_text(json.dumps(CONFIG), encoding="utf-8")
+        self.cli = self.root / "fake-cli"; self.cli.write_text("fake", encoding="utf-8")
+
+    def test_qa_keyword_cap_is_enforced_before_any_request(self):
+        source = self.root / "05.json"
+        source.write_text(json.dumps({"title_keywords": {"high": ["k%d" % i for i in range(6)], "relevant": ["r%d" % i for i in range(4)]}}), encoding="utf-8")
+        with patch.object(backend.subprocess, "run") as runner:
+            result = backend.run_cli("qa", site="US", keywords_file=source, config=self.config, cli=self.cli, output=self.root / "qa.json")
+        runner.assert_not_called()
+        self.assertEqual(result["error_code"], "qa_too_many_keywords")

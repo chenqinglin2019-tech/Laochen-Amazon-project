@@ -135,11 +135,20 @@ class KeywordImportTests(unittest.TestCase):
         self.assertEqual(data["keywords"][0]["monthly_searches"], 40)
         self.assertEqual(len(data["keywords"][0]["raw_cells"]), 4)
 
-    def test_unknown_nonempty_sheet_requires_explicit_selection(self):
+    def test_notes_sheet_is_recorded_with_preview_but_a_file_without_keywords_fails(self):
         path = self.root / "mixed.xlsx"
         workbook(path, [("Notes", [["报告说明"]], False), ("Words", [["Keyword"], ["cat decor"]], False)])
+        data = importer.build_import([path], "US")
+        notes = data["source_files"][0]["sheets"][0]
+        self.assertEqual((notes["status"], notes["preview"]), ("no_keyword_header", [["报告说明"]]))
+        self.assertEqual(data["import_issues"][0]["code"], "sheet_without_keyword_header")
+        self.assertEqual([r["keyword"] for r in data["keywords"]], ["cat decor"])
+        only_notes = self.root / "notes.xlsx"
+        workbook(only_notes, [("Notes", [["报告说明"]], False)])
+        with self.assertRaisesRegex(ValueError, "没有可识别关键词表头"):
+            importer.build_import([only_notes], "US")
         with self.assertRaisesRegex(ValueError, "找不到关键词表头"):
-            importer.build_import([path], "US")
+            importer.build_import([path], "US", sheets=["Notes", "Words"])
         data = importer.build_import([path], "US", sheets=["Words"])
         self.assertEqual(data["source_files"][0]["sheets"][0]["status"], "not_selected")
         with self.assertRaisesRegex(ValueError, "不存在"):
@@ -298,3 +307,44 @@ class KeywordImportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SellerSpriteMetricTests(unittest.TestCase):
+    """Reverse-ASIN exports: ASIN-specific shares are kept per source, extra columns rank only."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup); self.root = Path(temp.name)
+
+    def export(self, name, rows):
+        path = self.root / name
+        with open(path, "w", newline="", encoding="utf-8-sig") as handle:
+            csv.writer(handle).writerows([["关键词", "流量占比", "自然排名", "月搜索量", "月购买量", "购买率", "ABA周排名"]] + rows)
+        return path
+
+    def test_traffic_share_kept_per_source_and_source_count_recorded(self):
+        a = self.export("ReverseASIN-US-B0A.csv", [["pen holder", "5.5%", "3", "9000", "300", "3.3%", "1200"], ["desk caddy", "1%", "40", "800", "", "", ""]])
+        b = self.export("ReverseASIN-US-B0B.csv", [["pen holder", "12%", "1", "9000", "300", "3.3%", "1200"]])
+        data = importer.build_import([a, b], "US")
+        pen = data["raw"]["keyword_data"][0]
+        self.assertIsNone(pen["traffic_percentage"])
+        self.assertEqual((pen["traffic_percentage_max"], pen["source_file_count"], pen["natural_rank_best"]), (12.0, 2, 1))
+        self.assertEqual(pen["traffic_percentage_by_source"], [{"file_id": "file-001", "value": 5.5}, {"file_id": "file-002", "value": 12.0}])
+        self.assertEqual((pen["monthly_searches"], pen["monthly_purchases"], pen["purchase_rate"], pen["aba_rank"]), (9000, 300, 3.3, 1200))
+        self.assertNotIn("metric_conflict", {i["code"] for i in data["import_issues"]})
+        self.assertEqual(data["raw"]["keyword_data"][1]["source_file_count"], 1)
+
+    def test_filename_site_mismatch_is_a_warning(self):
+        path = self.export("ReverseASIN-UK-B0A.csv", [["pen holder", "5%", "3", "9000", "", "", ""]])
+        data = importer.build_import([path], "US")
+        self.assertEqual(data["import_issues"][0]["code"], "filename_site_mismatch")
+        self.assertEqual(importer.build_import([self.export("keywords-in-desk.csv", [["pen holder", "", "", "", "", "", ""]])], "US")["import_issues"], [])
+
+    def test_command_prints_compact_issue_summary(self):
+        files = [self.export("t%d.csv" % i, [["pen holder", "", "", str(100 + i), "", "", ""]]) for i in range(3)]
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            self.assertEqual(importer.main(["--files", *map(str, files), "--site", "US", "--run-dir", str(self.root / "run")]), 0)
+        summary = json.loads(stdout.getvalue())
+        self.assertEqual(summary["issue_counts"], {"metric_conflict": 1})
+        self.assertNotIn("issues", summary)
+        self.assertLessEqual(len(summary["issue_examples"]), 5)

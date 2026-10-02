@@ -127,6 +127,20 @@ def _write_json(path, data):
             os.unlink(temporary)
 
 
+POLICY_PATH = ROOT / "knowledge" / "quality_policy.json"
+
+
+def qa_keyword_count(path):
+    data = json.loads(Path(path).read_text(encoding="utf-8-sig"), parse_constant=_reject_constant)
+    groups = data.get("title_keywords", {}) if isinstance(data, dict) else {}
+    words = []
+    for field in ("high", "relevant"):
+        for word in groups.get(field, []) if isinstance(groups.get(field), list) else []:
+            if isinstance(word, str) and word.strip().casefold() not in words:
+                words.append(word.strip().casefold())
+    return len(words)
+
+
 def run_cli(command, *, site, keywords_file=None, listing_file=None,
             output=None, config=None, cli=None, timeout=None):
     """Return only safe data; exit_code is the actual child code, or None if absent.
@@ -140,6 +154,14 @@ def run_cli(command, *, site, keywords_file=None, listing_file=None,
             raise BackendError("invalid_arguments", "Choose qa/validate and an explicit supported site. Import keyword tables locally with import_keywords.py.")
         if command == "qa" and site != "US":
             raise BackendError("qa_us_only", "The current QA connector accepts US only; record the documented local skip for other sites.")
+        if command == "qa" and keywords_file is not None and Path(keywords_file).is_file():
+            limit = json.loads(POLICY_PATH.read_text(encoding="utf-8")).get("qa_max_keywords")
+            try:
+                count = qa_keyword_count(keywords_file)
+            except (OSError, ValueError):
+                raise BackendError("input_invalid", "The keywords file is not valid JSON.") from None
+            if limit and count > limit:
+                raise BackendError("qa_too_many_keywords", "QA request has %d keywords; keep at most %d high-traffic identity/intent words in title_keywords (no request was sent)." % (count, limit))
         timeout = (120 if command == "validate" else None) if timeout is None else timeout
         if timeout is not None and (isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0):
             raise BackendError("invalid_arguments", "Timeout must be a finite positive number of seconds.")

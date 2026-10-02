@@ -135,10 +135,255 @@ def prepare(run):
                                    "normalized": key, "source_ref": "profile.product_identity"}, "product"))
         existing.add(key)
     result = {"keyword_schema_version": VERSION, "source_fingerprints": bound,
+              "bound_facts": fact_snapshot(profile),
               "records": records, "supplemental_terms": supplemental}
     if bound != fingerprints(run, (PROFILE, RAW)):
         raise ValueError("Source files changed while preparing")
     atomic_write(run / DECISIONS, result)
+    return result
+
+
+def fact_snapshot(profile):
+    """Per-fact digests so a later profile edit can name the exact keywords it affects."""
+    snapshot = {"__identity__": digest(profile.get("product_identity")), "__forbidden__": digest(profile.get("forbidden_terms", [])),
+                "__variants__": digest([v.get("variant_id") for v in profile.get("variants", []) if isinstance(v, dict)])}
+    for owner in [profile] + [v for v in profile.get("variants", []) if isinstance(v, dict)]:
+        for key, identity in (("facts", "fact_id"), ("measurements", "measurement_id")):
+            for value in owner.get(key, []):
+                if isinstance(value, dict) and isinstance(value.get(identity), str):
+                    snapshot[value[identity]] = digest(value)
+    return snapshot
+
+
+def rebind(run, reviewed=False):
+    """Re-bind the ledger to an edited profile after only the affected keywords were rechecked."""
+    decisions, profile = read_json(run / DECISIONS), read_json(run / PROFILE)
+    current = fingerprints(run, (PROFILE, RAW))
+    old = decisions.get("source_fingerprints", {})
+    if old.get(RAW) != current[RAW]:
+        raise ValueError("02_kw_raw.json changed; raw keywords cannot be re-bound, prepare a new ledger in a new run")
+    if old == current:
+        return {"rebound": False, "affected": [], "message": "ledger already bound to current files"}
+    before, after = decisions.get("bound_facts"), fact_snapshot(profile)
+    records = all_records(decisions)
+    if not isinstance(before, dict):
+        changed, affected = None, [r["keyword"] for r in records if r.get("fact_ids") or r.get("measurement_ids")]
+    else:
+        changed = {key for key in set(before) | set(after) if before.get(key) != after.get(key)}
+        affected = []
+        for record in records:
+            refs = set(record.get("fact_ids") or []) | set(record.get("measurement_ids") or [])
+            if (refs & changed or "__identity__" in changed and record.get("identity_basis")
+                    or "__forbidden__" in changed and record.get("reason_code") == "user_restriction"
+                    or "__variants__" in changed and record.get("applies_to") != ["all"]):
+                affected.append(record["keyword"])
+    if affected and not reviewed:
+        return {"rebound": False, "affected": affected, "changed": sorted(changed) if changed is not None else None,
+                "message": "recheck only these keywords against the edited profile, update them if needed, then run rebind --reviewed"}
+    decisions["source_fingerprints"], decisions["bound_facts"] = current, after
+    atomic_write(run / DECISIONS, decisions)
+    return {"rebound": True, "affected": affected, "changed": sorted(changed) if changed is not None else None}
+
+
+GROUP_FIELDS = ("decision", "reason_code", "reason", "query_intent", "evidence", "role", "label", "fact_ids",
+                "measurement_ids", "identity_basis", "applies_to", "promotion_condition", "restrictions",
+                "group_difference", "resolution")
+
+
+def apply_groups(run, groups_file):
+    """Fill per-keyword ledger fields from intent-group judgements.
+
+    The per-keyword ledger and every check stay unchanged; a group judgement is copied
+    to each member so one decision is written once instead of once per keyword.
+    """
+    decisions, spec = read_json(run / DECISIONS), read_json(groups_file)
+    if not isinstance(spec, dict) or not isinstance(spec.get("groups"), dict):
+        raise ValueError("Groups file needs a 'groups' object")
+    records = all_records(decisions)
+    by_key = {}
+    for record in records:
+        by_key[record["keyword_id"]] = record
+        by_key[norm(record["keyword"])] = record
+    reviewer = spec.get("reviewer")
+    unknown, assigned = [], {}
+    cluster_members = None
+    if any(isinstance(w, str) and w.startswith("@") for g in spec["groups"].values() if isinstance(g, dict) for w in g.get("keywords", [])):
+        proposal = read_json(run / CLUSTERS, required=False)
+        if not isinstance(proposal, dict) or proposal.get("raw_sha256") != fingerprints(run, (RAW,))[RAW]:
+            raise ValueError("Cluster references need a current 03_keyword_clusters.json; run view --clusters first")
+        cluster_members = {c["cluster_id"]: c["keyword_ids"] for c in proposal.get("clusters", [])}
+    for group_id, group in spec["groups"].items():
+        if not nonempty(group_id) or not isinstance(group, dict) or not isinstance(group.get("keywords"), list):
+            raise ValueError("Each group needs an id and a keywords array")
+        expanded = []
+        for word in group["keywords"]:
+            if isinstance(word, str) and word.startswith("@"):
+                if word[1:] not in (cluster_members or {}):
+                    unknown.append(word); continue
+                expanded.extend(cluster_members[word[1:]])
+            else:
+                expanded.append(word)
+        excluded = set()
+        for word in group.get("except", []):
+            record = (by_key.get(word) or by_key.get(norm(word))) if isinstance(word, str) else None
+            if record is None:
+                unknown.append(word)
+            else:
+                excluded.add(record["keyword_id"])
+        group["keywords"] = [w for w in expanded if ((by_key.get(w) or by_key.get(norm(w))) if isinstance(w, str) else None) is None
+                             or (by_key.get(w) or by_key.get(norm(w)))["keyword_id"] not in excluded]
+        for word in group["keywords"]:
+            record = by_key.get(word) or by_key.get(norm(word)) if isinstance(word, str) else None
+            if record is None:
+                unknown.append(word); continue
+            if record["keyword_id"] in assigned and assigned[record["keyword_id"]] != group_id:
+                raise ValueError("Keyword assigned to two groups: " + record["keyword"])
+            assigned[record["keyword_id"]] = group_id
+    overrides = spec.get("overrides", {})
+    if not isinstance(overrides, dict):
+        raise ValueError("overrides must be an object keyed by keyword or keyword_id")
+    for word in overrides:
+        if (by_key.get(word) or by_key.get(norm(word))) is None:
+            unknown.append(word)
+    if unknown:
+        raise ValueError("Unknown keywords in groups file (use the exact keyword or keyword_id): " + ", ".join(map(str, unknown[:20])))
+    stored = decisions.setdefault("intent_groups", {})
+    for group_id, group in spec["groups"].items():
+        stored[group_id] = {key: group[key] for key in GROUP_FIELDS + ("reviewer", "except") if key in group}
+        stored[group_id]["keywords"] = [by_key.get(w, by_key.get(norm(w)))["keyword_id"] for w in group["keywords"]]
+    for record in records:
+        group_id = assigned.get(record["keyword_id"])
+        if group_id is None:
+            continue
+        group = spec["groups"][group_id]
+        for key in GROUP_FIELDS:
+            if key in group:
+                record[key] = list(group[key]) if isinstance(group[key], list) else group[key]
+        record["intent_group"] = group_id
+        record["reviewer"] = group.get("reviewer") or reviewer or record.get("reviewer", "")
+        if record.get("initial_decision") is None:
+            record["initial_decision"] = record.get("decision")
+    for word, fields in overrides.items():
+        record = by_key.get(word) or by_key.get(norm(word))
+        if not isinstance(fields, dict):
+            raise ValueError("Override for %s must be an object" % word)
+        for key, value in fields.items():
+            if key in GROUP_FIELDS + ("intent_group", "reviewer", "initial_decision", "matched_terms", "initial_reason"):
+                record[key] = value
+        if record.get("initial_decision") is None:
+            record["initial_decision"] = record.get("decision")
+    atomic_write(run / DECISIONS, decisions)
+    remaining = sum(r.get("decision") is None for r in records)
+    return {"applied": len(assigned), "overrides": len(overrides), "unreviewed": remaining}
+
+
+def keyword_metrics(raw):
+    metrics = {}
+    for value in raw.get("raw", {}).get("keyword_data", []) if isinstance(raw.get("raw"), dict) else []:
+        if isinstance(value, dict) and isinstance(value.get("keyword"), str):
+            metrics.setdefault(norm(value["keyword"]), value)
+    return metrics
+
+
+def _number(metric, *keys):
+    for key in keys:
+        value = metric.get(key) if isinstance(metric, dict) else None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return value
+    return None
+
+
+def _searches(metric):
+    return _number(metric, "searches", "monthly_searches")
+
+
+def _traffic(metric):
+    # Traffic share is ASIN-specific; imported tables keep the best share across sources.
+    return _number(metric, "traffic_percentage_max", "trafficPercentage", "traffic_percentage")
+
+
+def rank_key(metric):
+    """Ordering for reading and prioritising only; never a relevance decision."""
+    searches = _searches(metric)
+    return (searches is None, -(searches or 0), -(_number(metric, "source_file_count") or 0),
+            -(_number(metric, "purchase_rate") or 0))
+
+
+CLUSTERS = "03_keyword_clusters.json"
+STOPWORDS = {"a", "an", "the", "and", "or", "for", "with", "of", "to", "in", "on", "by", "at", "from"}
+
+
+def _ordered_tokens(text):
+    return [w for w in re.findall(r"[^\W_]+(?:['’][^\W_]+)*", norm(text))]
+
+
+def _grams(words, longest=4):
+    return {tuple(words[i:i + size]) for size in range(1, min(len(words), longest) + 1) for i in range(len(words) - size + 1)}
+
+
+def build_clusters(records, metrics, min_members=3):
+    """Lexical candidate groups (proposal only, never a decision).
+
+    A head is a query (<=4 words) contained in at least `min_members` other queries;
+    each query joins the longest head it contains, otherwise its last word.
+    """
+    raw = [r for r in records if r.get("origin") == "raw"]
+    words_of = {r["keyword_id"]: _ordered_tokens(r["keyword"]) for r in raw}
+    candidates = {}
+    for record in raw:
+        words = tuple(words_of[record["keyword_id"]])
+        if words and len(words) <= 4 and not all(w in STOPWORDS or w.isdigit() for w in words):
+            candidates.setdefault(words, record)
+    contained = {}
+    for record in raw:
+        words = tuple(words_of[record["keyword_id"]])
+        for gram in _grams(list(words)):
+            if gram in candidates and gram != words:
+                contained[gram] = contained.get(gram, 0) + 1
+    heads = {gram for gram, count in contained.items() if count >= min_members}
+    clusters = {}
+    for record in raw:
+        words = words_of[record["keyword_id"]]
+        found = sorted((gram for gram in _grams(words) if gram in heads),
+                       key=lambda gram: (-len(gram), rank_key(metrics.get(candidates[gram]["normalized"], {}))))
+        label = " ".join(found[0]) if found else "~" + (words[-1] if words else record["keyword"])
+        clusters.setdefault(label, []).append(record)
+    ordered = sorted(clusters.items(), key=lambda item: (-sum(_searches(metrics.get(r["normalized"], {})) or 0 for r in item[1]), item[0]))
+    result = []
+    for number, (label, members) in enumerate(ordered, 1):
+        members.sort(key=lambda r: rank_key(metrics.get(r["normalized"], {})))
+        result.append({"cluster_id": "c%03d" % number, "head": label, "keyword_ids": [r["keyword_id"] for r in members],
+                       "searches_total": sum(_searches(metrics.get(r["normalized"], {})) or 0 for r in members)})
+    return result
+
+
+def write_view(run, clusters=False):
+    """Compact traffic-sorted table for reading the ledger instead of the verbose JSON."""
+    decisions, raw = read_json(run / DECISIONS), read_json(run / RAW)
+    metrics = keyword_metrics(raw)
+    records = all_records(decisions)
+    cluster_of, order = {}, {}
+    if clusters:
+        proposal = build_clusters(records, metrics)
+        atomic_write(run / CLUSTERS, {"raw_sha256": fingerprints(run, (RAW,))[RAW], "note": "词面候选分组，仅供阅读和 apply 引用；分类由逐组语义判断决定", "clusters": proposal})
+        for index, cluster in enumerate(proposal):
+            for position, keyword_id in enumerate(cluster["keyword_ids"]):
+                cluster_of[keyword_id], order[keyword_id] = cluster["cluster_id"] + " " + cluster["head"], (index, position)
+    rows = []
+    for record in records:
+        metric = metrics.get(record["normalized"], {})
+        values = (record["keyword"], _searches(metric), _traffic(metric), _number(metric, "source_file_count"),
+                  _number(metric, "purchase_rate"), _number(metric, "natural_rank_best"),
+                  record.get("decision") or "-", record.get("intent_group") or "-",
+                  cluster_of.get(record["keyword_id"], "-"), record["origin"])
+        rows.append((order.get(record["keyword_id"], (len(order) + 1, 0)) if clusters else rank_key(metric), values))
+    rows.sort(key=lambda row: row[0])
+    lines = ["keyword\tsearches\ttraffic_pct\tsources\tpurchase_rate\tbest_rank\tdecision\tgroup\tcluster\torigin"]
+    lines += ["\t".join("" if v is None else str(v) for v in values) for _, values in rows]
+    (run / "03_keyword_view.tsv").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    result = {"rows": len(rows), "unreviewed": sum(values[6] == "-" for _, values in rows), "file": "03_keyword_view.tsv"}
+    if clusters:
+        result["clusters"] = len(set(cluster_of.values()))
     return result
 
 
@@ -284,10 +529,7 @@ def check_decisions(profile, raw, decisions, source_fingerprints):
 def project_pools(decisions, raw):
     pools = {name: [] for name in POOLS.values()}
     tagged = []
-    metrics = {}
-    for value in raw.get("raw", {}).get("keyword_data", []):
-        if isinstance(value, dict) and isinstance(value.get("keyword"), str):
-            metrics.setdefault(norm(value["keyword"]), value)
+    metrics = keyword_metrics(raw)
     for item in all_records(decisions):
         reason = item["reason"]
         if item["origin"] == "raw":
@@ -389,6 +631,160 @@ def check_usage(profile, decisions, title_keywords=None, qa=None, listing=None):
     return issues
 
 
+POLICY = Path(__file__).resolve().parents[1] / "knowledge" / "quality_policy.json"
+FIELD_ORDER = ("title", "item_highlight", "bullets[0]", "bullets[1]", "bullets[2]", "bullets[3]", "bullets[4]",
+               "description", "search_terms")
+CJK = re.compile(r"[\u3040-\u30ff\u3400-\u9fff]")
+
+
+def _tokens(text):
+    """Word set used for A9-style matching: case-folded, simple English plural folding."""
+    words = re.findall(r"[^\W_]+(?:['’][^\W_]+)*", norm(text))
+    return {w[:-2] if len(w) > 4 and w.endswith("es") and w[-3] in "sxz" else w[:-1] if len(w) > 3 and w.endswith("s") and not w.endswith("ss") else w
+            for w in words}
+
+
+def _fields(content):
+    result = {}
+    for field in FIELD_ORDER:
+        if field.startswith("bullets["):
+            bullets = content.get("bullets") if isinstance(content.get("bullets"), list) else []
+            index = int(field[8])
+            value = bullets[index] if index < len(bullets) else None
+        else:
+            value = content.get(field)
+        if isinstance(value, str):
+            result[field] = value
+    return result
+
+
+def _targets(profile, listing):
+    """[(target, field-prefix map, content)] with family content resolved per child."""
+    if profile.get("listing_mode") != "family":
+        return [("single", {f: f for f in FIELD_ORDER}, listing)]
+    shared = listing.get("shared_content", {}) if isinstance(listing.get("shared_content"), dict) else {}
+    result = []
+    for variant in listing.get("variants", []):
+        if not isinstance(variant, dict):
+            continue
+        vid, overrides = variant.get("variant_id"), variant.get("content_overrides") or {}
+        content = dict(shared, **{k: v for k, v in overrides.items() if k in ("bullets", "description", "search_terms")})
+        content.update(title=variant.get("title"), item_highlight=variant.get("item_highlight"))
+        prefixes = {}
+        for field in FIELD_ORDER:
+            base = field.split("[")[0]
+            if base in ("title", "item_highlight") or base in overrides:
+                prefixes[field] = "variants.%s.%s" % (vid, field)
+            else:
+                prefixes[field] = "shared_content." + field
+        result.append((vid, prefixes, content))
+    return result
+
+
+def coverage(run, write_placement=False):
+    """Deterministic SEO feedback: where eligible keywords are indexed and what is still missing.
+
+    It is advisory (never a completion gate) so it cannot start a repair loop.
+    """
+    profile, raw, decisions, listing = [read_json(run / name) for name in (PROFILE, RAW, DECISIONS, "07_listing.json")]
+    qa = read_json(run / "06_qa.json", required=False)
+    policy = read_json(POLICY)
+    site = profile.get("site")
+    byte_limit = policy["sites"].get(site, {}).get("search_terms_max_bytes", policy["default_limits"]["search_terms_max_bytes"])
+    metrics = keyword_metrics(raw)
+    records = all_records(decisions)
+    eligible = [r for r in records if r.get("decision") == "eligible"]
+    quarantined = [r for r in records if r.get("decision") in ("deferred", "excluded")]
+    report = {"site": site, "targets": {}, "intent_map": [], "fact_unlocks": [], "unsupported_questions": []}
+    placements = []
+    for target, prefixes, content in _targets(profile, listing):
+        fields = _fields(content)
+        joined = " ".join(fields.values())
+        index_tokens = _tokens(joined)
+        title_tokens = _tokens(fields.get("title", ""))
+        rows, known, covered_searches = [], 0, 0
+        for record in eligible:
+            if not (record.get("applies_to") == ["all"] or target in record.get("applies_to", [])):
+                continue
+            word = record["keyword"]
+            searches = _searches(metrics.get(record["normalized"], {})) if record["origin"] == "raw" else None
+            phrase_fields = [f for f, text in fields.items() if contains_phrase(text, word)]
+            words = _tokens(word)
+            token_covered = norm(word) in norm(joined) if CJK.search(word) else bool(words) and words <= index_tokens
+            in_title = norm(word) in norm(fields.get("title", "")) if CJK.search(word) else bool(words) and words <= title_tokens
+            metric = metrics.get(record["normalized"], {}) if record["origin"] == "raw" else {}
+            rows.append({"keyword": word, "searches": searches, "sources": _number(metric, "source_file_count"),
+                         "purchase_rate": _number(metric, "purchase_rate"), "phrase_fields": phrase_fields,
+                         "token_covered": token_covered, "title_tokens_covered": in_title})
+            if searches is not None:
+                known += searches
+                covered_searches += searches if token_covered else 0
+            for field in phrase_fields:
+                placements.append((prefixes[field], word, target, record))
+        rows.sort(key=lambda row: (row["searches"] is None, -(row["searches"] or 0), -(row["sources"] or 0), -(row["purchase_rate"] or 0)))
+        search_terms = fields.get("search_terms", "")
+        repeated = sorted(_tokens(search_terms) & title_tokens) if not CJK.search(search_terms) else []
+        hits = []
+        for record in quarantined:
+            spans = [f for f, text in fields.items() if contains_phrase(text, record["keyword"])
+                     and not any(contains_phrase(text, e["keyword"]) and contains_phrase(e["keyword"], record["keyword"]) and e is not record for e in eligible)]
+            if spans:
+                hits.append({"keyword": record["keyword"], "decision": record["decision"], "fields": spans})
+        report["targets"][str(target)] = {
+            "eligible": len(rows),
+            "phrase_covered": sum(bool(r["phrase_fields"]) for r in rows),
+            "token_covered": sum(r["token_covered"] for r in rows),
+            "searches_weighted_token_coverage": round(covered_searches / known, 4) if known else None,
+            "top_uncovered": [r for r in rows if not r["token_covered"]][:30],
+            "top10_in_title": [r["keyword"] for r in rows[:10] if r["title_tokens_covered"]],
+            "search_terms": {"bytes": len(search_terms.encode("utf-8")), "limit": byte_limit,
+                             "words_repeated_from_title": repeated},
+            "quarantined_phrase_hits": hits,
+        }
+    # COSMO-style intent relations: each confirmed relation should be stated somewhere indexable.
+    targets = _targets(profile, listing)
+    for entry in profile.get("intent_map", []) if isinstance(profile.get("intent_map"), list) else []:
+        if not isinstance(entry, dict) or not nonempty(entry.get("expression")):
+            continue
+        scope = entry.get("applies_to") or ["all"]
+        found = {str(t): [f for f, text in _fields(c).items() if contains_phrase(text, entry["expression"])]
+                 for t, _, c in targets if scope == ["all"] or t in scope}
+        report["intent_map"].append({"relation": entry.get("relation"), "expression": entry["expression"],
+                                     "expressed_in": found, "missing_for": sorted(t for t, f in found.items() if not f)})
+    # Facts that would unlock deferred traffic, ranked by searches.
+    unlocks = {}
+    for record in records:
+        if record.get("decision") != "deferred":
+            continue
+        key = record.get("promotion_condition") or record.get("intent_group") or record["keyword"]
+        item = unlocks.setdefault(key, {"fact_needed": key, "keywords": [], "searches": 0})
+        item["keywords"].append(record["keyword"])
+        item["searches"] += _searches(metrics.get(record["normalized"], {})) or 0
+    report["fact_unlocks"] = sorted(unlocks.values(), key=lambda item: -item["searches"])
+    if isinstance(qa, dict):
+        report["unsupported_questions"] = [r.get("question") for r in qa.get("question_reviews", [])
+                                           if isinstance(r, dict) and r.get("disposition") == "unsupported"]
+    report["generated_at"] = datetime.now(timezone.utc).isoformat()
+    atomic_write(run / "07_keyword_coverage.json", report)
+    if write_placement:
+        title_keywords = read_json(run / "05_title_keywords.json")
+        plan, seen = [], set()
+        for field, word, target, record in placements:
+            shared = not field.startswith("variants.")
+            applies = ["all"] if shared or profile.get("listing_mode") != "family" else [target]
+            if shared and record.get("applies_to") != ["all"]:
+                continue  # Scope problems stay visible in check/usage review, never silently planned.
+            key = (field, norm(word))
+            if key not in seen:
+                seen.add(key)
+                plan.append({"keyword": word, "target_field": field, "applies_to": applies,
+                             "reason": "coverage 工具按最终文案中的完整短语位置生成"})
+        title_keywords["placement_plan"] = plan
+        atomic_write(run / "05_title_keywords.json", title_keywords)
+        report["placement_entries"] = len(plan)
+    return report
+
+
 def check_run(run, require_exports=True, downstream=True):
     """Recompute evidence from source files; never trust a cached 'passed' flag."""
     names = (PROFILE, RAW, DECISIONS) + tuple(POOLS.values()) + ("04_kw_tagged.json",) + DOWNSTREAM
@@ -418,13 +814,38 @@ def check_run(run, require_exports=True, downstream=True):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "check", "export"))
+    parser.add_argument("command", choices=("prepare", "view", "apply", "check", "export", "rebind", "coverage"))
     parser.add_argument("--run-dir", type=Path, required=True)
+    parser.add_argument("--groups", type=Path, help="apply: intent-group judgement file")
+    parser.add_argument("--reviewed", action="store_true", help="rebind: affected keywords were rechecked")
+    parser.add_argument("--write-placement", action="store_true", help="coverage: rewrite 05 placement_plan from the final copy")
+    parser.add_argument("--clusters", action="store_true", help="view: also write lexical candidate groups (03_keyword_clusters.json) for @cluster references")
     args = parser.parse_args(argv)
     try:
         if args.command == "prepare":
             value = prepare(args.run_dir)
-            print(json.dumps({"prepared": True, "records": len(value["records"])}, ensure_ascii=False)); return 0
+            view = write_view(args.run_dir)
+            print(json.dumps({"prepared": True, "records": len(value["records"]), "view": view["file"]}, ensure_ascii=False)); return 0
+        if args.command == "view":
+            print(json.dumps(write_view(args.run_dir, clusters=args.clusters), ensure_ascii=False)); return 0
+        if args.command == "apply":
+            if args.groups is None:
+                raise ValueError("apply requires --groups FILE")
+            summary = apply_groups(args.run_dir, args.groups)
+            write_view(args.run_dir, clusters=(args.run_dir / CLUSTERS).exists())
+            print(json.dumps(summary, ensure_ascii=False)); return 0
+        if args.command == "rebind":
+            result = rebind(args.run_dir, args.reviewed)
+            print(json.dumps(result, ensure_ascii=False)); return 0 if result["rebound"] or not result["affected"] else 1
+        if args.command == "coverage":
+            report = coverage(args.run_dir, args.write_placement)
+            summary = {target: {k: v for k, v in item.items() if k in ("eligible", "token_covered", "searches_weighted_token_coverage")}
+                       | {"uncovered_top5": [r["keyword"] for r in item["top_uncovered"][:5]],
+                          "search_terms_bytes": "%d/%d" % (item["search_terms"]["bytes"], item["search_terms"]["limit"])}
+                       for target, item in report["targets"].items()}
+            summary["intent_missing"] = [e["expression"] for e in report["intent_map"] if e["missing_for"]]
+            summary["fact_unlocks_top3"] = [u["fact_needed"] for u in report["fact_unlocks"][:3]]
+            print(json.dumps(summary, ensure_ascii=False)); return 0
         has_exports = any((args.run_dir / name).exists() for name in POOLS.values())
         result = check_run(args.run_dir, require_exports=has_exports if args.command == "check" else False, downstream=args.command == "check")
         if args.command == "export" and result["status"] == "passed":

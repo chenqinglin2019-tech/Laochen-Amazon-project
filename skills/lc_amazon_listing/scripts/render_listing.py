@@ -24,6 +24,7 @@ FILES = {
     "qa": "06_qa.json", "listing": "07_listing.json", "validation": "08_validation.json",
     "review": "08_semantic_review.json", "backend": "08_backend_validation.json",
     "kw_pending": "03_kw_pending.json", "keyword_decisions": "03_keyword_decisions.json",
+    "coverage": "07_keyword_coverage.json",
 }
 FIELDS = ("bullets", "description", "search_terms")
 LABELS = {
@@ -566,6 +567,27 @@ def render_coverage(doc, listing):
         doc.html.append('<ol class="coverage-list">' + "".join("<li>" + html.escape(text) + "</li>" for text in texts) + "</ol>")
 
 
+def render_attributes(doc, listing):
+    """Backend structured-attribute suggestions (filters and Alexa for Shopping read them)."""
+    suggestions = listing.get("attribute_suggestions")
+    if not isinstance(suggestions, list) or not suggestions:
+        return
+    doc.heading("后台属性建议")
+    texts = []
+    for item in suggestions:
+        if not isinstance(item, dict):
+            continue
+        scope = item.get("applies_to")
+        scope_text = "" if scope in (None, ["all"]) else "（适用：" + "、".join(map(as_text, scope)) + "）"
+        note = item.get("note")
+        texts.append(f"{as_text(item.get('attribute'))}：{as_text(item.get('value'))}{scope_text}" + (f" —— {as_text(note)}" if note else ""))
+    doc.md.append("\n".join("- " + md_escape(text) for text in texts))
+    if doc.report_view:
+        doc.html.extend(f"<p>{html.escape(text)}</p>" for text in texts)
+    else:
+        doc.html.append("<ul>" + "".join("<li>" + html.escape(text) + "</li>" for text in texts) + "</ul>")
+
+
 def render_listing(profile, listing, report_view=False):
     doc, gaps = Document(report_view=report_view), []
     mode = listing.get("listing_mode", profile.get("listing_mode", "single"))
@@ -604,6 +626,7 @@ def render_listing(profile, listing, report_view=False):
             for key in FIELDS:
                 if key in overrides:
                     doc.field(key, overrides[key])
+    render_attributes(doc, listing)
     render_media(doc, profile, listing, ordered, gaps)
     render_coverage(doc, listing)
     for key in ("excluded_claims", "claim_controls"):
@@ -627,6 +650,25 @@ def current_keyword_stage(run_dir):
     return module.check_run(run_dir)
 
 
+def report_kw_raw(raw):
+    """Spreadsheet imports keep every cell in 02_kw_raw.json; the page only needs metrics.
+
+    Embedding per-row raw_cells made reports many megabytes without adding visible content.
+    """
+    if not isinstance(raw, dict) or raw.get("source_kind") != "user_spreadsheets":
+        return raw
+    slim = {key: raw.get(key) for key in ("source_kind", "import_schema_version", "site", "import_counts", "import_policy") if key in raw}
+    slim["source_files"] = [{k: v for k, v in f.items() if k != "sheets"} | {"sheets": [{k: v for k, v in sheet.items() if k in ("name", "status", "imported_rows")} for sheet in f.get("sheets", [])]}
+                            for f in raw.get("source_files", []) if isinstance(f, dict)]
+    issues = raw.get("import_issues") if isinstance(raw.get("import_issues"), list) else []
+    slim["import_issue_counts"] = {}
+    for issue in issues:
+        code = issue.get("code") if isinstance(issue, dict) else "unknown"
+        slim["import_issue_counts"][code] = slim["import_issue_counts"].get(code, 0) + 1
+    slim["raw"] = {"keyword_data": (raw.get("raw") or {}).get("keyword_data", [])}
+    return slim
+
+
 def build_report(run_dir: Path, generated_at=None):
     data, snapshots = {}, {}
     for key, filename in FILES.items():
@@ -635,7 +677,7 @@ def build_report(run_dir: Path, generated_at=None):
     for key in ("kw_removed", "kw_filtered", "kw_tagged", "kw_pending"):
         if data[key] is not None:
             ensure_array(data[key], FILES[key])
-    for key in ("kw_raw", "title_keywords", "review", "backend"):
+    for key in ("kw_raw", "title_keywords", "review", "backend", "coverage"):
         if data[key] is not None:
             ensure_object(data[key], FILES[key])
     doc, gaps = render_listing(profile, listing)
@@ -664,7 +706,8 @@ def build_report(run_dir: Path, generated_at=None):
     report_doc, _ = render_listing(profile, listing, report_view=True)
     _, listing_html = report_doc.result()
     metadata = {"generated_at": stamp, "missing_files": [name for name, raw in snapshots.items() if raw is None], "fingerprints": fingerprints, "evidence_fingerprints": evidence_fingerprints}
-    replacements = {"__DATA_" + key.upper() + "__": script_json(data[key]) for key in ("profile", "kw_raw", "kw_removed", "kw_filtered", "kw_tagged", "title_keywords", "qa", "kw_pending")}
+    replacements = {"__DATA_" + key.upper() + "__": script_json(data[key]) for key in ("profile", "kw_removed", "kw_filtered", "kw_tagged", "title_keywords", "qa", "kw_pending", "coverage")}
+    replacements["__DATA_KW_RAW__"] = script_json(report_kw_raw(data["kw_raw"]))
     replacements.update({"__DATA_META__": script_json(metadata), "__DATA_LISTING__": script_json(listing),
                          "__DATA_VALIDATION__": script_json(validation),
                          "__DATA_EVIDENCE__": script_json({key: data[key] for key in ("validation", "review", "backend", "keyword_decisions")}),

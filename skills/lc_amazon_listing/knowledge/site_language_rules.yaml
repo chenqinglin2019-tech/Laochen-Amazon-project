@@ -1,4 +1,4 @@
-version: '2.0'
+version: '2.2'
 policy_ref: quality_policy.json
 contract_ref: data_contract.md
 sources_ref: sources.json
@@ -15,7 +15,7 @@ rules:
 - id: site_units
   type: required
   source_id: user_unit_localization
-  prompt_fragment: US 普通物理长度由 normalize 转为英寸并全字段复用。非 US 首版保留已提供单位；行业公称、尺码及数值来源范围遵循 product_facts_rules.yaml，不凭站点猜缺失单位。
+  prompt_fragment: US 由 normalize 把公制换成 in/ft、oz/lb、fl oz/gal 并全字段复用（规则见 product_facts_rules.us_units）。非 US 保留来源单位。后台词字节预算按站点取 quality_policy.sites（IN 199、JP 499、其他 249）。
 - id: site_keywords
   type: editorial
   source_id: skill_editorial_v2
@@ -23,7 +23,7 @@ rules:
 - id: site_media
   type: required
   source_id: user_image_planning
-  prompt_fragment: 策划说明默认中文，image_plan/aplus_plan 的 overlay_text 和 native_text 使用目标语言。overlay_text 为图片嵌字，native_text
+  prompt_fragment: 策划说明默认中文，image_plan/a_plus_plan 的 overlay_text 和 native_text 使用目标语言。overlay_text 为图片嵌字，native_text
     为 A+ 原生文字；主图两者都为空。移动端与自然语序按目标语言复审。
 - id: site_qa_scope
   type: required

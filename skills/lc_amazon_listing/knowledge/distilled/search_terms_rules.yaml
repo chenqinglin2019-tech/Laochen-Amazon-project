@@ -1,4 +1,4 @@
-version: '2.0'
+version: '2.2'
 domain: search_terms
 contract_ref: ../data_contract.md
 policy_ref: ../quality_policy.json
@@ -6,26 +6,22 @@ sources_ref: ../sources.json
 rules:
 - id: search_terms_budget
   type: required
-  source_id: skill_editorial_v2
-  prompt_fragment: 按 UTF-8 实际字节数含空格校验，预算读取统一政策。该值是保守兼容预算；存在目标站点或类目特殊限制时记录来源并使用已核验配置。
+  source_id: amazon_search_terms_2026
+  prompt_fragment: 按 UTF-8 字节计数（含空格），预算按站点取 quality_policy：IN 199、JP 499、其他 249。超限可能导致整栏被忽略。尽量用满预算。
   limit_ref: default_limits.search_terms_max_bytes
-- id: search_terms_role
-  type: editorial
-  source_id: skill_editorial_v2
-  prompt_fragment: 优先补充真实相关、前台尚未充分表达的同义词、习惯用语和有效长尾。不得删除标题核心品名以把它移入后台。可节省重复词，但不以全字段去重为由破坏前台自然表达。
+- id: search_terms_no_repeat
+  type: required
+  source_id: amazon_search_terms_2026
+  prompt_fragment: Amazon 员工指引：不重复标题和品牌中已有的词，全小写，用空格分隔，不加标点，不写竞品品牌或 ASIN。本栏不重复自身，单复数只写一种，不写冠词和介词，不写 new、best 一类临时或主观词。重复标题词会给出 warning 和可省字节数。
 - id: search_terms_selection
   type: required
   source_id: user_product_identity
-  prompt_fragment: 仅从统一词审查中的 eligible 原词和有事实依据的本品补充词选择，deferred/excluded 不得改写后入后台。修改分类时先补充真实依据、更新当前理由并填写 resolution，再由统一工具导出；最终关键词一致性复审核对实际用词。同一意图组按相关性与实际流量统一选词；未知流量为 null，不能凭词短就认定高流量。不用不常见的自造缩写，不把已剔除的无关词改写后加回。
+  prompt_fragment: 只从 eligible 原词和有依据的本品补充词中选，优先选前台未覆盖的同义词、别称、缩写和长尾（参考 coverage 的 top_uncovered）。deferred/excluded 词不得改写后放进来；要改分类须先补依据并写 resolution。不自造缩写。
 - id: search_terms_format
   type: editorial
   source_id: skill_editorial_v2
-  prompt_fragment: 以目标站点实际用语为基础；英语通常用小写空格分隔并节省无意义标点与停用词，其他语言遵循自然分词。不得为省字节截断单词、破坏品牌以外的真实技术术语或拆散必要语义。
+  prompt_fragment: 以目标站点实际用语为准；其他语言遵循自然分词。不为省字节截断单词或拆散必要语义。
 - id: search_terms_scope
   type: required
   source_id: user_family_rules
-  prompt_fragment: 不塞入竞品品牌、ASIN、价格、促销或与产品无关的属性。共享搜索词必须适用于全部子体；子体独有词放入对应 content_overrides.search_terms。
-- id: search_terms_no_weight_claim
-  type: editorial
-  source_id: seo_guide
-  prompt_fragment: 不宣称后台与标题、五点、长描有固定权重或自动合并索引机制。报告实际投放位置和依据，不把推测写成官方算法事实。
+  prompt_fragment: 共享搜索词必须适用于全部子体；子体独有的词放入对应的 content_overrides.search_terms。
