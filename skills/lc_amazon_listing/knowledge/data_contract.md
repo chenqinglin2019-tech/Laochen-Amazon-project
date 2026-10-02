@@ -1,4 +1,4 @@
-# 本地数据契约 v2.1
+# 本地数据契约 v2.2（Listing schema_version 仍为 "2.1"）
 
 本文是新增字段的唯一结构定义。已有单品字段继续有效；新生成内容使用 `schema_version: "2.1"`。历史文件缺少 `listing_mode` 时按 `single` 读取，但不能因兼容读取被宣布已通过新版验收。所有 JSON 使用 UTF-8。
 
@@ -10,10 +10,11 @@
 - `brand`: 用户品牌字符串或 null；不造品牌。
 - `product_identity`: `{original_name, canonical_name, protected_terms: [目标语言完整核心短语]}`。至少一个必保短语；比较只规范大小写、空白与连字符，不允许拆散名词短语。
 - `facts`: `[{fact_id, field, value, source_ref, status}]`。`status` 为 `confirmed/unknown/conflict`；根级 facts 是明确适用于全部子体的共性，单品则是本品事实。只有 confirmed 且有来源的事实能支持声明。
-- 购买数量事实使用 field=quantity/package_quantity/unit_count/pack_count/number_of_items，value 为正整数或正整数字符串，必须与配件数量分开。首版机器核对英文 2-Pack、2 count、2 pieces、Pack of 2、Set of 2、Quantity: 2 等表达的数值、范围及事实引用；图片数量声明须在 body_refs 正文引用同一数量事实。其他语言表达和画面实物数量仍需语义复审。
-- `measurements`: `[{measurement_id, kind, subject, label, value, unit, source_ref, display_value?, display_unit?, display_text?, approximate?}]`。value 是原始十进制数字字符串；kind 为 `length/weight/volume/nominal/size`；subject 为 `product/package/fit`。label 标明 height/width/length/diameter 等。普通长度单位支持 mm/cm/m/in/ft；US 转 in，其他站点首版保留来源单位。公称规格和尺码不换算。重量、容量首版保留单位，禁止质量 oz 与容量 fl oz 混用。缺失值或单位不补造；需要表达的未知参数先补充资料。
+- 购买数量事实使用 field=quantity/package_quantity/unit_count/pack_count/number_of_items，value 为正整数或正整数字符串，必须与配件数量分开。首版机器核对英文 2-Pack、2 count、2 pieces、Pack of 2、Set of 2、Quantity: 2 等表达的数值、范围及事实引用；图片数量声明须在 body_refs 正文引用同一数量事实。其他语言表达和画面实物数量仍需语义复审。随附配件数量用 field=accessory_count/included_quantity/component_count（confirmed 正整数），`4 pcs felt pads` 这类写法据此核对，且不能满足购买数量；`N pieces of <物品>` 视为配件描述，不按购买数量扫描。
+- `measurements`: `[{measurement_id, kind, subject, label, value, unit, source_ref, display_value?, display_unit?, display_text?, approximate?}]`。value 是原始十进制数字字符串；kind 为 `length/weight/volume/nominal/size`；subject 为 `product/package/fit`。label 标明 height/width/length/diameter 等。普通长度单位支持 mm/cm/m/in/ft。US：公制长度 <120 in 显示 in，否则 ft；公制重量 <1 lb 显示 oz，否则 lb；公制容量 <1 gal 显示 fl oz，否则 gal；来源已是英制时保留原单位（统一四舍五入到两位小数）。可选 `preferred_unit`（仅 US；长度 in/ft、重量 oz/lb、容量 fl oz/gal）强制展示单位。其他站点保留来源单位。公称规格和尺码不换算；禁止质量 oz 与容量 fl oz 混用。US 正文可写 `display_text (原值 原单位)`，括号内的原单位不视为泄漏。缺失值或单位不补造；需要表达的未知参数先补充资料。
 - `images`: `[{image_id, source, applies_to: ["all"] 或 [variant_id, ...]}]`。source 是用户素材路径/URL/附件定位；不能把单一子体素材标成全系列通用。
 - `forbidden_terms`: 用户禁用词数组，可为空。
+- `intent_map`: `[{relation, expression, fact_ids?, measurement_ids?, applies_to?}]`。relation 取 function/capability/activity/audience/location/season/body_part/companion/product_type/interest（COSMO 关系的精简映射）；expression 是目标语言的自然表达；引用必须 confirmed 且范围匹配（结构错误为 error）。表达未出现在任何可索引字段时给 warning `intent_unexpressed`；缺少 intent_map 给 warning。
 
 `family` 另加：
 
@@ -28,12 +29,12 @@ fact_id、measurement_id 和 image_id 在画像中全局唯一。子体有效事
 
 ## 关键词与问题：02—06
 
-- `02_kw_raw.json` 是 `import_keywords.py` 从用户表格生成的完整本地快照，结构见下文；不是后端扩词响应。历史 keywords/raw 结构继续可读。
+- `02_kw_raw.json` 是 `import_keywords.py` 从用户表格生成的完整本地快照（结构见下文），不是后端扩词响应。历史 keywords/raw 结构继续可读。
 - `03_keyword_decisions.json` 是关键词分类唯一依据，新版不生成或依赖 `03_keyword_review.json`；旧文件仅留作历史资料，详细结构见下文。
 - `03_kw_filtered.json` 是原始词中 eligible 的字符串数组；`03_kw_removed.json` 是 excluded 的 `{keyword, reason, reason_code, keyword_id, applies_to}` 数组；新增 `03_kw_pending.json` 保存 deferred 并增加 `promotion_condition`。三者只由统一工具导出，补充词不混入原始词统计。
 - `03_keyword_validation.json` 保存当前检查结果；总验收与报告重算数据，不信任此文件的缓存 passed。
 - `04_kw_tagged.json` 保留原 keyword/label/reason；增加 `role`（identity/attribute/intent/synonym）、`intent_group`、`source`、`traffic_percentage`（未知为 null）、`applies_to`。旧 high/relevant 标签用于兼容，不决定核心品名优先级。该数组由统一工具导出，仅含 eligible 原始词及补充词，另有 keyword_id、origin=raw/product、searches、restrictions；未知流量为 null，0 保持真实的 0。
-- `05_title_keywords.json` 保留 `title_keywords: {high: [], relevant: []}` 供原 CLI；增加 `protected_terms`、`placement_plan: [{keyword, target_field, applies_to, reason}]`。这些是候选与实际投放安排，不是全部进标题的配额。high/relevant 数组必须存在，placement_plan 非空并逐项填写 keyword/target_field/applies_to/reason；protected_terms 至少覆盖画像中的全部必保词。
+- `05_title_keywords.json` 保留 `title_keywords: {high: [], relevant: []}` 供原 CLI；增加 `protected_terms`、`placement_plan: [{keyword, target_field, applies_to, reason}]`。这些是候选与实际投放安排，不是全部进标题的配额。title_keywords 同时是 QA 请求词，high+relevant 去重后 ≤ quality_policy.qa_max_keywords（8），超出时 backend_cli 本地拒绝且不发请求。最终 placement_plan 由 `keyword_quality.py coverage --write-placement` 按最终文案的完整短语位置生成（字段如 title、bullets[2]、shared_content.description、variants.<id>.title）。high/relevant 数组必须存在，placement_plan 非空并逐项填写 keyword/target_field/applies_to/reason；protected_terms 至少覆盖画像中的全部必保词。
 - `06_qa.json` 保留 status/site/qa_pairs。US 原始响应先存 `06_qa.raw.json`，再补充 `requested_keywords`、`question_reviews: [{question, keyword, relevance: relevant/irrelevant/uncertain, fact_ids, applies_to, disposition: answered/unsupported/excluded}]`。保留原问题，不把自行整理的问题混充后端返回；不相关或无本品证据的问题不用于声称功能。非 US 用 status=skipped、reason_code=rufus_us_only、qa_pairs=[]。
 - US 本次未采集时用 `status=unavailable` 和明确 `reason`，上述三个数组均为空；验收为 incomplete，不把未采集标成已完成，也不伪造请求关键词。实际请求失败时另外保留原始错误和请求记录，不能用此状态掩盖已返回的问题。
 
@@ -46,14 +47,16 @@ fact_id、measurement_id 和 image_id 在画像中全局唯一。子体有效事
 `02_kw_raw.json` 字段：
 
 - `source_kind: "user_spreadsheets"`、`import_schema_version: "1.0"`、`site`。
-- `source_files`: 按输入顺序保留 `{file_id, filename, path, sha256, sheets}`。每表包含 name、visibility、status、imported_rows、blank_keyword_rows、repeated_header_rows；已导入表增加 header_row、columns（列号从 1 开始）、preamble_rows。未识别的非空工作表报错，显式 --sheet 选择之外的表记录 not_selected，不静默遗漏。
+- `source_files`: 按输入顺序保留 `{file_id, filename, path, sha256, sheets}`。每表包含 name、visibility、status、imported_rows、blank_keyword_rows、repeated_header_rows；已导入表增加 header_row、columns（列号从 1 开始）、preamble_rows。未指定 --sheet 时，找不到关键词表头的非空工作表记为 status=no_keyword_header，附 preview（前 3 行，每格最多 40 字符），并登记 sheet_without_keyword_header；同一文件中没有任何可识别的工作表时导入失败。显式 --sheet 选中的表找不到表头时报错；未选中的表记为 not_selected，不静默遗漏。
 - `keywords`: 所有数据行的 `{keyword, source: {file_id, sheet, row}, raw_cells, monthly_searches, traffic_percentage, keyword_translation, flow_type}`，保留输入顺序、原词和重复行。`raw_cells` 保存全部列（含未识别业务列）的 column/header/value/cell_type/formula/percentage_format；不丢弃额外指标。row 是源工作表行号，CSV 多行单元格取起始物理行。
-- `raw.keyword_data`: 供现有筛词和报告读取的唯一词指标视图，每项包含 keyword、source_positions（keywords 的零基位置）、monthly_searches、traffic_percentage。多个非空指标相同则保留；不同则为 null，并在 import_issues 记录 metric_conflict。未知流量不是 0，真实 0 不改写；未确认的单位/数字格式不猜测。
-- `import_issues`: 数值歧义、无公式缓存或指标冲突及对应来源位置。公式不执行，只读取已有缓存；关键词列为错误或公式无缓存时整个导入失败，指标错误时保留词并标 null。
+- `raw.keyword_data`: 供筛词、覆盖率和报告读取的唯一词指标视图，每项包含 keyword、source_positions（keywords 的零基位置）、source_file_count（出现在几个来源文件中）、monthly_searches、traffic_percentage、traffic_percentage_max；识别到对应列时还包含 monthly_purchases、purchase_rate、aba_rank、title_density、natural_rank_best。关键词级指标（月搜索量、月购买量、购买率、ABA 排名、标题密度）多个非空值相同时保留，不同时为 null 并登记 metric_conflict。竞品 ASIN 级指标（流量占比、自然排名）各来源不同属于正常情况，不登记冲突：traffic_percentage 只在各来源一致时有值，另给 traffic_percentage_max 和 traffic_percentage_by_source；natural_rank_best 取各来源最小值。附加指标只用于排序和提示，不作为剔除依据。未知流量不是 0，真实 0 不改写；未确认的单位或数字格式不猜测。
+- `import_issues`: 数值歧义、无公式缓存、指标冲突、说明页（sheet_without_keyword_header）、文件名站点不一致（filename_site_mismatch，仅提示）及对应来源位置。命令行只输出 import_counts、按 code 汇总的 issue_counts、前 5 条 issue_examples 和各工作表状态，完整清单只保存在 02 中。公式不执行，只读取已有缓存；关键词列为错误或公式无缓存时整个导入失败，指标错误时保留词并标 null。
 - `import_counts`: files、raw_records、unique、duplicates，满足 raw_records=unique+duplicates。空关键词行、表头及明确排除的说明表不计关键词记录，但来源中保留位置。没有任何关键词时失败。
-- `import_policy`: semantic_filtering=false、row_limit=null、deduplicate_input=false、conflicting_metrics=unknown。不按字符集、流量、流量类型或条数预筛选，完整意图判断统一发生在 03 阶段。
+- `import_policy`: semantic_filtering=false、row_limit=null、deduplicate_input=false、conflicting_metrics=unknown、asin_specific_metrics=per_source_values_plus_max_or_best、extra_metrics_use=ordering_only。不按字符集、流量、流量类型或条数预筛选，完整意图判断统一发生在 03 阶段。
 
 输出原子写入；已有 02 文件时拒绝覆盖。无效或部分失败的导入不能推进筛词。03 的 source_positions 可以精确回溯到本地原文件/工作表/行，审核指纹继续绑定整个 02 快照；输入改变创建新任务，不手改哈希宣称审核有效。示例见 [keyword_import_examples.json](keyword_import_examples.json)。
+
+report.html 只嵌入 02 的 keyword_data、来源文件和工作表状态、计数和问题计数，不嵌入逐行 raw_cells，避免报告体积膨胀；完整数据保留在 02 文件中。
 
 ### 关键词分类结构（keyword_schema_version: "1.1"）
 
@@ -65,6 +68,8 @@ fact_id、measurement_id 和 image_id 在画像中全局唯一。子体有效事
 
 - `source_fingerprints`: 01_product_profile.json 和 02_kw_raw.json 的字节 SHA-256，工具生成。画像或原词改变后先逐条重新核对，再更新绑定并重新校验；不单改哈希冒充重新审查。
 - `records`: 按原始词首次出现顺序排列的唯一词记录。工具生成且不得改写 `keyword_id/keyword/normalized/source_positions/original_forms/origin`；source_positions 为原始 keywords 数组的零基位置。重复记录保存所有位置和原词，norm 保留词序、否定词、数字和单位。
+- `bound_facts`: 工具生成的逐事实摘要，用于 `rebind` 精确列出受画像改动影响的词。
+- `intent_groups`: 由 `apply` 写入的意图组判定留档（组字段 + 成员 keyword_id）。逐词记录仍是唯一分类依据。
 - `supplemental_terms`: 单独登记本品新增表达。字段同逐词记录，但 origin=product、source_ref 为真实来源，无原始词位置。编号为 `product-` 加规范化词的规范 JSON SHA-256 前 20 位；核心名称由 prepare 预登记。不能通过新增同词补充记录绕过原词的暂缓或剔除。
 
 每条记录需填写：
@@ -78,6 +83,11 @@ fact_id、measurement_id 和 image_id 在画像中全局唯一。子体有效事
 - `promotion_condition`：deferred 必填，说明疑点与晋级所需事实；已审查的 deferred 可以留档，不使审查阶段失败。核心品名明确冲突时用 identity_conflict 暂缓，并保持未完成，不能静默丢弃。
 - `resolution`：初次与当前分类不同时必填；保留原初次判断，且同步更新当前 reason_code/reason/evidence。可用 initial_reason 另行保存旧理由，不用旧理由导出当前词池。`matched_terms` 为可选的完整词/短语命中证据数组，只校验词边界，不决定相关性。
 
+意图组判定（新增，不替代逐词账本）：`keyword_quality.py apply --run-dir RUN --groups FILE`，FILE 为
+`{"reviewer": "...", "groups": {"组id": {decision, reason_code, reason, query_intent, evidence, role, label, fact_ids, measurement_ids?, identity_basis?, applies_to, promotion_condition?, restrictions?, keywords: [原词或 keyword_id]}}, "overrides": {"原词或 keyword_id": {要单独改写的字段, group_difference, resolution?}}}`。
+工具把组字段复制到每个成员（intent_group=组id、reviewer、initial_decision 为空时取 decision），未列出的词保持不变，可分批执行；未知词或一个词进入两个组时报错且不写入。之后 check 的全部逐词规则照常生效。`03_keyword_view.tsv` 是只读紧凑表（keyword/searches/traffic_pct/sources/purchase_rate/best_rank/decision/group/cluster/origin），按搜索量、覆盖竞品数、购买率排序，由 prepare/view/apply 生成；指标缺失时为空，只用于阅读和排序。`view --clusters` 另写 `03_keyword_clusters.json`（`{raw_sha256, clusters: [{cluster_id, head, keyword_ids, searches_total}]}`）：head 是被至少 3 个其他查询包含、且本身也是查询的短语（不超过 4 词），每个查询归入它包含的最长 head，没有 head 时按末词归组。这只是词面候选分组。groups 的 keywords 可以写 `"@c001"` 引用整组（要求 raw_sha256 与当前 02 一致），用 `except` 排除个别词；分类仍由逐组语义判断决定，全部逐词检查不变。
+画像在筛词后被修改时运行 `rebind`：原词变化则拒绝；否则列出引用了变化事实（或身份、禁用词、子体变化相关）的词，核对后 `rebind --reviewed` 重新绑定；无受影响词时直接绑定。
+
 事实冲突不能引用 unknown/conflict 事实作为已证实反证。user_restriction 必须对应画像中用户明确提供的 forbidden_terms；不能自造禁词。unusable_query 只用于没有有效文字或数字的查询，有有效内容时先修复或暂缓判断。
 
 旧版兼容：可读取 1.0 分类记录，但也须满足当前理由与 decision 一致的要求。旧 03_keyword_review.json 的缺失、过期、结论或格式不参与当前校验及导出；不自动把旧复核结论合入分类记录。沿用历史修正时，将有依据的当前理由明确写回 03_keyword_decisions.json，再导出。旧报告继续可读，缺当前分类或最终文案复审时不能仅凭历史通过状态宣布新版验收完成。
@@ -88,7 +98,9 @@ fact_id、measurement_id 和 image_id 在画像中全局唯一。子体有效事
 
 ## 最终内容：07_listing.json
 
-公共字段：schema_version、listing_mode、site、listing_language、listing_language_code、brand_name（字符串或 null）、buyer_question_coverage（数组）、excluded_claims（字符串数组）。
+公共字段：schema_version、listing_mode、site、listing_language、listing_language_code、brand_name（字符串或 null）、buyer_question_coverage（数组）、excluded_claims（字符串数组）、attribute_suggestions（数组）。
+
+`attribute_suggestions` 每项 `{attribute, value, fact_ids, measurement_ids?, applies_to?, note?}`：后台结构化属性建议（item type、material、target audience、intended use、special feature、included components、number of items 等），值必须引用 confirmed 事实或规格；缺字段给 warning。buyer_question_coverage 少于 6 项给 warning `question_matrix_thin`（5W1H + 品类常见问题）。
 
 `buyer_question_coverage` 每项 `{question, status, location, source?}`；status 使用 covered/partially_covered/not_claimed/not_applicable。location 用中文说明真实覆盖字段或未主张原因。自行整理的问题标 source=local_editorial，不包装成已采集问答。
 
@@ -136,9 +148,13 @@ fact_id、measurement_id 和 image_id 在画像中全局唯一。子体有效事
 
 ## 验收与后端适配
 
-- `08_semantic_review.json`: 绑定当前 profile/listing/qa 文件 SHA-256 的复审记录。目标为 single 或 parent＋各 variant_id，另含 media。每项 `{target, check, status: pass/fail/not_applicable/pending, evidence}`。文本检查 identity/readability/factual_support/language/variant_scope/qa_relevance/keyword_usage；media 检查 image_truth。not_applicable 需要原因；pending/fail 或缺项不能交付通过。不得为了过关机械填 pass。
-- `08_backend_validation.json`: `{records: [{target, payload_sha256, exit_code, response}]}`。target 为 single 或具体 variant_id；response 保留后端 JSON，仅 `ok=true` 且 `errors=[]`、退出码为 0 才通过。父节点只本地检查。响应或 payload 指纹缺失/过期不通过。
+- `08_semantic_review.json`: 复审记录。新版写 `target_fingerprints`（每个 target 与 media 依赖内容的规范 JSON SHA-256；重新格式化文件不失效）和 `carried_over`；review-template 遇到已有复审文件时保留内容未变 target 的结论（keyword_usage 还要求关键词指纹未变），只把变化的 target 置为 pending（--fresh 可全部重置）。旧版只有文件级 fingerprints 时按文件 SHA-256 绑定。目标为 single 或 parent＋各 variant_id，另含 media。每项 `{target, check, status: pass/fail/not_applicable/pending, evidence}`。文本检查 identity/readability/factual_support/language/variant_scope/qa_relevance/keyword_usage；media 检查 image_truth。not_applicable 需要原因；pending/fail 或缺项不能交付通过。不得为了过关机械填 pass。
+- `08_backend_validation.json`: `{records: [{target, payload_sha256, exit_code, response, reused}]}`；重跑 backend 时，payload 未变且已通过的子体沿用旧记录（reused=true），--no-reuse 强制全部请求。target 为 single 或具体 variant_id；response 保留后端 JSON，仅 `ok=true` 且 `errors=[]`、退出码为 0 才通过。父节点只本地检查。响应或 payload 指纹缺失/过期不通过。
 - `08_validation.json`: 汇总本地、关键词审查、语义、后端检查（local/keywords/semantic/backend）；`status` 为 passed/failed/incomplete；fingerprints 绑定 profile/listing/qa 原文件 SHA-256，evidence_fingerprints 的 review_sha256/backend_sha256 绑定复审与后端文件的规范 JSON SHA-256，keywords_sha256 绑定重新计算的关键词阶段结果 SHA-256（UTF-8、ensure_ascii=False、sort_keys=True、separators=(',',':')）。报告核对原验收文件存在且指纹匹配；缺失、过期为 incomplete，不以生成了文件代替完成。
+
+`07_keyword_coverage.json`（`keyword_quality.py coverage` 生成，仅供优化参考，不参与验收）：每个可售 target 的可用词数、完整短语覆盖、词级覆盖（大小写与简单英文复数折叠）、按搜索量加权覆盖率、未覆盖高流量词、标题覆盖前 10 词、后台词字节/预算/与标题重复词、暂缓或剔除词的完整短语命中；intent_map 表达位置；按搜索量排序的 fact_unlocks（暂缓词晋级条件）与 unsupported 问题。
+
+本地检查的 warning（不阻断）：title_word_repeat、search_terms_title_repeat、search_terms_duplicate、search_terms_format、bullet_prohibited_symbol、intent_unexpressed、intent_map_missing、attribute_suggestions_missing、question_matrix_thin。error：title_banned_character（品牌名中的除外）、search_bytes（按站点预算：IN 199、JP 499、其他 249）。
 
 本地工具命令统一使用 `python3 scripts/listing_quality.py`：
 
@@ -150,7 +166,7 @@ fact_id、measurement_id 和 image_id 在画像中全局唯一。子体有效事
 
 后端统一入口 `python3 scripts/backend_cli.py`：
 
-- `qa --keywords-file FILE --site US --output FILE`：仅从 CLI 的完整临时输出读取 JSON，脱敏后原子写入原有结构，不把终端摘要当作原始数据。本表格版不提供 expand，原词使用 import_keywords.py。
+- `qa --keywords-file FILE --site US --output FILE`：仅从 CLI 的完整临时输出读取 JSON，脱敏后原子写入原有结构，不把终端摘要当作原始数据；title_keywords 超过 8 个时本地拒绝且不发请求。本表格版不提供 expand，原词用 import_keywords.py 导入。
 - `validate --listing-file FILE --site SITE [--output FILE]`：原 CLI 单品接口；无 output 时返回的安全摘要含 response。系列统一使用上述 listing_quality.py backend 完成逐子体投影。
 - 两个命令均可选 --config、--cli、--timeout；凭据只能从配置文件读取，无环境变量回退或 token 命令行参数。默认配置相对 Skill 定位，不依赖工作目录；自动选择本 Skill tools/bin 中的 laochen-cli-v2 平台文件。
 - 非零进程退出、无有效 JSON、超时和显式业务失败均返回非零；validate 仍要求 ok=true 且 errors=[]。进程已执行时保留真实 exit_code，未执行/未正常返回时为 null。错误响应可留档，不代表验收通过；无新有效响应时旧文件不覆盖、不视为本次结果。原始进程日志不透传。

@@ -1,12 +1,12 @@
 {
-  "version": "2.1",
-  "checked_at": "2026-09-08",
+  "version": "2.2",
+  "checked_at": "2026-10-01",
   "default_limits": {
     "title_max_chars": 75,
     "item_highlight_max_chars": 125,
     "bullets_count": 5,
-    "bullet_max_chars": 500,
-    "bullets_total_max_chars": 1000,
+    "bullet_max_chars": 250,
+    "bullets_total_max_chars": 1250,
     "search_terms_max_bytes": 249
   },
   "limit_provenance": {
@@ -24,16 +24,18 @@
       "note": "本 skill 固定交付 5 条，不声称全类目统一平台数量"
     },
     "bullet_max_chars": {
-      "kind": "compatibility",
-      "note": "现有后端兼容预算；目标类目更严格时另行核验"
+      "kind": "platform_reported",
+      "source_id": "amazon_bullet_guidelines",
+      "note": "帮助页 GX5L8BF8GLMML6CX 经第三方转述为每条 10–255 字符；取 250 留余量"
     },
     "bullets_total_max_chars": {
       "kind": "editorial_budget",
-      "note": "内部简洁写作预算，不宣称全部类目平台硬限制"
+      "note": "5×250；不宣称平台总字符硬限制"
     },
     "search_terms_max_bytes": {
-      "kind": "conservative_budget",
-      "note": "UTF-8 含空格严格低于 250 字节，不宣称所有站点相同额度"
+      "kind": "platform_reported",
+      "source_id": "amazon_search_terms_2026",
+      "note": "默认 <250 字节；IN/JP 在 sites 中覆盖（帮助页 G23501 经卖家转述：IN <200，JP <500）。需在目标站后台核实"
     }
   },
   "sites": {
@@ -59,13 +61,15 @@
       "language": "English",
       "language_code": "en",
       "length_unit": "source",
-      "qa_enabled": false
+      "qa_enabled": false,
+      "search_terms_max_bytes": 199
     },
     "JP": {
       "language": "Japanese",
       "language_code": "ja",
       "length_unit": "source",
-      "qa_enabled": false
+      "qa_enabled": false,
+      "search_terms_max_bytes": 499
     },
     "DE": {
       "language": "German",
@@ -114,5 +118,15 @@
     "kind": "user_requirement",
     "source_id": "user_delivery_media_v21",
     "note": "本次确认的创意交付数量，不作为 Amazon 平台统一图片数量声明"
-  }
+  },
+  "title_compliance": {
+    "banned_characters": "!$?_{}^¬¦",
+    "max_word_repeats": 2,
+    "source_id": "amazon_title_rules_2025",
+    "severity": {
+      "banned_characters": "error",
+      "max_word_repeats": "warning"
+    }
+  },
+  "qa_max_keywords": 8
 }

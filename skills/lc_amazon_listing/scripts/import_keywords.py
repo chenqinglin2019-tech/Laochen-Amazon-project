@@ -29,7 +29,18 @@ ALIASES = {
     "keyword_translation": ("关键词翻译", "关键词中文翻译", "中文翻译", "关键词(中文)", "翻译", "keyword translation", "keyword_translation", "translation"),
     "traffic_percentage": ("流量占比", "流量占比(%)", "流量百分比", "traffic percentage", "traffic share", "traffic_percentage"),
     "flow_type": ("流量词类型", "流量类型", "词类型", "flow type", "flow_type", "traffic type"),
+    # Common SellerSprite columns used only for ordering/prioritising, never to drop a query.
+    "monthly_purchases": ("月购买量", "monthly purchases", "monthly_purchases"),
+    "purchase_rate": ("购买率", "purchase rate", "purchase_rate"),
+    "natural_rank": ("自然排名", "organic rank", "natural rank", "natural_rank"),
+    "aba_rank": ("ABA周排名", "ABA排名", "aba rank", "aba_rank", "search frequency rank"),
+    "title_density": ("标题密度", "title density", "title_density"),
 }
+# Keyword-level metrics must agree across sources (otherwise unknown). Traffic share and
+# natural rank describe one competitor ASIN, so differing values are expected, not conflicts.
+KEYWORD_METRICS = ("monthly_searches", "monthly_purchases", "purchase_rate", "aba_rank", "title_density")
+PERCENT_METRICS = ("traffic_percentage", "purchase_rate")
+NUMERIC_METRICS = KEYWORD_METRICS + ("traffic_percentage", "natural_rank")
 
 
 def header_key(value):
@@ -210,7 +221,14 @@ def build_import(paths, site, *, sheets=None, keyword_column=None, searches_colu
                     continue
                 found = resolve_header(rows, keyword_column, searches_column)
                 if found is None:
-                    raise ValueError("工作表 %s 找不到关键词表头；指定 --keyword-column 或 --sheet，不能跳过不明数据" % name)
+                    if sheets:
+                        raise ValueError("工作表 %s 找不到关键词表头；指定 --keyword-column 或核对 --sheet" % name)
+                    # A notes/explanation sheet next to the data: record it with a preview instead of failing.
+                    counts["status"] = "no_keyword_header"
+                    counts["preview"] = [[str(v.get("value"))[:40] for _, v in sorted(values.items())[:6] if v.get("value") not in (None, "")]
+                                         for _, values in rows[:3]]
+                    issues.append({"code": "sheet_without_keyword_header", "file_id": file_id, "sheet": name})
+                    continue
                 header_position, mapping, headers = found
                 counts.update(status="imported", header_row=rows[header_position][0],
                               columns={key: {"column": col + 1, "header": headers[col]["value"]} for key, col in mapping.items()},
@@ -230,16 +248,22 @@ def build_import(paths, site, *, sheets=None, keyword_column=None, searches_colu
                     location = {"file_id": file_id, "sheet": name, "row": row_number}
                     record = {"keyword": str(text), "source": location,
                               "raw_cells": [{"column": col + 1, "header": headers.get(col, cell(None))["value"], **value} for col, value in sorted(values.items())]}
-                    for key in ("monthly_searches", "traffic_percentage", "keyword_translation", "flow_type"):
+                    for key in ("monthly_searches", "traffic_percentage", "keyword_translation", "flow_type") + tuple(
+                            k for k in NUMERIC_METRICS if k in mapping and k not in ("monthly_searches", "traffic_percentage")):
                         value = values.get(mapping.get(key), cell(None))
-                        if key in ("monthly_searches", "traffic_percentage"):
-                            record[key], warning = metric(value, percentage=key == "traffic_percentage")
+                        if key in NUMERIC_METRICS:
+                            record[key], warning = metric(value, percentage=key in PERCENT_METRICS)
                             if warning:
                                 issues.append({"code": warning, "field": key, **location})
                         else:
                             record[key] = value["value"]
                     keywords.append(record)
                     counts["imported_rows"] += 1
+            if not any(sheet.get("status") == "imported" for sheet in source["sheets"]):
+                raise ValueError("没有可识别关键词表头的工作表；指定 --keyword-column 或 --sheet")
+            sites_in_name = {token for token in re.findall(r"[A-Za-z]+", path.stem) if token in SITES}
+            if sites_in_name and site not in sites_in_name:
+                issues.append({"code": "filename_site_mismatch", "file_id": file_id, "found": sorted(sites_in_name), "site": site})
         except (ValueError, KeyError, IndexError, TypeError, ET.ParseError, zipfile.BadZipFile, csv.Error) as exc:
             raise ValueError("文件 %s 导入失败：%s" % (path.name, str(exc))) from None
         sources.append(source)
@@ -250,17 +274,28 @@ def build_import(paths, site, *, sheets=None, keyword_column=None, searches_colu
         groups.setdefault(quality.norm(record["keyword"]), []).append(index)
     metrics = []
     for normalized, positions in groups.items():
-        item = {"keyword": keywords[positions[0]]["keyword"], "source_positions": positions}
-        for field in ("monthly_searches", "traffic_percentage"):
-            distinct = {keywords[index][field] for index in positions if keywords[index][field] is not None}
+        item = {"keyword": keywords[positions[0]]["keyword"], "source_positions": positions,
+                "source_file_count": len({keywords[index]["source"]["file_id"] for index in positions})}
+        for field in KEYWORD_METRICS + ("traffic_percentage",):
+            distinct = {keywords[index].get(field) for index in positions if keywords[index].get(field) is not None}
+            if field != "monthly_searches" and field != "traffic_percentage" and not any(field in keywords[index] for index in positions):
+                continue
             item[field] = next(iter(distinct)) if len(distinct) == 1 else None
-            if len(distinct) > 1:
+            if len(distinct) > 1 and field in KEYWORD_METRICS:
                 issues.append({"code": "metric_conflict", "field": field, "source_positions": positions})
+        shares = [(keywords[i]["source"]["file_id"], keywords[i]["traffic_percentage"]) for i in positions if keywords[i].get("traffic_percentage") is not None]
+        item["traffic_percentage_max"] = max((v for _, v in shares), default=None)
+        if len({v for _, v in shares}) > 1:
+            item["traffic_percentage_by_source"] = [{"file_id": f, "value": v} for f, v in shares]
+        ranks = [keywords[i]["natural_rank"] for i in positions if keywords[i].get("natural_rank") is not None]
+        if ranks:
+            item["natural_rank_best"] = min(ranks)
         metrics.append(item)
     return {"source_kind": "user_spreadsheets", "import_schema_version": "1.0", "site": site,
             "source_files": sources, "keywords": keywords, "raw": {"keyword_data": metrics}, "import_issues": issues,
             "import_counts": {"files": len(sources), "raw_records": len(keywords), "unique": len(groups), "duplicates": len(keywords) - len(groups)},
-            "import_policy": {"semantic_filtering": False, "row_limit": None, "deduplicate_input": False, "conflicting_metrics": "unknown"}}
+            "import_policy": {"semantic_filtering": False, "row_limit": None, "deduplicate_input": False, "conflicting_metrics": "unknown",
+                              "asin_specific_metrics": "per_source_values_plus_max_or_best", "extra_metrics_use": "ordering_only"}}
 
 
 def main(argv=None):
@@ -286,7 +321,14 @@ def main(argv=None):
         data = build_import(args.files, args.site, sheets=args.sheet, keyword_column=args.keyword_column,
                             searches_column=args.searches_column, encoding=args.encoding)
         quality.atomic_write(destination, data)
-        print(json.dumps({"status": "imported", "counts": data["import_counts"], "issues": data["import_issues"]}, ensure_ascii=False))
+        issue_counts = {}
+        for issue in data["import_issues"]:
+            issue_counts[issue["code"]] = issue_counts.get(issue["code"], 0) + 1
+        # Full issue list stays in 02_kw_raw.json; printing all of it would flood the agent's context.
+        print(json.dumps({"status": "imported", "counts": data["import_counts"], "issue_counts": issue_counts,
+                          "issue_examples": data["import_issues"][:5],
+                          "sheets": [{"file": f["filename"], "sheet": sh["name"], "status": sh.get("status")} for f in data["source_files"] for sh in f["sheets"]]},
+                         ensure_ascii=False))
         return 0
     except (OSError, ValueError, LookupError) as exc:
         print("关键词导入失败：%s" % exc, file=sys.stderr)
