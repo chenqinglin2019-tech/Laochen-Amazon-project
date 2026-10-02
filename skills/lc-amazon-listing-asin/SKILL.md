@@ -21,3 +21,11 @@ description: 输入目标站点、竞品 ASIN 和真实产品资料，生成兼�
 ## 后端凭据
 
 统一经 `scripts/backend_cli.py` 调用 tools/bin 中的 CLI：自动从本 Skill 的 config.json 读取 `backend_url/backend_token`，注入子进程环境变量 `LAOCHEN_BACKEND_URL/LAOCHEN_BACKEND_TOKEN` 并脱敏输出。无需手工 export，不要另写带凭据的命令。缺 token 时停在请求前，不阻止本地整理。
+
+## 对话自动填写鉴权 token
+
+发布目录直接提供 backend_url 为 https://mcp.yixunkuajing.com、backend_token 留空的 config.json，不使用 config.example.json。用户在对话中明确提供本 Skill 的鉴权 token 后，在任何后端请求前自动调用 scripts/configure_credentials.py，将标准输入 JSON 的 backend_token 写入本 Skill 的 config.json；保留 backend_url 和其他字段。无需用户手工编辑文件或 export 环境变量。缺 token 时一次说明缺少鉴权 token，收到后填写并继续原流程。
+
+通过工具的标准输入传递 JSON，禁止把 token 嵌入 shell 命令、命令行参数或临时脚本；不回显、不放入报告、日志或 Git。脚本原子写入、Unix 权限为 0600，拒绝空值、控制字符和符号链接，输出只有成功状态与文件名。之后由 backend_cli.py 从 config.json 读取并注入 CLI 子进程；服务端仍检查 token 有效性、账号权限和额度，失败保留原脱敏处理，不绕过授权、不自动重试。
+
+本 Skill 的外部调用统一经过后台 CLI，没有直接读取第三方 API key 的 .env 路线；不得创建无调用入口的 .env、猜测 API 字段，或将第三方 API key 当成 backend_token。用户提供第三方 key 时明确说明支持范围，使用支持该来源的 Skill。
