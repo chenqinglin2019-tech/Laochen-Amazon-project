@@ -200,6 +200,12 @@ def validate_checked_at(value: str, max_age_hours: int = 48) -> datetime:
 
 
 def load_json(path: Path) -> Any:
+    # Legacy offline callers retain their frozen API, without a distributed
+    # example file and without touching the live config.json.
+    if (path == skill_root() / "config.example.json" and not path.exists()
+            and offline_credentials_disabled()):
+        from credential_defaults import BACKEND_URL
+        return {"backend_url": BACKEND_URL, "backend_token": ""}
     with path.open("r", encoding="utf-8-sig") as handle:
         return json.load(handle)
 

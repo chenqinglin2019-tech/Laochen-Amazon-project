@@ -123,3 +123,11 @@ Serper、Signa、SerpApi 只有在创建任务时显式启用或已有任务授�
 
 
 内部预算停止后，只对确实未执行且没有关联原件的范围保留“未查询／风险待定”和预算原因，可在已有材料完成双审后生成证据模式部分报告。未读原件、未知提交和完整性异常不能用预算豁免。嵌套执行必须通过受控执行器复用任务进程组；全局截止时间不因分批或重启重置。具体规则见上述预算参考文档。
+
+## 对话提供凭据
+
+发布包直接提供 token 留空的 `config.json`，不使用 config.example.json。用户在对话中明确提供本 Skill 的后台鉴权 token 时，在业务鉴权前自动填写本 Skill 的 `config.json.backend_token`，保留 backend_url 和其他字段。不得回显、记录到报告、提交到 Git 或通过命令行参数传递凭据。
+
+用 `scripts/configure_credentials.py` 接收标准输入 JSON（backend_token 字段；第三方凭据放在 api_keys 对象，以 .env 中准确字段名为键），输出只有成功状态、文件名和字段名。通过文件写入工具或 stdin 传递，禁止在 shell 命令文本、临时脚本或参数里嵌入凭据。脚本原子保存且 Unix 权限为 0600，仅更新用户提供的字段。用户明确给出提供方的 API key 时，自动填写本 Skill 的 `.env` 对应字段；提供方不明确时先确认，不猜测。没有 .env 的 Skill 不接收第三方 API key。
+
+缺凭据时一次说明缺少的项目；用户提供后填写并继续原鉴权流程，不绕过门禁。IPR 的 config.local.json 或非空 LAOCHEN_BACKEND_TOKEN 仍按现有优先级生效；如与新提供 token 冲突，说明来源并只在用户明确要求时更新覆盖。API key 的填写不代表启用来源或授权消耗额度。

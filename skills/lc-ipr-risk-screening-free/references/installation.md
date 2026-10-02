@@ -16,7 +16,7 @@ Windows 10 是本项目需单独实测的兼容目标，不能因带有 Windows 
 
 ## 初始化与依赖
 
-进入解压后的 Skill 根目录，包内已预置各字段值为空的 `.env`，可以直接填写自己的第三方 API Key。Mac Finder 按 `⌘ + Shift + .` 显示隐藏文件；`.env.example` 保留为恢复模板。初始化只补建缺失的空 config.json／.env，已有字节与权限不改：
+进入解压后的 Skill 根目录，包内已预置各字段值为空的 `.env`，可以直接填写自己的第三方 API Key。Mac Finder 按 `⌘ + Shift + .` 显示隐藏文件；包内 `config.json` 的后台 token 也留空，不附带示例文件。初始化只补建缺失的空 config.json／.env，已有字节与权限不改：
 
 macOS：
 
@@ -56,7 +56,7 @@ BOM／CRLF 在配置读取时兼容；文件写入使用 UTF-8。建议命令始
 
 使用包内 `scripts/package_skill.py --output-dir 新空目录`。它按 [明确文件清单](distribution-files.json) 读取所需文件，在独立暂存目录检查空模板、已知秘密值和机器路径，生成逐文件 SHA-256 清单并原子生成 ZIP。新增业务文件需经审阅后显式加入清单，不能通过递归“全目录打包”带入用户状态。
 
-分发不含发送者真实 config.json、config.local.json、.env、任务、报告、日志、浏览器会话、虚拟环境、额度账本或账户证明。包内 `.env` 在暂存目录从已校验的空 `.env.example` 生成，权限记录为 0600，来源与文件哈希纳入清单；不复制本机现用 `.env`。历史文档中的发送者本机恢复路径只在暂存副本中脱敏；不会修改发送者原文，也不会提供不可用的接收者恢复命令。最终 ZIP 解压后应从空配置开始；不要附送个人凭据来“方便使用”。
+分发不含发送者真实 config.json、config.local.json、.env、任务、报告、日志、浏览器会话、虚拟环境、额度账本或账户证明。包内 `config.json` 和 `.env` 由 scripts/credential_defaults.py 的固定空字段在暂存目录生成，权限记录为 0600，来源与文件哈希纳入清单；不复制本机现用 `.env`。历史文档中的发送者本机恢复路径只在暂存副本中脱敏；不会修改发送者原文，也不会提供不可用的接收者恢复命令。最终 ZIP 解压后应从空配置开始；不要附送个人凭据来“方便使用”。
 
 修改 Skill 后先运行 `scripts/verify_skill.py --mode fast --output-dir <新目录>`，交付前运行 `--mode release`（release 还需要系统 Chrome 与浏览器版面验收）；在没有系统 Chrome 的环境里 `tools/cdp` 中依赖 Chrome 的用例会失败，属环境原因，须在有 Chrome 的机器上复核。改动 `codex_guard.py`／`completion_check.py` 后，需重新运行 `scripts/install_codex_guard.py` 并在 Codex `/hooks` 重新信任。
 

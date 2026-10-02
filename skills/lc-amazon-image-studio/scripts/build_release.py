@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a clean distributable zip of this skill (standard library only).
 
-Never packages local credentials (config.json), caches, transaction folders,
+Generates a blank config.json; never copies local credentials, caches, transaction folders,
 macOS metadata or the in-skill user template file (the user library lives in the
 per-user data directory). Tests are excluded unless --with-tests. Auth binaries
 are verified against references/auth-binaries.json before packaging.
@@ -74,9 +74,14 @@ def build(out_dir: Path, with_tests: bool, platform: str, name: str) -> dict:
             info.external_attr = (0o100000 | mode) << 16
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, path.read_bytes())
-    return {"zip": str(target), "sha256": sha256(target), "files": len(files), "bytes": target.stat().st_size,
+        config = {"backend_url": "https://mcp.yixunkuajing.com", "backend_token": ""}
+        info = zipfile.ZipInfo(f"{NAME}/config.json", date_time=(2026, 9, 30, 0, 0, 0))
+        info.external_attr = (0o100000 | 0o600) << 16
+        info.compress_type = zipfile.ZIP_DEFLATED
+        archive.writestr(info, json.dumps(config, indent=2) + "\n")
+    return {"zip": str(target), "sha256": sha256(target), "files": len(files) + 1, "bytes": target.stat().st_size,
             "excluded": len(skipped), "with_tests": with_tests, "platform": platform,
-            "contains_config_json": any(relative == "config.json" for _, relative in files)}
+            "contains_config_json": True, "config_token_empty": True}
 
 
 def main(argv=None) -> int:
@@ -89,7 +94,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     result = build(args.out, args.with_tests, args.platform, args.name)
     print(json.dumps(result, ensure_ascii=False))
-    return 0 if not result["contains_config_json"] else 2
+    return 0 if result["config_token_empty"] else 2
 
 
 if __name__ == "__main__":

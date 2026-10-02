@@ -22,14 +22,14 @@ python scripts/auth_gate.py
 
 - 后台 Token 优先使用**非空进程环境变量 `LAOCHEN_BACKEND_TOKEN`**；否则使用 `config.json` 与 `config.local.json` 合并后的 `backend_token`。`config.local.json` 覆盖 `config.json` 的同名字段，保留原包行为。不要删除接收者已有覆盖文件。
 - 后台地址来自上述合并配置的 `backend_url`。初始化模板为 `https://mcp.yixunkuajing.com`，请求固定 `/auth/skill-check`，固定 `skill_id=ipr_risk_screening_free`。不改成账户余额接口，不调用业务接口代替鉴权。
-- 第三方 API Key、Client ID、Secret、用户名和密码只从本 Skill 根目录 `.env` 读取，沿用 [.env.example](.env.example) 的 12 个字段；不回退到其它 Skill、进程环境或 Keychain。缺少或留空只影响相应来源。
+- 第三方 API Key、Client ID、Secret、用户名和密码只从本 Skill 根目录 `.env` 读取，沿用 [.env](.env) 的 12 个字段；不回退到其它 Skill、进程环境或 Keychain。缺少或留空只影响相应来源。
 - `references/runtime-config.json` 保存非秘密运行规则、额度、浏览器参数及组件哈希。旧后台配置中其它业务字段不覆盖这里的新检索规则。
 
 分发包根目录已附带列出 12 个字段、值全部留空的 `.env`，接收者直接在等号后填写自己的凭据。Mac Finder 按 `⌘ + Shift + .` 显示该隐藏文件。用 `setup_skill.py --init` 仅补建缺失的空 `config.json` 和 `.env`；已有文件不覆盖、不搬迁、不自动更换权限。macOS/Unix 的新私密文件使用 `0600`；Windows 使用当前用户目录权限，不将 POSIX 位检查冒充 Windows ACL 校验。`.env` 作为 UTF-8 文本解析，支持 BOM、CRLF，不执行 shell、不展开变量或修改进程环境。
 
 接收者填写自己的后台 Token 和获准使用的第三方凭据。Key 已配置不代表来源获得授权、生产审批通过或仍有免费额度；创建任务时仍按来源规则明确选择。Serper 可以由接收者明确授权使用现有余额，不继承发送者的授权、余额证明或额度账本。EUIPO 本轮暂停，不自动测试或启用。
 
-禁止把完整 Token、Key、用户名、密码或 Cookie 写入命令行、任务、日志、报告或回复。发送者的 `config.json`、`config.local.json`、`.env` 不进入分发包；包内空 `.env` 仅由校验通过的 `.env.example` 在暂存目录生成，不能复制发送者现用文件。配置值不得用来生成公开调试信息。
+禁止把完整 Token、Key、用户名、密码或 Cookie 写入命令行、任务、日志、报告或回复。发送者的 `config.json`、`config.local.json`、`.env` 不进入分发包；包内空 `config.json` 和 `.env` 由 scripts/credential_defaults.py 的固定空字段在暂存目录生成，不能复制发送者现用文件。配置值不得用来生成公开调试信息。
 
 ## 3. 失败与成功
 
@@ -43,3 +43,5 @@ python scripts/auth_gate.py
 原因以程序实际输出为准，包含原包的 Skill 未登记、Skill 停用、权限缺失／未启用，以及 Token、账户、余额、限流、服务、配置和组件错误。立即停止本轮业务，不绕过或伪造成功；仍可执行不依赖业务鉴权的开发排错。
 
 本次恢复只改变前端调用与原包的对齐，不改变后端授权状态；有效 Token 仍须获得此 Skill 的后台权限。鉴权不扣业务积分，也不采用新增会话缓存。此门禁约束官方分发包正常执行流程，不是不可绕过的 DRM。
+
+用户在对话中提供自己的后台 token 或明确来源的 API key 后，按 SKILL.md 的“对话提供凭据”自动写入 config.json／.env，再继续原门禁；不得回显凭据。

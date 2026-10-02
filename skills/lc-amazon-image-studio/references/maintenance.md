@@ -99,6 +99,6 @@
 
 `python3 scripts/build_release.py [--out DIR] [--name N] [--with-tests] [--platform all|mac|win|linux]`：
 
-- 输出干净的 zip：排除 config.json、缓存、`__pycache__`/`__MACOSX`、事务目录和 skill 内的用户模板文件；默认不含测试。
+- 输出干净的 zip：用固定后台地址生成 token 留空的 config.json（不复制本机 config.json），排除缓存、`__pycache__`/`__MACOSX`、事务目录和 skill 内的用户模板文件；默认不含测试。
 - `--platform` 只带对应平台的鉴权二进制；打包前会核对 `auth-binaries.json`。
 - 发布包：默认名 `lc-amazon-image-studio-v7.zip`。维护包：`--with-tests --name lc-amazon-image-studio-v7-dev`。

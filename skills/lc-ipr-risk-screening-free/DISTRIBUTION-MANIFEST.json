@@ -3,10 +3,11 @@
   "package_name": "lc-ipr-risk-screening-free",
   "files": [
     {
-      "path": ".env.example",
-      "bytes": 1159,
-      "sha256": "414804613ee5fc60eb019f1e12bce996db897fc892c484d5f38f3f1a8c16e740",
-      "mode": "0644"
+      "path": ".env",
+      "bytes": 288,
+      "sha256": "a717b50f8ca013331cd5c70623d8959cea6e2aaf2323e462f18f79e72ab2a123",
+      "mode": "0600",
+      "generated_from": "credential_defaults"
     },
     {
       "path": ".gitignore",
@@ -16,14 +17,14 @@
     },
     {
       "path": "INSTRUCTIONS.md",
-      "bytes": 4848,
-      "sha256": "dff9279aa5ac5df15601c5fe814e3604a79ee2b8db32e8b0d47f674a5d7a2b7a",
+      "bytes": 5063,
+      "sha256": "58213891369929cf27cfa9764ec080a497c03b594a04721e31b091097c25b664",
       "mode": "0644"
     },
     {
       "path": "SKILL.md",
-      "bytes": 27651,
-      "sha256": "28b0798bd854fd8516c4e34d34cc8335a14a7e6099ee5379ee501cfdc91a8376",
+      "bytes": 28974,
+      "sha256": "1d86cae7d3e345884589cd3eafc2f074a6e44348786b9943d0fd8bfe9bb3f9c8",
       "mode": "0644"
     },
     {
@@ -57,10 +58,11 @@
       "mode": "0644"
     },
     {
-      "path": "config.example.json",
+      "path": "config.json",
       "bytes": 75,
       "sha256": "30e7163d200fbde3c355197160bdfda8613e02122438a9f9059c66782df8e3f3",
-      "mode": "0644"
+      "mode": "0600",
+      "generated_from": "credential_defaults"
     },
     {
       "path": "fixtures/evidence-delivery-products.json",
@@ -208,8 +210,8 @@
     },
     {
       "path": "references/distribution-files.json",
-      "bytes": 58752,
-      "sha256": "d6349a8980f3f51c68b60722bf4c0629dea7fac9d897218aa031fe0385efca3d",
+      "bytes": 59343,
+      "sha256": "5b1851765ed55dfe2abccc6adc9d84b74b0e89361406a8b2725f1d11a742fd7d",
       "mode": "0644"
     },
     {
@@ -220,8 +222,8 @@
     },
     {
       "path": "references/installation.md",
-      "bytes": 7644,
-      "sha256": "eff6bb26d6b9d243885258567e4401bf47d89d19e7dfa725d3b3e7fd3c3d681a",
+      "bytes": 7715,
+      "sha256": "81bb3c16ba609e51e0c87aa39f21c8b7a8efd094a2c8278c93721ff471b8e80c",
       "mode": "0644"
     },
     {
@@ -406,11 +408,11 @@
     },
     {
       "path": "references/upgrade-validation-v24.md",
-      "bytes": 6193,
-      "sha256": "94dd9e344a81d0f3f5f9c0292f185d2315ba3bbe419968975126c5c03495599c",
+      "bytes": 6338,
+      "sha256": "a87defada13912d8313adda8f8ebbe6ff2ff0f4ca7c7072d7f928fd278205b2a",
       "mode": "0644",
       "transform": "redact_sender_history_v1",
-      "source_sha256": "717b7a855534a3171b8ce072744d6287af1c34be128e02db5696db414656788a"
+      "source_sha256": "94dd9e344a81d0f3f5f9c0292f185d2315ba3bbe419968975126c5c03495599c"
     },
     {
       "path": "references/workflow-business-logic.md",
@@ -552,8 +554,8 @@
     },
     {
       "path": "scripts/common.py",
-      "bytes": 103558,
-      "sha256": "cfc1981ae179adeec017de9533694d6d34ce9a05df0b9865d2ab2951aa338f47",
+      "bytes": 103937,
+      "sha256": "f86667995e981e555f4de150c429e4c7d87ad230fc8a3886ee321bc35c97d3c4",
       "mode": "0644"
     },
     {
@@ -566,6 +568,12 @@
       "path": "scripts/completion_policy.py",
       "bytes": 1189,
       "sha256": "ff576736413a7da76a42aabe4c0ba322814e10dbb28caf7a233f8bac1613c0cd",
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/configure_credentials.py",
+      "bytes": 4046,
+      "sha256": "8466f82b8a6e7db5dfe265b19a6d954495d23f05cdbb3be46300ddcd514f85ab",
       "mode": "0644"
     },
     {
@@ -602,6 +610,12 @@
       "path": "scripts/create_task.py",
       "bytes": 20013,
       "sha256": "12ca3590a6bddeaa32716affd0b793b9f8bfd92dab24a33aa3a5bdafd3bf56de",
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/credential_defaults.py",
+      "bytes": 786,
+      "sha256": "9e8090950dade186346fa5f1ee21745fb0515e42246e5750dd05cf480c569543",
       "mode": "0644"
     },
     {
@@ -810,8 +824,8 @@
     },
     {
       "path": "scripts/package_skill.py",
-      "bytes": 17429,
-      "sha256": "71b92cbe10471638488069e9cf2692162326ceb4c0fce68ebc1ceb757abbbd0e",
+      "bytes": 18151,
+      "sha256": "0478b7c143facbf81c1f8c270f25661a8d8f9d9ed0b85d7f31321373fecc9cd0",
       "mode": "0644"
     },
     {
@@ -1308,8 +1322,8 @@
     },
     {
       "path": "scripts/setup_skill.py",
-      "bytes": 15181,
-      "sha256": "b4e15bd0b3d307122e7afb52b134f1e4e40b67babb9acfd63c1525f6150e89d0",
+      "bytes": 15297,
+      "sha256": "140280e7b093dcc47a39e04dfe84e2d5cbd870e7e8be5b2b2291db26fd38e893",
       "mode": "0644"
     },
     {
@@ -1574,6 +1588,18 @@
       "path": "scripts/test_completion_policy_v2.py",
       "bytes": 8462,
       "sha256": "aa5b14fd8cb39bd42ebeff512a09d4cab8f8a372dd36ee8bf2c92c06a29c38b7",
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_configure_auth.py",
+      "bytes": 4371,
+      "sha256": "304dcb86bf05f603d43da1c6a8a225b438b93b4ee651fec1fa5c12200298fbb9",
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_configure_credentials.py",
+      "bytes": 5794,
+      "sha256": "acbf0701260e4bfaab100a075a43cf6a84df167120f02be6460aeba226f52d9f",
       "mode": "0644"
     },
     {
@@ -1872,8 +1898,8 @@
     },
     {
       "path": "scripts/test_package_skill.py",
-      "bytes": 17369,
-      "sha256": "e6f998389d31a334de57c1cb9608ec3646e3c4601ff1131795ec8a48e7e40254",
+      "bytes": 18220,
+      "sha256": "bce670ea7aeaeb8e1d039354a1fa08268252767c26e3f86d2587d176d3383e65",
       "mode": "0644"
     },
     {
@@ -2220,8 +2246,8 @@
     },
     {
       "path": "scripts/test_setup_skill.py",
-      "bytes": 8522,
-      "sha256": "597e2395117fe957a7e535b270d0e265854ff395dd02ba78d020c7882c3a135e",
+      "bytes": 8999,
+      "sha256": "8e02f83632e7de796e26b55c910f2434bf3db1392394d7653bd871588a5b2832",
       "mode": "0644"
     },
     {
@@ -2679,13 +2705,6 @@
       "bytes": 3414,
       "sha256": "9f585103ac5709004ae2de097942ee5fd958b3363762201123d9b83a5278e6fa",
       "mode": "0644"
-    },
-    {
-      "path": ".env",
-      "bytes": 1159,
-      "sha256": "414804613ee5fc60eb019f1e12bce996db897fc892c484d5f38f3f1a8c16e740",
-      "mode": "0600",
-      "generated_from": ".env.example"
     }
   ]
 }

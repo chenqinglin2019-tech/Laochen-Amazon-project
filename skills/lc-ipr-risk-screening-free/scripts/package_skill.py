@@ -47,7 +47,7 @@ def _fail(code, path=""):
     raise PackageError(code + (": " + path if path else ""))
 
 
-def _relative_path(value):
+def _relative_path(value, *, generated=False):
     if not isinstance(value, str) or not value or "\\" in value:
         _fail("INVALID_DISTRIBUTION_PATH")
     path = PurePosixPath(value)
@@ -59,7 +59,7 @@ def _relative_path(value):
         _fail("INVALID_DISTRIBUTION_PATH")
     lower = {p.lower() for p in parts}
     filename = parts[-1].lower()
-    if (lower & FORBIDDEN_PARTS or lower & PRIVATE_FILES or filename in STATE_FILES
+    if (lower & FORBIDDEN_PARTS or (lower & PRIVATE_FILES and not (generated and value in {"config.json", ".env"})) or filename in STATE_FILES
             or filename.endswith((".pyc", ".pyo", ".log", ".zip", ".lock"))
             or filename.startswith(".env.") and filename != ".env.example"
             or filename == MANIFEST.lower()):
@@ -157,7 +157,7 @@ def _empty_template(relative, content):
     try:
         if filename in {".env.example", ".env"} and any(_env_values(content).values()):
             _fail("POPULATED_CREDENTIAL_TEMPLATE", relative)
-        if filename == "config.example.json":
+        if filename in {"config.example.json", "config.json"}:
             obj = json.loads(content)
             if (not isinstance(obj, dict) or set(obj) != {"backend_url", "backend_token"}
                     or obj["backend_token"] != "" or not isinstance(obj["backend_url"], str)
@@ -234,7 +234,7 @@ def package_skill(source_root, output_dir, *, allowlist_path=None, archive_name=
                 or entry.get("required") is not True or entry.get("mode") not in ("0644", "0755")
                 or set(entry) - {"path", "kind", "required", "mode", "transform"}):
             _fail("INVALID_DISTRIBUTION_ENTRY")
-        name = _relative_path(entry.get("path"))
+        name = _relative_path(entry.get("path"), generated=entry.get("transform") == "empty_credentials_v1")
         if entry["kind"] == "binary" and name not in PLATFORM_BINARIES:
             _fail("UNSUPPORTED_DISTRIBUTION_BINARY", name)
         if name.casefold() in seen:
@@ -257,17 +257,27 @@ def package_skill(source_root, output_dir, *, allowlist_path=None, archive_name=
         source_hashes = {}
         for entry in sorted(entries, key=lambda item: item["path"]):
             relative = entry["path"]
-            source = _read_regular(root, relative)
-            source_hashes[relative] = hashlib.sha256(source).hexdigest()
+            generated = entry.get("transform") == "empty_credentials_v1"
+            if generated:
+                if relative not in {"config.json", ".env"} or entry["kind"] != "text":
+                    _fail("UNSUPPORTED_DISTRIBUTION_TRANSFORM", relative)
+                from credential_defaults import empty_credentials
+                source = empty_credentials(relative)
+            else:
+                source = _read_regular(root, relative)
+                source_hashes[relative] = hashlib.sha256(source).hexdigest()
             # Secret scanning also precedes the one permitted historical transform.
             if any(needle in source for needle in needles) or any(p.search(source) for p in SECRET_PATTERNS):
                 _fail("SECRET_DETECTED", relative)
-            content = _transform(relative, source, entry.get("transform"))
+            content = source if generated else _transform(relative, source, entry.get("transform"))
             _scan(relative, content, entry["kind"], needles, roots)
             target = tree / relative; target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(content); target.chmod(int(entry["mode"], 8))
-            record = {"path": relative, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest(), "mode": entry["mode"]}
-            if entry.get("transform"):
+            mode = "0600" if generated else entry["mode"]
+            target.write_bytes(content); target.chmod(int(mode, 8))
+            record = {"path": relative, "bytes": len(content), "sha256": hashlib.sha256(content).hexdigest(), "mode": mode}
+            if generated:
+                record.update(generated_from="credential_defaults")
+            elif entry.get("transform"):
                 record.update(transform=entry["transform"], source_sha256=hashlib.sha256(source).hexdigest())
             manifest["files"].append(record)
         # Distribute an immediately editable empty file, never the sender's
