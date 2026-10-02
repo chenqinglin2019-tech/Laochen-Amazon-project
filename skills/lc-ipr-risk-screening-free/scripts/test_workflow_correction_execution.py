@@ -19,6 +19,7 @@ class WorkflowCorrectionExecutionTests(unittest.TestCase):
         self.f.setUp()
         self.addCleanup(self.f.tearDown)
         f = self.f
+        f.task.pop("continuous_recovery_revision", None)  # Exercise the frozen 01 correction contract.
         self.params = {"q": f.candidate["serial_number"], "serial_number": f.candidate["serial_number"],
             "candidate_id": f.candidate["candidate_id"], "strategy": "record_number", "mode": "agent"}
         f.annotate("needs_info", missing_information=["Complete goods"], next_actions=[{
@@ -74,6 +75,44 @@ class WorkflowCorrectionExecutionTests(unittest.TestCase):
             for state in ("submitted", "not_submitted")]}
         self.assertEqual(action_attempt_state(evidence, "uspto_tsdr", self.row)["state"], "submitted")
         self.assertFalse(action_attempt_state(evidence, "other", self.row)["attempted"])
+
+    def test_needs_info_allows_only_reviewed_single_source_recovery(self):
+        from recovery_stage_b import REVISION, record_review
+        f = self.f
+        f.task["continuous_recovery_revision"] = REVISION
+        atomic_write_json(f.path / "task.json", f.task)
+        self.failure("submitted")
+        original = copy.deepcopy(f.evidence["source_runs"][-1])
+        self.assertEqual(scenario_dispatch_block_from_dir(f.path, "uspto_tsdr", self.row)["code"],
+                         "TRIAGE_BOUNDED_ACTION_ALREADY_ATTEMPTED")
+        record_review(f.path, {"kind": "failure_review", "source_run_id": original["run_id"],
+            "source_run_sha256": sha256_json(original), "reviewer": "offline-agent",
+            "reasoning": "Original failure reviewed", "receipt_absence_reason": "No retained body",
+            "receipt_review": "Submitted failure receipt checked", "material_review": "No new goods",
+            "remaining_work": "Read exact goods", "failure_cause": "Temporary source failure",
+            "repair_basis": "Source condition checked", "source_rule_ref": "Synthetic source policy",
+            "source_allows_retry": True})
+        self.assertIsNone(scenario_dispatch_block_from_dir(f.path, "uspto_tsdr", self.row))
+        self.assertEqual(load_json(f.path / "evidence.json")["source_runs"][-1], original)
+        self.failure("submitted")
+        self.assertIsNotNone(scenario_dispatch_block_from_dir(f.path, "uspto_tsdr", self.row))
+
+    def test_needs_info_success_and_unknown_still_block_with_recovery_enabled(self):
+        from recovery_stage_b import REVISION
+        f = self.f
+        f.task["continuous_recovery_revision"] = REVISION
+        atomic_write_json(f.path / "task.json", f.task)
+        for status, submission, reason in (("success", "submitted", "TRIAGE_REVIEW_REQUIRED"),
+                                          ("failed", "unknown", "TRIAGE_ATTEMPT_STATE_UNKNOWN")):
+            with self.subTest(status=status, submission=submission):
+                evidence = load_json(f.path / "evidence.json")
+                evidence["source_runs"] = []
+                atomic_write_json(f.path / "evidence.json", evidence)
+                self.failure(submission)
+                evidence = load_json(f.path / "evidence.json")
+                evidence["source_runs"] = [dict(evidence["source_runs"][-1], status=status)]
+                atomic_write_json(f.path / "evidence.json", evidence)
+                self.assertEqual(scenario_dispatch_block_from_dir(f.path, "uspto_tsdr", self.row)["code"], reason)
 
     def test_review_of_exact_guard_failure_preserves_original_and_allows_recovery(self):
         f = self.f

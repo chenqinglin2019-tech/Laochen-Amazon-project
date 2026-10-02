@@ -347,9 +347,18 @@ class BrowserPlanIntegrationTests(unittest.TestCase):
                             "--url", "https://www.amazon.com/dp/B012345678", "--jurisdictions", "US,JP",
                             "--output-dir", directory], check=True, capture_output=True)
             task = load_json(root / "task.json")
+            task.pop("product_entry_revision", None)  # Frozen pre-entry compatibility fixture.
+            task.pop("product_scope_required", None)  # Historical contract.
             # This frozen compatibility fixture exercises the original broad browser plan.
             task.pop("retrieval_workflow_revision", None)
             task.pop("retrieval_policy", None)
+            task['source_operation_revision'] = 'source-operation-v1'
+            task.pop('review_policy_revision', None)
+            task.pop('final_review_execution_revision', None)
+            from workflow_v24 import build_coverage_requirements_v24
+            task['coverage_requirements'] = build_coverage_requirements_v24(
+                task['target_jurisdictions'], screening_revision=task.get('screening_revision'),
+                specialty_workflow_revision=task.get('specialty_workflow_revision'))
             from common import serper_free_enhancement, serpapi_free_enhancement
             task["serper_free_enhancement"] = serper_free_enhancement(False)
             task["serpapi_free_enhancement"] = serpapi_free_enhancement(False)
@@ -368,10 +377,16 @@ class BrowserPlanIntegrationTests(unittest.TestCase):
                 return {"executor_available": False, "status": "unvalidated", "error_code": "AUTOMATION_NOT_VALIDATED", "detail": "Offline adapter test; no network query occurred."}
             report = scheduler.execute_plan(root, 1, runner=unavailable)
             self.assertTrue(report["queries"])
-            self.assertTrue(all(r["status"] == "access_limited" and r.get("source_run_id") for r in report["queries"]))
+            # The v2 scheduler can omit rows whose frozen route does not
+            # belong to the requested browser batch.  Executed rows must
+            # retain an access-limited receipt; omitted rows must state why.
+            self.assertTrue(all((r["status"] == "access_limited" and r.get("source_run_id"))
+                                or (r["status"] in {"skipped", "cancelled"} and r.get("reason"))
+                                for r in report["queries"]))
             self.assertTrue(all("automation-capability" in command for command in calls))
             evidence = load_json(root / "evidence.json")
-            self.assertEqual(len(evidence["source_runs"]), len(report["queries"]))
+            executed = [row for row in report["queries"] if row.get("source_run_id")]
+            self.assertEqual(len(evidence["source_runs"]), len(executed))
             by_id = {r["query_id"]: r for rows in plan["queries"].values() for r in rows}
             self.assertTrue(all(run["plan_entry_sha256"] == canonical_digest(by_id[run["query_id"]]) for run in evidence["source_runs"]))
 

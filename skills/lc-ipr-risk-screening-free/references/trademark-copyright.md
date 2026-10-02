@@ -26,7 +26,7 @@ trade_dress 在 US 可对应商业外观，在其他国家必须注明实际适�
 
 仅链接且未说明为用户自己的产品：按可见外观、功能相同且照片/文案另做的选品假设，参考照片只用于识别商品，不调查竞品摄影/文案复制风险。用户提供自己的产品图片、文案或明确拟使用素材时，检查这些素材；“自己的”不是已获许可的证明。两种情况均检查产品本体造型、内置图案、角色和装饰；功能性与可独立识别艺术表达分开，不把版权等同外观专利。
 
-`product.assets` 必须为实际盘点列表，条目保存 asset_id、usage、right_types、scenario_ids、scope_reasoning、evidence_refs；usage 为 reference_only/intended_material/integrated_expression/product_configuration/intended_packaging。不得把不完整条目静默筛成空清单。`asset_scope_review` 保存 status=reviewed、reviewer、reasoning、evidence_refs，以及 `record_asset_provenance.inventory_identity_sha256(task,right_type)` 的摘要；产品、图片或清单变更后重新核对盘点。来源日期保持原取证时间。
+`product.assets` 必须为实际盘点列表，条目保存 asset_id、usage、right_types、scenario_ids、scope_reasoning、evidence_refs；usage 为 reference_only/intended_material/integrated_expression/product_configuration/intended_packaging。`record_product_analysis.py` 在计划前定位未知情景、不支持用途、用途与权利类型冲突及缺失图证；不得把不完整条目静默筛成空清单。版权／商业外观素材与 `mark_inventory` 的图形标识分开登记，但可引用同一真实产品图。`asset_scope_review` 保存 status=reviewed、reviewer、reasoning、evidence_refs，以及 `record_asset_provenance.inventory_identity_sha256(task,right_type)` 的摘要；产品、图片或清单变更后重新核对盘点。来源日期保持原取证时间。
 
 `product.mark_inventory` 分 plain_text/stylized_text/graphic/composite，保存 mark_id、form、graphic_description、scenario_ids、evidence_refs；另有同格式 mark_inventory_review。缺图片/缺盘点不等于无图形。美国实际可见图形可派生 `query_terms.kind=design_code`（六位USPTO代码）或 mark_description（英文），derived_from 精确指 product.mark_inventory[index]。新计划使用 tm-figurative-fields-v1，DC 分类、DE 描述与视觉比较分别留证；不将普通品牌全文搜索当图形召回。代码以当前官方 Design Search Code Manual 核对，不能混用同数字 Vienna 分类。[USPTO 字段说明](https://www.uspto.gov/sites/default/files/documents/TM-FederalTrademarkSearching-FieldTags-handout.pdf)。
 
@@ -34,7 +34,7 @@ USPTO 不提供反向图片搜索；`visual_comparison` 是取得与阅读真实
 
 风格化文字不当然有图形分类码。核对实际图样和官方手册后，确无适用代码者在该标识 classification_review 保存 status=not_applicable、design_codes=[]、reasoning、evidence_refs；同情景所有适用标识满足时，通过classification轴Agent记录留证，不强造DC查询。存在可用代码则仍须执行实际分类召回；描述和标样比较义务独立保留，不能用单轴不适用关闭整个模块。
 
-执行 `record_asset_provenance.py --task-dir DIR --list-work` 获取现有计划中的 Agent 待办。版权：provenance、visual_comparison；商业外观：public_use、source_identification、functionality；图形商标：visual_comparison。版权公开调查追溯适用作品/本体表达与必要注册线索；商业外观另读品牌/制造商原页、历史宣传、相关产品配置注册与已发现公开争议，核对具体主张、使用、来源识别、混淆及功能性。合格既有原文/标样/TSDR事实直接复用；只补缺项，不重查整套事实。
+执行 `record_asset_provenance.py --task-dir DIR --list-work` 获取现有计划中的 Agent 待办。版权：provenance、visual_comparison；商业外观：public_use、source_identification、functionality；图形商标：visual_comparison。版权公开调查追溯适用作品/本体表达与必要注册线索；商业外观另读品牌/制造商原页、历史宣传、相关产品配置注册与已发现公开争议，核对具体主张、使用、来源识别、混淆及功能性。合格既有原文/标样/TSDR事实直接复用；只补缺项，不重查整套事实。同一情景、权利和资产摘要下，共享的创作、来源、首次发布或功能事实可在一次命令中通过多个 `--query-id` 落盘；各国家步骤仍分别留存适用性和限制，事实包只计一个独立来源。
 
 来源记录器仍是本地记录器，不是联网API。每次提交绑定查询、情景、asset_scope_sha256、当前适用资产 coverage_attestation；investigation_steps[] 保存 step/status/reasoning/evidence_refs/artifact_sha256。completed 或有依据 not_applicable 是步骤状态；outstanding_actions 记录未做的必要工作，unresolved 保留尚未知的权属/许可等事实。完成依据必须连接已登记实际来源及哈希文件，自写说明不能单独代替公开调查。失败保持具体下一步，不自动转排除/低风险；缺用户独有材料与 Agent 尚未查资料分开。
 

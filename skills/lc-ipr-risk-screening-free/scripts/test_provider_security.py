@@ -25,6 +25,32 @@ from provider_utils import ProviderError
 
 
 class RetainedTextTests(unittest.TestCase):
+    def test_xml_space_containing_url_and_bare_keys_keep_markup(self):
+        from xml.etree import ElementTree
+        for content in (
+                'Temu https://www.temu.com/-do ---toy?x=1&amp;share_token=fixture-secret; Oct. 8, 2024.',
+                'share_token=fixture-secret', '--access-token fixture-secret',
+                'Authorization: Bearer fixture-secret', 'Bearer fixture-secret'):
+            with self.subTest(content=content):
+                raw = ('<root><nplcit><text>' + content + '</text></nplcit></root>').encode()
+                retained = transport.sanitize_raw_evidence(raw, 'xml')
+                ElementTree.fromstring(retained)
+                self.assertNotIn(b'fixture-secret', retained)
+                self.assertIn(b'</text></nplcit>', retained)
+                self.assertEqual(transport.sanitize_raw_evidence(retained, 'xml'), retained)
+
+    def test_xml_url_redaction_preserves_entities_and_unchanged_bytes(self):
+        from xml.etree import ElementTree
+        safe = b'<root><url>https://www.youtube.com/watch?v=pV198Qhx8fQ&amp;t=21s</url></root>'
+        self.assertEqual(transport.sanitize_raw_evidence(safe, 'xml'), safe)
+        secret = b'<root href="https://user:password@example.test/x?a=1&amp;access_token=fixture-secret&amp;t=21s"><password>fixture-pass</password></root>'
+        retained = transport.sanitize_raw_evidence(secret, 'xml')
+        root = ElementTree.fromstring(retained)
+        self.assertNotIn('fixture-', retained.decode())
+        self.assertNotIn('user:password', retained.decode())
+        self.assertEqual(root.attrib['href'], 'https://example.test/x?a=1&t=21s')
+        self.assertEqual(transport.sanitize_raw_evidence(retained, 'xml'), retained)
+
     def capture(self, text):
         return {"text_evidence_revision": transport.TEXT_EVIDENCE_REVISION,
             "rendered_text": text, "abstract": text, "satisfied_facts": ["abstract"],

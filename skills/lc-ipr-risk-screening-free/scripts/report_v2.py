@@ -1227,7 +1227,7 @@ def build_report_data(
     *, generated_at: str | None = None,
 ) -> dict[str, Any]:
     assert_active_free_policy(task)
-    assert_default_discovery_plan_contract(task, search_plan)
+    assert_default_discovery_plan_contract(task, search_plan, task_dir=task_dir, evidence=evidence)
     assert_no_wipo_traces(task_dir, task, evidence, candidates, journal, search_plan)
     binding_errors = verification_plan_binding_errors(
         task, evidence, candidates, search_plan,

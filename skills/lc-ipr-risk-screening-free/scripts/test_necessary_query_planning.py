@@ -160,6 +160,45 @@ class NecessaryQueryPlanningTests(unittest.TestCase):
         self.assertNotIn("brand_placeholder", self.task["product"])
         self.assertTrue(any(term["derived_from"] == "product.brand" for term in term_records(self.task)))
 
+    def test_api_v3_exact_generic_field_skips_all_name_discovery(self):
+        from api_first_planning import _eligible_scope_terms
+        for value in ("Generic", " generic ", "GENERIC", "\tGeNeRiC\n"):
+            task = copy.deepcopy(self.task)
+            task["retrieval_workflow_revision"] = "api-first-v3"
+            task["product"].update(brand=value)
+            task["query_terms"] = [{"kind": "brand", "value": value,
+                "language": "en", "derived_from": "product.brand"}]
+            terms = term_records(task)
+            self.assertFalse(any(t["derived_from"] == "product.brand" for t in terms))
+            for country in ("US", "GB", "FR", "DE", "IT", "ES", "JP"):
+                self.assertFalse(_eligible_scope_terms(task, terms, country, "trademark_word"))
+            self.assertEqual(task["product"]["brand"], value)
+
+    def test_api_v3_compound_and_observed_or_own_mark_are_not_generic_placeholder(self):
+        from workflow_v24 import brand_name_query_disposition
+        task = copy.deepcopy(self.task)
+        task["retrieval_workflow_revision"] = "api-first-v3"
+        for value in ("Generic Toys", "SuperGeneric", "Generic-Brand", "", None):
+            task["product"]["brand"] = value
+            self.assertIsNone(brand_name_query_disposition(task))
+        task["product"]["brand"] = "Generic"
+        task["request"]["entry_type"] = "user_materials"
+        self.assertIsNone(brand_name_query_disposition(task))
+        task["request"]["entry_type"] = "amazon_url"
+        task["product"]["brand_role"] = "own"
+        self.assertIsNone(brand_name_query_disposition(task))
+        task["product"].pop("brand_role")
+        task["product"].update(brand="Generic", own_brand="OWN MARK")
+        task["query_terms"] = [
+            {"kind": "brand", "value": "GENERIC", "language": "en", "derived_from": "product.mark_inventory[0]"},
+            {"kind": "brand", "value": "OWN MARK", "language": "en", "derived_from": "product.own_brand"}]
+        terms = term_records(task)
+        self.assertEqual({t["value"] for t in terms if t["kind"] == "brand"}, {"GENERIC", "OWN MARK"})
+        disposition = brand_name_query_disposition(task)
+        self.assertEqual(disposition["assessment_object"], "reference_brand_name")
+        self.assertNotIn("risk", disposition)
+        self.assertIn("自有品牌未评估", disposition["limitation"])
+
     def test_placeholder_is_source_specific_and_historical_behavior_survives(self):
         for raw in ("Brand: Generic", "Brand : Generic", "Visit the Unbranded Store", "generic"):
             task = copy.deepcopy(self.task)

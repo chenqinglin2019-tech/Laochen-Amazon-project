@@ -16,9 +16,9 @@ STATUS_LABELS = {
     "hit": "查到候选", "no_match": "本次查询无命中", "failed": "查询失败",
     "access_limited": "访问受限", "not_run": "未执行", "submission_unknown": "提交状态未知",
     "truncated": "结果截断／未取全", "not_applicable": "不适用", "unknown": "结果或覆盖未知",
-    "awaiting_review": "材料待审阅", "blocked": "工作受阻",
+    "awaiting_review": "材料待审阅", "blocked": "工作受阻", "local_review_complete": "本地资料调查完成",
 }
-COMPLETE = {"hit", "no_match", "not_applicable"}
+COMPLETE = {"hit", "no_match", "not_applicable", "local_review_complete"}
 ZERO_WARNING = "有效检索为零；本结论为规则兜底，未排除侵权风险。"
 
 
@@ -132,10 +132,14 @@ def _bounded_discovery_receipt(evidence, query, run, source_task_dir):
     """
     providers = {"serper_patents", "serper_web", "serper_images", "serpapi_google_patents", "serpapi_google_lens"}
     if (query.get("action_purpose") != "discovery" or run.get("provider") not in providers
-            or run.get("status") not in {"success", "no_result"} or run.get("submission_state") != "submitted"):
+            or run.get("status") not in {"success", "no_result"}):
         return None
     if source_task_dir is None:
         return {"valid": False, "error": "DISCOVERY_EVIDENCE_ROOT_UNAVAILABLE"}
+    if run.get("submission_state") != "submitted":
+        from runtime_v24 import physical_response_source
+        if physical_response_source(Path(source_task_dir), evidence, run) is None:
+            return {"valid": False, "error": "DISCOVERY_PHYSICAL_RECEIPT_UNVERIFIED"}
     from api_first_planning import source_files_error
     from assessment_v24 import _source_records
     error = source_files_error(Path(source_task_dir), evidence, run)
@@ -145,11 +149,19 @@ def _bounded_discovery_receipt(evidence, query, run, source_task_dir):
     return {"valid": True, "returned_count": len(records), "basis": "retained_source_contract"}
 
 
-def _attempt(run, query, entries, candidates, position, *, discovery=None):
+def _attempt(run, query, entries, candidates, position, *, discovery=None, source_task_dir=None,
+             evidence=None):
     meta = run.get("metadata", {}) if isinstance(run.get("metadata"), dict) else {}
     coverage = meta.get("search_coverage", {}) if isinstance(meta.get("search_coverage"), dict) else {}
-    status = str(run.get("status") or "unknown")
-    submitted = str(run.get("submission_state") or "")
+    recorded_status = str(run.get("status") or "unknown")
+    recorded_submission = str(run.get("submission_state") or "")
+    from recovery_stage_b import effective_submission, effective_result
+    submitted = effective_submission(evidence or {}, run) if evidence else recorded_submission
+    status = effective_result(evidence or {}, run) if evidence else recorded_status
+    physical = None
+    if source_task_dir is not None and meta.get("physical_response_reuse"):
+        from runtime_v24 import physical_response_source
+        physical = physical_response_source(Path(source_task_dir), evidence or {}, run)
     actual, basis = _semantics(run, entries)
     refs = list(dict.fromkeys([entry["evidence_id"] for entry in entries] + _refs(run)))
     associated = [item for item in candidates if set(_refs(item) + (item.get("verification_refs") or [])).intersection(refs)
@@ -174,7 +186,21 @@ def _attempt(run, query, entries, candidates, position, *, discovery=None):
     if bounded and retrieved is None:
         retrieved = returned_count  # Returned cards are counted; the global total remains unknown.
     reason = str(run.get("error_code") or run.get("reason") or coverage.get("stop_reason") or "")
-    if submitted in {"unknown", "submission_unknown"} or status == "submission_unknown":
+    processing = None
+    if source_task_dir is not None and isinstance(run.get("result_processing"), dict):
+        try:
+            from source_result_processing import progress
+            processing = progress(Path(source_task_dir), run, evidence or {})
+        except (OSError, ValueError, KeyError, TypeError):
+            processing = None
+    local_review = (run.get("provider") in {"local_agent_review", "asset_provenance"}
+                    and status in {"success", "complete", "completed"} and bool(entries)
+                    and submitted in {"not_submitted", "not_started"})
+    if local_review:
+        # A local recorded investigation has no remote submission by design.
+        # It is not a successful API search and never proves zero recall.
+        state = "local_review_complete"
+    elif submitted in {"unknown", "submission_unknown"} or status == "submission_unknown":
         state = "submission_unknown"
     elif status in {"not_applicable", "not_required"}:
         state = "not_applicable"
@@ -182,7 +208,7 @@ def _attempt(run, query, entries, candidates, position, *, discovery=None):
         state = "access_limited"
     elif status in {"failed", "error", "timeout", "blocked"}:
         state = "failed"
-    elif status in {"not_run", "skipped", "not_executed"} or submitted in {"not_submitted", "not_started"}:
+    elif status in {"not_run", "skipped", "not_executed"} or (submitted in {"not_submitted", "not_started"} and physical is None):
         state = "not_run"
     elif discovery is not None:
         state = "no_match" if bounded and status == "no_result" and returned_count == 0 else "hit" if bounded and status == "success" and returned_count else "unknown"
@@ -201,8 +227,24 @@ def _attempt(run, query, entries, candidates, position, *, discovery=None):
     if declared_count_mismatch:
         state = "unknown"
         reason = "; ".join(part for part in (reason, "SOURCE_RECORD_COUNT_MISMATCH") if part)
-    if state in {"not_run", "not_applicable"} or submitted in {"not_submitted", "not_started"}:
+    result_index = run.get("result_processing")
+    from source_result_processing import zero_result_proven
+    effective_zero = zero_result_proven(run, evidence or {}, source_task_dir)
+    if (isinstance(result_index, dict)
+            and result_index.get("revision") == "source-result-processing-v1"
+            and status == "no_result" and not effective_zero):
+        state = "unknown"
+        reason = "; ".join(part for part in (reason, "ZERO_RESULT_UNVERIFIED") if part)
+    if processing and (processing.get("receipt_disposition") or {}).get("outcome") == "non_result_error":
+        state = "unknown"
+        reason = "; ".join(part for part in (reason, "SOURCE_RECEIPT_NON_RESULT_ERROR") if part)
+    if local_review:
+        actual, basis = "", "recorded_local_investigation"
+    elif state in {"not_run", "not_applicable"} or (submitted in {"not_submitted", "not_started"} and physical is None):
         actual, basis = "", "not_submitted"
+    elif physical is not None:
+        actual, basis = _semantics(physical, entries)
+        basis = "verified_physical_response_reuse:" + basis
     elif state in {"failed", "access_limited"} and submitted != "submitted":
         actual, basis = "", "submission_not_confirmed"
     # A successful, schema-valid observed result is effective within its reported
@@ -210,13 +252,18 @@ def _attempt(run, query, entries, candidates, position, *, discovery=None):
     effective = bool((coverage.get("schema_valid") is True or bounded) and refs and state in {"hit", "no_match", "truncated"})
     completeness = coverage.get("completeness", "not_recorded")
     coverage_complete = not bounded and _recorded_retrieval_complete(coverage, state, source_records, run.get("provider") or query.get("provider"))
-    response_complete = bool(bounded and state in {"hit", "no_match"}) or coverage_complete
+    response_complete = local_review or bool(bounded and state in {"hit", "no_match"}) or coverage_complete
     sources = [{"evidence_id": entry["evidence_id"], "source_url": _url(entry.get("source_url") or entry.get("url") or entry.get("final_url")),
                 "source_checked_at": _time(entry), "source_name": entry.get("source_name") or entry.get("provider") or run.get("provider", "")}
                for entry in entries]
     return {"run_id": run.get("run_id", ""), "attempt_index": position, "query_id": run.get("query_id") or query.get("query_id", ""),
-            "status": state, "status_label": STATUS_LABELS[state], "recorded_status": status,
-            "submission_state": submitted or "not_recorded", "actual_query": actual, "actual_query_basis": basis,
+            "status": state, "status_label": ("复用原响应；" if physical is not None else "") + STATUS_LABELS[state], "recorded_status": recorded_status,
+            "submission_state": submitted or "not_recorded", "recorded_submission_state": recorded_submission,
+            "actual_query": actual, "actual_query_basis": basis, "local_investigation_performed": local_review,
+            "source_query_performed": submitted == "submitted",
+            "physical_response_reused": physical is not None,
+            "physical_source_run_id": physical.get("run_id") if physical is not None else None,
+            "physical_source_checked_at": _time(physical) if physical is not None else None,
             "checked_at": _time(run), "source_url": _url(run.get("source_url") or run.get("url")),
             "evidence_refs": refs, "sources": sources, "candidates_found": found,
             "total_hits": total, "retrieved_hits": retrieved, "truncated": coverage.get("truncated") if isinstance(coverage.get("truncated"), bool) else None,
@@ -226,6 +273,11 @@ def _attempt(run, query, entries, candidates, position, *, discovery=None):
             "bounded_discovery": bounded, "response_complete": response_complete,
             "source_response_basis": discovery.get("basis", "") if bounded else "search_coverage" if coverage.get("schema_valid") is True else "unvalidated",
             "count_contradiction": count_contradiction,
+            "request_status": processing.get("request_status", status) if processing else status,
+            "zero_proven": effective_zero if isinstance(result_index, dict) else None,
+            "recorded_zero_proven": result_index.get("zero_proven") if isinstance(result_index, dict) else None,
+            "zero_proof_basis": "retained_receipt_projection" if processing else "recorded_index",
+            "receipt_disposition_outcome": (processing.get("receipt_disposition") or {}).get("outcome") if processing else None,
             "coverage_schema_valid": coverage.get("schema_valid") is True, "effective": effective,
             "reason": reason, "coverage_boundary": "仅为有界发现来源的本次响应；无命中不等于完整官方覆盖或排除侵权。" if bounded else "仅代表本次查询及已记录结果范围；不等于全面排除。"}
 
@@ -246,7 +298,8 @@ def build_query_trace(task, evidence, assessment, candidates, plan, *, source_ta
             seen_runs.add(id(run))
             refs = [entry for entry in entries if entry.get("source_run_id") and entry.get("source_run_id") == run.get("run_id")]
             attempts.append(_attempt(run, query, refs, candidate_rows, position,
-                discovery=_bounded_discovery_receipt(evidence, query, run, source_task_dir)))
+                discovery=_bounded_discovery_receipt(evidence, query, run, source_task_dir),
+                source_task_dir=source_task_dir, evidence=evidence))
         state = attempts[-1]["status"] if attempts else "not_applicable" if query.get("not_applicable") is True else "not_run"
         prior_findings = any(attempt["effective"] and (attempt["candidates_found"] or (attempt["retrieved_hits"] or 0) > 0)
                              for attempt in attempts[:-1])
@@ -268,7 +321,7 @@ def build_query_trace(task, evidence, assessment, candidates, plan, *, source_ta
         if id(run) in seen_runs or not run.get("query_id"):
             continue
         refs = [entry for entry in entries if entry.get("source_run_id") and entry.get("source_run_id") == run.get("run_id")]
-        attempt = _attempt(run, {}, refs, candidate_rows, 1)
+        attempt = _attempt(run, {}, refs, candidate_rows, 1, source_task_dir=source_task_dir, evidence=evidence)
         result.append({"query_id": run["query_id"], "provider": run.get("provider", ""), "jurisdiction": run.get("jurisdiction", ""),
             "right_type": run.get("right_type", ""), "scenario_id": run.get("scenario_id", ""), "scenario_ids": [],
             "scenario_sha256": run.get("scenario_sha256", ""), "scenario_bindings": run.get("scenario_bindings", run.get("metadata", {}).get("scenario_bindings", [])),
@@ -342,7 +395,9 @@ def build_query_trace(task, evidence, assessment, candidates, plan, *, source_ta
             "unfinished_indices": [index for index, item in enumerate(remaining) if matches(item)],
             "conclusions": [{key: row[key] for key in ("candidate_id", "title", "risk", "evidence_confidence", "confidence", "risk_basis", "assessment_status", "reasoning", "risk_reasoning", "pending_reasoning", "human_checks", "raise_if", "lower_if", "evidence_refs", "out_of_scope") if key in row} for row in rows]})
     attempts = [attempt for query in result for attempt in query["attempts"]]
-    effective = sum(attempt["effective"] for query in result if not query.get("historical_unplanned_run") for attempt in query["attempts"])
+    effective = len({attempt.get("physical_source_run_id") or attempt["run_id"]
+                     for query in result if not query.get("historical_unplanned_run")
+                     for attempt in query["attempts"] if attempt["effective"]})
     digest = lambda value: hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
     unique_work = {item.get("work_id") or digest(item) for item in remaining}
     return {"revision": "query-trace-v1", "queries": result, "unfinished_work": remaining, "dimensions": dimensions,
@@ -368,7 +423,14 @@ def query_notes(query):
             "来源响应：" + ("已完成有界发现响应，官方覆盖仍未知" if attempt["bounded_discovery"] and attempt["response_complete"] else "按原始查询及覆盖状态记录"),
             "查到的候选：" + (found or ("本次成功查询无命中" if attempt["status"] == "no_match" else "未记录具体候选，不能据此推断零命中")),
             "原因／停止边界：" + (attempt["reason"] or "未另记录") + "；" + attempt["coverage_boundary"],
+            "来源回执状态：" + str(attempt.get("request_status", "未知"))
+                + "；零命中已证明：" + ("是" if attempt.get("zero_proven") is True else "否/未知")
+                + "；当前错误处置：" + str(attempt.get("receipt_disposition_outcome") or "未记录"),
             "证据与来源：" + (sources or "；".join(attempt["evidence_refs"]) or "未记录")])
+        if attempt.get("physical_response_reused"):
+            notes.append("复用原请求：" + str(attempt.get("physical_source_run_id") or "未知")
+                         + "；原查询时点：" + str(attempt.get("physical_source_checked_at") or "未知")
+                         + "；本条未发起新请求，不增加独立来源计数。")
     return notes
 
 

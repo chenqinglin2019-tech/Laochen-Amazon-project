@@ -1,0 +1,52 @@
+[
+  [
+    "( ball OR sphere ) AND ( motorized )",
+    "(ball OR sphere) AND (motorized)",
+    true
+  ],
+  [
+    "BALL  AND MOTOR",
+    "ball AND motor",
+    true
+  ],
+  [
+    "\"Rolling Ball\" AND motor",
+    "\"rolling ball\" AND motor",
+    true
+  ],
+  [
+    "\"self  propelled\" AND ball",
+    "\"self propelled\" AND ball",
+    false
+  ],
+  [
+    "(ball OR sphere) OR motor",
+    "(ball OR sphere) AND motor",
+    false
+  ],
+  [
+    "ball AND (motor OR drive)",
+    "(ball AND motor) OR drive",
+    false
+  ],
+  [
+    "ball.TI.",
+    "ball",
+    false
+  ],
+  [
+    "ball AND motor",
+    "sphere AND motor",
+    false
+  ],
+  [
+    null,
+    "ball",
+    false
+  ],
+  [
+    "ball",
+    null,
+    false
+  ]
+]

@@ -281,14 +281,18 @@ def _append_scenario_decisions(task_dir: Path, task: dict, candidates: dict, arg
     if args.input:
         payload = load_json(args.input.expanduser().resolve())
         decisions = payload.get("decisions") if isinstance(payload, dict) else payload
+        discovery_reviews = payload.get("discovery_reviews", []) if isinstance(payload, dict) else []
         if not isinstance(decisions, list) or not decisions:
             raise ValueError("TRIAGE_INPUT_DECISIONS_REQUIRED")
+        if not isinstance(discovery_reviews, list):
+            raise ValueError("TRIAGE_INPUT_DISCOVERY_REVIEWS_MUST_BE_ARRAY")
         if any((args.candidate_id, args.decision, args.material, args.reason, args.material_reason,
                 args.scenario_id, args.jurisdiction, args.right_type, args.evidence_ref,
                 args.missing_information, args.next_actions_json, args.reading_level,
                 args.basis_summary, args.reopen_condition)):
             raise ValueError("TRIAGE_INPUT_CANNOT_MIX_SINGLE_DECISION_FLAGS")
     else:
+        discovery_reviews = []
         if args.decision and args.material:
             raise ValueError("TRIAGE_DECISION_AND_MATERIAL_CONFLICT")
         selected = args.decision or ({"true": "selected", "false": "not_selected"}.get(args.material))
@@ -340,7 +344,26 @@ def _append_scenario_decisions(task_dir: Path, task: dict, candidates: dict, arg
         add_history(task, str(task.get("state") or "ready_for_assessment"),
                     f"Scenario triage appended: {row['annotation_id']} {row['candidate_id']} "
                     f"{row['scenario_id']}/{row['jurisdiction']}/{row['right_type']}={row['decision']}")
+    if discovery_reviews:
+        from api_first_planning import prepare_review
+        plan = ensure_object(load_json(task_dir / "search-plan.json"), "search-plan.json")
+        plan_rows = {row.get("query_id"): row for rows in plan.get("queries", {}).values()
+                     if isinstance(rows, list) for row in rows if isinstance(row, dict)}
+        for request in discovery_reviews:
+            if not isinstance(request, dict):
+                raise ValueError("TRIAGE_DISCOVERY_REVIEW_MUST_BE_OBJECT")
+            query_id = str(request.get("query_id") or "")
+            parent = plan_rows.get(query_id)
+            if parent is None:
+                raise ValueError("TRIAGE_DISCOVERY_REVIEW_QUERY_UNKNOWN: " + query_id)
+            prepared = dict(request)
+            prepared.pop("query_id", None)
+            prepare_review(task_dir, task, plan, evidence, parent, prepared,
+                           candidates=candidates, ledger=pending, supplement=supplement)
+            add_history(task, str(task.get("state") or "ready_for_assessment"),
+                        "Discovery result reviewed with triage batch: " + query_id)
     atomic_write_json(task_dir / LEDGER_FILENAME, pending)
+    atomic_write_json(task_dir / "evidence.json", evidence)
     atomic_write_json(task_dir / "task.json", task)
 
 
@@ -365,7 +388,8 @@ def main() -> None:
     parser.add_argument("--reading-level", choices=sorted(workflow.READING_LEVELS))
     parser.add_argument("--basis-summary")
     parser.add_argument("--reopen-condition", action="append", default=[])
-    parser.add_argument("--input", "--decisions", dest="input", type=Path, help="JSON array or {decisions:[...]} for scenario triage; each row is appended separately")
+    parser.add_argument("--input", "--decisions", dest="input", type=Path,
+                        help="JSON array or {decisions:[...], discovery_reviews:[...]} for one validated triage/review commit")
     args = parser.parse_args()
 
     task_dir = args.task_dir.expanduser().resolve()

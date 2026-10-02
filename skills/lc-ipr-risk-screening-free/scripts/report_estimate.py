@@ -41,6 +41,7 @@ CSS_PATH = Path(__file__).resolve().parent.parent / "assets" / "evidence-estimat
 EXPLANATION_FIELDS = [("supporting_evidence", "支持风险的事实"), ("counter_evidence", "降低风险的事实"), ("reasoning", "主审推论"), ("assumptions", "假设与范围"), ("confidence_reasoning", "置信度理由"), ("human_checks", "人工核查"), ("raise_if", "上调条件"), ("lower_if", "下调条件")]
 CSV_FIELDS = ["row_type", "jurisdiction", "right_type", "candidate_id", "title", "scope", "risk", "confidence", "aggregation_included", "supporting_evidence", "counter_evidence", "reasoning", "assumptions", "confidence_reasoning", "human_checks", "raise_if", "lower_if", "evidence_refs", "evidence_sources"]
 BASIS_LABELS = {"official_verified": "已由官方记录核验", "source_observed": "来源所载，未经官方核验",
+                "trusted_api_record": "已采信 API 原记录字段",
                 "inferred": "基于所列证据的审阅推论", "unknown": "尚无足够证据", "conflicted": "来源记载存在冲突，未解决"}
 FACT_FIELDS = {"title": "文献或标识名称", "publication_number": "公开号", "registration_number": "登记号",
                "legal_status": "法律状态", "owner": "权利人", "assignee": "受让人", "applicant": "申请人",
@@ -202,19 +203,22 @@ def _is_scored(row: dict) -> bool:
 
 
 def _partial_report(data: dict) -> bool:
-    from assessment_estimate import PARTIAL_EVIDENCE_REVISION
-    return data.get("assessment_revision") == PARTIAL_EVIDENCE_REVISION and bool(data.get("query_trace"))
+    from assessment_estimate import PARTIAL_EVIDENCE_REVISION, LEGACY_PARTIAL_EVIDENCE_REVISION
+    return data.get("assessment_revision") in {PARTIAL_EVIDENCE_REVISION, LEGACY_PARTIAL_EVIDENCE_REVISION} and bool(data.get("query_trace"))
 
 
 def _risk_basis_note(row: dict) -> str:
     return {"policy_fallback": "规则兜底：已取得信息中未确认中、高或极高风险；低风险不代表已经排除侵权风险。",
-            "evidence_supported": "证据支持：基于已列事实及主审判断，未完成工作仍单独保留。"}.get(row.get("risk_basis"), "")
+            "evidence_supported": "证据支持：基于已列事实及主审判断，未完成工作仍单独保留。",
+            "insufficient_evidence": "证据不足：该范围暂不定级；未知、失败或未执行事项没有被当作低风险。"}.get(row.get("risk_basis"), "")
 
 
 def _partial_warning(data: dict) -> str:
     from report_query_trace import ZERO_WARNING
     summary = data["query_trace"]["summary"]
-    warning = "查询未完成；未完成步骤 " + str(summary["unfinished_step_count"]) + " 项；全部评级置信度为低。"
+    legacy = data.get("assessment_revision") == "partial-evidence-v1"
+    warning = ("查询未完成；未完成步骤 " + str(summary["unfinished_step_count"]) + " 项；"
+               + ("全部评级置信度为低。" if legacy else "已定级项目保留各自证据置信度，证据不足范围暂不定级。"))
     if summary["zero_effective_search"]:
         warning += ZERO_WARNING if data['overall'].get('risk') == '低' and data['overall'].get('risk_basis') == 'policy_fallback' else "有效检索为零；当前风险由已审阅的具体证据支持，未完成范围不代表已排除侵权。"
     return warning
@@ -350,6 +354,7 @@ def build_verification_basis(task: dict, evidence: dict, assessment: dict, candi
     None of these derived disclosures changes a risk, confidence or work status.
     """
     from assessment_v24 import official_refs
+    from trusted_api import enabled as api_enabled, accepted_candidate_facts
     registry = _registry(evidence, assessment.get("supplement", {}), registered_only=True)
     runs = {run.get("run_id"): run for run in evidence.get("source_runs", []) if isinstance(run, dict)}
     candidate_index = {row["candidate_id"]: row for group in candidates.values() if isinstance(group, list)
@@ -435,8 +440,39 @@ def build_verification_basis(task: dict, evidence: dict, assessment: dict, candi
                     if fact not in source_index[ref]["observed_facts"]:
                         source_index[ref]["observed_facts"].append(fact)
         facts = []
-        for field, label in FACT_FIELDS.items():
-            observed = observations[field]
+        api_facts = accepted_candidate_facts(task, evidence, candidate, row.get("jurisdiction"),
+            row.get("right_type")) if candidate and api_enabled(task) else {}
+        api_fields = {"identity": "record_identity", "territory": "territory", "current_status": "legal_status",
+            "rights_holder": "owner", "representative_figures": "representative_figures",
+            "protection_content": "claims" if row.get("right_type") in {"patent", "utility_model"} else
+                "goods_services" if row.get("right_type", "").startswith("trademark") else "protection_content"}
+        field_labels = {**FACT_FIELDS, "record_identity": "准确记录身份", "territory": "记录地域",
+            "representative_figures": "已留存图样", "protection_content": "保护内容"}
+        for fact_name, support in api_facts.items():
+            field = api_fields.get(fact_name, fact_name)
+            for ref in support["evidence_refs"]:
+                if ref not in source_index:
+                    continue
+                text = _text(support["value"])
+                observation = {"evidence_id": ref, "candidate_id": row.get("candidate_id", ""),
+                    "jurisdiction": row.get("jurisdiction", ""), "right_type": row.get("right_type", ""),
+                    "source_field": support["source_field"], "value": text[:800],
+                    "value_sha256": _digest(support["value"]), "excerpted": len(text) > 800,
+                    "basis": "trusted_api_record", "record_identity": support["record_identity"],
+                    "provider": support["provider"], "source_upstream": support["source_upstream"],
+                    "source_form": support["source_form"], "checked_at": support["checked_at"],
+                    "source_updated_at": support["source_updated_at"]}
+                # The single acceptance result replaces weaker observations
+                # for this exact field, without promoting other fields.
+                observations[field] = [observation]
+                source_index[ref].update({key: support[key] for key in
+                    ("provider", "source_upstream", "source_form", "source_updated_at")})
+                source_index[ref]["observed_facts"] = [old for old in source_index[ref]["observed_facts"]
+                    if old.get("field") != field or old.get("candidate_id") != row.get("candidate_id", "")]
+                source_index[ref]["observed_facts"].append({"field": field,
+                    "label": field_labels.get(field, field), **observation})
+        for field, label in field_labels.items():
+            observed = observations.get(field, [])
             if not observed and field not in {"legal_status", "owner", "claims", "goods_services"}:
                 continue
             if field == "claims" and row.get("right_type") not in {"patent", "utility_model", "utility_patent"}:
@@ -445,6 +481,7 @@ def build_verification_basis(task: dict, evidence: dict, assessment: dict, candi
                 continue
             values = {item["value_sha256"] for item in observed}
             basis = ("unknown" if not observed else "conflicted" if len(values) > 1 else
+                     "trusted_api_record" if any(item["basis"] == "trusted_api_record" for item in observed) else
                      "official_verified" if any(item["basis"] == "official_verified" for item in observed) else "source_observed")
             facts.append({"field": field, "label": label, "basis": basis, "basis_label": BASIS_LABELS[basis],
                           "observations": observed, "evidence_refs": list(dict.fromkeys(item["evidence_id"] for item in observed))})
@@ -456,9 +493,12 @@ def build_verification_basis(task: dict, evidence: dict, assessment: dict, candi
                       ("scenario_id", "jurisdiction", "right_type", "candidate_id", "title")},
                       "facts": facts, "unverified_facts": [fact["label"] for fact in facts
                           if fact["basis"] in {"source_observed", "unknown", "conflicted"}]})
-    counts = {basis: sum(fact["basis"] == basis for item in items for fact in item["facts"]) for basis in BASIS_LABELS}
+    counts = {basis: sum(fact["basis"] == basis for item in items for fact in item["facts"])
+        for basis in BASIS_LABELS if basis != "trusted_api_record" or api_enabled(task)}
     return {"schema": "IPR-VERIFICATION-BASIS/1.0", "sources": sources, "assessments": items, "fact_counts": counts,
-            "note": "来源记载仅证明取证时该来源展示的内容；未核验事项不等于无权利或无侵权风险。"}
+            **({"acceptance_policy": "api-first-v3"} if api_enabled(task) else {}),
+            "note": "按实际字段采信；缺失、冲突和来源更新时间未知如实保留，不据此推断无权利或低风险。" if api_enabled(task)
+                else "来源记载仅证明取证时该来源展示的内容；未核验事项不等于无权利或无侵权风险。"}
 
 
 def _delivery_text(data: dict) -> str:
@@ -466,7 +506,8 @@ def _delivery_text(data: dict) -> str:
         return ""
     publication = data.get("publication", {})
     mode = publication.get("mode")
-    label = "来源取证报告已生成 · 含未经官方核验事项" if mode == "evidence" else "阶段取证报告 · 仍有待处理工作" if mode == "stage" else "报告已生成 · 核验范围见逐项依据"
+    api = data.get("verification_basis", {}).get("acceptance_policy") == "api-first-v3"
+    label = ("本轮报告已生成 · 具体限制见逐项依据" if api else "来源取证报告已生成 · 含未经官方核验事项") if mode == "evidence" else "阶段取证报告 · 仍有待处理工作" if mode == "stage" else "报告已生成 · 核验范围见逐项依据"
     labels = {"completed": "完成", "complete": "完成", "partial": "部分交付", "incomplete": "未完成", "unknown": "未知"}
     return label + "。交付状态：" + labels.get(publication.get("delivery_status"), "未知") + "；业务完成度：" + labels.get(data["overall"].get("business_completion"), "未知") + "。"
 
@@ -498,6 +539,9 @@ def _source_notes(data: dict, row: dict | None = None) -> list[str]:
                 or all(fact.get(key, "") == row.get(key, "") for key in ("candidate_id", "jurisdiction", "right_type"))]
     return [item["source_name"] + " [" + item["evidence_id"] + "]；来源：" + (item["source_url"] or "未登记来源 URL")
             + "；原取证时间：" + (item["source_checked_at"] or "未登记")
+            + (("；实际提供方：" + item.get("provider", item["source_name"]) + "；上游：" + item.get("source_upstream", "未知")
+                + "；资料形式：" + item["source_form"] + "；来源更新时间：" + (item.get("source_updated_at") or "未知"))
+               if item.get("source_form") == "trusted_api_record" else "")
             + "；实际支持：" + ("；".join(fact["candidate_id"] + " · " + fact["label"] + "=" + fact["value"] + "（" + BASIS_LABELS[fact["basis"]] + "）"
                                       for fact in facts(item)) or "仅为已引用来源材料，未提取可单独核实的登记事实")
             for item in data.get("verification_basis", {}).get("sources", []) if refs is None or item["evidence_id"] in refs]
@@ -528,7 +572,25 @@ def _resolve(root: Path, path: str, *, relative_root: Path | None = None) -> Pat
     try:
         resolved.relative_to(root.resolve())
     except ValueError:
-        raise ValueError("REPORT_SOURCE_OUTSIDE_EVIDENCE_ROOT") from None
+        # A re-evaluation clone keeps historical declarations immutable. Only
+        # its exact byte-bound recovery manifest may relocate an old path.
+        from common import load_json, resolve_retained_path
+        relocation_root = (relative_root or root).resolve()
+        manifest_path = relocation_root / "recovery-manifest.json"
+        manifest = load_json(manifest_path) if manifest_path.is_file() else {}
+        mappings = manifest.get("file_mappings", []) if isinstance(manifest, dict) else []
+        mapping = next((item for item in mappings if isinstance(item, dict)
+                        and item.get("source_path") == str(path)), None)
+        if not mapping:
+            raise ValueError("REPORT_SOURCE_OUTSIDE_EVIDENCE_ROOT") from None
+        digest, size = mapping.get("sha256"), mapping.get("bytes")
+        if (not isinstance(digest, str) or not re.fullmatch(r"[a-fA-F0-9]{64}", digest)
+                or not isinstance(size, int) or isinstance(size, bool) or size < 0):
+            raise ValueError("REPORT_RECOVERY_MAPPING_BINDING_REQUIRED")
+        resolved = resolve_retained_path(relocation_root, path,
+            expected_sha256=digest, expected_bytes=size)
+        if not resolved.is_relative_to(root.resolve()):
+            raise ValueError("REPORT_SOURCE_OUTSIDE_EVIDENCE_ROOT")
     return resolved
 
 
@@ -717,7 +779,8 @@ def _declared_images(record: Any, *, source_url: str = "", checked_at: str = "",
     return found
 
 
-def _automatic_visuals(rows: list[dict], registry: dict, root: Path, out: Path, bindings: dict[str, dict]) -> list[dict]:
+def _automatic_visuals(rows: list[dict], registry: dict, root: Path, out: Path, bindings: dict[str, dict],
+                       *, bind_evidence=False) -> list[dict]:
     figures, seen = [], set()
     for identifier in _refs(rows):
         record = registry.get(identifier)
@@ -729,6 +792,8 @@ def _automatic_visuals(rows: list[dict], registry: dict, root: Path, out: Path, 
                 continue
             seen.add(figure["sha256"])
             figure.update({"label": binding.get("label") or identifier + " · 图证原件", "alt": identifier + " 已引用证据原图", "caption": "本图来自主审已引用证据 " + identifier + "；具体支持和反对理由见逐项推论。自动展示不代表该图本身足以确认侵权。"})
+            if bind_evidence:
+                figure["evidence_id"] = identifier
             figures.append(figure)
     return figures
 
@@ -761,9 +826,11 @@ def _visual_failed(record: Any) -> bool:
 def _core_visuals(rows: list[dict], registry: dict, root: Path, out: Path,
                   bindings: dict[str, dict], failed_queries: set | None = None,
                   failed_runs: set | None = None, candidate_index: dict | None = None,
-                  *, visual_policy_revision=LEGACY_VISUAL_POLICY_REVISION, task=None) -> tuple[list[dict], list[dict]]:
+                  *, visual_policy_revision=LEGACY_VISUAL_POLICY_REVISION, task=None,
+                  relevance_selection=False) -> tuple[list[dict], list[dict]]:
     """Select current-risk rights media, following only exact frozen PDF bindings."""
     sections, gaps, page_cache = [], [], {}
+    relevant_supplement = {"evidence": list(registry.values())} if relevance_selection else None
     def failed(record):
         return (_visual_failed(record) or record.get("source_run_id") in (failed_runs or set())
                 or (not record.get("source_run_id") and record.get("query_id") in (failed_queries or set())))
@@ -773,10 +840,16 @@ def _core_visuals(rows: list[dict], registry: dict, root: Path, out: Path,
         if document and isinstance(digest, str):
             derivatives.setdefault((str(_resolve(root, document)), digest.lower()), []).append((identifier, record))
     for row in rows:
-        if not _visual_eligible(row):
+        if not _visual_eligible(row) and not (relevance_selection and row.get("candidate_id")
+                and not row.get("out_of_scope") and not row.get("signal_only")):
             continue
         identity = {key: row.get(key, "") for key in ("candidate_id", "scenario_id", "scenario_sha256", "jurisdiction", "right_type")}
         candidate = (candidate_index or {}).get(row["candidate_id"], row)
+        relevant_documents = []
+        if relevance_selection:
+            from decision_workflow import candidate_document_entries
+            relevant_documents = candidate_document_entries(candidate,
+                supplement=relevant_supplement, task=task)
         selected, comparisons, seen, roles = [], [], set(), set()
         gap_reasons = []
         comparison_hashes = {item.get("artifact_sha256") for item in row.get("comparison", {}).get("visual_coverage", {}).get("product_views", [])
@@ -788,6 +861,12 @@ def _core_visuals(rows: list[dict], registry: dict, root: Path, out: Path,
             # right merely because it was used somewhere in the explanation.
             if task and task.get("workflow_correction_revision"):
                 from decision_workflow import candidate_document_entries
+                if relevance_selection and any(item.get("path") == record.get("path")
+                        and item.get("sha256") == record.get("sha256")
+                        and item.get("publication_number") == record.get("publication_number")
+                        and item.get("jurisdiction") == record.get("jurisdiction")
+                        and item.get("right_type") == record.get("right_type") for item in relevant_documents):
+                    return True
                 return any(item.get("evidence_id") == record.get("evidence_id") for item in
                     candidate_document_entries(candidate, supplement={"evidence": [record]}, task=task))
             actual, expected = record.get("publication_number"), candidate.get("publication_number")
@@ -845,7 +924,11 @@ def _core_visuals(rows: list[dict], registry: dict, root: Path, out: Path,
                 if not comparison:
                     roles.add(role)
 
-        for identifier in _refs(row):
+        visual_refs = _refs(row)
+        if relevance_selection:
+            visual_refs = list(dict.fromkeys(visual_refs + [item["evidence_id"] for item in relevant_documents
+                                                           if item.get("evidence_id")]))
+        for identifier in visual_refs:
             record = registry.get(identifier, {})
             if not record or failed(record):
                 continue
@@ -906,7 +989,7 @@ def _core_visuals(rows: list[dict], registry: dict, root: Path, out: Path,
                 "reason": "核心图证尚不完整；缺图不改变已有风险预判。", "details": list(dict.fromkeys(gap_reasons))})
         # Product images have a place only beside an actual selected rights image.
         figures = selected + (comparisons if selected else [])
-        title = (row.get("scenario_title") or row.get("scenario_id") or "当前评价情景") + " · " + (row.get("title") or row["candidate_id"]) + " · " + row["risk"] + "风险"
+        title = (row.get("scenario_title") or row.get("scenario_id") or "当前评价情景") + " · " + (row.get("title") or row["candidate_id"]) + (" · " + row["risk"] + "风险" if row.get("risk") else " · 待判断候选")
         blocks = ([{"type": "figures", "cols": 2, "items": figures}] if figures else [])
         if missing or gap_reasons:
             blocks.append({"type": "note", "html": html.escape("核心图证待补：" + "、".join([VISUAL_ROLE_LABELS[role] for role in missing] + list(dict.fromkeys(gap_reasons))) + "。已知风险及原文引用继续保留。")})
@@ -945,6 +1028,15 @@ def _canonical(task_dir, task, evidence, assessment, candidates, plan):
 
 
 def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: dict, candidates: dict, journal: dict, plan: dict, *, output_dir: Path | None = None, report_content: dict | None = None, verify_assessment: bool = True, visual_policy_revision: str | None = VISUAL_POLICY_REVISION) -> dict:
+    from decision_workflow import decision_snapshot
+    # One immutable computation domain; original-media integrity is still read.
+    with decision_snapshot(task, evidence, candidates, plan, assessment, journal):
+        return _build_report_data(task_dir, task, evidence, assessment, candidates, journal, plan,
+            output_dir=output_dir, report_content=report_content, verify_assessment=verify_assessment,
+            visual_policy_revision=visual_policy_revision)
+
+
+def _build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: dict, candidates: dict, journal: dict, plan: dict, *, output_dir: Path | None = None, report_content: dict | None = None, verify_assessment: bool = True, visual_policy_revision: str | None = VISUAL_POLICY_REVISION) -> dict:
     task_dir = Path(task_dir).resolve()
     out = Path(output_dir or task_dir).resolve()
     if assessment.get("assessment_policy") != POLICY:
@@ -976,7 +1068,8 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
             if row.get("risk") not in RISKS or _confidence(row) not in CONFIDENCES:
                 raise ValueError("REPORT_INVALID_FINAL_RATING")
     overall = assessment.get("overall", {})
-    stage = (recall_integrity_enabled(task) and assessment.get("status") == "incomplete"
+    stage = ((recall_integrity_enabled(task) or task.get('assessment_revision') == 'known-findings-risk-v1')
+             and assessment.get("status") == "incomplete"
              and overall.get("risk") is None)
     if (overall.get("risk") not in RISKS and not stage) or overall.get("confidence") not in CONFIDENCES:
         raise ValueError("REPORT_INVALID_OVERALL_RATING")
@@ -984,8 +1077,36 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
     if product.get("actual_asin") and product.get("asin") and product["actual_asin"] != product["asin"]:
         raise ValueError("REPORT_PRODUCT_ASIN_CONFLICT")
     product["asin"] = product.get("actual_asin") or product.get("asin") or product.get("requested_asin", "")
+    from product_entry import enabled as entry_enabled
+    if entry_enabled(task):
+        product["entry_type"] = task["request"]["entry_type"]
+        product["jurisdiction_source"] = task["request"]["jurisdiction_source"]
+        product["identity_status"] = task["product_identity"]["status"]
     product["source_url"] = _safe_url(product.get("source_url") or task.get("request", {}).get("url"))
     product["jurisdictions"] = task.get("target_jurisdictions", [])
+    import product_scope as ps
+    if ps.enabled(task):
+        product['scope_objects']=deepcopy(ps.scope(task)['objects'])
+        from product_delivery import enabled as delivery_enabled
+        if delivery_enabled(task):
+            product['delivery_revision']=ps.scope(task)['delivery_revision']
+            product['scope_facts']=deepcopy(ps.scope(task)['facts'])
+            product['image_permissions']=deepcopy(ps.scope(task).get('image_permissions',[]))
+        product['scope_assumption']=ps.DEFAULT_ASSUMPTION
+        product['scope_dependencies']=[{**deepcopy(d),'state':ps.direction_state(task,d)} for d in ps.directions(task)]
+        product['scope_waiting']=ps.work_entries(task)
+        product['scope_sha256']=ps.scope(task)['scope_sha256']
+    from product_change import enabled as product_change_enabled, verify as verify_product_change
+    if product_change_enabled(task):
+        verify_product_change(task,evidence,task_dir)
+        binding={'version':task['product_change_version'],
+                 'target_sha256':task['product_identity']['sha256'],
+                 'scope_sha256':task.get('product_scope',{}).get('scope_sha256','')}
+        if assessment.get('product_version_binding')!=binding:
+            raise ValueError('REPORT_PRODUCT_VERSION_BINDING_MISMATCH')
+        product['version_binding']=binding
+        product['applicability_reviews']=[deepcopy(row) for row in task.get('product_applicability_reviews',[])
+            if row.get('product_version')==binding['version'] and row.get('scope_sha256')==binding['scope_sha256']]
     display_facts = content.get("product_facts", {})
     if not isinstance(display_facts, dict):
         raise ValueError("REPORT_PRODUCT_FACTS_TYPE")
@@ -1103,7 +1224,7 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
                 modules[-1]["label"] = label + '（已评局部）'
                 modules[-1]["confidence_reasoning"] = ('仅为已评局部风险；仍有 ' + str(modules[-1]["pending_count"])
                     + ' 项待评范围或候选，不是该模块的最终等级。' + modules[-1]["confidence_reasoning"])
-        if partial:
+        if partial and task.get("assessment_revision") == "partial-evidence-v1":
             modules[-1]["confidence"] = "低"
             modules[-1]["risk_basis"] = ("evidence_supported" if risk in {"中", "高", "极高"} else "policy_fallback") if risk else None
             modules[-1]["confidence_reasoning"] = "查询未完成，模块置信度统一为低；当前等级不改变原查询、审阅及核验完成状态。" + _risk_basis_note(modules[-1])
@@ -1115,14 +1236,19 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
         confidence_basis = ["总置信度取决定总体风险的证据链及覆盖置信度上限；具体假设见逐项推论。"]
     inputs = {"task": task, "evidence": evidence, "assessment": assessment, "candidates": candidates, "journal": journal, "search_plan": plan}
     result = {"report_schema": REPORT_SCHEMA, "assessment_policy": POLICY, "task_id": task["task_id"], "generated_at": assessment.get("generated_at", ""), "section_order": SECTION_ORDER, "product": product, "overall": overall, "assessments": rows, "supplemental_rows": signal_rows, "modules": modules, "coverage": assessment.get("coverage", {}), "future_applications": assessment.get("future_applications", []), "enforcement_signals": assessment.get("enforcement_signals", []), "lead": _localize_html(overall.get("report_lead", ""), root, out, linked_files, bindings), "summary": _localize_html(overall.get("report_summary", ""), root, out, linked_files, bindings), "scope": product.get("report_scope") or product.get("intended_use", ""), "sections": sections, "coverage_notes": _unique_notes(content.get("coverage_notes", []), assessment.get("coverage", {}).get("notes", [])), "overall_confidence_basis": confidence_basis, "evidence_cutoff": content.get("evidence_cutoff") or "见各引用证据的核查时间", "change_note": content.get("change_note") or "报告生成时间不代表全部证据重新检索；评级按所列来源时点和现行策略生成。", "review_method": content.get("review_method", ""), "review_binding": content.get("review_binding", {}), "footer": content.get("footer", "本报告为指定产品、销售行为、法域及证据时点下的风险预判。风险等级与证据置信度分别表达；范围限制及核查条件随结论列示。"), "visual_evidence": images, "evidence_index": evidence_index, "linked_files": linked_files, "presentation_source": content, "presentation_explicit": report_content is not None, "trace": {"source_task_dir": str(task_dir), "input_digests": {key: _digest(value) for key, value in inputs.items()}, "assessment_digest": assessment.get("review", {}).get("evidence_digest", ""), "report_content_digest": _digest(content), "template_css_sha256": _sha(CSS_PATH.read_bytes())}, "offline_policy": {"images_embedded_as_data_uri": True, "remote_resources": False, "scripts": False, "visual_limit": None}}
+    from workflow_v24 import brand_name_query_disposition
+    brand_query = brand_name_query_disposition(task)
+    if brand_query:
+        result["product"]["brand_name_query"] = brand_query
     if partial_evidence_enabled(task):
-        result["assessment_revision"] = PARTIAL_EVIDENCE_REVISION
+        result["assessment_revision"] = task["assessment_revision"]
     if partial:
         from report_query_trace import build_query_trace
         result["query_trace"] = build_query_trace(task, evidence, assessment, candidates, plan,
             source_task_dir=task.get("outputs", {}).get("assessment_input_dir") or task_dir)
         result["coverage_notes"].append(_partial_warning(result))
-        result["overall_confidence_basis"] = _unique_notes(["查询未完成，全部评级置信度统一为低。"], result["overall_confidence_basis"])
+        if task.get("assessment_revision") == "partial-evidence-v1":
+            result["overall_confidence_basis"] = _unique_notes(["查询未完成，全部评级置信度统一为低。"], result["overall_confidence_basis"])
     if scenario_mode:
         result["decision_workflow_revision"] = task["decision_workflow_revision"]
         result["scenario_summaries"] = assessment["scenario_summaries"]
@@ -1157,10 +1283,90 @@ def build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: di
             result["coverage_notes"].append(_delivery_text(result))
             result["coverage_notes"].append(result["verification_basis"]["note"])
             if publication.get("mode") == "evidence" and not partial:
-                result["coverage_notes"].append("本报告已完成来源取证交付；官方核验、检索覆盖和风险评估仍按原状态逐项披露。")
+                result["coverage_notes"].append("本报告已完成本轮取证交付；字段缺口、检索覆盖和风险评估按实际状态逐项披露。"
+                    if task.get("retrieval_workflow_revision") == "api-first-v3" else
+                    "本报告已完成来源取证交付；官方核验、检索覆盖和风险评估仍按原状态逐项披露。")
+    if task.get("retrieval_workflow_revision") == "api-first-v3" and "verification_basis" not in result:
+        result["verification_basis"] = build_verification_basis(task, evidence, assessment, candidates, plan)
+        result.setdefault("publication", deepcopy(assessment.get("publication", {})))
+        result["coverage_notes"].append(result["verification_basis"]["note"])
     if task.get("workflow_correction_revision") == "workflow-correction-v1":
         result["workflow_correction_revision"] = task["workflow_correction_revision"]
         result = _compact_report_data(result)
+    from operator_report import enabled as operator_enabled
+    operator_mode = operator_enabled(task)
+    from report_presentation_stage_a import enabled as presentation_enabled, build as presentation_build
+    if presentation_enabled(task):
+        presentation = presentation_build(task_dir, task, assessment, candidates)
+        current_rows = []
+        for judgment in presentation["stage"]["stage_risk"].get("judgments", []):
+            scope = judgment.get("scope", {})
+            if (judgment.get("applicability") != "current" or
+                    (not operator_mode and judgment.get("stage_risk") not in {"中", "高", "极高"})
+                    or not scope.get("candidate_id") or
+                    (operator_mode and scope.get("scenario_id") != task.get("primary_scenario_id"))):
+                continue
+            original = next((row for row in rows if all(row.get(key, "") == scope.get(key, "") for key in
+                ("candidate_id", "scenario_id", "jurisdiction", "right_type"))), {})
+            current_rows.append({**original, **{key: scope.get(key, "") for key in
+                ("candidate_id", "scenario_id", "jurisdiction", "right_type")},
+                "title": original.get("title") or judgment.get("title") or scope["candidate_id"], "risk": judgment.get("stage_risk"),
+                "assessment_status": "assessed", "aggregation_included": True,
+                "evidence_refs": judgment.get("evidence_refs", [])})
+        candidate_index = {item["candidate_id"]: item for group in candidates.values() if isinstance(group, list)
+                           for item in group if isinstance(item, dict) and item.get("candidate_id")}
+        stage_sections, stage_gaps = _core_visuals(current_rows, registry, root, out, bindings,
+            candidate_index=candidate_index, visual_policy_revision=VISUAL_POLICY_REVISION, task=task,
+            relevance_selection=operator_mode)
+        presentation["visual_sections"] = stage_sections
+        presentation["visual_gaps"] = stage_gaps
+        for item in _section_figures(stage_sections):
+            if item not in result["visual_evidence"]:
+                result["visual_evidence"].append(item)
+            if item.get("source_document_source_path"):
+                linked = _local_info(root, out, {"path": item["source_document_source_path"],
+                    "sha256": item["source_document_sha256"]}, bindings=bindings)
+                if linked not in result["linked_files"]:
+                    result["linked_files"].append(linked)
+        result["presentation_stage_a"] = presentation
+        from report_package_stage_c import enabled as package_enabled
+        if package_enabled(task):
+            existing_ids = {item.get("evidence_id") for item in result["evidence_index"]}
+            stage_risk = presentation['stage'].get('stage_risk', {})
+            for identifier in _refs(stage_risk.get('judgments', []) + stage_risk.get('signals', [])):
+                if identifier in existing_ids:
+                    continue
+                record = registry.get(identifier, {"evidence_id": identifier})
+                role = " ".join(_text(record.get(key, "")) for key in ("role", "kind", "privacy", "purpose")).casefold()
+                if record.get("private") is True or any(word in role for word in ("private", "login", "account", "debug")):
+                    record = {"evidence_id": identifier, "source_note": "私密或登录资料未纳入附件"}
+                elif any(record.get(key) for key in ("path", "source_document", "local_path", "file_path")):
+                    record = _local_info(root, out, record, bindings=bindings)
+                result["evidence_index"].append(record)
+                existing_ids.add(identifier)
+        if presentation.get("business_status"):
+            result["business_status_stage_b"] = presentation["business_status"]
+        from report_presentation_stage_a import project as presentation_project
+        result = presentation_project(result)
+    if operator_mode:
+        from operator_report import build as operator_build, project as operator_project
+        expression_rows = [row for row in rows if row.get("scenario_id") == task.get("primary_scenario_id")
+            and row.get("right_type") in {"copyright", "trade_dress"}]
+        for item in _automatic_visuals(expression_rows, registry, root, out, bindings, bind_evidence=True):
+            if item not in result["visual_evidence"]:
+                result["visual_evidence"].append(item)
+        result["_operator_plan"] = plan
+        result = operator_project(result, operator_build(task, evidence, assessment, candidates, result))
+        result.pop("_operator_plan", None)
+    from report_package_stage_c import enabled as package_enabled, contract as package_contract
+    if package_enabled(task):
+        for record in result['evidence_index']:
+            if record.get('source_document') and record.get('path'):
+                original = _local_info(root, out, {'path': record['source_document'],
+                    'sha256': record.get('source_document_sha256'), 'evidence_id': record.get('evidence_id')}, bindings=bindings)
+                if original not in result['linked_files']:
+                    result['linked_files'].append(original)
+        result["report_package_stage_c"] = package_contract(task, result)
     return result
 
 
@@ -1250,6 +1456,12 @@ def _refs_html(row: dict, data: dict) -> str:
     for identifier in list(dict.fromkeys(_refs(row) + [item["evidence_id"] for item in _row_visuals(data, row)])):
         item = index.get(identifier, {})
         url = quote(item["path"], safe="/:#") if item.get("path") else _safe_url(item.get("source_url") or item.get("url"))
+        inline = next((entry for entry in data.get('report_package_stage_c', {}).get('materials', [])
+            if entry.get('evidence_id') == identifier and entry.get('status') == 'retained_inline_evidence'), None)
+        if inline:
+            links.append('<a href="report-data.json" title="' + html.escape(inline['json_pointer'], quote=True) + '">' +
+                html.escape(identifier) + ' · 留存记录</a>')
+            continue
         links.append('<a href="' + html.escape(url, quote=True) + '">' + html.escape(identifier) + '</a>' if url else html.escape(identifier))
     return '<div class="refs">' + '<br>'.join(links) + '</div>'
 
@@ -1263,7 +1475,8 @@ def _reason_html(row: dict) -> str:
 
 def _figure(item: dict, out: Path) -> str:
     local_path = _resolve(out, item["path"])
-    payload = (local_path if local_path.is_file() else Path(item["source_path"])).read_bytes()
+    source_path = Path(item["source_path"])
+    payload = (source_path if source_path.is_file() else local_path).read_bytes()
     if _sha(payload) != item["sha256"]:
         raise ValueError("REPORT_IMAGE_CHANGED: " + item["path"])
     local = html.escape(quote(item["path"], safe="/:"), quote=True)
@@ -1336,11 +1549,56 @@ def _gaps_html(data: dict) -> str:
     return result
 
 def render_html(data: dict, output_dir: Path) -> str:
+    if data.get("presentation_policy_revision") == "operator-report-v1":
+        from operator_report import render
+        return render(data, output_dir)
     e = html.escape
     product, overall = data["product"], data["overall"]
     def facts(items):
         return '<div class="facts">' + ''.join('<div class="fact"><span>' + e(key) + '</span><div>' + val + '</div></div>' for key, val in items) + '</div>'
-    product_body = '<div class="product-layout"><div class="gallery single">' + (_figure(product["main_visual"], output_dir) if product.get("main_visual") else '<p class="empty">未附产品主图；按已列文字与证据范围评价。</p>') + '</div><div class="product-copy"><span class="badge">评价对象与使用前提</span><h2>' + e(product.get("title", "产品知识产权风险预判")) + '</h2>' + facts([("ASIN", e(product.get("asin", ""))), ("法域", e(_text(product.get("jurisdictions", [])))), ("品牌", e(_text(product.get("brand", "")))), ("变体", e(_text(product.get("variant", "")))), ("评估前提", e(_text(data.get("scope", "")))), ("商品链接", '<a href="' + e(product["source_url"], quote=True) + '">来源商品页面</a>')]) + '</div></div>'
+    product_facts = [("ASIN", e(product.get("asin", ""))), ("法域", e(_text(product.get("jurisdictions", [])))), ("品牌", e(_text(product.get("brand", "")))), ("变体", e(_text(product.get("variant", "")))), ("评估前提", e(_text(data.get("scope", "")))), ("商品链接", '<a href="' + e(product["source_url"], quote=True) + '">来源商品页面</a>')]
+    if product.get("entry_type") == "user_materials":
+        product_facts = [("产品 ID", e(product.get("product_id", ""))), ("资料来源", "用户提供的产品资料"),
+            ("法域", e(_text(product.get("jurisdictions", [])))), ("国家依据", "用户明确指定"),
+            ("用途", e(product.get("purpose", ""))), ("评估前提", e(_text(data.get("scope", ""))))]
+        if product.get("brand"):
+            product_facts.append(("品牌", e(_text(product["brand"]))))
+        if product.get("variant"):
+            product_facts.append(("变体", e(_text(product["variant"]))))
+    if product.get('scope_sha256'):
+        from product_scope import LABELS
+        role={'reference_product':'竞品参考','actual_product':'实际产品'}.get(product.get('input_role'),str(product.get('input_role','')))
+        role_source={'default':'系统默认','user':'用户明确指定'}.get(product.get('input_role_source'),str(product.get('input_role_source','')))
+        product_facts.extend([('产品角色及来源', e(role+' / '+role_source)),
+            ('销售假设',e(product['scope_assumption']))])
+        if product.get('version_binding'):
+            binding=product['version_binding']
+            product_facts.append(('当前产品／范围版本',e('v'+str(binding['version'])+' / '+binding['target_sha256'][:12]+' / '+binding['scope_sha256'][:12])))
+            if product['applicability_reviews']:
+                product_facts.append(('历史材料适用性',_list_html([row['candidate_id']+'：'+
+                    {'usable':'经复核继续适用','not_applicable':'不适用于当前目标','needs_info':'待补充'}[row['status']]
+                    +'；依据：'+row['reason'] for row in product['applicability_reviews']])))
+        for status,label in LABELS.items():
+            items=[o for o in product['scope_objects'] if o['scope_status']==status]
+            product_facts.append((label, _list_html([o['description']+'；位置：'+o['location']+'；依据：'+o['reason']+'；来源：'+', '.join(dict.fromkeys(o['source_refs']+o.get('statement_refs',[]))) for o in items]) if items else '无已登记对象'))
+        if product['scope_waiting']:
+            product_facts.append(('局部限制与最小补充',_list_html([v.get('question') or v['reason'] for v in product['scope_waiting']])))
+        if product.get('delivery_revision'):
+            image=product.get('query_image',{})
+            product_facts.append(('查询主图',e(str(image.get('image_id') or image.get('status') or '未选定')+'；依据：'+str(image.get('reason','')))))
+            fact_labels={'direct_observation':'直接观察','page_claim':'页面声明','user_statement':'用户说明','analysis_inference':'分析推断'}
+            verify_labels={'verified':'已核实','claim_only':'仅确认存在该声明','unverified':'待核实','conflict':'有冲突'}
+            product_facts.append(('产品事实与线索',_list_html([str(f['fact_id'])+' v'+str(f['version'])+'：'+str(f.get('value',''))+'；'+fact_labels[f['nature']]+'／'+verify_labels[f['verification']]+'；来源：'+', '.join(f['source_refs']) for f in product['scope_facts']])))
+            limits=[o['description']+'：'+o['visual_evidence']['main_visibility']+'；'+o['visual_evidence'].get('limitation_reason','') for o in product['scope_objects'] if o['scope_status']=='included' and o['visual_evidence']['main_visibility']!='sufficient']
+            if limits: product_facts.append(('主图呈现限制',_list_html(limits)))
+    brand_query = product.get("brand_name_query")
+    if isinstance(brand_query, dict):
+        product_facts.append(("参考品牌名称查询", e(_text(brand_query.get("display")))))
+        product_facts.append(("名称项适用范围", e(_text(brand_query.get("limitation")))))
+    product_body = '<div class="product-layout"><div class="gallery single">' + (_figure(product["main_visual"], output_dir) if product.get("main_visual") else '<p class="empty">未附产品主图；按已列文字与证据范围评价。</p>') + '</div><div class="product-copy"><span class="badge">评价对象与使用前提</span><h2>' + e(product.get("title", "产品知识产权风险预判")) + '</h2>' + facts(product_facts) + '</div></div>'
+    if data.get("presentation_stage_a"):
+        from report_presentation_stage_a import render as render_stage_a
+        return render_stage_a(data, output_dir, product_body)
     if data.get("verification_basis"):
         product_body += '<div class="review-note"><strong>' + e(_delivery_text(data)) + '</strong><p>' + e(data["verification_basis"]["note"]) + '</p></div>'
     if _partial_report(data):
@@ -1396,6 +1654,8 @@ def render_html(data: dict, output_dir: Path) -> str:
     trace = '<h2>可复现数据绑定</h2><p>本版采用 ' + POLICY + '。重新定级基于已列证据与主审论证；策略变化不表示新增事实或新查得权利。</p>' + facts([(key, '<code>' + e(value) + '</code>') for key, value in sorted(data["trace"]["input_digests"].items())]) + '<p>' + e(data.get("review_method", "")) + '</p><p><a href="report-data.json">统一报告数据</a> · <a href="report-manifest.json">图证与产物校验清单</a> · <a href="report-findings.csv">逐项 CSV</a></p>'
     if data.get("verification_basis"):
         trace += '<h3>取证来源与原始时点</h3>' + _source_html(data)
+    if data.get('report_package_stage_c') and 'report-findings.csv' not in data['report_package_stage_c']['required_artifacts']:
+        trace = trace.replace(' · <a href="report-findings.csv">逐项 CSV</a>', '')
     panels = [product_body, decision, coverage, gaps, modules, visual, candidate, trace]
     nav = ''.join('<a href="#' + key + '">' + label + '</a>' for key, label in zip(SECTION_ORDER, SECTION_LABELS))
     sections = ''.join('<section id="' + key + '" class="panel' + (' trace' if key == 'trace' else '') + '">' + text + '</section>' for key, text in zip(SECTION_ORDER, panels))
@@ -1421,8 +1681,17 @@ def _blocks_md(blocks: list[dict]) -> str:
 
 
 def render_markdown(data: dict) -> str:
+    if data.get("presentation_policy_revision") == "operator-report-v1":
+        from operator_report import render_markdown as operator_markdown
+        return operator_markdown(data)
+    if data.get("presentation_stage_a"):
+        from report_presentation_stage_a import render_markdown as render_stage_a_markdown
+        return render_stage_a_markdown(data)
     overall = data["overall"]
     lines = ['# 知识产权风险筛查报告', '**' + _report_risk_text(data) + '／' + overall["confidence"] + '置信度**', '## 产品快照', _text(data["product"].get("title")), 'ASIN：' + data["product"].get("asin", ""), _text(data.get("scope", ""))]
+    if data["product"].get("brand_name_query"):
+        lines.extend(["参考品牌名称查询：" + data["product"]["brand_name_query"]["display"],
+                      data["product"]["brand_name_query"]["limitation"]])
     if _partial_report(data):
         lines[2:2] = [_partial_warning(data), _risk_basis_note(overall)]
     if data.get("verification_basis"):
@@ -1432,6 +1701,32 @@ def render_markdown(data: dict) -> str:
     for scenario in data.get("scenario_summaries", []):
         lines.extend(['### ' + scenario["title"], _scenario_summary_text(scenario, data.get("coverage", {}).get("triage", {}).get("counts")),
                       '\n'.join('- ' + assumption for assumption in scenario["assumptions"])])
+    if data['product'].get('scope_sha256'):
+        from product_scope import LABELS
+        product=data['product']
+        role={'reference_product':'竞品参考','actual_product':'实际产品'}.get(product.get('input_role'),str(product.get('input_role','')))
+        role_source={'default':'系统默认','user':'用户明确指定'}.get(product.get('input_role_source'),str(product.get('input_role_source','')))
+        lines.extend(['产品角色及来源：'+role+' / '+role_source,product['scope_assumption']])
+        if product.get('version_binding'):
+            binding=product['version_binding']
+            lines.append('当前产品／范围版本：v'+str(binding['version'])+' / '+binding['target_sha256'][:12]+' / '+binding['scope_sha256'][:12])
+            if product['applicability_reviews']:
+                lines.append('历史材料适用性：'+'；'.join(row['candidate_id']+'：'+
+                    {'usable':'经复核继续适用','not_applicable':'不适用于当前目标','needs_info':'待补充'}[row['status']]
+                    +'；依据：'+row['reason'] for row in product['applicability_reviews']))
+        for status,label in LABELS.items():
+            items=[o for o in product['scope_objects'] if o['scope_status']==status]
+            lines.append(label+'：'+('；'.join(o['description']+'（'+o['reason']+'；来源 '+', '.join(dict.fromkeys(o['source_refs']+o.get('statement_refs',[])))+'）' for o in items) or '无已登记对象'))
+        if product['scope_waiting']:
+            lines.append('局部限制与最小补充：'+'；'.join(dict.fromkeys(v.get('question') or v['reason'] for v in product['scope_waiting'])))
+        if product.get('delivery_revision'):
+            image=product.get('query_image',{})
+            lines.append('查询主图：'+str(image.get('image_id') or image.get('status') or '未选定')+'；依据：'+str(image.get('reason','')))
+            labels={'direct_observation':'直接观察','page_claim':'页面声明','user_statement':'用户说明','analysis_inference':'分析推断'}
+            verifications={'verified':'已核实','claim_only':'仅确认存在该声明','unverified':'待核实','conflict':'有冲突'}
+            lines.append('产品事实与线索：'+'；'.join(str(f['fact_id'])+' v'+str(f['version'])+' '+str(f.get('value',''))+'（'+labels[f['nature']]+'／'+verifications[f['verification']]+'；来源 '+', '.join(f['source_refs'])+'）' for f in product['scope_facts']))
+            limits=[o['description']+'：'+o['visual_evidence']['main_visibility']+'；'+o['visual_evidence'].get('limitation_reason','') for o in product['scope_objects'] if o['scope_status']=='included' and o['visual_evidence']['main_visibility']!='sufficient']
+            if limits: lines.append('主图呈现限制：'+'；'.join(limits))
     main = data["product"].get("main_visual")
     if main:
         lines.append(_blocks_md([{"type": "figures", "items": [main]}]))
@@ -1492,6 +1787,12 @@ def render_markdown(data: dict) -> str:
 
 
 def render_findings_csv(data: dict) -> str:
+    if data.get("presentation_policy_revision") == "operator-report-v1":
+        from operator_report import render_csv as operator_csv
+        return operator_csv(data)
+    if data.get("presentation_stage_a"):
+        from report_presentation_stage_a import render_csv as render_stage_a_csv
+        return render_stage_a_csv(data)
     stream = io.StringIO(newline='')
     fields = [*CSV_FIELDS, *(["scenario_id", "scenario_sha256", "conditional", "business_completion", "retrieval_status", "triage_status", "verification_status", "assessment_status", "assessment_completion", "comparison"] if data.get("scenario_summaries") else [])]
     if data.get("visual_policy_revision"):
@@ -1575,11 +1876,36 @@ def render_findings_csv(data: dict) -> str:
 
 
 def bundle_bytes(data: dict, output_dir: Path) -> dict[str, bytes]:
-    return {'report-data.json': _json(data), 'report.html': render_html(data, Path(output_dir)).encode(), 'report.md': render_markdown(data).encode(), 'report-findings.csv': render_findings_csv(data).encode('utf-8-sig')}
+    from report_package_stage_c import report_files
+    required = report_files(data)
+    payloads = {'report-data.json': _json(data), 'report.html': render_html(data, Path(output_dir)).encode()}
+    if data.get("presentation_policy_revision") == "operator-report-v1":
+        from operator_report import render_appendix, render_audit
+        payloads["operator-appendix.html"] = render_appendix(data, Path(output_dir)).encode()
+        payloads["technical-audit.html"] = render_audit(data, Path(output_dir)).encode()
+    if 'report.md' in required:
+        payloads['report.md'] = render_markdown(data).encode()
+    if 'report-findings.csv' in required:
+        payloads['report-findings.csv'] = render_findings_csv(data).encode('utf-8-sig')
+    return payloads
 
 
 def _manifest(data: dict, payloads: dict[str, bytes]) -> dict:
     manifest = {'report_schema': REPORT_SCHEMA, 'assessment_policy': POLICY, 'task_id': data['task_id'], 'generated_at': data['generated_at'], 'overall': {'risk': data['overall']['risk'], 'confidence': data['overall']['confidence']}, 'section_order': SECTION_ORDER, 'input_digests': data['trace']['input_digests'], 'report_content_digest': data['trace']['report_content_digest'], 'template_css_sha256': data['trace']['template_css_sha256'], 'artifacts': {name: {'path': name, 'bytes': len(payload), 'sha256': _sha(payload)} for name, payload in payloads.items()}, 'images': data['visual_evidence'], 'evidence_index': data['evidence_index'], 'linked_files': data['linked_files'], 'offline_policy': data['offline_policy']}
+    manifest['section_order'] = data.get('section_order', SECTION_ORDER)
+    if data.get('presentation_policy_revision'):
+        manifest['presentation_policy_revision'] = data['presentation_policy_revision']
+        manifest['operator_view'] = {'path': 'report-data.json', 'json_pointer': '/operator_view',
+            'sha256': _digest(data['operator_view'])}
+    if data.get('business_status_stage_b'):
+        manifest['business_status_stage_b'] = {'path': 'report-data.json', 'json_pointer': '/business_status_stage_b',
+            'sha256': _digest(data['business_status_stage_b']),
+            'business_status': data['business_status_stage_b']['business_status'],
+            'delivery_status': data['business_status_stage_b']['delivery_status']}
+    if data.get('report_package_stage_c'):
+        from report_package_stage_c import material_files
+        manifest['report_package_stage_c'] = deepcopy(data['report_package_stage_c'])
+        manifest['material_files'] = material_files(data)
     if data.get('assessment_revision'):
         manifest['assessment_revision'] = data['assessment_revision']
     if _partial_report(data):
@@ -1626,7 +1952,8 @@ def build_bundle(task_dir: Path, task: dict, evidence: dict, assessment: dict, c
     return _write_delivery_bundle(data, out, task_dir=task_dir, task=task, assessment=assessment)
 
 
-def build_bundle_from_verified_context(context, *, task_dir, output_dir, journal=None, report_content=None):
+def build_bundle_from_verified_context(context, *, task_dir, output_dir, journal=None, report_content=None,
+                                       validation_context=None):
     from assessment_estimate import VerifiedAssessmentContext
     if not isinstance(context, VerifiedAssessmentContext):
         raise ValueError("REPORT_VERIFIED_CONTEXT_REQUIRED")
@@ -1640,10 +1967,11 @@ def build_bundle_from_verified_context(context, *, task_dir, output_dir, journal
         report_content=report_content, verify_assessment=False)
     context.validate(task_dir=task_dir, output_dir=output_dir)
     return _write_delivery_bundle(data, Path(output_dir).resolve(), task_dir=task_dir,
-        task=context.output_task, assessment=context.assessment)
+        task=context.output_task, assessment=context.assessment, validation_context=validation_context)
 
 
-def _write_delivery_bundle(data: dict, out: Path, *, task_dir: Path, task: dict, assessment: dict) -> tuple[dict, dict]:
+def _write_delivery_bundle(data: dict, out: Path, *, task_dir: Path, task: dict, assessment: dict,
+                           validation_context=None) -> tuple[dict, dict]:
     """v2 delivers only bytes which passed the same independent bundle validator.
 
     No persisted 'validation passed' flag is trusted. Standalone finalize keeps
@@ -1662,15 +1990,16 @@ def _write_delivery_bundle(data: dict, out: Path, *, task_dir: Path, task: dict,
         atomic_write_json(stage / "assessment.json", assessment)
         atomic_write_json(stage / "task.json", task)
         result, manifest = _write_bundle(data, stage)
-        errors = validate_run(Path(task_dir), task, output_dir=stage)
+        errors = (validation_context.validate_staged(stage) if validation_context is not None
+                  else validate_run(Path(task_dir), task, output_dir=stage))
         if errors:
             raise ValueError("REPORT_DELIVERY_VALIDATION_FAILED: " + "; ".join(errors))
         # Publish the exact staged bytes, never reread source media after QA.
         # HTML is last so a new visible report cannot precede its attachments.
         files = list(_unique_file_records(data["visual_evidence"] + data["evidence_index"] + data["linked_files"]))
+        from report_package_stage_c import report_files
         names = ([name for name in ("assessment.json", "task.json") if not (out / name).exists()]
-            + [item["path"] for item in files] + ["report-data.json", "report.md",
-            "report-findings.csv", "report-manifest.json", "report.html"])
+            + [item["path"] for item in files] + [name for name in report_files(data) if name != 'report.html'] + ['report.html'])
         for name in dict.fromkeys(names):
             path = _resolve(stage, name)
             target = _resolve(out, name)
@@ -1716,7 +2045,7 @@ def validate_run(task_dir: Path, task: dict, *, output_dir: Path | None = None) 
     try:
         data = json.loads((out / 'report-data.json').read_text())
         manifest = json.loads((out / 'report-manifest.json').read_text())
-        actual_rendered = {name: (out / name).read_bytes() for name in ('report.html', 'report.md', 'report-findings.csv') if (out / name).is_file()}
+        actual_rendered = {name: (out / name).read_bytes() for name in ('report.html', 'report.md', 'report-findings.csv', 'operator-appendix.html', 'technical-audit.html') if (out / name).is_file()}
         security = _security_errors({'task': task, 'report_data': data, 'manifest': manifest}, actual_rendered)
         if security:
             return security
@@ -1731,6 +2060,10 @@ def validate_run(task_dir: Path, task: dict, *, output_dir: Path | None = None) 
             if not path.is_file() or _sha(path.read_bytes()) != item['sha256']:
                 errors.append('REPORT_SOURCE_CHANGED: ' + item['path'])
         payloads = bundle_bytes(data, out)
+        if data.get('report_package_stage_c'):
+            for name in ('report.md', 'report-findings.csv'):
+                if name not in payloads and (out / name).exists():
+                    errors.append('REPORT_UNDECLARED_EXPORT: ' + name)
         for name, expected in payloads.items():
             if not (out / name).is_file() or (out / name).read_bytes() != expected:
                 errors.append('REPORT_ARTIFACT_MISMATCH: ' + name)
@@ -1739,6 +2072,10 @@ def validate_run(task_dir: Path, task: dict, *, output_dir: Path | None = None) 
         source = Path(task.get('outputs', {}).get('assessment_input_dir') or data['trace'].get('source_task_dir') or task_dir)
         if source.resolve() != Path(task.get('outputs', {}).get('assessment_input_dir') or task_dir).resolve():
             return list(dict.fromkeys(errors + ['REPORT_CANONICAL_SOURCE_MISMATCH']))
+        from delivery_inspection_stage_d import enabled as inspection_enabled, source_task_errors
+        current_task = json.loads((source / 'task.json').read_text()) if (source / 'task.json').is_file() else {}
+        if inspection_enabled(task) or inspection_enabled(current_task):
+            errors.extend(source_task_errors(source, task))
         inputs = {}
         for key, filename in [('evidence', 'evidence.json'), ('assessment', 'assessment.json'), ('candidates', 'normalized-candidates.json'), ('journal', 'browser-candidate-journal.json'), ('search_plan', 'search-plan.json')]:
             # A re-evaluation keeps its new assessment in the output bundle;
@@ -1768,7 +2105,7 @@ def validate_run(task_dir: Path, task: dict, *, output_dir: Path | None = None) 
                 if data != expected_data:
                     errors.append('REPORT_DATA_RECOMPUTE_MISMATCH')
         expected_ids = [re.search(r'<section id="([^"]+)"', part).group(1) for part in re.findall(r'<section id="[^"]+"[^>]*>', payloads['report.html'].decode())]
-        if expected_ids != SECTION_ORDER:
+        if expected_ids != data.get('section_order', SECTION_ORDER):
             errors.append('REPORT_SECTIONS_MISMATCH')
         if '<script' in payloads['report.html'].decode().lower():
             errors.append('REPORT_SCRIPT_FORBIDDEN')

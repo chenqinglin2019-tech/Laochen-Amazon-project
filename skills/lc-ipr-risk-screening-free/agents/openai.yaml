@@ -1,6 +1,6 @@
 interface:
   display_name: "易逊-免费知识产权排查"
   short_description: "免费来源分国排查专利、外观、商标与版权，区分风险、置信度及覆盖缺口。"
-  default_prompt: "使用 $lc-ipr-risk-screening-free 以免费来源排查该 Amazon 商品，默认按 evidence-estimate-v1 输出分国家五级风险、三级置信度、正反依据、专业或供应链核查事项及离线图证报告；自动检索由 Agent 完成，人工仅恢复访问。"
+  default_prompt: "使用 $lc-ipr-risk-screening-free 以免费来源排查该 Amazon 商品或用户提供的产品资料，默认按 evidence-estimate-v1 输出分国家五级风险、三级置信度、正反依据、专业或供应链核查事项及离线图证报告；自动检索由 Agent 完成，人工仅恢复访问。"
 policy:
   allow_implicit_invocation: false

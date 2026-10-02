@@ -10,10 +10,11 @@ import argparse
 import json
 import os
 import re
+import math
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
 from common import (ensure_object, load_json, sha256_json, api_first_enabled,
-                    discovery_plan_scope_valid, serpapi_free_enhancement_error, API_FIRST_REVISION)
+                    discovery_plan_scope_valid, serpapi_free_enhancement_error, API_FIRST_REVISION, api_first_revision_enabled)
 from provider_utils import ProviderError, http_json, record_result, sanitize_for_evidence
 from free_search_budget import attempt_context, reserve_search
 from provider_plan_v24 import load_action
@@ -45,7 +46,7 @@ def search(base: str, key: str, timeout: int, image_url: str, item: dict):
     return http_json(f'{base}/search.json?{urlencode(params)}', timeout=timeout, retries=0)
 
 
-def normalize(payload: dict, *, retrieval_workflow_revision: str | None = None) -> dict:
+def normalize(payload: dict, *, retrieval_workflow_revision: str | None = None, investigation_right_type: str = '') -> dict:
     metadata = payload.get('search_metadata')
     if not isinstance(metadata, dict) or metadata.get('status') != 'Success':
         if payload.get('error'):
@@ -63,14 +64,19 @@ def normalize(payload: dict, *, retrieval_workflow_revision: str | None = None) 
         for row in payload[name]:
             if not isinstance(row, dict) or not isinstance(row.get('link'), str) or urlparse(row['link']).scheme not in {'http', 'https'}:
                 raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'Lens match lacks a source page URL')
-            if retrieval_workflow_revision == API_FIRST_REVISION:
+            if api_first_revision_enabled(retrieval_workflow_revision):
                 row = sanitize_for_evidence(row)
             candidates.append({'title': str(row.get('title') or ''), 'url': row['link'], 'source': PROVIDER, 'source_name': str(row.get('source') or ''),
                 'image_url': str(row.get('image') or row.get('thumbnail') or ''), 'match_type': name,
                 'right_type': 'copyright', 'role': 'discovery_only', 'material': False,
                 'authoritative_for_final_rating': False, 'official_verification': {'status': 'not_checked'}})
-            if retrieval_workflow_revision == API_FIRST_REVISION:
-                candidates[-1].update(retrieval_workflow_revision=API_FIRST_REVISION, source_index='google_lens', source_record_sha256=sha256_json(row), source_collection=name, source_record_hash_stage='retained-v1')
+            if api_first_revision_enabled(retrieval_workflow_revision):
+                candidates[-1].update(retrieval_workflow_revision=retrieval_workflow_revision, source_index='google_lens', source_record_sha256=sha256_json(row), source_collection=name, source_record_hash_stage='retained-v1')
+            if retrieval_workflow_revision == 'api-first-v3':
+                candidates[-1].update(right_type='unknown', candidate_nature='visual_match',
+                    investigation_right_type=investigation_right_type,
+                    source_upstream='google_lens', field_provenance={'url': 'link', 'image_url': 'image' if row.get('image') else 'thumbnail'},
+                    image_kind='source_image' if row.get('image') else 'thumbnail')
     return {'candidates': candidates, 'role': 'discovery_only', 'authoritative_for_final_rating': False,
         'search_metadata': {'total_hits': None, 'retrieved_hits': len(candidates), 'reviewed_hits': None, 'truncated': True, 'stop_reason': 'ranked_search_total_unknown', 'source_updated_at': None, 'schema_valid': True}}
 
@@ -79,7 +85,8 @@ def retained_source_records(evidence: dict, run: dict, task_dir: Path | None = N
     """Validate and project retained Lens cards without rewriting their receipt."""
     from retained_discovery import retained_records
     return retained_records(evidence, run, task_dir, provider=PROVIDER,
-        normalize_records=lambda raw: normalize(raw, retrieval_workflow_revision=API_FIRST_REVISION)['candidates'],
+        normalize_records=lambda raw, revision, entry: normalize(raw, retrieval_workflow_revision=revision,
+            investigation_right_type=str(entry.get('right_type') or run.get('right_type') or ''))['candidates'],
         invalid='LENS_RETAINED_NORMALIZATION_INVALID', projection_revision='lens-retained-projection-v1')
 
 def execute(task_dir: Path, query_id: str, *, attempt_id='initial', retry_reason=''):
@@ -100,6 +107,19 @@ def execute(task_dir: Path, query_id: str, *, attempt_id='initial', retry_reason
                 or any(item.get(k) != expected for k, expected in {'required': False, 'required_for': 'discovery_only', 'role': 'discovery_only', 'authoritative_for_final_rating': False}.items())):
                 raise ProviderError('DISCOVERY_ONLY_CONTRACT_INVALID', 'failed', 'Lens cannot satisfy formal or low-risk requirements')
             evidence = ensure_object(load_json(task_dir / 'evidence.json'), 'evidence.json')
+            from runtime_v24 import _reuse_physical_response
+            from common import load_skill_config
+            maximum_age = load_skill_config().get('performance', {}).get('dynamic_evidence_max_age_hours', 48)
+            try:
+                maximum_age = float(maximum_age)
+            except (TypeError, ValueError):
+                raise ProviderError('SOURCE_FRESHNESS_POLICY_INVALID', 'failed', 'Dynamic evidence reuse requires a valid age limit') from None
+            if not math.isfinite(maximum_age) or maximum_age <= 0:
+                raise ProviderError('SOURCE_FRESHNESS_POLICY_INVALID', 'failed', 'Dynamic evidence reuse requires a positive finite age limit')
+            reused = _reuse_physical_response(task_dir, PROVIDER, item, maximum_age,
+                authorized_task=task, authorized_params=params)
+            if reused is not None:
+                return reused
             maximum = min(int(selection.get('max_queries_per_task', 3)), 10 if api_first_enabled(task) else 3)
             if consumed_queries(evidence) >= maximum:
                 raise ProviderError('SERPAPI_TASK_QUERY_LIMIT_REACHED', 'access_limited', 'Combined Lens and Patents task search budget is exhausted')
@@ -114,7 +134,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id='initial', retry_reason
                 query_id=query_id, renewal_date=account.get('plan_renewal_date', ''), plan_entry_sha256=sha256_json(item), max_queries_per_task=maximum, **attempt))
             attempted = True
             payload, _, body = search(base, key, timeout, image_url, item)
-            normalized = normalize(payload, retrieval_workflow_revision=task.get('retrieval_workflow_revision'))
+            normalized = normalize(payload, retrieval_workflow_revision=task.get('retrieval_workflow_revision'), investigation_right_type=str(item.get('right_type') or ''))
             return record_result(task_dir, **options, status='success' if normalized['candidates'] else 'no_result', normalized=normalized, raw_body=body, raw_suffix='json', quota={**account, 'network_request_attempted': True})
         except ProviderError as exc:
             return record_result(task_dir, **options, status=exc.source_status, normalized=None, raw_body=body, raw_suffix='json', error_code=exc.code, detail=exc.detail, quota={**account, 'network_request_attempted': attempted})

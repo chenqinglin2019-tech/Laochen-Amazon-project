@@ -3,6 +3,840 @@
   "package_name": "lc-ipr-risk-screening-free",
   "files": [
     {
+      "path": "scripts/test_budget_delivery.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/process_group_exec.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/execution_budget.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_execution_budget.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/public_identity.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_public_identity.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/test_public_identity.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_api_first_v3.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/runtime_compat.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_runtime_compat.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/delivery_versions_stage_e.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_delivery_versions_stage_e.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/delivery-versions-stage-e.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/delivery_inspection_stage_d.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_delivery_inspection_stage_d.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/delivery-inspection-stage-d.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/report_package_stage_c.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_report_package_stage_c.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/report-package-stage-c.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/business_status_stage_b.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_business_status_stage_b.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/business-status-stage-b.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/report_presentation_stage_a.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_report_presentation_stage_a.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/report-presentation-stage-a.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/stage_delivery_stage_d.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/create_stage_result.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_stage_delivery_stage_d.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/stage-delivery-stage-d.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/stage_review_stage_c.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_stage_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_stage_review_stage_c.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/legacy/stage-review-stage-c.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/stage_risk_stage_b.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_stage_risk.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_stage_risk_stage_b.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/stage-risk-stage-b.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/review_progress_stage_a.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_review_progress.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_review_progress_stage_a.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/review-progress-stage-a.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/continuous_progress_stage_d.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_progress.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_continuous_progress_stage_d.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/continuous-progress-stage-d.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/continuation_stage_c.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_continuation.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_continuation_stage_c.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/continuous-continuation-stage-c.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/recovery_stage_b.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_recovery_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_recovery_stage_b.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/continuous-recovery-stage-b.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/continuous_work_stage_a.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_continuous_work_stage_a.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/continuous-work-stage-a.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/distinctive_rights.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/distinctive_rights_stage_c.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/distinctive_rights_stage_d.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_distinctive_rights.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_distinctive_rights.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_distinctive_rights_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_distinctive_rights_stage_c.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_distinctive_rights_stage_d.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/distinctive-rights.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/specialty_analysis.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_specialty_analysis.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_specialty_analysis.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_specialty_professional_scope.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/specialty-analysis.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/candidate_acquisition.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_candidate_acquisition.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/candidate_handoff.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_candidate_handoff.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_candidate_handoff.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/candidate-accounting-handoff.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_triage_scope.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/candidate-triage-scope.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/candidate_followup.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_candidate_followup.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_candidate_followup.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_followup_material_resolution.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/candidate-followup.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/candidate_triage_stage.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_candidate_triage_stage.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_candidate_triage_stage.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/candidate-triage-stage.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/candidate_identity.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/candidate_identity_corrections.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_candidate_identity_correction.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_candidate_identity.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/candidate-identity.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/source_result_processing.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_source_result_processing.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_source_result_processing.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/source-result-processing.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/discovery_semantics.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_discovery_semantics.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_discovery_semantics.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/discovery-semantics.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/source_operation.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/source_operation_registry.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/source-operation-registry.json",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_source_operation.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_source_operation.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/scope_cancellation.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_scope_cancellation.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/source-operations.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/discovery_budget.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_discovery_budget.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tools/cdp/discovery-budget.test.mjs",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/discovery-purpose-budget.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/product_feedback.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_product_feedback.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_product_feedback.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/product-feedback.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/product_change.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_product_applicability.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_product_image.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_product_change.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/product-change.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/product_delivery.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_product_delivery.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/product-delivery.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/product_scope.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_product_scope.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_product_scope.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/product-scope.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/product_entry.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_user_product.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_product_entry.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/product-entry.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tools/cdp/product-entry.test.mjs",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/completion_check.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/codex_guard.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/install_codex_guard.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_completion_check.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_codex_guard.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/continuation-guard.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
       "path": "scripts/report_query_trace.py",
       "kind": "text",
       "required": true,
@@ -328,6 +1162,12 @@
       "mode": "0644"
     },
     {
+      "path": "scripts/advance_work.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
       "path": "scripts/epo_ops_client.py",
       "kind": "text",
       "required": true,
@@ -485,6 +1325,12 @@
     },
     {
       "path": "scripts/record_browser_product.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_product_analysis.py",
       "kind": "text",
       "required": true,
       "mode": "0644"
@@ -701,6 +1547,12 @@
     },
     {
       "path": "scripts/test_asset_scope.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_product_analysis_recorder.py",
       "kind": "text",
       "required": true,
       "mode": "0644"
@@ -1295,6 +2147,522 @@
     },
     {
       "path": "tools/cdp/workflow-correction.test.mjs",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/legacy-compatibility.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/audit_epo_search_receipt.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_epo_query.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/serpapi_patent_details_client.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_independent_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_workflow_efficiency.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_continuous_work_dispatch.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_asset_inventory_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/provider_routing.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_discovery_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_provider_routing.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_serpapi_patent_details_client.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/record_public_source.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/epo_query.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/resume_continuous_work.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "fixtures/ppubs-query-equality.json",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_cua_recall_provenance.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/macos_review_host.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_macos_review_host.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/review_material_bundle.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_review_material_bundle.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/review_readiness.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_review_readiness.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/report_review_host.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_report_review_host.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_publish_review_freeze.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_record_independent_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/report-review-host.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/candidate_api_actions.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/coverage_v3.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/final_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_api_final_integration.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_api_record_limits.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_api_v3_provider_records.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_product_fact_api_authorization.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_lens_consumer_reuse.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_api_v3_specialty_integration.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_final_api_acceptance.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_final_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_trusted_api.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/trusted_api.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/api-direct-final-review.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_lens_candidate_identity_reuse.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_exact_candidate_api_followup.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_serpapi_physical_plan_limit.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_query_territory_triage.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_epo_images_retrieval.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_patent_detail_record_processing.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_source_card_snapshot.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_ops_images_record_processing.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_review_progress_query_batch.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_local_review_supplement.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_completed_api_gap_request.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_bounded_refinement_waiting.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_public_ranked_scope.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_specific_failure_scope.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_candidate_physical_budget.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_api_v3_public_routes.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_lens_physical_reuse.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tests/test_identity_user_wait_projection.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_no_retry_and_original_credit.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_api_gap_semantic_projection.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_cancelled_publication_work.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "assets/operator-report.css",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/delivery_validation.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/operator_report.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_delivery_validation.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/module_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_operator_delivery_transaction.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_module_review.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_product_image_review_refs.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/review_isolation.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/review-host.json",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/prepare_adjudication.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/test_optimization_round.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_review_host_backends.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/workflow-efficiency.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/legacy/report-review-host-whole-input.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/legacy/risk-estimate-historical.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_discovery_semantics_batch.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_stage_risk_batch.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/input_template.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0755"
+    },
+    {
+      "path": "scripts/test_input_template.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/official_tmsearch_export.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_official_tmsearch_export.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_product_scope_review.py",
       "kind": "text",
       "required": true,
       "mode": "0644"

@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright-core";
 import { compilePpubsBoolean, compilePpubsQuery, extractAmazonProduct, freshState, browserRateLimited,
-  submitSearch, waitForSearchSemanticState, collectPpubsRenderedResults, existingProviderRateLimit, rateLimitPageRef, ensureSession } from "./cdp-cli.mjs";
+  dismissPpubsRegistrationNotice, submitSearch, waitForSearchSemanticState, collectPpubsRenderedResults, existingProviderRateLimit, rateLimitPageRef, ensureSession } from "./cdp-cli.mjs";
 
 const CHROME = requireChromeExecutable();
 const TM = { tmsearch_query_binding: { tmsearchQuery: 'CM:"FUNANYWHERE"' }, cdp: { semantic_poll_ms: 15, semantic_stable_samples: 2 } };
@@ -168,4 +168,64 @@ test("Amazon byline normalization retains source and distinguishes placeholders 
     const actual = await extractAmazonProduct(page, { strict: true });
     assert.equal(actual.brand, brand); assert.equal(actual.brand_byline_raw, raw); assert.equal(actual.brand_placeholder, placeholder);
   }
+});
+
+
+test("only the known future PPS registration notification can be dismissed", async t => {
+  const page = await localPage(t);
+  await page.unroute("**/*");
+  const markup = `<div class="registration-notification-overlay" role="dialog">
+    <div class="registration-notification-content"><strong>Patent Public Search Registration Requirement</strong></div>
+    <p class="registration-notification-message">Beginning November 7, 2026, Patent Public Search (PPUBS) will require users to sign in with a USPTO account.</p>
+    <button class="close" data-action="close" title="Close">Close</button><button data-action="createaccount">Create account</button></div>`;
+  await page.route("**/*", route => route.fulfill({ contentType: "text/html", body: markup }));
+  await page.goto("https://ppubs.uspto.gov/pubwebapp/");
+  const reset = async extra => {
+    await page.setContent(markup + (extra || ""));
+    await page.evaluate(() => {
+      window.closeClicks = window.accountClicks = 0;
+      document.querySelector('button.close').onclick = () => {
+        window.closeClicks++; document.querySelector('.registration-notification-overlay').style.display = 'none';
+      };
+      document.querySelector('[data-action="createaccount"]').onclick = () => window.accountClicks++;
+    });
+  };
+  const before = Date.parse("2026-10-01T00:00:00Z");
+  await reset();
+  assert.equal(await dismissPpubsRegistrationNotice(page, before), true);
+  assert.equal(await page.evaluate(() => window.closeClicks), 1);
+  assert.equal(await page.evaluate(() => window.accountClicks), 0);
+  for (const date of [Date.parse("2026-11-07T00:00:00Z"), Date.parse("2026-12-01T00:00:00Z"), NaN]) {
+    await reset(); assert.equal(await dismissPpubsRegistrationNotice(page, date), false);
+    assert.equal(await page.evaluate(() => window.closeClicks), 0);
+  }
+  await reset('<div role="dialog">Too Many Requests</div>');
+  assert.equal(await dismissPpubsRegistrationNotice(page, before), false);
+  assert.equal(await page.evaluate(() => window.closeClicks), 0);
+  await reset(); await page.locator('.registration-notification-content > strong').evaluate(n => n.textContent = "Sign in required");
+  assert.equal(await dismissPpubsRegistrationNotice(page, before), false);
+  await reset(); await page.locator('.registration-notification-message').evaluate(n => n.textContent = "Sign in is required now");
+  assert.equal(await dismissPpubsRegistrationNotice(page, before), false);
+});
+
+
+test("PPS semantic readiness shares canonical history equality but preserves exact result and editor bindings", async t => {
+  const page = await localPage(t);
+  const query = '("face-shaped silicone pimple popper with sunglasses") AND S.KD.';
+  await page.setContent(`<trix-editor class="trix" aria-label="Enter query text">${query}</trix-editor>
+    <div id="searchResults-content"><div class="resultInfo"><span class="lQuery">L1:</span><span class="resultNumber">0</span> results found.</div>
+    <div id="search-results-table"></div></div>`);
+  const binding = { bound: true, result_set_id: "L1", total_hits: 0, query: query.replace("with", "WITH") };
+  const check = value => waitForSearchSemanticState(page, "uspto_patent_browser", 1500,
+    { ppubs_query_binding: { strict: true, renderedQuery: query, historyBinding: value },
+      cdp: { semantic_poll_ms: 15, semantic_stable_samples: 2 } });
+  const valid = await check(binding);
+  assert.equal(valid.stable, true); assert.equal(valid.query_bound, true); assert.equal(valid.noResult, true);
+  for (const changed of [{ query: binding.query.replace("silicone", "rubber") }, { result_set_id: "L2" },
+    { total_hits: 1 }, { bound: false }, { query: binding.query.replace("face-shaped silicone", "face-shaped  silicone") }]) {
+    const result = await check({ ...binding, ...changed });
+    assert.equal(result.stable, false); assert.equal(result.query_bound, false); assert.equal(result.noResult, false);
+  }
+  await page.locator('trix-editor').evaluate(n => n.textContent = "another query");
+  assert.equal((await check(binding)).query_bound, false);
 });

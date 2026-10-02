@@ -91,6 +91,29 @@ class CandidateLeadTests(unittest.TestCase):
         self.assertEqual(candidate["sources"][0]["status"], "")
         self.assertEqual(len(self.merge_cli()["patents"]), 1)
 
+    def test_exact_reassessment_copy_preserves_lead_and_source_registration(self):
+        original = self.root / self.source['path']
+        self.source['path'] = str(original)
+        self.save_supplement()
+        before = build_record(self.task, self.evidence, self.root, self.payload)
+        clone = self.root / 'reassessment'
+        clone.mkdir()
+        copied = clone / original.name
+        copied.write_bytes(original.read_bytes())
+        atomic_write_json(clone / 'supplemental-evidence.json', self.supplement)
+        mapping = {'source_path': str(original), 'copied_path': copied.name,
+                   'sha256': self.source['sha256'], 'bytes': self.source['bytes']}
+        atomic_write_json(clone / 'recovery-manifest.json', {'file_mappings': [mapping]})
+        self.assertEqual(build_record(self.task, self.evidence, clone, self.payload), before)
+        copied.write_text('changed')
+        with self.assertRaises(ValueError): build_record(self.task, self.evidence, clone, self.payload)
+        copied.write_bytes(original.read_bytes())
+        mapping['bytes'] += 1
+        atomic_write_json(clone / 'recovery-manifest.json', {'file_mappings': [mapping]})
+        with self.assertRaises(ValueError): build_record(self.task, self.evidence, clone, self.payload)
+        (clone / 'recovery-manifest.json').unlink()
+        with self.assertRaises(ValueError): build_record(self.task, self.evidence, clone, self.payload)
+
     def test_materiality_review_reaches_known_number_action_and_survives_remerge(self):
         self.register()
         candidate = self.merge_cli()["patents"][0]

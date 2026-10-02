@@ -89,6 +89,26 @@ class DecisionWorkflowTests(unittest.TestCase):
         self.assertEqual(self.candidate["priority_signals"][0]["kind"], "source_material")
         self.assertEqual(workflow.effective_selected_candidates(self.task, self.candidates, self.ledger, evidence=self.evidence), [])
 
+    def test_unknown_right_can_be_lightly_screened_but_never_selected(self):
+        self.task["candidate_identity_revision"] = "candidate-identity-v1"
+        self.task["workflow_correction_revision"] = "workflow-correction-v1"
+        self.candidate.update(right_type="unknown", identity_status="identity_pending")
+        with patch("product_scope.enabled", return_value=True), \
+                patch("product_scope.candidate_scope", side_effect=AssertionError("unknown type has no right-specific scope")):
+            summary = workflow.triage_summary(self.task, self.candidates, self.ledger,
+                                               evidence=self.evidence)
+        self.assertEqual(summary["counts"]["unreviewed"], 1)
+        with self.assertRaisesRegex(ValueError, "UNKNOWN_TYPE_CANNOT_BE_SELECTED"):
+            self.annotation("selected")
+        row = self.annotation("not_selected")
+        self.ledger["annotations"].append(row)
+        self.assertEqual(self.effective()["decision"], "not_selected")
+        self.assertEqual(workflow.effective_selected_candidates(self.task, self.candidates,
+                         self.ledger, evidence=self.evidence), [])
+        self.task.pop("candidate_identity_revision")
+        with self.assertRaisesRegex(ValueError, "TRIAGE_SCENARIO_RIGHT_MISMATCH"):
+            self.annotation("not_selected")
+
     def test_selection_is_scenario_and_country_specific(self):
         self.use_trademark()
         self.ledger["annotations"].append(self.annotation("not_selected"))
@@ -295,7 +315,11 @@ class DecisionWorkflowTests(unittest.TestCase):
             self.assertEqual(task["product"]["input_role"], "reference_product")
             self.assertEqual(task["primary_scenario_id"], "product_entry")
             self.assertEqual(task["workflow_correction_revision"], workflow.CORRECTION_REVISION)
-            self.assertEqual(task["retrieval_workflow_revision"], "api-first-v1")
+            self.assertEqual(task["retrieval_workflow_revision"], "api-first-v3")
+            self.assertEqual(task["review_policy_revision"], "final-double-review-v1")
+            self.assertEqual(task["assessment_revision"], "known-findings-risk-v1")
+            self.assertEqual(task["presentation_policy_revision"], "operator-report-v1")
+            self.assertEqual(task['final_review_execution_revision'], 'module-double-review-v1')
             self.assertEqual(task["retrieval_policy"], runtime["api_first"])
             self.assertEqual(task["serper_free_enhancement"]["max_queries_per_task"], 30)
             self.assertEqual(task["serpapi_free_enhancement"]["max_queries_per_task"], 10)
@@ -309,6 +333,9 @@ class DecisionWorkflowTests(unittest.TestCase):
             self.assertNotIn("decision_workflow_revision", old)
             self.assertNotIn("workflow_correction_revision", old)
             self.assertNotIn("retrieval_workflow_revision", old)
+            self.assertNotIn("assessment_revision", old)
+            self.assertNotIn("presentation_policy_revision", old)
+            self.assertNotIn('final_review_execution_revision', old)
             self.assertEqual(load_json(root / "old/materiality-annotations.json")["schema_version"], "1.0")
 
     def test_unknown_nonempty_revision_fails_instead_of_legacy_fallback(self):

@@ -17,8 +17,8 @@ from common import (
     AMAZON_EU_COUNTRIES, add_history, assert_active_free_policy, atomic_write_json,
     ensure_object, intrinsic_patent_right_type, is_active_schema, load_json,
     normalize_text, load_skill_config, now_iso, parse_iso, SERPAPI_PROVIDER,
-    SERPER_PROVIDERS, api_discovery_patent_right_type,
-    stable_id,
+    SERPER_PROVIDERS, api_discovery_patent_right_type, api_first_revision_enabled,
+    stable_id, sha256_json,
 )
 from annotate_materiality import apply_materiality_annotations, load_materiality_ledger
 from provider_utils import query_identity
@@ -55,19 +55,21 @@ PUBLIC_RECORD_IDENTIFIER_PLACEHOLDERS = {
 }
 
 
-def patent_key(item: dict[str, Any]) -> str:
+def patent_key(item: dict[str, Any], *, preserve_legacy_explicit_type: bool = False) -> str:
     publication = str(item.get("publication_number") or "")
     number = str(publication or item.get("application_number") or item.get("grant_number") or item.get("record_number") or "")
     number = re.sub(r"[^A-Za-z0-9]", "", number).upper()
     jurisdiction = str(item.get("jurisdiction") or number[:2]).upper()
     kind = str(item.get("kind_code") or "").upper()
-    api_discovery = item.get('retrieval_workflow_revision') == 'api-first-v1' and item.get('source_index') == 'google_patents'
+    api_discovery = api_first_revision_enabled(item.get('retrieval_workflow_revision')) and item.get('source_index') == 'google_patents'
     right_type = (api_discovery_patent_right_type(number, kind) or 'unknown') if api_discovery else (
         intrinsic_patent_right_type(jurisdiction, number, kind) or str(item.get("right_type") or "patent"))
+    if preserve_legacy_explicit_type and item.get("right_type"):
+        right_type = str(item["right_type"])
     family = str(item.get("family_id") or "")
     if (publication or re.match(r"^[A-Z]{2}(?:D|RE|PP)?\d", number)) and number:
         return f"{jurisdiction}:{right_type}:{number}"
-    if (not number and not family and item.get('retrieval_workflow_revision') == 'api-first-v1'
+    if (not number and not family and api_first_revision_enabled(item.get('retrieval_workflow_revision'))
         and item.get('source_index') == 'google_patents' and re.fullmatch(r'[0-9a-f]{64}', str(item.get('source_record_sha256') or ''))):
         # A readable API card without an identifier still needs triage. Its
         # retained source-row hash is a discovery identity, never a patent ID.
@@ -184,7 +186,104 @@ def merge_browser_evidence(left: Any, right: Any) -> Any:
     return merged
 
 
-def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+def _physical_identity_origins(entries: list[dict[str, Any]], runs: dict[str, dict[str, Any]],
+                               task_dir: Path | None, evidence: dict | None) -> dict:
+    """Resolve a logical Lens wrapper only through its retained physical receipt.
+
+    URL matches are insufficient: both receipts and each ordinal's complete
+    normalized card must agree. Investigation type is the wrapper's query
+    purpose; it does not create another physical result card.
+    """
+    if task_dir is None or evidence is None:
+        return {}
+    from runtime_v24 import physical_response_source
+    from serpapi_lens_client import retained_source_records
+    origins = {}
+    stored_entries = [entry for group in evidence.get("collections", {}).values()
+                      if isinstance(group, list) for entry in group if isinstance(entry, dict)]
+    for entry in entries:
+        proof = entry.get("physical_response_reuse")
+        if entry.get("provider") != "serpapi_google_lens" or not isinstance(proof, dict):
+            continue
+        run = runs.get(str(entry.get("source_run_id")), {})
+        stored_runs = [row for row in evidence.get("source_runs", [])
+                       if isinstance(row, dict) and row.get("run_id") == run.get("run_id")]
+        stored = [row for row in stored_entries if row.get("evidence_id") == entry.get("evidence_id")]
+        if (len(stored_runs) != 1 or stored_runs[0] != run or len(stored) != 1 or stored[0] != entry
+                or any(entry.get(key) != run.get(key) for key in ("provider", "operation", "jurisdiction", "right_type"))):
+            continue
+        original = physical_response_source(task_dir, evidence, run)
+        if original is None:
+            continue
+        originals = [row for row in entries if row.get("evidence_id") == proof.get("source_evidence_id")
+                     and row.get("source_run_id") == original.get("run_id")]
+        if len(originals) != 1:
+            continue
+        origin = originals[0]
+        stored_originals = [row for row in stored_entries if row.get("evidence_id") == origin.get("evidence_id")]
+        if (len(stored_originals) != 1 or stored_originals[0] != origin
+                or any(origin.get(key) != original.get(key) for key in ("provider", "operation", "jurisdiction", "right_type"))
+                or origin.get("physical_response_reuse") or proof.get("source_run_id") != original.get("run_id")
+                or proof.get("source_run_sha256") != sha256_json(original)
+                or proof.get("source_collected_at") != origin.get("collected_at")
+                or entry.get("collected_at") != origin.get("collected_at")
+                or proof.get("independent_source_count") != 1):
+            continue
+        try:
+            original_cards = retained_source_records(evidence, original, task_dir)
+            logical_cards = retained_source_records(evidence, run, task_dir)
+        except (OSError, ValueError, TypeError, KeyError):
+            continue
+        if ((origin.get("payload") or {}).get("candidates") != original_cards
+                or (entry.get("payload") or {}).get("candidates") != logical_cards
+                or not original_cards or len(original_cards) != len(logical_cards)):
+            continue
+        if any(old.get("retrieval_workflow_revision") != "api-first-v3"
+               or not re.fullmatch(r"[0-9a-f]{64}", str(old.get("source_record_sha256") or ""))
+               or {key: value for key, value in old.items() if key != "investigation_right_type"}
+                  != {key: value for key, value in new.items() if key != "investigation_right_type"}
+               for old, new in zip(original_cards, logical_cards)):
+            continue
+        origins[id(entry)] = (origin, original_cards)
+    return origins
+
+
+def physical_response_identity_aliases(candidates: dict) -> list[dict]:
+    """Keep former wrapper IDs traceable without rewriting any review history."""
+    aliases = []
+    for rows in candidates.values():
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            for source in row.get("sources", []):
+                old_id = source.get("logical_candidate_id")
+                if not old_id or old_id == row.get("candidate_id"):
+                    continue
+                proof = source["physical_response_reuse"]
+                aliases.append({"event_id": stable_id("PHYS-ID", old_id, row["candidate_id"]),
+                    "kind": "physical_response_reuse", "old_candidate_ids": [old_id],
+                    "current_candidate_ids": [row["candidate_id"]],
+                    "evidence_refs": [proof["source_evidence_id"], source["evidence_id"]],
+                    "source_anchor": source["source_anchor"],
+                    "logical_source_anchor": source["logical_source_anchor"],
+                    "basis": "validated_physical_response_and_exact_retained_card",
+                    "transfers_status_or_risk": False})
+    return aliases
+
+
+def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, Any]],
+          *, identity_revision: str | None = None,
+          identity_assignments: dict[str, str] | None = None,
+          identity_redirects: dict[str, str] | None = None,
+          retired_identity_keys: set[str] | None = None,
+          task_dir: Path | None = None, evidence: dict | None = None) -> list[dict[str, Any]]:
+    identity_mode = identity_revision == "candidate-identity-v1"
+    if identity_revision not in (None, "candidate-identity-v1"):
+        raise ValueError("CANDIDATE_IDENTITY_REVISION_INVALID")
+    if identity_mode:
+        from candidate_identity import (source_anchor, identity_key, identifier_snapshot,
+                                        field_claims, append_field_claims, duplicate_discovery_facts,
+                                        TRANSPORT_FIELDS)
     result: dict[str, dict[str, Any]] = {}
     if kind == "patent":
         key_fn = patent_key
@@ -192,7 +291,10 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
         key_fn = trademark_key
     else:
         key_fn = lambda item: public_record_key(kind, item)
-    for entry in entries:
+    origins = _physical_identity_origins(entries, runs, task_dir, evidence) if identity_mode else {}
+    # Physical cards establish the original facts before any logical wrapper,
+    # even when a collection was reordered by an external caller.
+    for entry in sorted(entries, key=lambda row: id(row) in origins):
         payload = entry.get("payload", {})
         candidates = payload if isinstance(payload, list) else payload.get("candidates", []) if isinstance(payload, dict) else []
         if isinstance(candidates, dict):
@@ -201,16 +303,36 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
             continue
         source_run = runs.get(str(entry.get('source_run_id')), {})
         if (entry.get('provider') in {'serpapi_google_lens', 'serper_images'} and candidates
-                and all(isinstance(c, dict) and c.get('retrieval_workflow_revision') == 'api-first-v1' for c in candidates)):
+                and all(isinstance(c, dict) and api_first_revision_enabled(c.get('retrieval_workflow_revision')) for c in candidates)):
             if entry.get('provider') == 'serper_images':
                 from serper_client import retained_source_records
             else:
                 from serpapi_lens_client import retained_source_records
-            candidates = retained_source_records({'collections': {'copyright_assets': [entry]}}, source_run)
-        for item in candidates:
+            retained_dir = task_dir if all(c.get('retrieval_workflow_revision') == 'api-first-v3' for c in candidates) else None
+            candidates = retained_source_records({'collections': {'copyright_assets': [entry]}}, source_run, retained_dir)
+        for ordinal, item in enumerate(candidates, 1):
             if not isinstance(item, dict):
                 continue
             item = dict(item)
+            physical_origin = origins.get(id(entry))
+            logical_anchor = logical_key = None
+            if physical_origin:
+                origin, original_cards = physical_origin
+                logical_anchor = source_anchor(kind, entry, ordinal)
+                original_anchor = source_anchor(kind, origin, ordinal)
+                logical_key = identity_key(kind, item, logical_anchor)[0]
+                original_key = identity_key(kind, original_cards[ordinal - 1], original_anchor)[0]
+                assigned_original = (identity_assignments or {}).get(original_anchor,
+                    (identity_redirects or {}).get(original_key, original_key))
+                assigned_logical = (identity_assignments or {}).get(logical_anchor,
+                    (identity_redirects or {}).get(logical_key))
+                # A reviewed split/assignment takes precedence over automatic
+                # transport identity. Never silently undo an identity decision.
+                if ((assigned_logical is not None and assigned_logical != assigned_original)
+                        or logical_key in (retired_identity_keys or set())):
+                    physical_origin = None
+                else:
+                    item = dict(original_cards[ordinal - 1])
             source_run = runs.get(str(entry.get("source_run_id")), {})
             if str(entry.get("provider") or "") in {*SERPER_PROVIDERS, SERPAPI_PROVIDER}:
                 item["role"] = "discovery_only"
@@ -237,14 +359,19 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
                         "application_number",
                     ) if str(item.get(field) or "").strip()
                 ), "")
-                api_discovery = (item.get('retrieval_workflow_revision') == 'api-first-v1'
+                api_discovery = (api_first_revision_enabled(item.get('retrieval_workflow_revision'))
                                  and item.get('source_index') == 'google_patents')
                 intrinsic_type = api_discovery_patent_right_type(document_number, item.get('kind_code')) if api_discovery else intrinsic_patent_right_type(
                     item.get("jurisdiction") or item.get("office"),
                     document_number, item.get("kind_code"),
                 )
-                declared_type = str(item.get("right_type") or source_right_type or "")
-                if intrinsic_type:
+                declared_type = str(item.get("right_type") or ("" if identity_mode else source_right_type) or "")
+                legacy_explicit_type = (not identity_mode and not api_discovery
+                    and entry.get("provider") in {*SERPER_PROVIDERS, SERPAPI_PROVIDER}
+                    and bool(declared_type) and intrinsic_type == "patent")
+                if legacy_explicit_type:
+                    item["right_type"] = declared_type
+                elif intrinsic_type:
                     item["right_type"] = intrinsic_type
                     if declared_type and declared_type != intrinsic_type:
                         item.setdefault("type_conflicts", []).append({
@@ -255,11 +382,34 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
                 elif api_discovery:
                     item['right_type'] = 'unknown'
                     item['right_type_status'] = 'unresolved'
-                elif source_right_type and not item.get("right_type"):
+                elif not identity_mode and source_right_type and not item.get("right_type"):
                     item["right_type"] = source_right_type
-            elif source_right_type and not item.get("right_type"):
+                elif identity_mode and not item.get("right_type"):
+                    item["right_type"] = "unknown"
+                    item["right_type_status"] = "unresolved"
+            elif not identity_mode and source_right_type and not item.get("right_type"):
                 item["right_type"] = source_right_type
-            key = key_fn(item)
+            elif identity_mode and not item.get("right_type"):
+                item["right_type"] = "unknown"
+                item["right_type_status"] = "unresolved"
+            if identity_mode:
+                anchor = source_anchor(kind, physical_origin[0] if physical_origin else entry, ordinal)
+                natural_key, identity_status = identity_key(kind, item, anchor)
+                key = (identity_assignments or {}).get(anchor)
+                if key is None:
+                    key = (identity_redirects or {}).get(natural_key)
+                if key is None:
+                    key = (f"{kind}:provisional:{anchor}" if natural_key in (retired_identity_keys or set())
+                           else natural_key)
+                item["identity_contract"] = identity_revision
+                item["identity_status"] = ("identity_pending" if natural_key in (retired_identity_keys or set())
+                    and key == f"{kind}:provisional:{anchor}" else
+                    "reviewed_identity" if key != natural_key else identity_status)
+                item["original_identifiers"] = identifier_snapshot(item)
+                item["candidate_id"] = stable_id("CAND", kind, key)
+            else:
+                key = (patent_key(item, preserve_legacy_explicit_type=legacy_explicit_type)
+                       if kind == "patent" else key_fn(item))
             if not key:
                 continue
             source_key = str(
@@ -284,6 +434,23 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
             }
             if source_key:
                 source_ref["source_key"] = source_key
+            if identity_mode:
+                source_ref["source_anchor"] = anchor
+                source_ref["identity_observation"] = {
+                    "identifiers": identifier_snapshot(item),
+                    "right_type": item.get("right_type"),
+                    "jurisdiction": item.get("jurisdiction") or item.get("office"),
+                }
+                if physical_origin:
+                    source_ref.update(query_id=entry.get("query_id"),
+                        logical_source_anchor=logical_anchor,
+                        logical_candidate_id=stable_id("CAND", kind, logical_key),
+                        physical_source_ordinal=ordinal,
+                        physical_response_reuse=deepcopy(entry["physical_response_reuse"]))
+            # Position and retained-row digest identify the actual result
+            # even when a provider has no named upstream index.
+            source_ref.update({k: item[k] for k in ("source_position", "result_position",
+                "source_record_sha256") if k in item})
             if item.get('source_index'):
                 source_ref.update({k: item[k] for k in ('source_index', 'source_record_sha256', 'source_position', 'source_collection',
                     'source_record_hash_stage', 'original_source_record_sha256', 'normalization_provenance') if k in item})
@@ -297,10 +464,16 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
                 # indexes: Serper and SerpApi both expose Google Patents.
                 item['source_indexes'] = [item['source_index']]
             if key not in result:
-                result[key] = {**item, "normalization_key": key, "sources": [source_ref], "conflicts": {}}
+                result[key] = {**item, "normalization_key": key, "sources": [source_ref], "conflicts": {},
+                    **({"field_claims": field_claims(item, source_ref)} if identity_mode else {})}
                 continue
             current = result[key]
             current["sources"].append(source_ref)
+            if identity_mode:
+                append_field_claims(current, field_claims(item, source_ref))
+                if duplicate_discovery_facts(current, item, source_ref) and source_ref.get("evidence_id"):
+                    source_ref["duplicate_only"] = True
+                    current.setdefault("duplicate_evidence_refs", []).append(source_ref["evidence_id"])
             current["material"] = bool(current.get("material") or item.get("material"))
             current["official_verification"] = better_verification(current.get("official_verification"), item.get("official_verification"))
             for field, value in item.items():
@@ -321,7 +494,10 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
                     # and historical fact rows. References do not grant official
                     # verification, which remains independently ranked above.
                     current[field] = unique_list([*current.get(field, []), *value])
-                elif field not in {"sources", "conflicts", "official_verification", "material"} and current.get(field) != value:
+                elif field not in {"sources", "conflicts", "official_verification", "material",
+                                  "field_claims", "original_identifiers"} \
+                        and (not identity_mode or field not in TRANSPORT_FIELDS) \
+                        and current.get(field) != value:
                     claims = current.setdefault("conflicts", {}).setdefault(field, [])
                     current_value = current.get(field)
                     for claim in (current_value, value):
@@ -791,6 +967,8 @@ def apply_candidate_contract(kind: str, items: list[dict[str, Any]]) -> None:
         key = str(item.get("normalization_key") or "")
         right_type = candidate_right_type(kind, item)
         inferred_module = module_for(right_type)
+        if right_type == "unknown" and item.get("identity_contract") == "candidate-identity-v1":
+            inferred_module = "identity_pending"
         if right_type == "patent" and str(item.get("kind_code") or "").upper().startswith("A"):
             inferred_module = "pending_application"
         item["candidate_id"] = str(item.get("candidate_id") or stable_id("CAND", kind, key))
@@ -1644,7 +1822,10 @@ def main() -> None:
         raise SystemExit("LEGACY_TASK_READ_ONLY: 2.1/2.2 candidates cannot be regenerated")
     assert_active_free_policy(task)
     evidence = ensure_object(load_json(task_dir / "evidence.json"), "evidence.json")
-    collections = evidence.get("collections", {})
+    from source_result_processing import project_entry
+    collections = {name: [project_entry(entry, evidence, task_dir) for entry in rows]
+                   if isinstance(rows, list) else rows
+                   for name, rows in evidence.get("collections", {}).items()}
     runs = {str(run.get("run_id")): run for run in evidence.get("source_runs", [])}
     official_entries = collections.get("official_verifications", [])
     official_providers = {
@@ -1656,12 +1837,39 @@ def main() -> None:
         official_providers.add("inpi_api")
     from record_candidate_lead import validated_candidate_lead_entries
     lead_entries = validated_candidate_lead_entries(task, evidence, task_dir)
-    patents = merge("patent", [*collections.get("patents", []), *lead_entries], runs)
-    if task.get("schema_version") == "2.4-free":
+    from candidate_identity import enabled as identity_enabled, relation_view
+    from candidate_identity_corrections import load_ledger, projection_policy, apply_reviewed_fields, correction_view
+    identity_revision = task.get("candidate_identity_revision") if identity_enabled(task) else None
+    identity_ledger = load_ledger(task_dir, task) if identity_revision else None
+    if identity_ledger and (task_dir / "normalized-candidates.json").is_file():
+        previous_view = load_json(task_dir / "normalized-candidates.json")
+        previous_head = previous_view.get("identity_correction_head")
+        if previous_head and previous_head not in {
+                event["event_id"] for event in identity_ledger["events"]}:
+            raise ValueError("CANDIDATE_CORRECTION_HISTORY_MISSING")
+    assignments, redirects, retired = projection_policy(identity_ledger) if identity_ledger else ({}, {}, set())
+    patents = merge("patent", [*collections.get("patents", []), *lead_entries], runs,
+                    identity_revision=identity_revision, identity_assignments=assignments,
+                    identity_redirects=redirects, retired_identity_keys=retired,
+                    task_dir=task_dir, evidence=evidence)
+    if task.get("schema_version") == "2.4-free" and not identity_revision:
         expand_family_candidates(patents)
-    trademarks = merge("trademark", collections.get("trademarks", []), runs)
-    copyright_assets = merge("copyright", collections.get("copyright_assets", []), runs)
-    enforcement = merge("enforcement", collections.get("enforcement", []), runs)
+    from official_tmsearch_export import candidate_entries as official_tmsearch_entries
+    export_issues = []
+    export_plan = load_json(task_dir / "search-plan.json") if (task_dir / "search-plan.json").is_file() else {}
+    trademarks = merge("trademark", [*collections.get("trademarks", []),
+                         *official_tmsearch_entries(task_dir, evidence, issues=export_issues, plan=export_plan)], runs,
+                       identity_revision=identity_revision, identity_assignments=assignments,
+                       identity_redirects=redirects, retired_identity_keys=retired,
+                       task_dir=task_dir, evidence=evidence)
+    copyright_assets = merge("copyright", collections.get("copyright_assets", []), runs,
+                             identity_revision=identity_revision, identity_assignments=assignments,
+                             identity_redirects=redirects, retired_identity_keys=retired,
+                             task_dir=task_dir, evidence=evidence)
+    enforcement = merge("enforcement", collections.get("enforcement", []), runs,
+                        identity_revision=identity_revision, identity_assignments=assignments,
+                        identity_redirects=redirects, retired_identity_keys=retired,
+                        task_dir=task_dir, evidence=evidence)
     apply_candidate_contract("patent", patents)
     apply_candidate_contract("trademark", trademarks)
     apply_candidate_contract("copyright", copyright_assets)
@@ -1712,6 +1920,22 @@ def main() -> None:
         "patents": patents, "trademarks": trademarks,
         "copyright_assets": copyright_assets, "enforcement": enforcement,
     }
+    if identity_ledger:
+        apply_reviewed_fields(candidates_payload, identity_ledger)
+        for kind, rows in (("patent", patents), ("trademark", trademarks),
+                           ("copyright", copyright_assets), ("enforcement", enforcement)):
+            apply_candidate_contract(kind, rows)
+    # Normalize semantic fields before calculating a materiality fingerprint.
+    # Otherwise a first merge hashes an absent value and a second merge hashes
+    # its default, spuriously invalidating a valid triage decision.
+    if task.get("schema_version") == "2.4-free":
+        for values in (patents, trademarks, copyright_assets, enforcement):
+            for item in values:
+                item.setdefault("territorial_effects", [])
+                item.setdefault("right_state", "unknown")
+                item.setdefault("comparison_elements", [])
+                item.setdefault("unresolved_issues", [])
+                item.setdefault("exclusion_basis", [])
     materiality_ledger = load_materiality_ledger(
         task_dir, str(task.get("task_id") or ""),
         **({"task": task} if scenario_workflow_enabled(task) else {}),
@@ -1729,14 +1953,18 @@ def main() -> None:
         "patents": patents, "trademarks": trademarks,
         "copyright_assets": copyright_assets, "enforcement": enforcement,
     }
-    if task.get("schema_version") == "2.4-free":
-        for values in candidates_payload.values():
-            for item in values:
-                item.setdefault("territorial_effects", [])
-                item.setdefault("right_state", "unknown")
-                item.setdefault("comparison_elements", [])
-                item.setdefault("unresolved_issues", [])
-                item.setdefault("exclusion_basis", [])
+    if export_issues:
+        output["official_export_issues"] = export_issues
+    if identity_revision:
+        view = correction_view(candidates_payload, identity_ledger)
+        relationships = relation_view(candidates_payload)
+        relationships["relations"] += view["relations"]
+        output["identity_relationships"] = relationships
+        output["identity_aliases"] = [*view["aliases"], *physical_response_identity_aliases(candidates_payload)]
+        output["identity_correction_head"] = view["head"]
+    from candidate_acquisition import enabled as acquisition_enabled, current_views
+    if acquisition_enabled(task):
+        output["candidate_acquisition_current"] = current_views(evidence, candidates_payload)
     atomic_write_json(task_dir / "normalized-candidates.json", output)
     if task.get("schema_version") == "2.4-free":
         from workflow_v24 import append_candidate_actions

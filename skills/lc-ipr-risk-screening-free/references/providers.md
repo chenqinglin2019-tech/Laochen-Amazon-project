@@ -1,5 +1,7 @@
 # 2.4 免费来源与接口契约
 
+新任务默认使用 `api-first-v3` 与 `final-double-review-v1`，以[API 直接采信与一次最终双审](api-direct-final-review.md)为优先契约。已采信 API 字段不生成官方网页重复核验；过程保留事实分析，取消 09C 阶段双审前置。下文旧修订仅约束保留该版本的历史任务。
+
 新 `workflow-correction-v1` 的三态提交、按需原文成功、本批次/全任务状态和同快照发布复用见[纠错契约](workflow-correction.md)；原免费、访问、时效和来源真实性约束不变。
 
 本文适用于新任务 `2.4-free`、`free_policy_revision=automation-first-v1`。来源的实际能力、检索覆盖与法律结论分别判断；“官方”“免费”“账号存在”“接口有响应”均不等于某模块已经查清。
@@ -11,7 +13,7 @@
 - 数据源支出上限固定 `0 USD`。只执行官方免费服务或已明确选中的商业免费额度；不购买、升级、充值、自动续费、使用付费积分或超额额度。
 - EPO OPS、EUIPO Production、JPO API、INPI API 的账号是可选能力，缺少任一账号只影响相应路线，不阻止商品采集和其他来源继续执行。
 - Serper、Signa、SerpApi 默认关闭，只能在创建任务时分别用 `--enable-serper-free`、`--enable-signa-free`、`--enable-serpapi-free` 选择；仅配置 Key 不会启用。已选但不可用的发现增强记非阻断缺口。
-- 三类商业来源的计划行固定 `required=false`、`required_for=discovery_only`、`requirement_ids=[]`、`authoritative_for_final_rating=false`。可选来源失败不降低已经核实事实的置信度；其发现的实质候选仍必须审阅。
+- 历史 v1/v2 商业发现行保持原 discovery-only 合同。v3 按准确记录与字段采信 API，详情可承担 comparison 或 verification 义务；是否成功、是否已读、字段是否完整分别记录。可选来源失败不降低其他已支持事实的置信度。
 - 自动检索阶段人工只负责登录、验证码、扫码、MFA、访问授权确认。查询、筛选、翻页、下载、取证、比对、独立审阅和报告由 Agent 完成；报告仍可列具体专业或供应链核查事项，用于提高把握或调整已输出的当前评级。受限来源不能改成“请用户搜索、复制结果或截图”。
 - CDP 是浏览器操作方式，不改变站点自动化条款。来源禁止自动查询或没有通过自动执行验收时保留缺口，不以“用户触发”“低频”“可见窗口”推定许可。
 
@@ -35,7 +37,7 @@
 
 ### 可调执行边界
 
-报告校验只完整重算一次可信评估，后续视图复用同次结果；执行缺口从已算覆盖派生。`decision_snapshot` 仅在单次不可变输入作用域复用纯索引/判断，退出核对内容摘要并清空；真实源文件仍核验，不能用mtime或跨运行缓存代替哈希。批次浏览器入口 `run_browser_plan.py --task-dir DIR --query-ids QRY1 QRY2` 只装载协调一次，逐条回执/检查点保持独立，每动作检查当前字节与撤销状态；不提高同源并发，部分成功遇限流也暂停该来源。
+报告校验只完整重算一次可信评估，后续视图复用同次结果；执行缺口从已算覆盖派生。`decision_snapshot` 仅在单次不可变输入作用域复用纯索引/判断，退出核对内容摘要并清空；真实源文件仍核验，不能用mtime或跨运行缓存代替哈希。`work_view_from_dir` 的公开身份调查验收可在同一视图复用同一调查包和准确候选绑定：每个实际文件首次校验真实 SHA-256，退出视图再次读取字节校验；文件变化、缺失、同路径预期哈希冲突或业务输入变化会拒绝整个视图。异常退出清空缓存，不跨视图、任务或原签名复用。批次浏览器入口 `run_browser_plan.py --task-dir DIR --query-ids QRY1 QRY2` 只装载协调一次，逐条回执/检查点保持独立，每动作检查当前字节与撤销状态；不提高同源并发，部分成功遇限流也暂停该来源。
 
 `necessary-work-v1` 新任务的普通浏览器已提交失败，按现有 `source_runs` 中相同 provider、query_id 和完整 `plan_entry_sha256` 计数：初次失败后至多恢复一次，默认值 `cdp.submitted_failure_resume_limit=1` 位于 `references/runtime-config.json`。待办、批次执行器与直接浏览器入口共用同一判断；两次失败后显示 `BROWSER_SUBMITTED_FAILURE_RECOVERY_EXHAUSTED`，保留失败原因、回执引用和次数，不再自动提交。删除状态文件、修改实现摘要均不重置次数；历史无标记任务沿用原行为。成功和部分成功走已有完成／部分结果恢复机制；限流冷却、未提交动作不消耗普通失败次数，未知提交先核验，查询语法拒绝交 Agent 修计划。耗尽仅证明该准确计划行的来源执行受阻，仍须处理其他来源、分类补查和 Agent 调查后才能按阶段报告规则停止。
 
@@ -52,9 +54,14 @@
 - 角色：公开专利召回、书目、分类、同族和法律事件补充；不独立证明授权后目标国现行效力。注册及审批可能受阻，不能设为启动前提。
 - 当前注册免费量为每周 4 GB；任务仍受同账号、本机跨进程周配额账本约束。每次真实数据请求先原子预留，响应后结算；失败或崩溃的未知用量不自动释放。付费 Header、429、配额拒绝或不可信窗口均停止后续请求。[官方免费政策](https://www.epo.org/en/service-support/ordering/fair-use)
 - 2.4 搜索使用 `GET https://ops.epo.org/3.2/rest-services/published-data/search/biblio,abstract?q=<CQL>`，计划参数为 `q/range/right_type`；通过官方 `X-OPS-Range` 请求分页，例如 `1-25`。首轮按文献分别保存标题、摘要、申请人、IPC/CPC、申请号和优先权号；缺失字段不编造。2.3 保持原 search 路径。OAuth Token 在内存缓存。
-- 只有实质候选追加 `candidate_detail`，其中 `detail_operation=biblio|family|legal`，携带已知文献号和 `candidate_id`。这些补充不代替官方单案核验。
+- 只有实质候选追加 `candidate_detail`，携带已知文献号和 `candidate_id`。旧流程保留 `biblio|family|legal`；v3 准确单案缺口可使用 `biblio|fulltext|images|legal`，`family` 仍按发现续查约束处理。v3 按返回字段支持单案判断；历史法律事件不自动证明现行有效，只有影响结论的具体字段缺口才补查。
+- v3 `images` 先读取 `published-data/publication/epodoc/<准确文献号>/images`，使用 `Accept: application/ops+xml`；仅依据同一记录实际返回的 `document-instance/fullimage` 链接和声明媒体格式读取一页。媒体请求使用例如 `Accept: application/tiff`，`X-OPS-Range` 为单一页码；优先 `DRAWINGS` 的 `start-page`。不猜测 S1 链接、不使用缩略图替代原图。取得一页不代表完整设计视图；原 XML、媒体文件与哈希保留，PDF 未读时不声明图样比较完成。
+- v3 精确补证的每个真实数据 HTTP 请求分别计入配置 `limits.epo_candidate_detail_limit` 的原有任务上限（当前 20 次），询问元数据和读取媒体各计一次；预留以 `epo-data-http-attempts.json` 留存，最终回执关联同一预留，不重复计数。历史未追踪请求、提交未知及崩溃预留继续占额；不会通过恢复扩大额度。已收到数据端 HTTP 406/404 的新请求记为已提交失败，404 fulltext 仅表示该接口未提供该文献内容，不证明专利不存在；旧 unknown 回执通过恢复审查附加记录，不改写历史。
 - `2.3` 保留每任务 6 次搜索；`2.4` 使用独立 `limits.epo_search_queries_per_task_v24=96`，供多国、多维查询使用。提高本地次数不提高 4 GB 免费边界，也不证明检索充分；达到次数或字节门槛均记缺口。
 - 生产搜索必须包含可识别的搜索 envelope 和 `total-result-count`；2.4 正命中还须核对响应 `ops:range` 与请求分页一致，服务器返回第一页不能冒充后续页。异常 XML、缺失身份字段、与计数冲突的空页不能是 `no_result`。首屏 25/500 条会记录截断。新增书目路径与页码核对已做离线契约测试，本次没有获批账号的线上验证。
+- `ops-cql-v1` 使用 `pn=US`、`pn=EP` 等国家代码过滤，不对两字母国家代码追加通配符。产品文字、申请人、发明人及分类分别使用 `ta/pa/in/ipc|cpc`；短语与显式 Boolean 语义分开编译。非法通配符、括号和未支持操作符在出网前拒绝；OPS 返回明确 CQL 语法 fault 时记录为已提交的查询语法错误，不记零结果或提交未知。
+
+图样接口依据：官方文档 3.1.3 节及 [OPS 图片返回格式说明](https://www.epo.org/en/service-support/faq/searching-patents/open-patent-services/search-queries-tips-and-tricks/what-do-0)。
 
 接口依据：[OPS 官方技术文档](https://link.epo.org/web/searching-for-patents/data/en-ops-v3.2-documentation-version-1.3.20.pdf)。
 
@@ -102,9 +109,9 @@ JPO 号码核验成功不能填补 J-PlatPat 关键词、图像召回缺口；�
 
 初始提供 2,500 次免费查询，无需信用卡；不是每月恢复的额度。仅使用 `patents/search/images`，任务共 10 次，上限分别 4/3/3；文字 Images 不等于反向图片搜索。[官方免费额度](https://serper.dev/)
 
-**2.4 当前不发送 Serper 计量查询。** 只有 Key 或本地 `allow_paid=false` 无法证实账号仍有免费额度、没有付费 credits 且没有自动充值；本版本尚未实现和验收官方账户页自动取证。因此在网络请求前记录 `FREE_ACCOUNT_UNVERIFIED`，保留精确的 SerpApi fallback。2.3 历史执行规则维持原契约。
+**以下固定停止仅描述无 API-first 标记的历史 2.4 任务。** 只有 Key 或本地 `allow_paid=false` 无法证实账号仍有免费额度、没有付费 credits 且没有自动充值；本版本尚未实现和验收官方账户页自动取证。因此在网络请求前记录 `FREE_ACCOUNT_UNVERIFIED`，保留精确的 SerpApi fallback。2.3 历史执行规则维持原契约。
 
-当前更稳妥的免费发现接入是 SerpApi，因为其 Account API 能在计量请求前核实套餐、余额和付费积分。Serper 客户端既有发现与解析代码保留，未来须先由 Agent 从官方账户页自动核实免费权益并建立跨任务账本；人工仅协助登录，不抄余额、不提交任意 JSON 充当证明。搜索摘要、图片结果和 Google Patents 聚合状态只能发现线索。
+当前更稳妥的免费发现接入是 SerpApi，因为其 Account API 能在计量请求前核实套餐、余额和付费积分。Serper 客户端既有发现与解析代码保留，未来须先由 Agent 从官方账户页自动核实免费权益并建立跨任务账本；人工仅协助登录，不抄余额、不提交任意 JSON 充当证明。v3 的摘要、图片和完整记录按实际字段分别使用；未截断且身份、地域、时效匹配的有效记录直接支持对应判断。
 
 ### SerpApi Google Patents 与 Google Lens
 
@@ -141,3 +148,7 @@ OEPM 免费 Web Services、Google BigQuery Sandbox 公共专利数据、UKIPO �
 # 本地阶段计时
 
 `runtime-timings.jsonl` 是快照之外的辅助计时，不是取证日期或业务完成证明。新专项任务的合并、分流、评估定稿、报告构建和验证入口以 monotonic 时钟记录 `cli_main_inclusive` 耗时；报告构建包含该入口原有验证与渲染，不称纯 HTML 渲染时间。浏览器/API 的单动作、初始化及调度耗时复用已有字段，不重复统计。历史任务无新修订标记且无显式输出目录时不写计时；日志写入失败不得改变业务返回值或异常。
+
+`next_work.py` 与 `advance_work.py` 的打印结果额外提供 `runtime_progress`：只读最近至多五条**已结束**的计时和当前工作视图中的**待推进**步骤。`pending` 表示需要推进，`waiting` 表示等资料或权限；`current_activity=unconfirmed` 明确表示没有跨进程实时活动证明。既有原生审阅若启动时没有活动记录，也不得据耗时日志推断正在运行或推算实时耗时。此打印字段不写入工作视图、状态摘要、证据或双审输入；旧任务仍只读，损坏/缺失计时日志仅使最近耗时为空。日志只公开固定阶段标签、实际 monotonic 耗时和结束状态，不公开异常文本、凭据或文件路径。
+
+本地子步骤使用 `runtime_timing.timed_step(directory, stage)`，在原操作外包裹上下文即可记录 `render`、`semantic_check`、`copy`、`entry_check`、`model_review`、`freeze` 等实际阶段。显式指定已有目录；不创建目录，也不读取或修改业务输入。每条记录的 `step_inclusive` 是包含内部调用的耗时，不能与嵌套步骤或 `cli_main_inclusive` 相加。未运行的步骤不产生成功计时；日志失败或锁竞争直接丢弃该辅助记录，不重做业务操作。计时不参与证据、双审或交付授权。

@@ -9,10 +9,11 @@ from copy import deepcopy
 from pathlib import Path
 import re
 
-from common import atomic_write_json, load_json, sha256_json, sha256_file, now_iso
+from common import (atomic_write_json, load_json, sha256_json, sha256_file, now_iso,
+    api_first_revision_enabled, API_FIRST_REVISION, API_FIRST_V3_REVISION)
 from completion_policy import evidence_delivery_enabled
 
-REVISION = "api-first-v1"
+REVISION = API_FIRST_REVISION
 META_FIELDS = frozenset({"retrieval_workflow_revision", "discovery_intent_id", "discovery_role",
     "refinement_round", "parent_query_id", "parent_plan_entry_sha256", "source_index", "discovery_scope"})
 INDEX = {"serper_patents": "google_patents", "serpapi_google_patents": "google_patents",
@@ -20,18 +21,125 @@ INDEX = {"serper_patents": "google_patents", "serpapi_google_patents": "google_p
     "signa": "signa", "epo_ops": "epo_ops", "euipo_trademark": "euipo", "euipo_design": "euipo",
     "inpi_api": "inpi", "uspto_patent_browser": "uspto_pps", "uspto_tmsearch_browser": "uspto_tmsearch"}
 API_PROVIDERS = frozenset(p for p in INDEX if not p.endswith("browser"))
+KEYWORD_DISCOVERY_PROVIDERS = frozenset({*API_PROVIDERS,
+    "uspto_patent_browser", "uspto_tmsearch_browser"})
+KEYWORD_DISCOVERY_OPERATIONS = frozenset({
+    "search", "patents", "images", "patent_recall", "design_recall", "trademark_recall",
+})
 FOLLOWUP_ROLES = frozenset({"refinement", "fallback", "browser_fallback"})
 REASONS = frozenset({"source_unavailable", "zero_results", "insufficient_relevant_candidates", "refine_scope"})
 
 
+def _plan_revision(task):
+    return API_FIRST_V3_REVISION if task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION else REVISION
+
+
 def enabled(task):
-    return task.get("retrieval_workflow_revision") == REVISION
+    return api_first_revision_enabled(task.get("retrieval_workflow_revision"))
+
+
+def _has_keyword_discovery_route(requirements: list[dict]) -> bool:
+    """Whether a requirement exposes a route that can actually consume search terms."""
+    for requirement in requirements:
+        routes = requirement.get("routes") if isinstance(requirement, dict) else None
+        if isinstance(routes, list) and any(isinstance(route, dict)
+                and route.get("provider") in KEYWORD_DISCOVERY_PROVIDERS
+                and route.get("operation") in KEYWORD_DISCOVERY_OPERATIONS for route in routes):
+            return True
+    return False
+
+
+def _has_agent_provenance_route(requirements: list[dict]) -> bool:
+    for requirement in requirements:
+        routes = requirement.get("routes") if isinstance(requirement, dict) else None
+        if isinstance(routes, list) and any(isinstance(route, dict)
+                and route.get("provider") == "asset_provenance"
+                and route.get("operation") == "provenance_review"
+                and route.get("method") == "agent" for route in routes):
+            return True
+    return False
+
+
+def _provenance_only_scope(requirements: list[dict]) -> bool:
+    """A scope served only by reviewed Agent provenance work has no term API route."""
+    return (_has_agent_provenance_route(requirements)
+        and not _has_keyword_discovery_route(requirements))
+
+
+def _eligible_scope_terms(task, terms, country, right):
+    """Return the terms initial planning may use for this country/right scope."""
+    from workflow_v24 import _applicable, _target_language_compatible
+    from coverage_v3 import public_discovery_enabled
+    public_routes = public_discovery_enabled(task)
+    special_right = right in {"copyright", "trade_dress", "unregistered_design"} or (
+        right == "enforcement" and task.get('retrieval_workflow_revision') == 'api-first-v3')
+    product_asset_terms = {"product", "ocr", "manufacturer"}
+    if (right in {'trade_dress','unregistered_design'} and task.get('retrieval_workflow_revision') == 'api-first-v3'
+            or right == 'copyright' and public_routes):
+        product_asset_terms.update({'design','structural_feature','feature'})
+    if right == 'enforcement' and task.get('retrieval_workflow_revision') == 'api-first-v3':
+        product_asset_terms.update({"design", "structural_feature", "function", "feature"})
+    eligible = [t for t in terms if _target_language_compatible(t, country) and
+        (_applicable(t, right, task=task) if not special_right
+        else t.get("kind") in product_asset_terms
+         and "mark_inventory" not in str(t.get("derived_from", "")))]
+    import product_scope as ps
+    if ps.enabled(task) and not (right == 'enforcement'
+            and task.get('retrieval_workflow_revision') == API_FIRST_V3_REVISION and not public_routes):
+        eligible = [t for t in eligible if ps.term_allowed(task, t, right)]
+    if right == 'enforcement' and public_routes:
+        # A byline placeholder cannot identify the party enforcing a right.
+        eligible = [t for t in eligible if str(t.get('value') or '').strip().casefold()
+                    not in {'generic', 'unbranded', 'n/a', 'unknown'}]
+    if right == "trademark_figurative":
+        eligible = [t for t in eligible if t.get("kind") not in {"brand", "ocr"}]
+    return eligible
+
+
+def _scope_image_term(task, image, right):
+    """Bind an image-only clue to a retained included object and its direction.
+
+    An image has no search-text language. Do not invent English descriptions
+    or rebind an unrelated title term to an appearance direction.
+    """
+    import product_scope as ps
+    from coverage_v3 import public_discovery_enabled
+    if not public_discovery_enabled(task) or not ps.enabled(task):
+        return None
+    data = ps.scope(task)
+    for index, obj in enumerate(data['objects']):
+        if (obj.get('scope_status') != 'included' or right not in obj.get('right_types', [])
+                or image.get('image_id') not in obj.get('visual_evidence', {}).get('image_ids', [])):
+            continue
+        term = {'kind': 'design', 'value': image['source_url'], 'language': '',
+                'derived_from': 'product.scope_objects[%s]' % index,
+                'discovery_channel': 'image', 'image_url': image['source_url'],
+                'image_only': True}
+        if ps.term_allowed(task, term, right):
+            return term
+    return None
 
 
 def intent_id(country, right, dimension, term):
     # A revised expression belongs to its original intent, not a new quota.
     return "INT-" + sha256_json({"country": country, "right": right, "dimension": dimension,
         "term": {k: term.get(k) for k in ("kind", "value", "language", "derived_from")}})[:20]
+
+
+def frozen_expression_matches(row, term):
+    """Accept the original term hash or its pre-fact-metadata schema only.
+
+    Query execution and semantic gates still validate current product facts.
+    This only distinguishes the same expression from a real expression change.
+    """
+    basis = row.get('discovery_scope', {}).get('expression_basis', {})
+    if not isinstance(term, dict) or any(basis.get(key, '') != term.get(source, '')
+            for key, source in (('kind', 'kind'), ('value', 'value'), ('language', 'language'),
+                                ('source', 'derived_from'))):
+        return False
+    original = {key: value for key, value in term.items()
+        if key not in {'fact_id', 'fact_version', 'fact_nature', 'fact_verification'}}
+    return basis.get('term_sha256') in {sha256_json(term), sha256_json(original)}
 
 
 def dimension(term):
@@ -92,7 +200,8 @@ def google_query(term):
     return " ".join(result)
 
 
-def provider_params(provider, term, country, right, *, page=1):
+def provider_params(provider, term, country, right, *, page=1, epo_query_revision=None,
+                    retrieval_revision=None, public_discovery_revision=None):
     from workflow_v24 import _api_params, LANGUAGES
     if provider == "serpapi_google_lens":
         image_url = str(term.get("image_url") or "")
@@ -102,6 +211,9 @@ def provider_params(provider, term, country, right, *, page=1):
             "country": country.lower()}
     if provider.startswith("serper_"):
         query = google_query(term)
+        if (right == 'enforcement' and provider == 'serper_web' and retrieval_revision == API_FIRST_V3_REVISION
+                and public_discovery_revision == 'public-discovery-v1'):
+            query = '(%s) (lawsuit OR litigation OR infringement OR "intellectual property" OR takedown)' % query
         if provider == "serper_patents":
             query = f"({query}) country:{'EP' if country == 'EU' else country}"
         return {"q": query, "num": 10, "gl": "fr" if country == "EU" else country.lower(),
@@ -109,19 +221,30 @@ def provider_params(provider, term, country, right, *, page=1):
     if provider == "serpapi_google_patents":
         if page != 1:
             raise ValueError("API_DISCOVERY_PAGINATION_UNSUPPORTED")
-        return {"q": google_query(term), "num": 10, "country": "EP" if country == "EU" else country}
+        params = {"q": google_query(term), "num": 10, "country": "EP" if country == "EU" else country}
+        # Google Patents exposes a native design filter.  Do not approximate
+        # US design discovery with a general patent query.
+        if right == "design":
+            params["type"] = "DESIGN"
+        return params
     if provider == "signa":
         from generate_search_plan import signa_discovery_entry
         from common import load_skill_config
-        office = load_skill_config().get("providers", {}).get("signa", {}).get("office_map", {}).get(country)
-        if not office:
+        countries = country.split(",") if isinstance(country, str) else []
+        office_map = load_skill_config().get("providers", {}).get("signa", {}).get("office_map", {})
+        offices = [office_map.get(value) for value in countries]
+        if (not countries or len(countries) > 10 or len(set(countries)) != len(countries)
+                or any(not value or value.strip() != value or value.upper() != value for value in countries)
+                or any(not office for office in offices) or len(set(offices)) != len(offices)):
             raise ValueError("API_DISCOVERY_ROUTE_UNSUPPORTED")
-        # Keep the established Signa wire contract, but one country intent.
-        row = signa_discovery_entry(country, term["value"], [term["derived_from"]], [office])
+        # One physical multi-office request can serve separately reviewed
+        # country scopes. Its source run and provider budget remain singular.
+        row = signa_discovery_entry(country, term["value"], [term["derived_from"]], offices)
         from provider_utils import PLAN_META_KEYS
         return {k: v for k, v in row.items() if k not in PLAN_META_KEYS}
     params = _api_params(provider, term, country, right,
-        query_compiler_revision="ppubs-boolean-v2" if provider == "uspto_patent_browser" and term.get("strategy") == "boolean" else None)
+        query_compiler_revision=("ppubs-boolean-v2" if provider == "uspto_patent_browser" and term.get("strategy") == "boolean"
+            else epo_query_revision if provider == "epo_ops" else None))
     if params is None:
         raise ValueError("API_DISCOVERY_ROUTE_UNSUPPORTED")
     return params
@@ -142,24 +265,57 @@ def make_row(task, provider, term, country, right, requirements, *, parent=None,
         "serpapi_google_patents": "search", "serpapi_google_lens": "image_search", "signa": "trademark_search",
         "uspto_patent_browser": "design_recall" if right == "design" else "patent_recall",
         "uspto_tmsearch_browser": "trademark_recall"}.get(provider, "search")
-    params = provider_params(provider, term, country, right)
+    params = provider_params(provider, term, country, right, epo_query_revision=task.get("epo_query_revision"),
+                             retrieval_revision=task.get('retrieval_workflow_revision'),
+                             public_discovery_revision=task.get('public_discovery_routing_revision'))
     if "num" in params:
         params["num"] = policy_limit(task, "discovery_results_per_query", 10)
     axis = parent.get("search_dimension") if parent else dimension(term)
     if evidence_delivery_enabled(task) and axis == "image" and provider not in {"serpapi_google_lens", "serper_images"}:
         raise ValueError("API_DISCOVERY_IMAGE_ROUTE_UNSUPPORTED")
-    iid = parent["discovery_intent_id"] if parent else intent_id(country, right, axis, term)
+    if provider == "serpapi_google_lens" and task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION \
+            and right not in {"copyright", "design", "trademark_figurative", "trade_dress", "unregistered_design"}:
+        raise ValueError("API_DISCOVERY_IMAGE_ROUTE_UNSUPPORTED")
+    from discovery_budget import enabled as purpose_budget_enabled, purpose_id
+    if parent:
+        iid = parent["discovery_intent_id"]
+    else:
+        iid = purpose_id(country, right, axis, term,
+            term.get("scenario_id") or task.get("primary_scenario_id")) if purpose_budget_enabled(task) else intent_id(country, right, axis, term)
     row = entry(provider, operation, country, params, right_type=right, required=False,
         requirement_ids=requirements, required_for="discovery_only", derived_from=[term["derived_from"]],
         wave=1 if role == "primary" else 2)
+    if provider == "serpapi_google_lens":
+        from product_delivery import enabled as delivery_enabled, selected_public_image, query_row_binding
+        if delivery_enabled(task):
+            image = selected_public_image(task)
+            if image is None or image.get("source_url") != term.get("image_url"):
+                raise ValueError("QUERY_IMAGE_INPUT_OR_PERMISSION_UNAVAILABLE")
+            row.update(query_row_binding(task, image))
     row.update(role="discovery_only", authoritative_for_final_rating=False, execute_by_default=True,
         search_dimension=axis, search_language=term.get("language", ""),
-        execution_phase="discovery_fallback" if role == "browser_fallback" else "discovery" if role == "primary" else "expansion",
-        retrieval_workflow_revision=REVISION, discovery_intent_id=iid, discovery_role=role,
+        execution_phase="discovery_fallback" if role == "browser_fallback" or (provider.endswith("browser") and role == "refinement" and purpose_budget_enabled(task)) else "discovery" if role == "primary" else "expansion",
+        retrieval_workflow_revision=_plan_revision(task), discovery_intent_id=iid, discovery_role=role,
         refinement_round=(parent.get("refinement_round", 0) + 1 if role == "refinement" else parent.get("refinement_round", 0)) if parent else 0,
         source_index=INDEX[provider], discovery_scope={"mode": "bounded", "max_pages": policy_limit(task, "max_pages_per_query", 8) if role == "browser_fallback" else 1,
             "max_candidates": policy_limit(task, "browser_fallback_max_candidates", 50) if role == "browser_fallback" else 25 if provider in {"epo_ops", "euipo_trademark", "euipo_design", "inpi_api", "signa"} else params.get("num", 10),
             "review_all_returned": True})
+    if purpose_budget_enabled(task):
+        row["discovery_scope"]["purpose_basis"] = deepcopy(parent["discovery_scope"]["purpose_basis"] if parent else {
+            "scenario_id":term.get("scenario_id") or task.get("primary_scenario_id"),
+            "clue_source":term["derived_from"], "problem_id":term.get("discovery_problem_id"),
+            "problem_reason":term.get("discovery_problem_reason"),
+            "different_from_purpose_id":term.get("different_from_purpose_id")})
+    from discovery_semantics import enabled as semantics_enabled
+    if semantics_enabled(task):
+        row["discovery_scope"]["expression_basis"] = {
+            "kind":term["kind"],"value":term["value"],"language":term.get("language", ""),
+            "source":term["derived_from"],"term_sha256":sha256_json(term)}
+    if task.get("retrieval_workflow_revision") in {REVISION, API_FIRST_V3_REVISION}:
+        from provider_routing import priority, source_upstream
+        row["provider_role"] = dict(priority(country, right, "discovery",
+            revision=task.get("retrieval_workflow_revision"))).get(provider, "fallback")
+        row["source_upstream"] = source_upstream(provider)
     if provider == "serpapi_google_lens":
         row["discovery_scope"].update(requested_candidates=policy_limit(task, "discovery_results_per_query", 10),
             response_limit_enforceable=False)
@@ -171,6 +327,8 @@ def make_row(task, provider, term, country, right, requirements, *, parent=None,
         row.update(parent_query_id=parent["query_id"], parent_plan_entry_sha256=sha256_json(parent))
     if provider == "uspto_tmsearch_browser":
         row["query_compiler_revision"] = "tm-figurative-fields-v1" if right == "trademark_figurative" else "tm-field-tags-v1"
+    elif provider == "epo_ops" and task.get("epo_query_revision"):
+        row["query_compiler_revision"] = task["epo_query_revision"]
     if evidence_delivery_enabled(task) and provider.endswith("browser"):
         from record_browser_execution import planned_browser_query
         try:
@@ -179,7 +337,24 @@ def make_row(task, provider, term, country, right, requirements, *, parent=None,
             unsupported_field = (provider == "uspto_tmsearch_browser" and term.get("kind") not in
                 {"brand", "ocr", "translation", "design_code", "mark_description"})
             raise ValueError("API_DISCOVERY_ROUTE_UNSUPPORTED" if unsupported_field else "API_DISCOVERY_QUERY_SYNTAX_UNSUPPORTED") from exc
-    return bind_scenario_action(task, provider, row, purpose="discovery", obligation_key=iid)
+    row = bind_scenario_action(task, provider, row, purpose="discovery", obligation_key=iid)
+    from coverage_v3 import public_discovery_enabled
+    if public_discovery_enabled(task) and right == 'enforcement':
+        import product_scope as ps
+        if ps.enabled(task) and not row.get('product_dependencies'):
+            raise ValueError('PRODUCT_SCOPE_REVIEW_REQUIRED')
+    from product_delivery import bind_fact_versions
+    row = bind_fact_versions(task, row)
+    # entry() calculates its ID before api-first and scenario metadata are
+    # attached.  The authorization contract deliberately binds those fields,
+    # so regenerate the ID only after the final wire parameters are known.
+    if provider.startswith("serper_"):
+        from common import _serper_expected_query_id
+        row["query_id"] = _serper_expected_query_id(provider, operation, country, row)
+    elif provider == "serpapi_google_patents":
+        from common import _serpapi_expected_query_id
+        row["query_id"] = _serpapi_expected_query_id(row)
+    return row
 
 
 def _account(provider):
@@ -196,10 +371,33 @@ def _preferred_providers(task, right, term, capabilities, country=None):
     # Current accepted APIs are preferred when their credential/capability proof
     # exists; browser access is never created here as a startup side effect.
     if term.get("discovery_channel") == "image":
-        if (right == "copyright" or evidence_delivery_enabled(task) and right in {"design", "trademark_figurative"}) and term.get("image_url") and serpapi_free_enabled(task):
+        if (right == "copyright" or
+                evidence_delivery_enabled(task) and right in {"design", "trademark_figurative"} or
+                task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION and right in {"trade_dress", "unregistered_design"}) \
+                and term.get("image_url") and serpapi_free_enabled(task):
             yield "serpapi_google_lens"
-        if serper_free_enabled(task):
+        if serper_free_enabled(task) and not term.get('image_only'):
             yield "serper_images"
+        return
+    if task.get("retrieval_workflow_revision") in {REVISION, API_FIRST_V3_REVISION} and country:
+        from provider_routing import priority
+        for provider, _role in priority(country, right, "discovery", revision=task.get("retrieval_workflow_revision")):
+            if provider in {"epo_ops", "inpi_api", "euipo_trademark", "euipo_design"}:
+                if capabilities.get(provider, {}).get("executable"):
+                    yield provider
+            elif provider == "signa" and signa_free_enabled(task):
+                yield provider
+            elif provider.startswith("serper_") and serper_free_enabled(task):
+                yield provider
+            elif provider == "serpapi_google_patents" and serpapi_free_enabled(task):
+                # Preserve the v2 fallback contract. V3 keeps all eligible
+                # APIs in order and selects only one per discovery intent;
+                # an unavailable Serper route must not force a browser call.
+                if task.get("retrieval_workflow_revision") != API_FIRST_V3_REVISION and serper_free_enabled(task):
+                    continue
+                yield provider
+            else:
+                continue
         return
     if evidence_delivery_enabled(task) and country:
         for requirement in task.get("coverage_requirements", []):
@@ -217,6 +415,30 @@ def _preferred_providers(task, right, term, capabilities, country=None):
         yield "serper_patents" if right in {"patent", "utility_model", "design"} else "serper_web"
     if right in {"patent", "design"} and serpapi_free_enabled(task) and not serper_free_enabled(task):
         yield "serpapi_google_patents"
+
+
+
+def _advisory_gap_has_frozen_query(task, plan, gap):
+    """Do not duplicate an append-only advisory whose exact expression has a query."""
+    from discovery_budget import enabled as purpose_enabled, purpose_id
+    code, country, right = gap.get('code'), gap.get('jurisdiction'), gap.get('right_type')
+    def same_intent(term):
+        actual = (purpose_id(country, right, gap['search_dimension'], term,
+            term.get('scenario_id') or task.get('primary_scenario_id')) if purpose_enabled(task)
+            else intent_id(country, right, gap['search_dimension'], term))
+        return actual == gap.get('discovery_intent_id')
+    return (task.get('retrieval_workflow_revision') == 'api-first-v3'
+                and gap.get('blocking_planning') is False
+                and code in {'API_DISCOVERY_BUDGET_RESERVED_FOR_FOLLOWUP',
+                             'API_DISCOVERY_PURPOSE_EXPRESSION_REVIEW_REQUIRED'}
+                and any(row.get('discovery_intent_id') == gap.get('discovery_intent_id')
+                    and (row.get('jurisdiction'), row.get('right_type')) == (country, right)
+                    and row.get('search_dimension') == gap.get('search_dimension')
+                    and any(same_intent(term)
+                        and frozen_expression_matches(row, term)
+                        and gap.get('derived_from') == [term.get('derived_from')]
+                        for term in plan.get('terms', []) if isinstance(term, dict))
+                    for values in plan.get('queries', {}).values() for row in values))
 
 
 def _capacity_rows(task, plan, evidence):
@@ -255,7 +477,8 @@ def account_stop_reason(provider, evidence):
 def _planning_gap_term(task, plan, gap):
     terms = list(plan.get("terms", []))
     if gap.get("search_dimension") == "image":
-        image = next((i for i in task.get("images", []) if str(i.get("source_url", "")).startswith("https://")), None)
+        from product_delivery import selected_public_image
+        image = selected_public_image(task)
         if image:
             terms.extend({**term, "discovery_channel": "image", "image_url": image["source_url"]} for term in plan.get("terms", []))
     matches = [term for term in terms if sha256_json(term) == gap.get("term_id")]
@@ -312,10 +535,12 @@ def gap_limit_still_current(task, plan, evidence, candidates, ledger, gap, capab
         basis = _capability_basis(task, snapshot, provider, country, right, term)
         if basis is None:
             continue
-        count = sum(p.endswith("browser") and r.get("discovery_role") == "browser_fallback"
-            and (r.get("jurisdiction"), r.get("right_type")) == (country, right) for p, r in rows)
-        if count >= policy_limit(task, "browser_fallback_queries_per_scope", 2):
-            continue
+        from discovery_budget import enabled as purpose_budget_enabled
+        if not purpose_budget_enabled(task):
+            count = sum(p.endswith("browser") and r.get("discovery_role") == "browser_fallback"
+                and (r.get("jurisdiction"), r.get("right_type")) == (country, right) for p, r in rows)
+            if count >= policy_limit(task, "browser_fallback_queries_per_scope", 2):
+                continue
         try:
             make_row(task, provider, term, country, right, gap.get("requirement_ids", []),
                 role="browser_fallback", capability_basis=basis)
@@ -400,7 +625,7 @@ def _capability_basis(task, snapshot, provider, country, right, term):
             reasons.append({"provider": api, "reason": cap.get("reason") or "SOURCE_CAPABILITY_UNAVAILABLE"})
             continue
         try:
-            provider_params(api, term, country, right)
+            provider_params(api, term, country, right, epo_query_revision=task.get("epo_query_revision"))
         except ValueError as exc:
             reasons.append({"provider": api, "reason": str(exc)})
             continue
@@ -463,9 +688,9 @@ def _figurative_not_applicable(task, plan, evidence, candidates, ledger, sid, co
     return set(INVESTIGATION_STEPS["trademark_figurative"]) <= completed
 
 
-def append_initial(task_dir, task, terms, queries, gaps, expansion_queue):
+def append_initial(task_dir, task, terms, queries, gaps, expansion_queue, *, retained_terms=None):
     """Round-robin countries and rights without dropping unplanned clues."""
-    from workflow_v24 import _applicable, _target_language_compatible, _add
+    from workflow_v24 import _add
     from decision_workflow import scenario_index, necessary_scenario_right_types
     cap_path = Path(task_dir) / "source-capabilities.json"
     raw_caps = load_json(cap_path) if cap_path.is_file() else {}
@@ -478,8 +703,12 @@ def append_initial(task_dir, task, terms, queries, gaps, expansion_queue):
         from workflow_v24 import scenario_supplement
         supplement = scenario_supplement(Path(task_dir), task=task, evidence=evidence)
     applicable_rights = set().union(*(necessary_scenario_right_types(task, s) for s in scenario_index(task).values()))
+    v3 = task.get('retrieval_workflow_revision') == 'api-first-v3'
+    if v3:
+        applicable_rights.update(r.get('right_type') for r in task.get('coverage_requirements', [])
+            if r.get('phase') == 'provenance' and r.get('right_type') in {'trade_dress','unregistered_design'})
     requirements = [r for r in task.get("coverage_requirements", []) if r.get("phase") in {"official_recall", "provenance"}
-        and r.get("right_type") in applicable_rights]
+        and (r.get("right_type") in applicable_rights or v3 and r.get('right_type') == 'enforcement')]
     buckets = {}
     for country in task["target_jurisdictions"]:
         for right in sorted({r["right_type"] for r in requirements if r["jurisdiction"] == country}):
@@ -489,38 +718,59 @@ def append_initial(task_dir, task, terms, queries, gaps, expansion_queue):
                 if relevant_scenarios and all(_figurative_not_applicable(task, context_plan, evidence, candidates, ledger,
                         sid, country, supplement) for sid in relevant_scenarios):
                     continue
-            refs = [r["requirement_id"] for r in requirements if (r["jurisdiction"], r["right_type"]) == (country, right)]
-            eligible = [t for t in terms if _target_language_compatible(t, country) and
-                (_applicable(t, right, task=task) if right not in {"copyright", "trade_dress", "unregistered_design"}
-                 else t["kind"] in {"product", "ocr", "manufacturer"} and "mark_inventory" not in str(t.get("derived_from", "")))]
-            if right == "trademark_figurative":
-                eligible = [t for t in eligible if t["kind"] not in {"brand", "ocr"}]
+            scoped_requirements = [r for r in requirements
+                if (r.get("jurisdiction"), r.get("right_type")) == (country, right)]
+            refs = [r["requirement_id"] for r in scoped_requirements]
+            provenance_only = _provenance_only_scope(scoped_requirements)
+            eligible = _eligible_scope_terms(task, terms, country, right)
 
             # Interleave dimensions within a country/right instead of consuming
             # all shared credit on the first language or one category of terms.
-            public_image = next((i for i in task.get("images", []) if str(i.get("source_url", "")).startswith("https://")), None)
-            if eligible and public_image and right in {"design", "copyright", "trademark_figurative"}:
-                eligible = [*eligible, {**eligible[0], "discovery_channel": "image", "image_url": public_image["source_url"]}]
+            from product_delivery import selected_public_image
+            public_image = selected_public_image(task)
+            image_rights = {"design", "copyright", "trademark_figurative"}
+            if v3:
+                image_rights.update({"trade_dress", "unregistered_design"})
+            if public_image and right in image_rights:
+                image_term = _scope_image_term(task, public_image, right) if v3 else None
+                if image_term:
+                    if image_term not in terms:
+                        terms.append(image_term)
+                    if retained_terms is not None and image_term not in retained_terms:
+                        retained_terms.append(image_term)
+                    eligible = [*eligible, image_term]
+                elif eligible:
+                    eligible = [*eligible, {**eligible[0], "discovery_channel": "image", "image_url": public_image["source_url"]}]
             dimensions = {}
             for term in eligible:
                 dimensions.setdefault(dimension(term), []).append(term)
             ordered = [values[i] for i in range(max(map(len, dimensions.values()), default=0))
                 for values in dimensions.values() if i < len(values)]
             buckets[(country, right)] = [(t, refs) for t in ordered]
-            if not ordered:
+            if not ordered and not provenance_only:
                 gaps.append({"code": "API_DISCOVERY_TERMS_MISSING", "jurisdiction": country, "right_type": right,
                     "requirement_ids": refs, "assigned_to": "agent", "blocking_planning": False})
     limits = _limits(task)
     # Leave shared credit for evidence-driven follow-ups, with no endpoint split.
     initial_limits = {p: n - (max(2, n // 4) if n >= 8 else 0) for p, n in limits.items()}
     capacity_rows = _capacity_rows(task, context_plan, evidence) if v2 else [(p, r) for p, rows in queries.items() for r in rows]
-    used = {p: sum(_account(provider) == p for provider, row in capacity_rows) for p in limits}
+    budget_rows = capacity_rows
+    if v3:
+        from candidate_api_actions import _physical_planned
+        physical_lens = {row['query_id'] for row in _physical_planned(task, evidence, queries,
+            {'serpapi_google_lens'}, plan=context_plan, task_dir=task_dir)}
+        budget_rows = [(provider, row) for provider, row in capacity_rows
+            if provider != 'serpapi_google_lens' or row['query_id'] in physical_lens]
+    used = {p: sum(_account(provider) == p for provider, row in budget_rows) for p in limits}
     release = {account: _reserve_release_basis(task, context_plan, evidence, candidates, ledger, account, supplement)
         for account in limits} if v2 else {}
     for account, basis in list(release.items()):
         if basis and _release_basis_files_error(task_dir, evidence, basis):
             release[account] = None
-    existing = {r.get("discovery_intent_id") for values in queries.values() for r in values
+    from coverage_v3 import public_discovery_enabled
+    intent_rows = [row for _, row in capacity_rows] if public_discovery_enabled(task) else [
+        row for values in queries.values() for row in values]
+    existing = {r.get("discovery_intent_id") for r in intent_rows
         if r.get("discovery_role") == "primary" or v2 and r.get("discovery_scope", {}).get("capability_basis")}
     countries = {country: i for i, country in enumerate(task["target_jurisdictions"])}
     rights = {r: i for i, r in enumerate(("patent", "design", "utility_model", "trademark_word", "trademark_figurative", "copyright", "trade_dress", "unregistered_design"))}
@@ -546,13 +796,37 @@ def append_initial(task_dir, task, terms, queries, gaps, expansion_queue):
             if row.get("action_purpose") == "discovery"}
         order.sort(key=lambda item: (*item[0], dimension(item[1][0])) in covered)
     for (country, right), (term, refs) in order:
-        iid = intent_id(country, right, dimension(term), term)
+        from discovery_budget import enabled as purpose_budget_enabled, purpose_id
+        iid = purpose_id(country, right, dimension(term), term,
+            term.get("scenario_id") or task.get("primary_scenario_id")) if purpose_budget_enabled(task) else intent_id(country, right, dimension(term), term)
         if iid in existing:
+            if purpose_budget_enabled(task):
+                if not any(row.get('discovery_intent_id') == iid
+                    and frozen_expression_matches(row, term)
+                    for _, row in capacity_rows):
+                    gaps.append({"code":"API_DISCOVERY_PURPOSE_EXPRESSION_REVIEW_REQUIRED",
+                        "discovery_intent_id":iid,"jurisdiction":country,"right_type":right,
+                        "search_dimension":dimension(term),"requirement_ids":refs,
+                        "derived_from":[term["derived_from"]],"term_id":sha256_json(term),
+                        "assigned_to":"agent","blocking_planning":False})
             continue
         reason, selected = "API_DISCOVERY_ROUTE_UNAVAILABLE", None
         stopped_sources = []
         for provider in _preferred_providers(task, right, term, capabilities, country):
             account = _account(provider)
+            if v3 and provider == 'serpapi_google_lens':
+                from candidate_api_actions import planned_lens_reuse
+                try:
+                    logical = make_row(task, provider, term, country, right, refs)
+                    reuse = planned_lens_reuse(task, evidence, queries, logical,
+                        task_dir=task_dir, plan=context_plan)
+                except ValueError as exc:
+                    reason = str(exc)
+                    continue
+                if reuse:
+                    logical['discovery_scope']['physical_response_plan_reuse'] = reuse
+                    selected = provider, logical
+                    break
             stopped = account_stop_reason(provider, evidence) if v2 else ""
             if stopped:
                 reason = "API_DISCOVERY_ACCOUNT_STOPPED"
@@ -577,11 +851,15 @@ def append_initial(task_dir, task, terms, queries, gaps, expansion_queue):
                 basis = _capability_basis(task, raw_caps, provider, country, right, term)
                 if basis is None:
                     continue
-                count = sum(p.endswith("browser") and (r.get("jurisdiction"), r.get("right_type")) == (country, right)
-                    and r.get("discovery_role") == "browser_fallback" for p, r in capacity_rows)
-                if count >= policy_limit(task, "browser_fallback_queries_per_scope", 2):
-                    reason = "API_DISCOVERY_BROWSER_SCOPE_LIMIT"
-                    break
+                # Text, classification and image recall are independent
+                # coverage axes.  One exhausted axis must not consume the
+                # bounded browser allowance of another.
+                if not purpose_budget_enabled(task):
+                    count = sum(p.endswith("browser") and (r.get("jurisdiction"), r.get("right_type"), r.get("search_dimension")) == (country, right, dimension(term))
+                        and r.get("discovery_role") == "browser_fallback" for p, r in capacity_rows)
+                    if count >= policy_limit(task, "browser_fallback_queries_per_scope", 2):
+                        reason = "API_DISCOVERY_BROWSER_SCOPE_LIMIT"
+                        break
                 try:
                     selected = provider, make_row(task, provider, term, country, right, refs,
                         role="browser_fallback", capability_basis=basis)
@@ -592,11 +870,14 @@ def append_initial(task_dir, task, terms, queries, gaps, expansion_queue):
         if selected:
             provider, row = selected
             _add(queries, provider, row)
-            if _account(provider) in used:
+            if purpose_budget_enabled(task):
+                existing.add(iid)
+            if _account(provider) in used and not row.get('discovery_scope', {}).get('physical_response_plan_reuse'):
                 used[_account(provider)] += 1
             capacity_rows.append((provider, row))
             expansion_queue.append({"query_id": row["query_id"], "discovery_intent_id": iid, "provider": provider,
-                "jurisdiction": country, "right_type": right, "state": "scheduled", "reason": "api_first_discovery"})
+                "jurisdiction": country, "right_type": right, "state": "scheduled",
+                "reason": "reuse_planned_physical_response" if row.get('discovery_scope', {}).get('physical_response_plan_reuse') else "api_first_discovery"})
         else:
             gaps.append({"code": reason, "discovery_intent_id": iid, "jurisdiction": country, "right_type": right,
                 "search_dimension": dimension(term), "requirement_ids": refs, "derived_from": [term["derived_from"]],
@@ -614,8 +895,63 @@ def triage_digest(task, evidence, candidates, ledger, supplement=None, *, query_
     return sha256_json(result)
 
 
-def source_card_state(task, evidence, candidates, ledger, row, run, supplement=None):
+def _bounded_waiting_decision_valid(task, evidence, decision, supplement=None):
+    """Validate one current needs_info decision for the bounded-stop path only.
+
+    This intentionally does not change the ordinary source-card contract: a
+    needs_info card is only non-executable when every exact follow-up action
+    has a hash-verified, current waiting review against its retained evidence.
+    """
+    from candidate_followup import action_errors, events, latest_event, verify_review_sources
+    annotation = decision.get("annotation")
+    actions = decision.get("next_actions")
+    if (not isinstance(annotation, dict) or annotation.get("decision") != "needs_info"
+            or not isinstance(actions, list) or not actions):
+        return False
+    try:
+        history = events(task)
+        verify_review_sources(task, evidence, supplement)
+        from decision_workflow import evidence_index
+        known = set(evidence_index(evidence, supplement))
+    except (ValueError, KeyError, TypeError):
+        return False
+    for action in actions:
+        if not isinstance(action, dict) or action.get("kind") not in {"user_information", "professional_review"}:
+            return False
+        if action_errors(action, known_evidence=known):
+            return False
+        if action.get("kind") == "user_information":
+            # This action is already an explicit, validated user dependency in
+            # the current needs_info annotation; the follow-up recorder handles
+            # result reviews, not unanswered user questions.
+            if not str(action.get("user_exclusive_reason") or "").strip():
+                return False
+            continue
+        event = latest_event(task, "result_review", annotation.get("annotation_id"), action.get("action_id"))
+        refs = action.get("followup_basis", {}).get("existing_evidence_refs", [])
+        if (not event or event.get("outcome") != "waiting" or event.get("annotation_id") != annotation.get("annotation_id")
+                or event.get("action_id") != action.get("action_id") or not event.get("dependency")
+                or not event.get("resume_condition") or not isinstance(event.get("result_evidence_refs"), list)
+                or not refs or not set(event["result_evidence_refs"]) <= set(refs)
+                or any(ref not in known for ref in event["result_evidence_refs"])):
+            return False
+    return True
+
+
+def source_card_state(task, evidence, candidates, ledger, row, run, supplement=None, *, allow_bounded_waiting=False):
     """Every returned card must survive merge and have current scope triage."""
+    from decision_workflow import decision_snapshot, _SNAPSHOT
+    if _SNAPSHOT.get() is not None:
+        return _source_card_state(task,evidence,candidates,ledger,row,run,supplement,
+                                  allow_bounded_waiting=allow_bounded_waiting)
+    # One immutable read boundary shares only pure decisions. Every retained
+    # source/artifact is still validated by each exact candidate proof.
+    with decision_snapshot(task,evidence,candidates,{'row':row,'run':run},ledger,supplement):
+        return _source_card_state(task,evidence,candidates,ledger,row,run,supplement,
+                                  allow_bounded_waiting=allow_bounded_waiting)
+
+
+def _source_card_state(task, evidence, candidates, ledger, row, run, supplement=None, *, allow_bounded_waiting=False):
     from assessment_v24 import _source_records, _query_candidates, _records_accounted_for
     from decision_workflow import triage_summary
     from provider_utils import ProviderError
@@ -649,23 +985,49 @@ def source_card_state(task, evidence, candidates, ledger, row, run, supplement=N
     ids = {c.get("candidate_id") for c in matched}
     summary = triage_summary(task, candidates, ledger, evidence=evidence, supplement=supplement)
     from decision_workflow import scenario_index, necessary_scenario_right_types
+    allowed_countries = set(task.get("target_jurisdictions", []))
+    from decision_workflow import triage_scope_enabled
+    if triage_scope_enabled(task):
+        allowed_countries.add("UNLOCATED")
     decisions = [r for r in summary.get("records", []) if r.get("candidate_id") in ids
-        and r.get("jurisdiction") == row["jurisdiction"]]
+        and r.get("jurisdiction") in allowed_countries]
     for candidate in matched:
         actual_right = candidate.get("right_type")
         if not actual_right or actual_right == "unknown" or candidate.get("right_type_status") == "unresolved":
+            from public_identity import current as public_identity_current, enabled as public_identity_enabled
+            association = [d for d in decisions if d.get('candidate_id') == candidate.get('candidate_id')]
+            public_context = (public_identity_enabled(task)
+                and any(candidate in candidates.get(name,[]) for name in ('copyright_assets','enforcement'))
+                and isinstance(candidate.get('sources'),list) and candidate['sources']
+                and all(isinstance(s,dict) and s.get('provider') in {
+                    'serpapi_google_lens','serper_web','serper_images'} for s in candidate['sources']))
+            if (public_context
+                    and association and all(d.get('current') and d.get('decision') == 'not_selected'
+                        and (d.get('annotation') or {}).get('comparison',{}).get('difference')
+                        and (d.get('annotation') or {}).get('comparison',{}).get('applicability_limit') for d in association)):
+                continue  # A concrete reviewed exclusion does not require inventing a right type.
+            if association and all(public_identity_current(task,evidence,candidates,ledger,d,supplement)
+                                   for d in association):
+                continue  # Only a bounded public-source disposition, never a typed right.
             return "API_DISCOVERY_CARD_IDENTITY_REVIEW_REQUIRED", decisions
         for sid, scenario in scenario_index(task).items():
             if actual_right not in necessary_scenario_right_types(task, scenario):
                 continue
             current = [d for d in decisions if d.get("candidate_id") == candidate.get("candidate_id")
                 and d.get("scenario_id") == sid and d.get("right_type") == actual_right]
-            if not current or any(not d.get("current") or d.get("decision") not in {"selected", "not_selected"} for d in current):
+            allowed = {"selected", "not_selected"}
+            if allow_bounded_waiting:
+                allowed.add("needs_info")
+            if not current or any(not d.get("current") or d.get("decision") not in allowed for d in current):
+                return "API_DISCOVERY_TRIAGE_REQUIRED", decisions
+            if allow_bounded_waiting and any(d.get("decision") == "needs_info"
+                    and not _bounded_waiting_decision_valid(task, evidence, d, supplement) for d in current):
                 return "API_DISCOVERY_TRIAGE_REQUIRED", decisions
     return None, decisions
 
 
-def retained_discovery_work(task, evidence, candidates, ledger, provider, row, supplement=None, *, task_dir=None):
+def retained_discovery_work(task, evidence, candidates, ledger, provider, row, supplement=None, *, task_dir=None,
+                            allow_bounded_waiting=False):
     """A later attempt never erases cards already obtained for this exact row."""
     if not evidence_delivery_enabled(task) or row.get("action_purpose") != "discovery":
         return None
@@ -684,7 +1046,8 @@ def retained_discovery_work(task, evidence, candidates, ledger, provider, row, s
         card_run = {**run, "status": "success"} if records and run.get("status") not in {"success", "no_result"} else run
         error = source_files_error(task_dir, evidence, card_run) if task_dir is not None else None
         if not error:
-            error, _ = source_card_state(task, evidence, candidates, ledger, row, run, supplement)
+            error, _ = source_card_state(task, evidence, candidates, ledger, row, run, supplement,
+                allow_bounded_waiting=allow_bounded_waiting)
         if error:
             pending.append((error, run))
     if not pending:
@@ -725,10 +1088,12 @@ def review_validation(task, plan, evidence, candidates, ledger, row, review, sup
     if run.get("status") in {"success", "no_result"}:
         if not refs or review.get("triage_digest") != triage_digest(task, evidence, candidates, ledger, supplement, query_id=row["query_id"]):
             return "API_DISCOVERY_TRIAGE_CHANGED"
-        error, decisions = source_card_state(task, evidence, candidates, ledger, row, run, supplement)
+        error, decisions = source_card_state(task, evidence, candidates, ledger, row, run, supplement,
+            allow_bounded_waiting=review.get("outcome") == "stop_bounded_discovery")
         if error:
             return error
-        if review["outcome"] == "proceed_to_verification" and not any(d.get("decision") == "selected" for d in decisions):
+        if review["outcome"] == "proceed_to_verification" and not any(d.get("decision") == "selected"
+                and d.get('right_type') != 'unknown' and d.get('jurisdiction') in task.get('target_jurisdictions', []) for d in decisions):
             return "API_DISCOVERY_RELEVANT_CANDIDATES_REQUIRED"
     elif (run.get("status") not in {"failed", "access_limited", "needs_user_action"}
             or not run.get("error_code") or review.get("outcome") != "blocked"):
@@ -736,7 +1101,8 @@ def review_validation(task, plan, evidence, candidates, ledger, row, review, sup
     if review.get("outcome") == "blocked" and not str(review.get("blocker") or "").strip():
         return "API_DISCOVERY_BLOCKER_REQUIRED"
     if not review.get("submission_review"):
-        pending = retained_discovery_work(task, evidence, candidates, ledger, run.get("provider"), row, supplement)
+        pending = retained_discovery_work(task, evidence, candidates, ledger, run.get("provider"), row, supplement,
+            allow_bounded_waiting=review.get("outcome") == "stop_bounded_discovery")
         if pending:
             return pending["reason"]
     return None
@@ -775,9 +1141,10 @@ def reviewed_unknown_submission(task, plan, evidence, candidates, ledger, row, s
     provider = providers[0]
     state = action_attempt_state(evidence, provider, row)
     known = {r.get("source_run_id") for r in state.get("submission_reviews", [])}
+    from recovery_stage_b import effective_submission
     unknown = [r for r in evidence.get("source_runs", []) if r.get("provider") == provider
         and r.get("query_id") == row["query_id"] and r.get("plan_entry_sha256") == sha256_json(row)
-        and r.get("submission_state") not in {"submitted", "not_submitted"} and r.get("run_id") not in known]
+        and effective_submission(evidence, r) == "unknown" and r.get("run_id") not in known]
     if not unknown:
         return None
     result = []
@@ -792,21 +1159,56 @@ def reviewed_unknown_submission(task, plan, evidence, candidates, ledger, row, s
             if source_files_error(task_dir, evidence, run):
                 return None
             for receipt in review["submission_review"]["raw_receipts"]:
-                path = (Path(task_dir) / receipt["path"]).resolve()
-                if not path.is_relative_to(Path(task_dir).resolve()) or not path.is_file() or path.stat().st_size != receipt["bytes"]:
+                from common import resolve_retained_path
+                try:
+                    resolve_retained_path(Path(task_dir), receipt["path"], expected_sha256=receipt.get("sha256", ""), expected_bytes=receipt["bytes"])
+                except ValueError:
                     return None
         result.append({"run_id": run["run_id"], "source_run_sha256": sha256_json(run),
             "review_sha256": sha256_json(review), "submission_state": run.get("submission_state", "unknown")})
     return result
 
 
-def append_review(task_dir, task, plan, evidence, parent, request):
+def prepare_review(task_dir, task, plan, evidence, parent, request, *, candidates=None, ledger=None, supplement=None):
+    """Validate and append a discovery review to in-memory task/evidence objects.
+
+    Callers may combine this with a detached triage ledger and commit all JSON
+    files only after the complete batch validates.
+    """
     from workflow_v24 import scenario_supplement
-    candidates = load_json(task_dir / "normalized-candidates.json")
-    ledger = load_json(task_dir / "materiality-annotations.json")
+    candidates = candidates if candidates is not None else load_json(task_dir / "normalized-candidates.json")
+    ledger = ledger if ledger is not None else load_json(task_dir / "materiality-annotations.json")
+    evidence_changed = False
     runs = [r for r in evidence.get("source_runs", []) if r.get("run_id") == request.get("source_run_id")]
     if len(runs) != 1:
         raise ValueError("API_DISCOVERY_SOURCE_RUN_REQUIRED")
+    run = runs[0]
+    # Compatibility repair for runs created before provider_utils retained an
+    # explicit receipt entry for an empty response.  This uses the already
+    # saved response and does not issue, retry, or alter a search request.
+    if run.get("status") == "no_result":
+        linked = [item for values in evidence.get("collections", {}).values() if isinstance(values, list)
+                  for item in values if isinstance(item, dict) and item.get("source_run_id") == run["run_id"]]
+        if not linked:
+            collection = {"patent": "patents", "design": "patents", "trademark": "trademarks"}.get(
+                str(run.get("right_type") or parent.get("right_type") or ""), "patents")
+            receipt_id = "EV-RECEIPT-" + run["run_id"]
+            evidence.setdefault("collections", {}).setdefault(collection, []).append({
+                "evidence_id": receipt_id, "source_run_id": run["run_id"],
+                "query_id": run.get("query_id"), "provider": run.get("provider"),
+                "operation": run.get("operation"), "jurisdiction": run.get("jurisdiction"),
+                "right_type": run.get("right_type"), "payload": {"candidates": [], "status": "no_result",
+                    "raw_paths": run.get("raw_paths", []), "payload_digest": run.get("payload_digest")},
+                "collected_at": now_iso(),
+            })
+            evidence_changed = True
+            # The pre-repair caller may have supplied an anticipated receipt
+            # id, but the only valid binding is the id just persisted here.
+            request = {**request, "evidence_ids": [receipt_id]}
+        else:
+            # Keep the review attached to the real pre-existing response
+            # receipt.  Callers must not need to guess a synthetic id.
+            request = {**request, "evidence_ids": [linked[0]["evidence_id"]]}
     record = {k: deepcopy(request.get(k)) for k in ("source_run_id", "reason", "reviewer", "evidence_ids", "triage_digest", "outcome", "blocker")}
     record.update(role="review", parent_query_id=parent["query_id"], parent_plan_entry_sha256=sha256_json(parent),
         source_run_sha256=sha256_json(runs[0]), discovery_scope=deepcopy(parent.get("discovery_scope")), reviewed_at=now_iso())
@@ -815,26 +1217,67 @@ def append_review(task_dir, task, plan, evidence, parent, request):
         if not evidence_delivery_enabled(task) or not isinstance(requested, dict):
             raise ValueError("API_DISCOVERY_SUBMISSION_REVIEW_INVALID")
         receipts = []
+        from common import resolve_retained_path
         for relative in runs[0].get("raw_paths", []):
-            path = (Path(task_dir) / relative).resolve()
-            if not path.is_relative_to(Path(task_dir).resolve()) or not path.is_file():
-                raise ValueError("API_DISCOVERY_SOURCE_FILES_INVALID")
+            try:
+                path = resolve_retained_path(Path(task_dir), relative, expected_sha256=runs[0].get("payload_digest", ""))
+            except ValueError as exc:
+                raise ValueError("API_DISCOVERY_SOURCE_FILES_INVALID: " + str(exc)) from exc
             receipts.append({"path": relative, "sha256": sha256_file(path), "bytes": path.stat().st_size})
         record["submission_review"] = {"state": requested.get("state"), "reasoning": requested.get("reasoning"),
             "source_run_sha256": sha256_json(runs[0]), "raw_receipts": receipts,
             **({"raw_receipt_absence_reason": requested.get("raw_receipt_absence_reason")} if not receipts else {})}
-    supplement = scenario_supplement(task_dir, task=task, evidence=evidence)
+    supplement = supplement if supplement is not None else scenario_supplement(task_dir, task=task, evidence=evidence)
     error = review_validation(task, plan, evidence, candidates, ledger, parent, record, supplement)
     if not error:
         error = source_files_error(task_dir, evidence, runs[0])
     if error:
         raise ValueError(error)
     task.setdefault("discovery_followups", []).append(record)
+    return record, evidence_changed
+
+
+def append_review(task_dir, task, plan, evidence, parent, request):
+    record, evidence_changed = prepare_review(task_dir, task, plan, evidence, parent, request)
+    if evidence_changed:
+        atomic_write_json(task_dir / "evidence.json", evidence)
     atomic_write_json(task_dir / "task.json", task)
     return record
 
 
-def followup_validation(task, plan, evidence, candidates, ledger, row, supplement=None):
+def _receipt_classified_failure(task_dir, task, evidence, run):
+    """Read shared result-processing proof; never reinterpret a genuine zero."""
+    if not isinstance(run, dict) or run.get("status") != "no_result":
+        return False
+    try:
+        from source_result_processing import enabled as processing_enabled, progress
+        if not processing_enabled(task):
+            return False
+        if task_dir is not None:
+            state = progress(Path(task_dir), run, evidence)
+            disposition = state.get("receipt_disposition")
+            return bool(disposition and disposition.get("outcome") == "non_result_error"
+                        and state.get("returned_count") == 0 and state.get("parsed_count") == 0
+                        and state.get("zero_proven") is False and not state.get("count_contradiction"))
+        # Read-only callers lacking a task directory can check the receipt and
+        # result-index linkage. Dispatch/append callers with a path also verify
+        # the retained raw bytes through progress().
+        dispositions = [item for item in evidence.get("receipt_dispositions", [])
+                        if isinstance(item, dict) and item.get("source_run_id") == run.get("run_id")]
+        index = run.get("result_processing")
+        return bool(len(dispositions) == 1 and isinstance(index, dict)
+            and dispositions[0].get("outcome") == "non_result_error"
+            and dispositions[0].get("payload_digest") == run.get("payload_digest")
+            and dispositions[0].get("raw_sha256") == run.get("payload_digest")
+            and index.get("payload_digest") == run.get("payload_digest")
+            and index.get("parsed_count") == 0 and index.get("rows") == []
+            and index.get("returned_count") == 0 and index.get("zero_proven") is False
+            and not index.get("count_contradiction"))
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def followup_validation(task, plan, evidence, candidates, ledger, row, supplement=None, *, task_dir=None):
     """Validate a follow-up using existing immutable rows/runs and triage."""
     if row.get("discovery_role") == "primary":
         return None
@@ -860,9 +1303,11 @@ def followup_validation(task, plan, evidence, candidates, ledger, row, supplemen
     term = d.get("term")
     try:
         if (len(providers) != 1 or not isinstance(term, dict)
-                or provider_params(providers[0], term, row["jurisdiction"], row["right_type"])["q"] != row["q"]):
+                or provider_params(providers[0], term, row["jurisdiction"], row["right_type"],
+                    epo_query_revision=row.get("query_compiler_revision"))["q"] != row["q"]):
             return "API_DISCOVERY_FOLLOWUP_TERM_MISMATCH"
-        if row.get("discovery_role") == "fallback" and provider_params(parent_provider, term, row["jurisdiction"], row["right_type"])["q"] != parent["q"]:
+        if row.get("discovery_role") == "fallback" and provider_params(parent_provider, term, row["jurisdiction"], row["right_type"],
+                epo_query_revision=parent.get("query_compiler_revision"))["q"] != parent["q"]:
             return "API_DISCOVERY_FALLBACK_CHANGED_QUERY"
     except (KeyError, ValueError, TypeError):
         return "API_DISCOVERY_FOLLOWUP_TERM_MISMATCH"
@@ -882,17 +1327,27 @@ def followup_validation(task, plan, evidence, candidates, ledger, row, supplemen
         for item in values if isinstance(item, dict) and item.get("source_run_id") == run["run_id"]}
     if not isinstance(refs, list) or any(ref not in linked for ref in refs) or (run.get("status") in {"success", "no_result"} and not refs):
         return "API_DISCOVERY_EVIDENCE_REQUIRED"
+    receipt_failure = _receipt_classified_failure(task_dir, task, evidence, run)
     if d["reason_code"] == "source_unavailable":
-        if run.get("status") not in {"failed", "access_limited", "needs_user_action"} or not run.get("error_code"):
+        explicit_failure = (run.get("status") in {"failed", "access_limited", "needs_user_action"}
+                            and bool(run.get("error_code")))
+        if not explicit_failure and not receipt_failure:
             return "API_DISCOVERY_SOURCE_NOT_FAILED"
     else:
-        if run.get("status") not in {"success", "no_result"}:
+        if receipt_failure or run.get("status") not in {"success", "no_result"}:
             return "API_DISCOVERY_SUCCESSFUL_PARENT_REQUIRED"
         if d["reason_code"] == "zero_results" and run.get("status") != "no_result":
             return "API_DISCOVERY_PARENT_NOT_ZERO"
         if d.get("triage_digest") != triage_digest(task, evidence, candidates, ledger, supplement, query_id=parent["query_id"]):
             return "API_DISCOVERY_TRIAGE_CHANGED"
-        error, relevant = source_card_state(task, evidence, candidates, ledger, parent, run, supplement)
+        # A v3 refinement can continue public discovery while a fully read
+        # candidate only awaits genuine user/professional information. Every
+        # returned card and exact waiting proof remain mandatory; unresolved
+        # source lookups do not qualify. v1/v2 keep their original contract.
+        allow_waiting = (task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION
+                         and row.get("discovery_role") == "refinement")
+        error, relevant = source_card_state(task, evidence, candidates, ledger, parent, run, supplement,
+                                            allow_bounded_waiting=allow_waiting)
         if error:
             return error
         if d["reason_code"] == "insufficient_relevant_candidates" and any(r.get("decision") == "selected" for r in relevant):
@@ -900,16 +1355,21 @@ def followup_validation(task, plan, evidence, candidates, ledger, row, supplemen
     if row.get("discovery_role") == "browser_fallback" and (parent_provider not in API_PROVIDERS
             or d["reason_code"] not in {"source_unavailable", "zero_results", "insufficient_relevant_candidates"}):
         return "API_DISCOVERY_BROWSER_FALLBACK_NOT_AUTHORIZED"
-    pending = retained_discovery_work(task, evidence, candidates, ledger, parent_provider, parent, supplement)
+    pending = retained_discovery_work(task, evidence, candidates, ledger, parent_provider, parent, supplement,
+        allow_bounded_waiting=(task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION
+                               and row.get("discovery_role") == "refinement"))
     if pending:
         return pending["reason"]
     return None
 
 
-def dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supplement=None):
+def dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supplement=None, *, task_dir=None):
+    from product_scope import dispatch_reason
+    reason=dispatch_reason(task,row)
+    if reason: return reason
     if not enabled(task):
         return None
-    if plan.get("retrieval_workflow_revision") != REVISION:
+    if plan.get("retrieval_workflow_revision") != _plan_revision(task):
         return "API_FIRST_PLAN_REVISION_MISMATCH"
     if (plan.get("retrieval_policy") != task.get("retrieval_policy")
             or plan.get("retrieval_policy_sha256") != sha256_json(task.get("retrieval_policy"))
@@ -921,7 +1381,7 @@ def dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supp
         if provider.endswith("browser") and row.get("action_purpose") == "recall" and not row.get("triage_candidate_id"):
             return "API_FIRST_BROAD_BROWSER_RECALL_DISABLED"
         return None
-    if (row.get("retrieval_workflow_revision") != REVISION or not row.get("discovery_intent_id")
+    if (row.get("retrieval_workflow_revision") != _plan_revision(task) or not row.get("discovery_intent_id")
             or row.get("role") != "discovery_only" or row.get("required_for") != "discovery_only"
             or row.get("authoritative_for_final_rating") is not False or row.get("source_index") != INDEX.get(provider)):
         return "API_DISCOVERY_CONTRACT_INVALID"
@@ -931,7 +1391,9 @@ def dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supp
         max_pages = policy_limit(task, "max_pages_per_query", 8)
         max_candidates = policy_limit(task, "browser_fallback_max_candidates", 50) if browser else 25
         max_rounds = policy_limit(task, "max_refinement_rounds", 2, minimum=0)
-        max_browser_queries = policy_limit(task, "browser_fallback_queries_per_scope", 2)
+        from discovery_budget import enabled as purpose_budget_enabled
+        max_browser_queries = (None if purpose_budget_enabled(task)
+            else policy_limit(task, "browser_fallback_queries_per_scope", 2))
     except ValueError as exc:
         return str(exc)
     if (not isinstance(scope, dict) or scope.get("mode") != "bounded" or scope.get("review_all_returned") is not True
@@ -939,10 +1401,19 @@ def dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supp
             or type(scope.get("max_candidates")) is not int or not 1 <= scope["max_candidates"] <= max_candidates):
         return "API_DISCOVERY_BOUNDS_INVALID"
     role = row.get("discovery_role")
-    if role not in {"primary", *FOLLOWUP_ROLES} or type(row.get("refinement_round")) is not int or not 0 <= row["refinement_round"] <= max_rounds:
+    if role not in {"primary", *FOLLOWUP_ROLES, *({"pagination"} if purpose_budget_enabled(task) else set())} or type(row.get("refinement_round")) is not int or not 0 <= row["refinement_round"] <= max_rounds:
         return "API_DISCOVERY_ROUND_LIMIT"
-    if browser != (role == "browser_fallback"):
+    browser_refinement = (browser and role == "refinement" and purpose_budget_enabled(task)
+        and any(p == provider and r.get("query_id") == row.get("parent_query_id")
+                and r.get("discovery_role") in {"browser_fallback", "refinement"}
+                for p, values in plan.get("queries", {}).items() for r in values))
+    if browser != (role == "browser_fallback") and role != "pagination" and not browser_refinement:
         return "API_DISCOVERY_BROWSER_FALLBACK_NOT_AUTHORIZED"
+    if purpose_budget_enabled(task):
+        from discovery_budget import dispatch_block as budget_dispatch_block
+        budget_error = budget_dispatch_block(task, plan, evidence, provider, row)
+        if budget_error:
+            return budget_error
     if evidence_delivery_enabled(task):
         account = _account(provider)
         limits = _limits(task)
@@ -950,9 +1421,10 @@ def dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supp
         from workflow_v24 import action_attempt_state
         attempts = action_attempt_state(evidence, provider, row)
         audited_not_submitted = {r.get("source_run_id") for r in attempts.get("submission_reviews", [])}
+        from recovery_stage_b import effective_submission
         if any(r.get("provider") == provider and r.get("query_id") == row["query_id"]
                 and r.get("plan_entry_sha256") == sha256_json(row)
-                and r.get("submission_state") not in {"submitted", "not_submitted"}
+                and effective_submission(evidence, r) == "unknown"
                 and r.get("run_id") not in audited_not_submitted for r in evidence.get("source_runs", [])):
             return "API_DISCOVERY_SUBMISSION_UNKNOWN_NO_RETRY"
         pending = retained_discovery_work(task, evidence, candidates, ledger, provider, row, supplement)
@@ -970,20 +1442,31 @@ def dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supp
                 return "API_DISCOVERY_RESERVE_RELEASE_REQUIRED"
     if role == "primary":
         from common import serper_free_enabled
-        if provider == "serpapi_google_patents" and serper_free_enabled(task):
+        if (task.get("retrieval_workflow_revision") != API_FIRST_V3_REVISION
+                and provider == "serpapi_google_patents" and serper_free_enabled(task)):
             return "API_DISCOVERY_FALLBACK_DECISION_REQUIRED"
         if provider not in API_PROVIDERS or row.get("refinement_round") != 0 or row.get("parent_query_id"):
             return "API_DISCOVERY_PRIMARY_INVALID"
         return None
     all_rows = [(p, r) for p, values in plan.get("queries", {}).items() for r in values]
+    if role == "pagination":
+        from discovery_budget import pagination_block
+        parents = [parent for _, parent in all_rows if parent.get("query_id") == row.get("parent_query_id")]
+        if len(parents) == 1:
+            frozen_limit = _pagination_frozen_scope_block(parents[0], evidence)
+            if frozen_limit:
+                return frozen_limit
+        return pagination_block(task, plan, evidence, provider, row)
     if browser:
         bounded_rows = _capacity_rows(task, plan, evidence) if evidence_delivery_enabled(task) else all_rows
         same = [r for p, r in bounded_rows if p.endswith("browser") and r.get("discovery_role") == "browser_fallback"
-            and (r.get("jurisdiction"), r.get("right_type")) == (row.get("jurisdiction"), row.get("right_type"))]
-        if len(same) > max_browser_queries:
+            and (r.get("jurisdiction"), r.get("right_type"), r.get("search_dimension")) == (row.get("jurisdiction"), row.get("right_type"), row.get("search_dimension"))]
+        if max_browser_queries is not None and len(same) > max_browser_queries:
             return "API_DISCOVERY_BROWSER_SCOPE_LIMIT"
         if evidence_delivery_enabled(task) and row.get("discovery_scope", {}).get("capability_basis"):
-            return _capability_basis_error(task, provider, row)
+            basis_error = _capability_basis_error(task, provider, row)
+            if basis_error or not row.get("parent_query_id"):
+                return basis_error
     parents = [r for _, r in all_rows if r.get("query_id") == row.get("parent_query_id")]
     if len(parents) != 1:
         return "API_DISCOVERY_PARENT_INVALID"
@@ -1000,10 +1483,67 @@ def dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supp
     siblings = [r for _, r in all_rows if r.get("parent_query_id") == parent["query_id"] and r.get("discovery_role") == role]
     if len(siblings) != 1:
         return "API_DISCOVERY_FOLLOWUP_AMBIGUOUS"
-    return followup_validation(task, plan, evidence, candidates, ledger, row, supplement)
+    return followup_validation(task, plan, evidence, candidates, ledger, row, supplement, task_dir=task_dir)
+
+
+def _pagination_frozen_scope_block(parent, evidence):
+    """Reject legacy page rows that exceed the parent's immutable purpose scope."""
+    frozen_scope = parent.get("discovery_scope", {})
+    if type(frozen_scope.get("max_pages")) is int and frozen_scope["max_pages"] <= 1:
+        return "DISCOVERY_VERSION_PAGE_LIMIT"
+    if type(frozen_scope.get("max_candidates")) is not int:
+        return None
+    parent_run = (frozen_scope.get("pagination_basis") or {}).get("source_run_id")
+    runs = [item for item in evidence.get("source_runs", []) if item.get("run_id") == parent_run]
+    if len(runs) != 1:
+        return None
+    metadata = runs[0].get("metadata")
+    coverage = metadata.get("search_coverage") if isinstance(metadata, dict) else None
+    coverage = coverage if isinstance(coverage, dict) else metadata
+    if (isinstance(coverage, dict) and type(coverage.get("retrieved_hits")) is int
+            and coverage["retrieved_hits"] >= frozen_scope["max_candidates"]):
+        return "DISCOVERY_VERSION_CANDIDATE_LIMIT"
+    return None
+
+
+def pagination_parent_stop_valid(task, plan, evidence, candidates, ledger, row, supplement=None):
+    """Whether an unsubmitted legacy page is superseded by its exact parent stop."""
+    if row.get("discovery_role") != "pagination" or candidates is None or ledger is None:
+        return False
+    parents = [(provider, parent) for provider, rows in plan.get("queries", {}).items()
+        for parent in rows if parent.get("query_id") == row.get("parent_query_id")]
+    if len(parents) != 1:
+        return False
+    provider, parent = parents[0]
+    if (row.get("parent_plan_entry_sha256") != sha256_json(parent)
+            or row.get("q") != parent.get("q")
+            or any(row.get(key) != parent.get(key) for key in
+                ("jurisdiction", "right_type", "requirement_ids", "search_dimension", "action_purpose"))):
+        return False
+    basis = row.get("discovery_scope", {}).get("pagination_basis")
+    runs = [run for run in evidence.get("source_runs", []) if run.get("run_id") == (basis or {}).get("source_run_id")
+        and run.get("provider") == provider and run.get("query_id") == parent.get("query_id")
+        and run.get("plan_entry_sha256") == sha256_json(parent)]
+    if len(runs) != 1 or sha256_json(runs[0]) != (basis or {}).get("source_run_sha256"):
+        return False
+    if any(run.get("query_id") == row.get("query_id") and run.get("provider") == provider
+            and run.get("plan_entry_sha256") == sha256_json(row) for run in evidence.get("source_runs", [])):
+        return False
+    reviews = [review for review in task.get("discovery_followups", []) if isinstance(review, dict)
+        if review.get("role") == "review" and review.get("parent_query_id") == parent.get("query_id")
+        and review.get("source_run_id") == runs[0].get("run_id")]
+    if len(reviews) != 1 or reviews[0].get("outcome") != "stop_bounded_discovery":
+        return False
+    return review_validation(task, plan, evidence, candidates, ledger, parent, reviews[0], supplement) is None
 
 
 def followup_source_files_error(task_dir, task, evidence, row):
+    if row.get("discovery_role") == "pagination" and row.get("discovery_scope", {}).get("pagination_basis"):
+        run_id = row["discovery_scope"]["pagination_basis"].get("source_run_id")
+        matches = [run for run in evidence.get("source_runs", []) if run.get("run_id") == run_id]
+        if len(matches) != 1:
+            return "DISCOVERY_PAGINATION_SOURCE_REQUIRED"
+        return source_files_error(task_dir, evidence, matches[0])
     if evidence_delivery_enabled(task) and row.get("discovery_scope", {}).get("reserve_release"):
         error = _release_basis_files_error(task_dir, evidence, row["discovery_scope"]["reserve_release"])
         if error:
@@ -1118,7 +1658,8 @@ def append_plan_repair(task_dir, task, plan, evidence, old_provider, parent, req
             and r.get("submission_state") != "not_submitted" for r in evidence.get("source_runs", [])):
         raise ValueError("API_DISCOVERY_PLAN_REPAIR_ALREADY_SUBMITTED")
     term = request.get("term")
-    if (not isinstance(term, dict) or provider_params(old_provider, term, parent["jurisdiction"], parent["right_type"])["q"] != parent["q"]
+    if (not isinstance(term, dict) or provider_params(old_provider, term, parent["jurisdiction"], parent["right_type"],
+            epo_query_revision=parent.get("query_compiler_revision"))["q"] != parent["q"]
             or any(not str(request.get(k) or "").strip() for k in ("reason", "reviewer"))):
         raise ValueError("API_DISCOVERY_PLAN_REPAIR_REASON_OR_TERM_INVALID")
     row = make_row(task, "serper_patents", term, parent["jurisdiction"], parent["right_type"], parent["requirement_ids"])
@@ -1184,7 +1725,8 @@ def append_followup(task_dir, request):
     trial_task, trial_plan = deepcopy(task), deepcopy(plan)
     trial_task.setdefault("discovery_followups", []).append(decision)
     _add(trial_plan["queries"], provider, row)
-    block = dispatch_block(trial_task, trial_plan, evidence, candidates, ledger, provider, row, supplement)
+    block = dispatch_block(trial_task, trial_plan, evidence, candidates, ledger, provider, row,
+                           supplement, task_dir=task_dir)
     block = block or followup_source_files_error(task_dir, trial_task, evidence, row)
     if block:
         raise ValueError(block)
@@ -1236,14 +1778,25 @@ def _next_work_v2(task, plan, evidence, candidates, ledger, supplement=None, *, 
             **({"planning_gap_sha256": sha256_json(gap)} if gap is not None else {})}
 
     for provider, row in rows:
+        if pagination_parent_stop_valid(task, plan, evidence, candidates, ledger, row, supplement):
+            # This row was appended beyond its parent's frozen one-page scope
+            # before the stop was recorded. Keep it archived in plan history,
+            # but do not generate another before-review or dispatch obligation.
+            continue
         runs = [r for r in evidence.get("source_runs", []) if r.get("provider") == provider
             and r.get("query_id") == row["query_id"] and r.get("plan_entry_sha256") == sha256_json(row)]
         run = runs[-1] if runs else None
         attempt = action_attempt_state(evidence, provider, row)
         audited = {r.get("source_run_id") for r in attempt.get("submission_reviews", [])}
-        unknown = [r for r in runs if r.get("submission_state") not in {"submitted", "not_submitted"}
+        from recovery_stage_b import effective_submission
+        unknown = [r for r in runs if effective_submission(evidence, r) == "unknown"
             and r.get("run_id") not in audited]
-        retained_work = retained_discovery_work(task, evidence, candidates, ledger, provider, row, supplement, task_dir=task_dir)
+        bounded_review = next((d for d in task.get("discovery_followups", [])
+            if run and d.get("role") == "review" and d.get("outcome") == "stop_bounded_discovery"
+            and d.get("parent_query_id") == row.get("query_id") and d.get("source_run_id") == run.get("run_id")
+            and review_validation(task, plan, evidence, candidates, ledger, row, d, supplement) is None), None)
+        retained_work = retained_discovery_work(task, evidence, candidates, ledger, provider, row, supplement,
+            task_dir=task_dir, allow_bounded_waiting=bool(bounded_review))
         if validated_query_cancellation(task, plan, row) and not unknown and not retained_work:
             continue
         block = dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supplement)
@@ -1256,6 +1809,11 @@ def _next_work_v2(task, plan, evidence, candidates, ledger, supplement=None, *, 
             base = {"scenario_id": scope["scenario_id"], "jurisdiction": row["jurisdiction"], "right_type": row["right_type"],
                 "query_id": row["query_id"], "provider": provider, "discovery_intent_id": row["discovery_intent_id"],
                 "plan_entry_sha256": sha256_json(row)}
+            import product_scope as ps
+            if not unknown and ps.enabled(task) and ps.binding_state(task,row,scope['scenario_id'])!='ready':
+                output.append({**base,'kind':'user_information','state':'awaiting_user' if ps.binding_state(task,row,scope['scenario_id'])=='awaiting_user' else 'blocked',
+                    'reason':ps.dispatch_reason(task,row) or 'PRODUCT_SCOPE_REVIEW_REQUIRED'})
+                continue
             if retained_work:
                 output.append({**base, **retained_work})
             if unknown:
@@ -1288,11 +1846,12 @@ def _next_work_v2(task, plan, evidence, candidates, ledger, supplement=None, *, 
                 and review_validation(task, plan, evidence, candidates, ledger, row, d, supplement) is None]
             children = [child for _, child in rows if child.get("parent_query_id") == row["query_id"]
                 and not validated_query_cancellation(task, plan, child)]
-            if any(followup_validation(task, plan, evidence, candidates, ledger, child, supplement) is None for child in children):
+            if any(followup_validation(task, plan, evidence, candidates, ledger, child, supplement,
+                    task_dir=task_dir) is None for child in children):
                 continue
             recovery = None
             if run:
-                if run.get("error_code") in {"UNSUPPORTED_QUERY_SEMANTICS", "USPTO_QUERY_REJECTED", "API_DISCOVERY_QUERY_SYNTAX_UNSUPPORTED"}:
+                if run.get("error_code") in {"UNSUPPORTED_QUERY_SEMANTICS", "USPTO_QUERY_REJECTED", "API_DISCOVERY_QUERY_SYNTAX_UNSUPPORTED", "EPO_QUERY_SYNTAX_REJECTED"}:
                     output.append({**base, "kind": "plan_repair", "state": "ready", "reason": run["error_code"],
                         "source_run_id": run["run_id"]})
                     continue
@@ -1337,12 +1896,40 @@ def _next_work_v2(task, plan, evidence, candidates, ledger, supplement=None, *, 
     active_intents = {row["discovery_intent_id"] for _, row in _capacity_rows(task, plan, evidence) if row.get("discovery_intent_id")}
     for gap in plan.get("planning_gaps", []):
         code, country, right = gap.get("code", ""), gap.get("jurisdiction"), gap.get("right_type")
-        if not code.startswith("API_DISCOVERY_") or not country or not right or gap.get("discovery_intent_id") in active_intents:
+        if _advisory_gap_has_frozen_query(task, plan, gap):
+            # Append-only advisory gaps do not recreate work once their exact
+            # expression has a frozen query, even if that query left capacity
+            # accounting through a valid cancellation. Its own receipt,
+            # cancellation and retained-material gates remain independent.
+            continue
+        if code == "API_DISCOVERY_PURPOSE_EXPRESSION_REVIEW_REQUIRED" and gap.get("term_id"):
+            # Expanding an append-only plan emits this advisory marker even
+            # when its expression is byte-for-byte the already frozen one.
+            # The exact query retains its own before/after/source obligations;
+            # do not manufacture a second queryless review of the same term.
+            term = next((item for item in plan.get('terms', []) if sha256_json(item) == gap['term_id']), None)
+            if term and any(row.get("discovery_intent_id") == gap.get("discovery_intent_id")
+                   and (row.get("jurisdiction"), row.get("right_type")) == (country, right)
+                   and frozen_expression_matches(row, term)
+                   for _, row in _capacity_rows(task, plan, evidence)):
+                continue
+        if (not code.startswith("API_DISCOVERY_") or not country or not right
+                or gap.get("discovery_intent_id") in active_intents
+                   and code != "API_DISCOVERY_PURPOSE_EXPRESSION_REVIEW_REQUIRED"):
+            continue
+        if code == "API_DISCOVERY_TERMS_MISSING" and not _eligible_scope_terms(task, plan.get("terms", []), country, right) and _provenance_only_scope([
+                r for r in task.get("coverage_requirements", [])
+                if (r.get("jurisdiction"), r.get("right_type")) == (country, right)
+                and r.get("phase") in {"official_recall", "provenance"} ]):
+            # Old append-only plans can retain this now-inapplicable gap. Do
+            # not rewrite historical queries or evidence; stop projecting the
+            # stale repair item when current coverage has only Agent provenance.
             continue
         for sid, scenario in scenario_index(task).items():
             if right not in necessary_scenario_right_types(task, scenario) or not_applicable(sid, country, right):
                 continue
-            ready = code in {"API_DISCOVERY_TERMS_MISSING", "API_DISCOVERY_QUERY_SYNTAX_UNSUPPORTED", "API_DISCOVERY_BUDGET_RESERVED_FOR_FOLLOWUP"}
+            ready = code in {"API_DISCOVERY_TERMS_MISSING", "API_DISCOVERY_QUERY_SYNTAX_UNSUPPORTED",
+                             "API_DISCOVERY_BUDGET_RESERVED_FOR_FOLLOWUP", "API_DISCOVERY_PURPOSE_EXPRESSION_REVIEW_REQUIRED"}
             base = {**gap, "scenario_id": sid, "kind": "plan_repair", "reason": code, "state": "ready" if ready else "blocked"}
             if code == "API_DISCOVERY_BUDGET_RESERVED_FOR_FOLLOWUP":
                 base["reserve_release_available"] = any(_reserve_release_basis(task, plan, evidence, candidates, ledger,
@@ -1376,7 +1963,8 @@ def next_work_entries(task, plan, evidence, candidates, ledger, supplement=None,
         from workflow_v24 import validated_query_cancellation
         if validated_query_cancellation(task, plan, row):
             continue
-        block = dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supplement)
+        block = dispatch_block(task, plan, evidence, candidates, ledger, provider, row,
+                               supplement, task_dir=task_dir)
         runs = [r for r in evidence.get("source_runs", []) if r.get("provider") == provider and r.get("query_id") == row["query_id"] and r.get("plan_entry_sha256") == sha256_json(row)]
         run = runs[-1] if runs else None
         for scope in necessary_scenario_row_bindings(task, row):
@@ -1395,7 +1983,8 @@ def next_work_entries(task, plan, evidence, candidates, ledger, supplement=None,
                 reviewed = any(d.get("role") == "review" and review_validation(task, plan, evidence, candidates, ledger, row, d, supplement) is None
                     for d in decisions)
                 children = [child for _, child in rows if child.get("parent_query_id") == row["query_id"]]
-                reviewed = reviewed or any(followup_validation(task, plan, evidence, candidates, ledger, child, supplement) is None for child in children)
+                reviewed = reviewed or any(followup_validation(task, plan, evidence, candidates, ledger, child, supplement,
+                    task_dir=task_dir) is None for child in children)
                 if reviewed:
                     continue
                 output.append({**base, "kind": "plan_repair", "state": "ready", "reason": "API_DISCOVERY_REVIEW_REQUIRED",
@@ -1413,6 +2002,11 @@ def next_work_entries(task, plan, evidence, candidates, ledger, supplement=None,
             continue
         country, right = gap.get("jurisdiction"), gap.get("right_type")
         if not country or not right:
+            continue
+        if gap.get("code") == "API_DISCOVERY_TERMS_MISSING" and not _eligible_scope_terms(task, plan.get("terms", []), country, right) and _provenance_only_scope([
+                r for r in task.get("coverage_requirements", [])
+                if (r.get("jurisdiction"), r.get("right_type")) == (country, right)
+                and r.get("phase") in {"official_recall", "provenance"} ]):
             continue
         from decision_workflow import scenario_index, necessary_scenario_right_types
         for sid, scenario in scenario_index(task).items():

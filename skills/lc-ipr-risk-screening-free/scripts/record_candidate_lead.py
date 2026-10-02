@@ -147,7 +147,12 @@ def build_record(task: dict, evidence: dict, root: Path, payload: dict) -> dict:
     if not isinstance(document, dict):
         raise ValueError("CANDIDATE_LEAD_DOCUMENT_BINDING_REQUIRED")
     path = _inside(root, document.get("path"))
-    registered_path = _inside(root, source.get("path"))
+    from common import resolve_retained_path
+    try:
+        registered_path = resolve_retained_path(root, source.get("path"),
+            expected_sha256=source.get("sha256", ""), expected_bytes=source.get("bytes"))
+    except (OSError, TypeError, ValueError) as exc:
+        raise ValueError("CANDIDATE_LEAD_DOCUMENT_OUTSIDE_OR_MISSING") from exc
     url = document.get("source_url")
     parsed = urlparse(url) if isinstance(url, str) else None
     if (not parsed or parsed.scheme not in {"https", "http"} or not parsed.hostname

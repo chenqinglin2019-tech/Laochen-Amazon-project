@@ -8,7 +8,8 @@ import unittest
 from unittest.mock import patch
 
 from common import sha256_json
-from assessment_estimate import compute_assessment, review_digest, _validate_implementation_claims
+from assessment_estimate import (compute_assessment, review_digest, _validate_implementation_claims,
+    KNOWN_FINDINGS_REVISION, known_findings_enabled)
 from decision_workflow import (REVISION, default_assessment_scenarios, make_annotation,
                                scenario_sha256)
 from test_assessment_estimate_recall import strict_fixture
@@ -196,6 +197,105 @@ class ScenarioEstimateTests(unittest.TestCase):
         result = self.calculate()
         self.assertEqual(result["overall"]["known_scoped_risk"], "低")
         self.assertIsNone(result["overall"]["risk"])
+
+    def use_known_findings_policy(self):
+        self.values[0]["assessment_revision"] = KNOWN_FINDINGS_REVISION
+        refresh(self.values)
+
+    def test_known_policy_pending_candidate_keeps_overall_pending(self):
+        self.use_known_findings_policy()
+        self.rows(risk=None, assessment_status="pending", pending_reasoning="Internal structure remains unavailable.")
+        result = self.calculate()
+        row = result["assessments"][0]
+        self.assertIsNone(result["overall"]["risk"])
+        self.assertEqual(result["overall"]["risk_basis"], "insufficient_evidence")
+        self.assertEqual(result["overall"]["listing_recommendation"], "暂缓上架")
+        self.assertIsNone(row["risk"])
+        self.assertEqual(row["assessment_status"], "pending")
+        self.assertFalse(row["risk_aggregation_included"])
+        self.assertFalse(result["overall"]["all_scope_clearance"])
+        self.assertEqual(result["status"], "incomplete")
+        self.assertIsNone(result["known_findings"]["by_scope"][0]["risk"])
+
+    def test_known_policy_work_failures_never_change_established_high(self):
+        self.use_known_findings_policy()
+        base = self.calculate()
+        gaps = [{"scenario_id": "product_entry", "code": code, "query_id": "Q-UNFINISHED"}
+                for code in ("SOURCE_REQUEST_FAILED", "API_DISCOVERY_BUDGET_EXHAUSTED", "USER_MATERIAL_UNKNOWN")]
+        with patch("assessment_estimate.coverage_by_scope", return_value=self.scopes()), \
+                patch("workflow_v24.scenario_execution_gaps", return_value=gaps):
+            changed = compute_assessment(*self.values)
+        self.assertEqual((base["overall"]["risk"], changed["overall"]["risk"]), ("高", "高"))
+        self.assertEqual(changed["overall"]["listing_recommendation"], "不建议上架")
+        self.assertEqual(changed["assessments"][0]["evidence_confidence"], "高")
+        self.assertEqual(changed["overall"]["risk_basis"], "evidence_supported")
+        self.assertTrue(changed["coverage"]["execution_gaps"])
+
+    def test_known_policy_empty_assessments_remain_pending_with_missing_work_visible(self):
+        self.use_known_findings_policy()
+        self.change_decision("needs_info")
+        for review in self.values[-2:]:
+            review["assessments"] = []
+        result = self.calculate()
+        self.assertIsNone(result["overall"]["risk"])
+        self.assertEqual(result["overall"]["listing_recommendation"], "暂缓上架")
+        self.assertEqual(result["status"], "incomplete")
+        self.assertTrue(result["scenario_summaries"][0]["completion"]["queues"]["needs_info"])
+        self.assertEqual(result["overall"]["drivers"], [])
+
+    def test_known_policy_conditional_high_never_raises_primary(self):
+        self.use_known_findings_policy()
+        self.rows(risk=None, assessment_status="pending", pending_reasoning="Unresolved expression origin.")
+        self.add_brand_row(risk="高")
+        for review in self.values[-2:]:
+            review["assessments"][-1].update(assessment_status="assessed", pending_reasoning="")
+        result = self.calculate()
+        self.assertIsNone(result["overall"]["risk"])
+        self.assertEqual(result["scenario_summaries"][1]["risk"], "高")
+        self.assertEqual(result["scenario_summaries"][0]["completion"]["status"], "incomplete")
+
+    def test_known_policy_future_signal_does_not_become_current_finding(self):
+        self.use_known_findings_policy()
+        self.rows(risk=None, assessment_status="assessed", future_signal=True)
+        result = self.calculate()
+        self.assertIsNone(result["overall"]["risk"])
+        self.assertEqual(result["overall"]["drivers"], [])
+        self.assertIsNone(result["assessments"][0]["risk"])
+        self.assertEqual(result["assessments"][0]["known_finding_status"], "signal")
+        self.assertFalse(result["assessments"][0]["risk_aggregation_included"])
+
+    def test_known_policy_scope_extreme_low_does_not_clear_whole_product(self):
+        self.use_known_findings_policy()
+        self.rows(risk="极低", counter_evidence=[{"reasoning": "Decisive limited exclusion.", "evidence_refs": ["EV-PROV"]}],
+                  decisive_exclusion={"reasoning": "Actual document has decisive excluded expression.", "evidence_refs": ["EV-PROV"]})
+        result = self.calculate()
+        self.assertEqual(result["assessments"][0]["risk"], "极低")
+        self.assertEqual(result["overall"]["risk"], "低")
+        self.assertEqual(result["overall"]["evidence_supported_risk"], "极低")
+
+    def test_known_policy_not_applicable_comes_from_bound_review_not_country_guess(self):
+        self.use_known_findings_policy()
+        self.rows(candidate_id='', risk=None, assessment_status='pending', pending_reasoning='No applicable regime.',
+            scope_applicability={'status':'not_applicable', 'reasoning':'The reviewed regime is not applicable to this bounded product.',
+                'evidence_refs':['EV-PROV']})
+        result = self.calculate()
+        scope = next(row for row in result['known_findings']['by_scope'] if row['scenario_id'] == 'product_entry')
+        self.assertEqual(scope['applicability'], 'not_applicable')
+        self.assertIn('bounded product', scope['query_not_required_reason'])
+        self.assertEqual(scope['applicability_evidence_refs'], ['EV-PROV'])
+        self.rows(scope_applicability=None)
+        scope = next(row for row in self.calculate()['known_findings']['by_scope'] if row['scenario_id'] == 'product_entry')
+        self.assertEqual(scope['applicability'], 'applicable')
+        self.assertNotIn('query_not_required_reason', scope)
+
+    def test_known_policy_change_requires_new_digest_not_old_review_rebinding(self):
+        old_digest = self.values[-2]["review_context"]["evidence_digest"]
+        self.values[0]["assessment_revision"] = KNOWN_FINDINGS_REVISION
+        self.assertTrue(known_findings_enabled(self.values[0]))
+        current_digest = review_digest(self.values[1], self.values[2], self.values[4], self.values[3], self.values[0])
+        self.assertNotEqual(old_digest, current_digest)
+        with self.assertRaisesRegex(ValueError, "REVIEW_CONTEXT_INVALID"):
+            self.calculate()
 
     def test_not_selected_needs_no_substantive_rating(self):
         self.change_decision("not_selected")

@@ -242,6 +242,16 @@ class ApiPlanAndExecutionTests(unittest.TestCase):
                         '--output-dir', str(self.root), '--enable-serper-free', '--enable-serpapi-free'],
                        env=offline_environment(), capture_output=True, check=True)
         self.task = common.load_json(self.root / 'task.json')
+        # This is a frozen v2 authorization fixture; don't inherit the new
+        # create_task v3 coverage contract while keeping a v2 hand-built row.
+        self.task['retrieval_workflow_revision'] = common.API_FIRST_REVISION
+        self.task['source_operation_revision'] = 'source-operation-v1'
+        from workflow_v24 import build_coverage_requirements_v24
+        self.task['coverage_requirements'] = build_coverage_requirements_v24(
+            self.task['target_jurisdictions'], screening_revision=self.task.get('screening_revision'),
+            specialty_workflow_revision=self.task.get('specialty_workflow_revision'))
+        self.task.pop('discovery_budget_revision', None)  # Frozen hand-built API authorization fixture.
+        self.task.pop('discovery_semantics_revision', None)
         requirement = next(r for r in self.task['coverage_requirements'] if r['jurisdiction'] == 'US' and r['right_type'] == 'patent')
         self.row = {'q': 'layered toy', 'num': 10, 'gl': 'us', 'hl': 'en', 'right_type': 'patent',
                     'search_language': 'en', 'operation': 'patents', 'jurisdiction': 'US', 'required': False,

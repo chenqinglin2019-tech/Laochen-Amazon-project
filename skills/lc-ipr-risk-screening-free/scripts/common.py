@@ -15,12 +15,31 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from runtime_compat import install_existing_dependencies
+install_existing_dependencies()
+
 
 SCHEMA_VERSION = "2.3-free"
 CURRENT_SCHEMA_VERSION = "2.4-free"
 AUTOMATION_POLICY_REVISION = "automation-first-v1"
 RECALL_INTEGRITY_REVISION = "recall-integrity-v1"
-API_FIRST_REVISION = "api-first-v1"
+API_FIRST_REVISION = "api-first-v2"
+API_FIRST_V3_REVISION = "api-first-v3"
+LEGACY_API_FIRST_REVISION = "api-first-v1"
+
+
+def api_first_revision_enabled(value: object) -> bool:
+    """Recognize frozen v1/v2 and current v3 retrieval contracts."""
+    return value in {API_FIRST_REVISION, LEGACY_API_FIRST_REVISION, API_FIRST_V3_REVISION}
+
+
+def api_first_v3_enabled(value: object) -> bool:
+    return value == API_FIRST_V3_REVISION
+
+
+def api_first_scenario_revision_enabled(value: object) -> bool:
+    """Revisions using scenario-bound row identity; v1 IDs remain frozen."""
+    return value in {API_FIRST_REVISION, API_FIRST_V3_REVISION}
 SERPER_API_FIRST_MAX_QUERIES_PER_TASK = 30
 SERPAPI_API_FIRST_MAX_QUERIES_PER_TASK = 10
 API_FIRST_PLAN_META_KEYS = {
@@ -29,6 +48,8 @@ API_FIRST_PLAN_META_KEYS = {
     "source_index", "discovery_scope",
 }
 DECISION_PLAN_META_KEYS = {
+    "product_scope_revision", "product_dependencies",
+    "product_target_sha256", "product_change_version",
     "decision_workflow_revision", "scenario_id", "scenario_sha256", "scenario_bindings",
     "triage_decision_id", "triage_decision_sha256", "triage_jurisdiction",
     "triage_candidate_id", "action_purpose", "evidence_obligation_id", "triage_action_id",
@@ -54,10 +75,14 @@ SERPER_FREE_ROLE = "discovery_only"
 SERPER_FREE_MAX_QUERIES_PER_TASK = 10
 SERPAPI_PROVIDER = "serpapi_google_patents"
 SERPAPI_OPERATION = "search"
+SERPAPI_DETAILS_OPERATION = "candidate_detail"
 SERPAPI_FREE_ROLE = "discovery_only"
 SERPAPI_FREE_MAX_QUERIES_PER_TASK = 3
 SIGNA_PROVIDER = "signa"
 SIGNA_OPERATION = "trademark_search"
+SIGNA_DETAIL_OPERATION = "candidate_detail"
+SIGNA_MEDIA_OPERATION = "trademark_media"
+SIGNA_RECORD_OPERATIONS = frozenset({SIGNA_DETAIL_OPERATION, SIGNA_MEDIA_OPERATION})
 SIGNA_FREE_ROLE = "discovery_only"
 SIGNA_FREE_MAX_QUERIES_PER_TASK = 3
 AUTHORIZED_FREE_COMMERCIAL_PROVIDERS = {
@@ -222,6 +247,38 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def resolve_retained_path(task_dir: Path, value: str | Path, *, expected_sha256: str = "", expected_bytes: int | None = None) -> Path:
+    """Resolve a task file or one exact, hash-bound recovery relocation."""
+    root = Path(task_dir).resolve()
+    raw = str(value)
+    direct = (root / raw).resolve()
+    if direct.is_relative_to(root):
+        candidate = direct
+    else:
+        manifest_path = root / "recovery-manifest.json"
+        if not manifest_path.is_file():
+            raise ValueError("RETAINED_PATH_OUTSIDE_TASK")
+        manifest = load_json(manifest_path)
+        entries = manifest.get("file_mappings", []) if isinstance(manifest, dict) else []
+        mapping = next((item for item in entries if isinstance(item, dict) and item.get("source_path") == raw), None)
+        if mapping is None:
+            raise ValueError("RETAINED_PATH_NOT_MAPPED")
+        candidate = (root / str(mapping.get("copied_path") or "")).resolve()
+        if not candidate.is_relative_to(root):
+            raise ValueError("RETAINED_PATH_MAPPING_ESCAPES_TASK")
+        if expected_sha256 and mapping.get("sha256") != expected_sha256:
+            raise ValueError("RETAINED_PATH_MAPPING_HASH_MISMATCH")
+        if expected_bytes is not None and mapping.get("bytes") != expected_bytes:
+            raise ValueError("RETAINED_PATH_MAPPING_BYTES_MISMATCH")
+    if not candidate.is_file():
+        raise ValueError("RETAINED_PATH_MISSING")
+    if expected_sha256 and sha256_file(candidate) != expected_sha256:
+        raise ValueError("RETAINED_PATH_HASH_MISMATCH")
+    if expected_bytes is not None and candidate.stat().st_size != expected_bytes:
+        raise ValueError("RETAINED_PATH_BYTES_MISMATCH")
+    return candidate
+
+
 def sha256_json(payload: Any) -> str:
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     return sha256_bytes(raw)
@@ -267,6 +324,11 @@ def intrinsic_patent_right_type(
             or re.match(r"^US\d+S\d?$", number)
         ):
             return "design"
+        # Exact US publication identity can establish utility type independently
+        # of the query's intended right; reuse the existing office/kind rule.
+        if (re.fullmatch(r"US(?:RE)?[0-9]+(?:[A-Z][0-9]?)?", number)
+                and api_discovery_patent_right_type(number, kind) == "patent"):
+            return "patent"
     if jurisdiction_value == "JP" or number.startswith("JP"):
         if kind.startswith(("U", "Y")) or re.search(r"(?:U|Y)\d?$", number):
             return "utility_model"
@@ -613,7 +675,7 @@ def api_first_enabled(task: dict[str, Any]) -> bool:
     revision = task.get("retrieval_workflow_revision")
     if revision is None:
         return False
-    if (revision != API_FIRST_REVISION or not is_v24(task)
+    if (not api_first_revision_enabled(revision) or not is_v24(task)
         or task.get('decision_workflow_revision') != 'scenario-triage-v1'
         or task.get('workflow_correction_revision') != 'workflow-correction-v1'
         or not isinstance(task.get('retrieval_policy'), dict) or not task['retrieval_policy']):
@@ -625,13 +687,13 @@ def discovery_plan_scope_valid(task: dict[str, Any], plan: dict[str, Any], item:
     """Discovery may address a requirement without becoming official verification."""
     if not api_first_enabled(task):
         return item.get("requirement_ids") == []
-    if plan.get("retrieval_workflow_revision") != API_FIRST_REVISION:
+    if plan.get("retrieval_workflow_revision") != task.get("retrieval_workflow_revision"):
         return False
     ids = item.get("requirement_ids")
     known = {r.get("requirement_id"): r for r in task.get("coverage_requirements", []) if isinstance(r, dict)}
     return (isinstance(ids, list) and all(isinstance(v, str) and v in known for v in ids)
             and len(ids) == len(set(ids)) and type(item.get("wave")) is int and item.get("wave") in (1, 2)
-            and item.get("retrieval_workflow_revision") == API_FIRST_REVISION
+            and api_first_revision_enabled(item.get("retrieval_workflow_revision"))
             and all(known[v].get("right_type") == item.get("right_type")
                     and known[v].get("jurisdiction") == item.get("jurisdiction") for v in ids))
 
@@ -641,7 +703,7 @@ def serper_free_enhancement(enabled: bool = False, retrieval_workflow_revision: 
     return {
         "enabled": enabled is True,
         "role": SERPER_FREE_ROLE,
-        "max_queries_per_task": SERPER_API_FIRST_MAX_QUERIES_PER_TASK if retrieval_workflow_revision == API_FIRST_REVISION else SERPER_FREE_MAX_QUERIES_PER_TASK,
+        "max_queries_per_task": SERPER_API_FIRST_MAX_QUERIES_PER_TASK if api_first_revision_enabled(retrieval_workflow_revision) else SERPER_FREE_MAX_QUERIES_PER_TASK,
     }
 
 
@@ -660,8 +722,8 @@ def serpapi_free_enhancement(enabled: bool = False, retrieval_workflow_revision:
     return {
         "enabled": enabled is True,
         "role": SERPAPI_FREE_ROLE,
-        "max_queries_per_task": SERPAPI_API_FIRST_MAX_QUERIES_PER_TASK if retrieval_workflow_revision == API_FIRST_REVISION else SERPAPI_FREE_MAX_QUERIES_PER_TASK,
-        "fallback_only_when_serper_enabled": retrieval_workflow_revision != API_FIRST_REVISION,
+        "max_queries_per_task": SERPAPI_API_FIRST_MAX_QUERIES_PER_TASK if api_first_revision_enabled(retrieval_workflow_revision) else SERPAPI_FREE_MAX_QUERIES_PER_TASK,
+        "fallback_only_when_serper_enabled": retrieval_workflow_revision not in {API_FIRST_REVISION, API_FIRST_V3_REVISION},
     }
 
 
@@ -835,13 +897,22 @@ def optional_discovery_incomplete_queries(
 def _serper_expected_query_id(
     provider: str, operation: str, jurisdiction: str, item: dict[str, Any],
 ) -> str:
+    # Scenario actions use the common full-row identity binding.  Keep the
+    # older compact ID formula for frozen/non-scenario entries.
+    if (api_first_scenario_revision_enabled(item.get("retrieval_workflow_revision"))
+            and item.get("decision_workflow_revision") == "scenario-triage-v1"):
+        from provider_utils import PLAN_META_KEYS, query_identity
+        identity = {key: value for key, value in item.items()
+                    if key not in PLAN_META_KEYS or key in DECISION_PLAN_META_KEYS}
+        identity["right_type"] = item.get("right_type")
+        return query_identity(provider, operation, jurisdiction, str(item.get("q") or ""), identity)
     identity_params = {
         "q": str(item.get("q") or ""),
         "num": item.get("num"),
         "right_type": str(item.get("right_type") or ""),
     }
     identity_params.update({key: item[key] for key in DECISION_PLAN_META_KEYS if key in item})
-    if item.get("retrieval_workflow_revision") == API_FIRST_REVISION:
+    if api_first_revision_enabled(item.get("retrieval_workflow_revision")):
         identity_params.update({key: item[key] for key in ("gl", "hl", "page") if key in item})
     encoded = json.dumps(
         identity_params, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -918,7 +989,9 @@ def authorize_serper_free_plan_entry(
     if task.get("decision_workflow_revision") == "scenario-triage-v1":
         allowed_keys |= DECISION_PLAN_META_KEYS - API_FIRST_PLAN_META_KEYS
     if api_first_enabled(task):
-        allowed_keys |= API_FIRST_PLAN_META_KEYS | {"gl", "hl", "page"}
+        allowed_keys |= API_FIRST_PLAN_META_KEYS | {"gl", "hl", "page", "provider_role", "source_upstream"}
+    if task.get("product_delivery_revision") == "image-fact-v1":
+        allowed_keys |= {"product_delivery_revision", "product_fact_refs"}
     if set(item) - allowed_keys:
         raise ValueError("SERPER_PLAN_PARAMETERS_INVALID")
     query = str(item.get("q") or "").strip()
@@ -948,6 +1021,31 @@ def authorize_serper_free_plan_entry(
 
 
 def _signa_expected_query_id(item: dict[str, Any]) -> str:
+    if (api_first_v3_enabled(item.get("retrieval_workflow_revision"))
+            and item.get("decision_workflow_revision") == "scenario-triage-v1"):
+        from provider_utils import PLAN_META_KEYS, query_identity
+        from workflow_v24 import SCENARIO_META_KEYS
+        identity = {key: value for key, value in item.items()
+                    if key not in PLAN_META_KEYS or key in SCENARIO_META_KEYS}
+        identity["right_type"] = item.get("right_type")
+        return query_identity(SIGNA_PROVIDER, item.get("operation"), item.get("jurisdiction"),
+                              str(item.get("q") or ""), identity)
+    if item.get("operation") in SIGNA_RECORD_OPERATIONS:
+        identity_params = {key: item.get(key) for key in (
+            "candidate_id", "provider_record_id", "missing_facts", "media_id", "q", "record_number",
+            "api_gap_revision", "gap_reason", "judgment_impact", "right_type",
+            "jurisdiction", "action_purpose", "evidence_obligation_id", "triage_action_id",
+            "triage_decision_id", "triage_decision_sha256", "triage_candidate_id",
+            "scenario_id", "scenario_sha256", "product_target_sha256", "product_dependencies",
+            "fact_versions", "product_change_version",
+        ) if key in item}
+        identity_params.update({key: item[key] for key in (
+            "required", "required_for", "role", "execute_by_default",
+            "authoritative_for_final_rating", "retrieval_workflow_revision",
+        ) if key in item})
+        encoded = json.dumps(identity_params, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        return stable_id("QRY", SIGNA_PROVIDER, item["operation"],
+            str(item.get("jurisdiction") or "").upper(), encoded)
     identity_params = {
         "q": str(item.get("q") or ""),
         "strategies": item.get("strategies"),
@@ -956,6 +1054,11 @@ def _signa_expected_query_id(item: dict[str, Any]) -> str:
         "options": item.get("options"),
         "right_type": str(item.get("right_type") or ""),
     }
+    if api_first_v3_enabled(item.get("retrieval_workflow_revision")):
+        identity_params.update({key: item[key] for key in (
+            "include", "required", "required_for", "role", "execute_by_default",
+            "authoritative_for_final_rating", "retrieval_workflow_revision",
+        ) if key in item})
     identity_params.update({key: item[key] for key in DECISION_PLAN_META_KEYS if key in item})
     encoded = json.dumps(
         identity_params, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -964,6 +1067,90 @@ def _signa_expected_query_id(item: dict[str, Any]) -> str:
         "QRY", SIGNA_PROVIDER, SIGNA_OPERATION,
         str(item.get("jurisdiction") or "").upper(), encoded,
     )
+
+
+def signa_record_operation_query_id(item: dict[str, Any]) -> str:
+    """Stable identity for v3 Signa known-record and media reads."""
+    if not isinstance(item, dict) or item.get("operation") not in SIGNA_RECORD_OPERATIONS:
+        raise ValueError("SIGNA_RECORD_OPERATION_INVALID")
+    return _signa_expected_query_id(item)
+
+
+def _authorize_signa_record_operation(task: dict[str, Any], item: dict[str, Any], query_id: str) -> None:
+    """Validate a v3 Signa read against one exact, bounded known-record plan row."""
+    if task.get("retrieval_workflow_revision") != API_FIRST_V3_REVISION:
+        raise ValueError("SIGNA_V3_OPERATION_REQUIRED")
+    if item.get("operation") not in SIGNA_RECORD_OPERATIONS:
+        raise ValueError("SIGNA_OPERATION_MISMATCH")
+    if item.get("required") is not False or item.get("authoritative_for_final_rating") is not False:
+        raise ValueError("SIGNA_DISCOVERY_ONLY_CONTRACT_INVALID")
+    jurisdiction = item.get("jurisdiction")
+    if not isinstance(jurisdiction, str) or not re.fullmatch(r"[A-Z]{2}", jurisdiction) or jurisdiction == "WO":
+        raise ValueError("SIGNA_OFFICE_SCOPE_VIOLATION")
+    if item.get("role") != SIGNA_FREE_ROLE or item.get("required_for") not in {SIGNA_FREE_ROLE, "comparison"}:
+        raise ValueError("SIGNA_DISCOVERY_ONLY_CONTRACT_INVALID")
+    if item.get("required_for") == "comparison":
+        required_scope = ("api_gap_revision", "gap_reason", "judgment_impact", "action_purpose",
+                          "evidence_obligation_id", "scenario_id", "scenario_sha256",
+                          "triage_decision_id", "triage_decision_sha256", "triage_jurisdiction",
+                          "triage_candidate_id")
+        if (item.get("api_gap_revision") != "api-first-v3"
+                or any(not isinstance(item.get(key), str) or not item[key].strip() for key in required_scope)
+                or item.get("action_purpose") != "document_content"
+                or item.get("triage_candidate_id") != item.get("candidate_id")
+                or item.get("triage_jurisdiction") != jurisdiction):
+            raise ValueError("SIGNA_COMPARISON_SCOPE_INVALID")
+        number = re.sub(r"[^A-Za-z0-9]", "", str(item.get("record_number") or "")).casefold()
+        query_number = re.sub(r"[^A-Za-z0-9]", "", str(item.get("q") or "")).casefold()
+        if not number or number != query_number:
+            raise ValueError("SIGNA_RECORD_NUMBER_MISMATCH")
+        from decision_workflow import scenario_index, scenario_sha256
+        scenario = scenario_index(task).get(item["scenario_id"])
+        if scenario is None or scenario_sha256(scenario) != item.get("scenario_sha256"):
+            raise ValueError("SIGNA_COMPARISON_SCOPE_INVALID")
+    if item.get("execute_by_default") is not True:
+        raise ValueError("SIGNA_DISCOVERY_ONLY_CONTRACT_INVALID")
+    targets = task.get("target_jurisdictions")
+    if not isinstance(targets, list) or jurisdiction not in {
+            str(value).upper() for value in targets if isinstance(value, str)}:
+        raise ValueError("SIGNA_OFFICE_SCOPE_VIOLATION")
+    if item.get("right_type") not in {"trademark_word", "trademark_figurative"}:
+        raise ValueError("SIGNA_OFFICE_SCOPE_VIOLATION")
+    candidate_id = item.get("candidate_id")
+    record_id = item.get("provider_record_id")
+    missing = item.get("missing_facts")
+    if not isinstance(candidate_id, str) or not candidate_id.strip():
+        raise ValueError("QUERY_PLAN_SCOPE_MISMATCH")
+    if not isinstance(record_id, str) or not re.fullmatch(r"tm_[A-Za-z0-9_-]{1,120}", record_id):
+        raise ValueError("SIGNA_RECORD_ID_INVALID")
+    if (not isinstance(missing, list) or not missing
+            or any(not isinstance(value, str) or not value.strip() for value in missing)
+            or len(missing) != len(set(missing))):
+        raise ValueError("SIGNA_DETAIL_GAP_REQUIRED")
+    allowed_facts = {"identity", "current_status", "territory", "rights_holder", "protection_content",
+                     "representative_figures", "goods_services", "mark_text"}
+    if any(value not in allowed_facts for value in missing):
+        raise ValueError("SIGNA_DETAIL_GAP_REQUIRED")
+    if item.get("operation") == SIGNA_MEDIA_OPERATION:
+        media_id = item.get("media_id")
+        if not isinstance(media_id, str) or not re.fullmatch(r"med_[A-Za-z0-9_-]{1,120}", media_id):
+            raise ValueError("SIGNA_MEDIA_ID_INVALID")
+    if query_id != _signa_expected_query_id(item):
+        raise ValueError("SIGNA_QUERY_ID_CONTENT_MISMATCH")
+    allowed = {
+        "query_id", "operation", "jurisdiction", "right_type", "candidate_id", "q",
+        "record_number", "provider_record_id", "missing_facts", "media_id", "api_gap_revision",
+        "gap_reason", "judgment_impact", "required", "required_for",
+        "requirement_ids", "wave", "derived_from", "role", "execute_by_default",
+        "authoritative_for_final_rating",
+    }
+    allowed |= DECISION_PLAN_META_KEYS | {"provider_role", "source_upstream"}
+    if is_v24(task):
+        allowed |= {"search_dimension", "search_language", "execution_phase", "publication_scope"}
+    if task.get("product_delivery_revision") == "image-fact-v1":
+        allowed |= {"product_delivery_revision", "product_fact_refs"}
+    if set(item) - allowed:
+        raise ValueError("SIGNA_PLAN_PARAMETERS_INVALID")
 
 
 def authorize_signa_free_plan_entry(
@@ -999,7 +1186,16 @@ def authorize_signa_free_plan_entry(
     if len(matches) != 1:
         raise ValueError("SIGNA_QUERY_ID_NOT_EXACTLY_PLANNED")
     item = dict(matches[0])
-    if item.get("operation") != SIGNA_OPERATION:
+    operation = item.get("operation")
+    if operation in SIGNA_RECORD_OPERATIONS:
+        if task.get("retrieval_workflow_revision") != API_FIRST_V3_REVISION:
+            raise ValueError("SIGNA_V3_OPERATION_REQUIRED")
+        if plan.get("retrieval_workflow_revision") != API_FIRST_V3_REVISION \
+                or item.get("retrieval_workflow_revision") != API_FIRST_V3_REVISION:
+            raise ValueError("SIGNA_PLAN_REVISION_MISMATCH")
+        _authorize_signa_record_operation(task, item, query_id)
+        return item
+    if operation != SIGNA_OPERATION:
         raise ValueError("SIGNA_OPERATION_MISMATCH")
     if (
         item.get("required") is not False
@@ -1009,7 +1205,8 @@ def authorize_signa_free_plan_entry(
         or item.get("required_for") != SIGNA_FREE_ROLE
         or item.get("execute_by_default") is not True
         or (not api_first_enabled(task) and item.get("wave") != 2)
-        or item.get("right_type") != "trademark_word"
+        or item.get("right_type") not in ({"trademark_word", "trademark_figurative"}
+            if task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION else {"trademark_word"})
     ):
         raise ValueError("SIGNA_DISCOVERY_ONLY_CONTRACT_INVALID")
     allowed_keys = {
@@ -1018,15 +1215,21 @@ def authorize_signa_free_plan_entry(
         "requirement_ids", "wave", "derived_from", "role", "execute_by_default",
         "authoritative_for_final_rating",
     }
+    v3_filter_keys = {"offices", "mark_feature_type", "has_media", "nice_classes", "status_stage"}
+    if task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION:
+        allowed_keys |= {"include"}
     if is_v24(task):
         allowed_keys |= {"search_dimension", "search_language", "execution_phase", "publication_scope"}
     if task.get("decision_workflow_revision") == "scenario-triage-v1":
         allowed_keys |= DECISION_PLAN_META_KEYS - API_FIRST_PLAN_META_KEYS
     if api_first_enabled(task):
-        allowed_keys |= API_FIRST_PLAN_META_KEYS
+        allowed_keys |= API_FIRST_PLAN_META_KEYS | {"provider_role", "source_upstream"}
+    if task.get("product_delivery_revision") == "image-fact-v1":
+        allowed_keys |= {"product_delivery_revision", "product_fact_refs"}
     if set(item) - allowed_keys:
         raise ValueError("SIGNA_PLAN_PARAMETERS_INVALID")
     offices = item.get("filters", {}).get("offices") if isinstance(item.get("filters"), dict) else None
+    v3_signa = task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION
     if (
         not str(item.get("q") or "").strip()
         or item.get("strategies") != ["exact", "phonetic", "fuzzy", "prefix"]
@@ -1037,21 +1240,57 @@ def authorize_signa_free_plan_entry(
         or len(set(offices)) != len(offices)
         or item.get("limit") != 25
         or item.get("options") != {"include_total": False}
-        or set(item.get("filters", {})) != {"offices"}
+        or not set(item.get("filters", {})) <= (v3_filter_keys if task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION else {"offices"})
+        or "offices" not in item.get("filters", {})
     ):
         raise ValueError("SIGNA_REQUEST_BOUNDS_INVALID")
+    filters = item.get("filters", {})
+    if v3_signa:
+        targets = {"EM" if str(value).upper() == "EU" else str(value).upper()
+                   for value in task.get("target_jurisdictions", []) if isinstance(value, str)}
+        if not set(offices) <= targets:
+            raise ValueError("SIGNA_OFFICE_SCOPE_VIOLATION")
+        feature = filters.get("mark_feature_type")
+        if feature is not None and feature not in {"word", "figurative", "combined", "three_dimensional"}:
+            raise ValueError("SIGNA_REQUEST_BOUNDS_INVALID")
+        if feature and ((item.get("right_type") == "trademark_word") != (feature == "word")):
+            raise ValueError("SIGNA_REQUEST_BOUNDS_INVALID")
+        if "has_media" in filters and not isinstance(filters["has_media"], bool):
+            raise ValueError("SIGNA_REQUEST_BOUNDS_INVALID")
+        classes = filters.get("nice_classes", [])
+        if (not isinstance(classes, list) or len(classes) > 45
+                or any(isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 45 for value in classes)
+                or len(set(classes)) != len(classes)):
+            raise ValueError("SIGNA_REQUEST_BOUNDS_INVALID")
+        stages = filters.get("status_stage", [])
+        if (not isinstance(stages, list) or len(stages) > 20
+                or any(not isinstance(value, str) or not re.fullmatch(r"[a-z_]+", value) for value in stages)
+                or len(set(stages)) != len(stages)):
+            raise ValueError("SIGNA_REQUEST_BOUNDS_INVALID")
+        if "include" in item and item["include"] != ["full_goods_services"]:
+            raise ValueError("SIGNA_REQUEST_BOUNDS_INVALID")
     if query_id != _signa_expected_query_id(item):
         raise ValueError("SIGNA_QUERY_ID_CONTENT_MISMATCH")
     return item
 
 
 def _serpapi_expected_query_id(item: dict[str, Any]) -> str:
+    if (api_first_scenario_revision_enabled(item.get("retrieval_workflow_revision"))
+            and item.get("decision_workflow_revision") == "scenario-triage-v1"):
+        from provider_utils import PLAN_META_KEYS, query_identity
+        identity = {key: value for key, value in item.items()
+                    if key not in PLAN_META_KEYS or key in DECISION_PLAN_META_KEYS}
+        identity["right_type"] = item.get("right_type")
+        return query_identity(SERPAPI_PROVIDER, str(item.get("operation") or SERPAPI_OPERATION),
+                              str(item.get("jurisdiction") or ""), str(item.get("q") or ""), identity)
     identity_params = {
         "q": str(item.get("q") or ""),
         "num": item.get("num"),
         "country": str(item.get("country") or ""),
         "right_type": str(item.get("right_type") or ""),
     }
+    if item.get("type"):
+        identity_params["type"] = str(item["type"])
     identity_params.update({key: item[key] for key in DECISION_PLAN_META_KEYS if key in item})
     encoded = json.dumps(
         identity_params, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -1062,8 +1301,57 @@ def _serpapi_expected_query_id(item: dict[str, Any]) -> str:
     )
 
 
+def serpapi_plan_physical_slots(task: dict[str, Any], plan: dict[str, Any], *,
+                                task_dir: Path | None = None, evidence: dict | None = None) -> int:
+    """Count reserved requests; only a validated retained reuse releases a slot.
+
+    With no artifact context the conservative logical count is retained. The
+    atomic request ledger remains responsible for actual network reservations.
+    """
+    providers = {SERPAPI_PROVIDER, "serpapi_google_lens"}
+    rows = [(provider, row) for provider in providers
+            for row in plan.get("queries", {}).get(provider, [])]
+    total = len(rows)
+    if task.get("retrieval_workflow_revision") != API_FIRST_V3_REVISION or task_dir is None:
+        return total
+    root = Path(task_dir).resolve()
+    if evidence is None:
+        try:
+            evidence = load_json(root / "evidence.json")
+        except (OSError, ValueError):
+            return total
+    if (not isinstance(evidence, dict) or evidence.get("task_id") != task.get("task_id")
+            or evidence.get("schema_version") != task.get("schema_version")):
+        return total
+    runs = evidence.get("source_runs", [])
+    if not isinstance(runs, list):
+        return total
+    from candidate_api_actions import _physical_planned
+    retained = _physical_planned(task, evidence, plan.get("queries", {}), providers,
+        plan=plan, task_dir=root)
+    total = len(retained)
+    planned_ids = {row.get("query_id") for row in retained if isinstance(row, dict)}
+    # Retried physical requests and historical requests outside this plan still
+    # consume quota; a logical plan row can account for at most one of them.
+    physical_counts = {}
+    for run in runs:
+        if not isinstance(run, dict) or run.get("provider") not in providers:
+            continue
+        quota = run.get("quota")
+        network = quota.get("network_request_attempted") if isinstance(quota, dict) else None
+        if (network is not True and not (run.get("submission_state") == "unknown" and network is not False)
+                and (quota is None or isinstance(quota, dict))):
+            continue
+        key = run.get("query_id")
+        physical_counts[key] = physical_counts.get(key, 0) + 1
+    total += sum(max(0, count - (1 if query_id in planned_ids else 0))
+                 for query_id, count in physical_counts.items())
+    return total
+
+
 def authorize_serpapi_free_plan_entry(
     task: dict[str, Any], plan: dict[str, Any], operation: str, query_id: str,
+    *, task_dir: Path | None = None, evidence: dict | None = None,
 ) -> dict[str, Any]:
     """Authorize one exact, free-plan-only SerpApi Google Patents query."""
     error = provider_execution_error(task, SERPAPI_PROVIDER, operation)
@@ -1087,9 +1375,10 @@ def authorize_serpapi_free_plan_entry(
         item for item in queries.get(SERPAPI_PROVIDER, []) if isinstance(item, dict)
     ]
     maximum = int(task["serpapi_free_enhancement"]["max_queries_per_task"])
-    if len(entries) > maximum:
-        raise ValueError("SERPAPI_TASK_QUERY_LIMIT_EXCEEDED")
-    if is_v24(task) and len(entries) + len(queries.get("serpapi_google_lens", [])) > maximum:
+    planned_count = (serpapi_plan_physical_slots(task, plan, task_dir=task_dir, evidence=evidence)
+                     if task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION
+                     else len(entries) + (len(queries.get("serpapi_google_lens", [])) if is_v24(task) else 0))
+    if planned_count > maximum:
         raise ValueError("SERPAPI_TASK_QUERY_LIMIT_EXCEEDED")
     matches = [
         item for item in entries if str(item.get("query_id") or "") == query_id
@@ -1097,6 +1386,12 @@ def authorize_serpapi_free_plan_entry(
     if len(matches) != 1:
         raise ValueError("SERPAPI_QUERY_ID_NOT_EXACTLY_PLANNED")
     item = dict(matches[0])
+    if operation == SERPAPI_DETAILS_OPERATION and item.get("operation") == SERPAPI_DETAILS_OPERATION:
+        if (item.get("required") is not False or not str(item.get("candidate_id") or "").strip()
+                or not re.fullmatch(r"patent/[A-Za-z]{2}[A-Za-z0-9]+/[a-z]{2}", str(item.get("patent_id") or ""))
+                or not str(item.get("q") or "").strip()):
+            raise ValueError("SERPAPI_DETAILS_PLAN_CONTRACT_INVALID")
+        return item
     if operation != SERPAPI_OPERATION or item.get("operation") != SERPAPI_OPERATION:
         raise ValueError("SERPAPI_OPERATION_MISMATCH")
     if (
@@ -1108,7 +1403,7 @@ def authorize_serpapi_free_plan_entry(
     ):
         raise ValueError("SERPAPI_DISCOVERY_ONLY_CONTRACT_INVALID")
     allowed_keys = {
-        "q", "num", "country", "query_id", "operation", "jurisdiction",
+        "q", "num", "country", "type", "query_id", "operation", "jurisdiction",
         "right_type", "required", "required_for", "requirement_ids", "wave",
         "derived_from", "role", "execute_by_default",
         "authoritative_for_final_rating", "execute_when", "fallback_provider",
@@ -1119,7 +1414,9 @@ def authorize_serpapi_free_plan_entry(
     if task.get("decision_workflow_revision") == "scenario-triage-v1":
         allowed_keys |= DECISION_PLAN_META_KEYS - API_FIRST_PLAN_META_KEYS
     if api_first_enabled(task):
-        allowed_keys |= API_FIRST_PLAN_META_KEYS
+        allowed_keys |= API_FIRST_PLAN_META_KEYS | {"provider_role", "source_upstream"}
+    if task.get("product_delivery_revision") == "image-fact-v1":
+        allowed_keys |= {"product_delivery_revision", "product_fact_refs"}
     if set(item) - allowed_keys:
         raise ValueError("SERPAPI_PLAN_PARAMETERS_INVALID")
     query = str(item.get("q") or "").strip()
@@ -1132,6 +1429,8 @@ def authorize_serpapi_free_plan_entry(
         or not 1 <= result_count <= 100
         or not re.fullmatch(r"[A-Z]{2}", country)
         or str(item.get("right_type") or "") not in {"patent", "design"}
+        or (item.get("type") not in (None, "", "DESIGN"))
+        or (item.get("type") == "DESIGN" and item.get("right_type") != "design")
     ):
         raise ValueError("SERPAPI_REQUEST_BOUNDS_INVALID")
     if query_id != _serpapi_expected_query_id(item):
@@ -1169,6 +1468,7 @@ def authorize_serpapi_free_plan_entry(
 
 def default_discovery_plan_error(
     task: dict[str, Any], plan: dict[str, Any],
+    *, task_dir: Path | None = None, evidence: dict | None = None,
 ) -> str:
     """Validate frozen default and current explicit optional discovery plans."""
     if not (
@@ -1229,10 +1529,15 @@ def default_discovery_plan_error(
             return "OPTIONAL_SERPAPI_PLAN_MISSING"
         if not serpapi_enabled and serpapi_rows:
             return "SERPAPI_FREE_NOT_ENABLED"
+        if (serpapi_enabled and task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION
+                and serpapi_plan_physical_slots(task, plan, task_dir=task_dir, evidence=evidence)
+                > int(task["serpapi_free_enhancement"]["max_queries_per_task"])):
+            return "SERPAPI_TASK_QUERY_LIMIT_EXCEEDED"
         for item in serpapi_rows:
             authorize_serpapi_free_plan_entry(
                 task, plan, str(item.get("operation") or ""),
                 str(item.get("query_id") or ""),
+                task_dir=task_dir, evidence=evidence,
             )
     except (KeyError, TypeError, ValueError) as exc:
         return str(exc).split(":", 1)[0] or "COMMERCIAL_DISCOVERY_PLAN_INVALID"
@@ -1255,8 +1560,9 @@ def default_discovery_plan_error(
 
 def assert_default_discovery_plan_contract(
     task: dict[str, Any], plan: dict[str, Any],
+    *, task_dir: Path | None = None, evidence: dict | None = None,
 ) -> None:
-    error = default_discovery_plan_error(task, plan)
+    error = default_discovery_plan_error(task, plan, task_dir=task_dir, evidence=evidence)
     if error:
         raise ValueError(error)
 
@@ -1310,12 +1616,22 @@ def coverage_route_configured(
             | set(task.get("optional_sources", []))
         )
         return provider in configured
+    routes = coverage_routes(task)
+    if task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION:
+        for requirement in task.get("coverage_requirements", []):
+            if not isinstance(requirement, dict):
+                continue
+            for route in requirement.get("gap_only_routes", []) + requirement.get("fallback_routes", []):
+                if isinstance(route, dict):
+                    routes.append({**route, "requirement_id": requirement.get("requirement_id", ""),
+                        "jurisdiction": requirement.get("jurisdiction", ""),
+                        "right_type": requirement.get("right_type", "")})
     return any(
         route.get("provider") == provider
         and (not operation or route.get("operation") == operation)
         and (not jurisdiction or str(route.get("jurisdiction") or "").upper() == jurisdiction.upper())
         and (not right_type or route.get("right_type") == right_type)
-        for route in coverage_routes(task)
+        for route in routes
     )
 
 
@@ -1347,12 +1663,14 @@ def provider_execution_error(
     if provider == SERPAPI_PROVIDER:
         if not serpapi_free_enabled(task):
             return "SERPAPI_FREE_NOT_ENABLED"
-        if operation != SERPAPI_OPERATION:
+        if operation not in {SERPAPI_OPERATION, SERPAPI_DETAILS_OPERATION}:
             return "PROVIDER_OPERATION_NOT_CONFIGURED"
         return ""
     if provider == SIGNA_PROVIDER:
         if not signa_free_enabled(task):
             return "SIGNA_FREE_NOT_ENABLED"
+        if operation in SIGNA_RECORD_OPERATIONS:
+            return "" if api_first_v3_enabled(task.get("retrieval_workflow_revision")) else "SIGNA_V3_OPERATION_REQUIRED"
         if operation != SIGNA_OPERATION:
             return "PROVIDER_OPERATION_NOT_CONFIGURED"
         return ""
@@ -1647,8 +1965,13 @@ def canonical_coverage_requirements_match(task: dict[str, Any]) -> bool:
         return False
     if is_v24(task):
         from workflow_v24 import build_coverage_requirements_v24
-        return task.get("coverage_requirements") == build_coverage_requirements_v24(
-            jurisdictions, screening_revision=task.get("screening_revision"), specialty_workflow_revision=task.get("specialty_workflow_revision"))
+        expected = build_coverage_requirements_v24(
+            jurisdictions, screening_revision=task.get("screening_revision"),
+            specialty_workflow_revision=task.get("specialty_workflow_revision"))
+        if task.get("retrieval_workflow_revision") == API_FIRST_V3_REVISION:
+            from coverage_v3 import build_requirements
+            expected = build_requirements(task, expected)
+        return task.get("coverage_requirements") == expected
     return task.get("coverage_requirements") == build_coverage_requirements(jurisdictions)
 
 
@@ -1686,7 +2009,10 @@ def capture_provenance(
     allowed_transports: set[str],
 ) -> dict[str, Any]:
     """Validate browser provenance without persisting CDP connection details."""
-    if str(capture.get("browser") or "").strip() != "chrome_desktop":
+    browser_name = str(capture.get("browser") or "").strip()
+    cua_capture = (capture.get("capture_transport") == "cua" and "cua" in allowed_transports
+                   and task.get("schema_version") == "2.4-free")
+    if browser_name != "chrome_desktop" and not (cua_capture and browser_name == "codex_iab"):
         raise ValueError("browser must be chrome_desktop")
     schema_version = str(task.get("schema_version") or "")
     if schema_version not in SUPPORTED_SCHEMA_VERSIONS:
@@ -1709,10 +2035,17 @@ def capture_provenance(
             "capture_transport must be one of: " + ", ".join(sorted(allowed_transports))
         )
     provenance: dict[str, Any] = {
-        "browser": "chrome_desktop",
+        "browser": browser_name,
         "capture_transport": transport,
     }
-    if transport == "cdp":
+    if transport == "cua":
+        if (not cua_capture or capture.get("operator_confirmed") is not None
+                or capture.get("mode") != "basic_search"
+                or any(not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(capture.get(key) or ""))
+                       for key in ("cua_browser_id", "cua_tab_id"))):
+            raise ValueError("CUA captures require a 2.4 automatic basic-search browser/tab binding")
+        provenance.update(cua_browser_id=capture["cua_browser_id"], cua_tab_id=capture["cua_tab_id"])
+    elif transport == "cdp":
         browser_version = str(capture.get("browser_version") or "").strip()
         protocol_version = str(capture.get("protocol_version") or "").strip()
         session_id = str(capture.get("cdp_session_id") or "").strip()
@@ -1847,3 +2180,49 @@ def path_within(path: Path, root: Path) -> bool:
 
 def run_dir_from_task(task_path: Path) -> Path:
     return task_path.resolve().parent
+
+
+_SUMMARY_TEXT_LIMIT = 200
+
+
+def _summary_value(value):
+    if isinstance(value, (bool, int, float)) or value is None:
+        return value
+    if isinstance(value, str):
+        return value if len(value) <= _SUMMARY_TEXT_LIMIT else None
+    if isinstance(value, list) and all(isinstance(item, str) and len(item) <= _SUMMARY_TEXT_LIMIT for item in value):
+        return value[:50] if len(value) > 50 else value
+    return None
+
+
+def summarize_recorded(value):
+    """Small agent-facing echo of a recorder result: ids, states and short scalars only.
+
+    Long text, evidence and nested judgments are already stored by the recorder;
+    printing them back only costs tokens. Lists of records keep each record's ids/states.
+    """
+    if isinstance(value, dict):
+        summary = {}
+        for key, child in value.items():
+            if isinstance(child, list) and child and all(isinstance(item, dict) for item in child):
+                summary[key] = [summarize_recorded(item) for item in child[:50]]
+                if len(child) > 50:
+                    summary[key + "_omitted"] = len(child) - 50
+            elif isinstance(child, dict):
+                nested = summarize_recorded(child) if key in {"scope", "event", "result", "record"} else None
+                if nested:
+                    summary[key] = nested
+            else:
+                shown = _summary_value(child)
+                if shown is not None or child is None:
+                    summary[key] = shown
+        return summary
+    return value
+
+
+def print_recorded(result, *, verbose: bool = False) -> None:
+    """Print a recorder result: compact summary by default, the historical full JSON with --verbose."""
+    if verbose:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(json.dumps(summarize_recorded(result), ensure_ascii=False, separators=(",", ":")))

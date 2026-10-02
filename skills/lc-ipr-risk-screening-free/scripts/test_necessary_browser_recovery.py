@@ -93,6 +93,7 @@ class SubmittedFailureProjectionTests(unittest.TestCase):
         self.addCleanup(self.fixture.tearDown)
         f = self.fixture
         f.task["completion_policy_revision"] = "necessary-work-v1"
+        f.task.pop("continuous_recovery_revision", None)  # Frozen pre-08B browser policy.
         self.provider = "uspto_patent_browser"
         self.row = next(row for row in f.plan["queries"][self.provider] if row["right_type"] == "patent")
         f.save()

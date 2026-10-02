@@ -182,6 +182,110 @@ print('five imports and business return preserved')
         self.assertEqual(self.rows()[0]['stage'], 'candidate_triage')
         self.assertEqual([call.args[1:] for call in backend.locking.call_args_list], [(1, 1), (2, 1)])
 
+    def test_step_uses_explicit_directory_and_preserves_input_bytes(self):
+        before = (self.task / 'task.json').read_bytes()
+        stream = io.StringIO()
+        with patch.object(timing.time, 'perf_counter_ns', side_effect=[100, 3_000_100]), redirect_stdout(stream):
+            with timing.timed_step(self.task, 'render'):
+                print('original output')
+        self.assertEqual(stream.getvalue(), 'original output\n')
+        row = self.rows()[0]
+        self.assertEqual((row['stage'], row['elapsed_scope'], row['elapsed_ms']), ('render', 'step_inclusive', 3.0))
+        self.assertTrue(row['auxiliary_only'])
+        self.assertEqual(before, (self.task / 'task.json').read_bytes())
+
+    def test_nested_steps_are_distinguished_from_cli_total(self):
+        @timing.timed_cli('report_build')
+        def main():
+            with timing.timed_step(self.task, 'render'):
+                with timing.timed_step(self.task, 'copy'):
+                    return 8
+        with patch.object(timing.time, 'perf_counter_ns', side_effect=[0, 1, 2, 3, 4, 5]):
+            self.assertEqual(self.invoke(main), 8)
+        self.assertEqual([(r['stage'], r['elapsed_scope']) for r in self.rows()], [
+            ('copy', 'step_inclusive'), ('render', 'step_inclusive'), ('report_build', 'cli_main_inclusive')])
+
+    def test_step_does_not_create_directory_and_accepts_disabled_destination(self):
+        missing = self.root / 'missing'
+        for target in (missing, None, object()):
+            with timing.timed_step(target, 'freeze'):
+                pass
+        self.assertFalse(missing.exists())
+        self.assertFalse((self.task / timing.FILENAME).exists())
+
+    def test_step_preserves_exception_and_never_records_private_text(self):
+        for error in (ValueError('private'), KeyboardInterrupt(), SystemExit(0), SystemExit(1)):
+            with self.assertRaises(type(error)) as captured:
+                with timing.timed_step(self.task, 'model_review'):
+                    raise error
+            self.assertIs(captured.exception, error)
+        self.assertEqual([r['status'] for r in self.rows()], ['error', 'interrupted', 'success', 'error'])
+        self.assertNotIn('private', (self.task / timing.FILENAME).read_text())
+        original = RuntimeError('original')
+        with patch.object(timing, '_append', side_effect=OSError('logging failure')):
+            with self.assertRaises(RuntimeError) as captured:
+                with timing.timed_step(self.task, 'semantic_check'):
+                    raise original
+            self.assertIs(captured.exception, original)
+            with timing.timed_step(self.task, 'entry_check'):
+                pass
+
+    def test_step_retains_safe_append_lock_and_symlink_behavior(self):
+        import provider_utils
+        busy = provider_utils.ProviderError('PROVIDER_LOCK_BUSY', 'access_limited', 'busy')
+        with patch.object(provider_utils, 'file_lock', side_effect=busy) as lock:
+            with timing.timed_step(self.task, 'copy'):
+                pass
+        lock.assert_called_once_with(self.task.resolve() / '.runtime-timings.lock', timeout=0.1)
+        before = (self.task / 'task.json').read_bytes()
+        (self.task / timing.FILENAME).symlink_to(self.task / 'task.json')
+        with timing.timed_step(self.task, 'render'):
+            pass
+        self.assertEqual(before, (self.task / 'task.json').read_bytes())
+
+    def test_progress_view_shows_real_ended_duration_and_pending_work_only(self):
+        before = (self.task / 'task.json').read_bytes()
+        with timing.timed_step(self.task, 'model_review'):
+            pass
+        view = {'entries': [{'kind': 'source_lookup', 'state': 'awaiting_review',
+                             'reason': 'private source detail', 'work_id': 'private-id'}]}
+        projected = timing.progress_view(self.task, view)
+        self.assertEqual(projected['current_activity'], 'unconfirmed')
+        self.assertEqual(projected['next_step'], {'state': 'pending', 'kind': 'source_lookup',
+                                                  'label': '来源查询或结果处理'})
+        self.assertEqual(projected['recent_ended_steps'][0]['stage'], 'model_review')
+        self.assertGreaterEqual(projected['recent_ended_steps'][0]['elapsed_ms'], 0)
+        self.assertNotIn('private', json.dumps(projected))
+        self.assertEqual(before, (self.task / 'task.json').read_bytes())
+
+    def test_progress_view_waiting_unknown_and_corrupt_log_are_safe(self):
+        with (self.task / timing.FILENAME).open('w') as stream:
+            stream.write('not-json\n')
+            stream.write(json.dumps({'schema': 'IPR-RUNTIME-TIMING/1.0', 'auxiliary_only': True,
+                'stage': 'private credential', 'status': 'success', 'elapsed_ms': 3})+'\n')
+            stream.write(json.dumps({'schema': 'IPR-RUNTIME-TIMING/1.0', 'auxiliary_only': True,
+                'stage': [], 'status': 'success', 'elapsed_ms': 3})+'\n')
+        wait = timing.progress_view(self.task, {'entries': [{'kind': 'source_lookup', 'state': 'awaiting_access'}]})
+        self.assertEqual(wait['next_step']['state'], 'waiting')
+        self.assertEqual(wait['recent_ended_steps'], [])
+        self.assertEqual(timing.progress_view(self.task)['next_step']['state'], 'unknown')
+        (self.task / timing.FILENAME).unlink()
+        (self.task / timing.FILENAME).symlink_to(self.task / 'task.json')
+        self.assertEqual(timing.progress_view(self.task)['recent_ended_steps'], [])
+
+    def test_next_work_prints_auxiliary_progress_without_mutating_canonical_view(self):
+        import next_work
+        view = {'entries': [{'kind': 'triage', 'state': 'ready'}], 'status': 'incomplete'}
+        before = (self.task / 'task.json').read_bytes()
+        stream = io.StringIO()
+        with patch('sys.argv', ['next_work', '--task-dir', str(self.task)]), \
+                patch.object(next_work, 'work_view_from_dir', return_value=view), redirect_stdout(stream):
+            next_work.main()
+        projected = json.loads(stream.getvalue())
+        self.assertEqual(projected['runtime_progress']['next_step']['label'], '候选分流')
+        self.assertEqual(view, {'entries': [{'kind': 'triage', 'state': 'ready'}], 'status': 'incomplete'})
+        self.assertEqual(before, (self.task / 'task.json').read_bytes())
+
 
 if __name__ == '__main__':
     unittest.main()

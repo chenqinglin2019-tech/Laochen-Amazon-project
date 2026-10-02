@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from common import atomic_write_json, load_json, sha256_json, sha256_file, serper_free_enhancement, serpapi_free_enhancement
 from workflow_v24 import generate_plan, scenario_dispatch_block_from_dir, assert_recall_planning_contract, product_identity_digest
-from api_first_planning import (REVISION, append_followup, dispatch_block, google_query, make_row,
+from api_first_planning import (REVISION, append_followup, append_initial, dispatch_block, google_query, make_row,
     next_work_entries, triage_digest)
 import test_scenario_planning as scenario_fixture
 
@@ -14,6 +14,9 @@ import test_scenario_planning as scenario_fixture
 class ApiFirstPlanningTests(unittest.TestCase):
     def setUp(self):
         scenario_fixture.ScenarioPlanningTests.setUp(self)
+        # These fixtures assert the frozen pre-03A api-first contract. New
+        # purpose-budget tasks are exercised in test_discovery_budget.py.
+        self.task.pop("discovery_budget_revision", None)
         self.task["retrieval_workflow_revision"] = REVISION
         self.task["serper_free_enhancement"] = serper_free_enhancement(True, REVISION)
         self.task["serpapi_free_enhancement"] = serpapi_free_enhancement(False, REVISION)
@@ -160,6 +163,60 @@ class ApiFirstPlanningTests(unittest.TestCase):
         atomic_write_json(self.path / "task.json", self.task)
         self.assertEqual(scenario_dispatch_block_from_dir(self.path, "uspto_patent_browser", new)["code"], "API_DISCOVERY_FOLLOWUP_DECISION_REQUIRED")
 
+    def test_hash_bound_xml_fault_is_failure_proof_and_tamper_revokes_it(self):
+        from source_result_processing import REVISION as PROCESSING_REVISION, append_receipt_disposition, make_index
+        from common import sha256_bytes
+        from api_first_planning import _receipt_classified_failure
+        self.task["result_processing_revision"] = PROCESSING_REVISION
+        atomic_write_json(self.path / "task.json", self.task)
+        raw_body = (b'<?xml version="1.0"?><fault xmlns="http://ops.epo.org">'
+                    b'<code>SERVER.EntityNotFound</code><message>upstream fault</message></fault>')
+        raw_path = self.path / "epo-fault.xml"
+        raw_path.write_bytes(raw_body)
+        digest = sha256_bytes(raw_body)
+        index = make_index(self.task, provider="epo_ops", evidence_type="patent", status="no_result",
+            submission_state="submitted", raw_body=raw_body, raw_suffix="xml",
+            normalized={"candidates": []}, coverage={"schema_valid": False, "retrieved_hits": 0},
+            payload_digest=digest)
+        self.evidence = load_json(self.path / "evidence.json")
+        run = {"run_id": "RUN-EPO-FAULT", "provider": "epo_ops", "query_id": "Q-EPO-FAULT",
+            "status": "no_result", "submission_state": "submitted",
+            "raw_paths": [raw_path.name], "payload_digest": digest, "result_processing": index,
+            "evidence_type": "patent", "operation": "search", "jurisdiction": "US", "right_type": "patent",
+            "requirement_ids": ["REQ-1"]}
+        self.evidence["source_runs"].append(run)
+        self.evidence["collections"].setdefault("patents", []).append({"evidence_id": "EV-RUN-EPO-FAULT",
+            "source_run_id": run["run_id"], "provider": "epo_ops", "query_id": run["query_id"],
+            "operation": run["operation"], "jurisdiction": run["jurisdiction"], "right_type": run["right_type"],
+            "requirement_ids": run["requirement_ids"],
+            "payload": {"candidates": [], "search_metadata": {"empty_fault_receipt": True}}})
+        atomic_write_json(self.path / "evidence.json", self.evidence)
+        append_receipt_disposition(self.path, run["run_id"], {"outcome": "non_result_error", "reviewer": "unit-agent",
+            "reason": "XML fault envelope is a provider error receipt"})
+        current = load_json(self.path / "evidence.json")
+        self.assertTrue(_receipt_classified_failure(self.path, self.task, current, run))
+        self.assertEqual(run["status"], "no_result")
+        self.assertEqual(run["result_processing"]["parsed_count"], 0)
+        self.assertIs(run["result_processing"]["zero_proven"], False)
+        raw_path.write_bytes(raw_body + b" ")
+        self.assertFalse(_receipt_classified_failure(self.path, self.task, current, run))
+        raw_path.write_bytes(raw_body)
+        changed_proof = deepcopy(current)
+        disposition = next(item for item in changed_proof["receipt_dispositions"]
+                           if item["source_run_id"] == run["run_id"])
+        disposition["outcome"] = "changed"
+        atomic_write_json(self.path / "evidence.json", changed_proof)
+        self.assertFalse(_receipt_classified_failure(self.path, self.task, changed_proof, run))
+
+    def test_valid_zero_is_not_source_unavailable(self):
+        from source_result_processing import REVISION as PROCESSING_REVISION
+        self.task["result_processing_revision"] = PROCESSING_REVISION
+        atomic_write_json(self.path / "task.json", self.task)
+        request = self.request(role="browser_fallback", provider="uspto_patent_browser")
+        request["reason_code"] = "source_unavailable"
+        with self.assertRaisesRegex(ValueError, "SOURCE_NOT_FAILED"):
+            append_followup(self.path, request)
+
     def test_source_file_tampering_rejects_exact_query_id_dispatch(self):
         req = self.request(role="browser_fallback", provider="uspto_patent_browser")
         new = append_followup(self.path, req)
@@ -206,6 +263,110 @@ class ApiFirstPlanningTests(unittest.TestCase):
         self.assertFalse(any("Visual Mark" in r.get("q", "") for rs in self.plan["queries"].values() for r in rs
             if r["right_type"] in {"copyright", "trade_dress"}))
 
+    def test_agent_provenance_scope_keeps_eligible_supplemental_discovery_terms(self):
+        provenance = lambda rid, right: {"requirement_id": rid, "jurisdiction": "US", "right_type": right,
+            "phase": "provenance", "routes": [{"provider": "asset_provenance",
+                "operation": "provenance_review", "method": "agent"}]}
+        search = lambda rid, right, provider, operation: {"requirement_id": rid, "jurisdiction": "US",
+            "right_type": right, "phase": "official_recall", "routes": [{"provider": provider, "operation": operation}]}
+        self.task["target_jurisdictions"] = ["US"]
+        self.task["coverage_requirements"] = [
+            provenance("C-PROV", "copyright"), provenance("TD-PROV", "trade_dress"),
+            search("D-RECALL", "design", "epo_ops", "search"),
+            search("P-RECALL", "patent", "epo_ops", "search")]
+        terms = [{"kind": "product", "value": "mechanical clasp", "language": "en",
+            "derived_from": "product.structure[0]"}]
+        queries = {"asset_provenance": [{"query_id": "keep-this-agent-work", "right_type": "copyright"}]}
+        gaps, queue = [], []
+        from decision_workflow import necessary_scenario_right_types
+        all_rights = {"copyright", "trade_dress", "design", "patent"}
+        with patch("decision_workflow.necessary_scenario_right_types", return_value=all_rights):
+            append_initial(self.path, self.task, terms, queries, gaps, queue)
+        self.assertEqual([row["query_id"] for row in queries["asset_provenance"]], ["keep-this-agent-work"])
+        self.assertEqual({row["right_type"] for provider, rows in queries.items()
+            if provider != "asset_provenance" for row in rows}, {"copyright", "trade_dress", "design", "patent"})
+        empty_gaps = []
+        with patch("decision_workflow.necessary_scenario_right_types", return_value=all_rights):
+            append_initial(self.path, self.task, [], {}, empty_gaps, [])
+        self.assertEqual({g["right_type"] for g in empty_gaps if g["code"] == "API_DISCOVERY_TERMS_MISSING"},
+            {"design", "patent"})
+
+    def test_missing_agent_route_does_not_cover_copyright_trade_dress_scope(self):
+        self.task["target_jurisdictions"] = ["US"]
+        self.task["coverage_requirements"] = [{"requirement_id": right, "jurisdiction": "US",
+            "right_type": right, "phase": "provenance", "routes": []}
+            for right in ("copyright", "trade_dress")]
+        from decision_workflow import necessary_scenario_right_types
+        gaps, queries = [], {}
+        with patch("decision_workflow.necessary_scenario_right_types",
+                   return_value={"copyright", "trade_dress"}):
+            append_initial(self.path, self.task, [], queries, gaps, [])
+        self.assertEqual({g["right_type"] for g in gaps if g["code"] == "API_DISCOVERY_TERMS_MISSING"},
+            {"copyright", "trade_dress"})
+
+    def test_serper_keyword_route_prevents_provenance_only_skip(self):
+        self.task["target_jurisdictions"] = ["US"]
+        self.task["coverage_requirements"] = [
+            {"requirement_id": "C-PROV", "jurisdiction": "US", "right_type": "copyright",
+                "phase": "provenance", "routes": [{"provider": "asset_provenance",
+                    "operation": "provenance_review", "method": "agent"}]},
+            {"requirement_id": "C-SEARCH", "jurisdiction": "US", "right_type": "copyright",
+                "phase": "official_recall", "routes": [{"provider": "serper_patents", "operation": "patents"}]},
+        ]
+        terms = [{"kind": "product", "value": "mechanical clasp", "language": "en",
+            "derived_from": "product.structure[0]"}]
+        from decision_workflow import necessary_scenario_right_types
+        queries, gaps = {}, []
+        with patch("decision_workflow.necessary_scenario_right_types", return_value={"copyright"}):
+            append_initial(self.path, self.task, terms, queries, gaps, [])
+        self.assertTrue(any(row.get("right_type") == "copyright"
+            for rows in queries.values() for row in rows))
+        self.assertFalse(any(g.get("code") == "API_DISCOVERY_TERMS_MISSING"
+            and g.get("right_type") == "copyright" for g in gaps))
+
+    def test_old_terms_missing_gap_stops_projecting_for_provenance_only_scope(self):
+        from api_first_planning import next_work_entries
+        self.task["coverage_requirements"] = [{"requirement_id": "C-PROV", "jurisdiction": "US",
+            "right_type": "copyright", "phase": "provenance", "routes": [{"provider": "asset_provenance",
+                "operation": "provenance_review", "method": "agent"}]}]
+        old_gap = {"code": "API_DISCOVERY_TERMS_MISSING", "jurisdiction": "US", "right_type": "copyright",
+            "requirement_ids": ["C-PROV"]}
+        plan = {**self.plan, "queries": {}, "planning_gaps": [old_gap]}
+        with patch("decision_workflow.necessary_scenario_right_types", return_value={"copyright"}):
+            work = next_work_entries(self.task, plan, self.evidence, self.candidates, self.ledger)
+        self.assertFalse(any(item.get("reason") == "API_DISCOVERY_TERMS_MISSING" for item in work))
+
+    def test_same_purpose_expression_marker_is_deduplicated_but_changed_term_stays_ready(self):
+        self.task["completion_policy_revision"] = "necessary-work-v2"
+        row = self.primary()
+        row["discovery_intent_id"] = "DISCOVERY-INTENT-FIXTURE"
+        term = {"kind": "structural_feature", "value": "layered shell", "language": "en",
+            "derived_from": "product.structure[0]", "fact_id": "FACT-1", "fact_version": 2,
+            "fact_nature": "observed", "fact_verification": "confirmed"}
+        original_term = {key: value for key, value in term.items() if key not in
+            {"fact_id", "fact_version", "fact_nature", "fact_verification"}}
+        self.plan["terms"] = [term]
+        row["discovery_scope"]["expression_basis"] = {**original_term, "source": original_term["derived_from"],
+            "term_sha256": sha256_json(original_term)}
+        self.plan["planning_gaps"] = [
+            {"code": "API_DISCOVERY_PURPOSE_EXPRESSION_REVIEW_REQUIRED", "jurisdiction": row["jurisdiction"],
+                "right_type": row["right_type"], "discovery_intent_id": row["discovery_intent_id"],
+                "term_id": sha256_json(term)}]
+        same = next_work_entries(self.task, self.plan, self.evidence, self.candidates, self.ledger)
+        self.assertFalse(any(item.get("reason") == "API_DISCOVERY_PURPOSE_EXPRESSION_REVIEW_REQUIRED"
+            and item.get("query_id") is None for item in same))
+
+        for field, value in (("value", "different shell"), ("derived_from", "product.structure[9]"),
+                             ("kind", "visual_feature")):
+            with self.subTest(field=field):
+                changed_term = {**term, field: value}
+                self.plan["terms"] = [changed_term]
+                self.plan["planning_gaps"][0]["term_id"] = sha256_json(changed_term)
+                changed = next_work_entries(self.task, self.plan, self.evidence, self.candidates, self.ledger)
+                marker = next(item for item in changed if item.get("reason") == "API_DISCOVERY_PURPOSE_EXPRESSION_REVIEW_REQUIRED"
+                    and item.get("query_id") is None)
+                self.assertEqual(marker["state"], "ready")
+
     def test_empty_normalization_cannot_skip_one_real_card(self):
         from api_first_planning import source_card_state
         run = self.source(status="success")
@@ -216,6 +377,116 @@ class ApiFirstPlanningTests(unittest.TestCase):
         self.assertEqual(error, "API_DISCOVERY_MERGE_REQUIRED")
         entries = next_work_entries(self.task, self.plan, self.evidence, self.candidates, self.ledger)
         self.assertTrue(any(e.get("query_id") == self.primary()["query_id"] and e["reason"] == error for e in entries))
+
+    def test_wo_card_uses_its_own_unlocated_triage_not_us_query_scope(self):
+        from test_triage_scope import TriageScopeTests
+        from api_first_planning import source_card_state
+        fixture = TriageScopeTests()
+        fixture.setUp()
+        self.addCleanup(fixture.tearDown)
+        task, candidate = fixture.task, fixture.candidate
+        candidate["jurisdiction"] = "unknown"
+        row = deepcopy(self.primary())
+        row["right_type"] = "patent"
+        row["jurisdiction"] = "US"
+        provider = next(p for p, rows in self.plan["queries"].items() if self.primary() in rows)
+        card_hash = "a" * 64
+        candidate["sources"] = [{"source_record_sha256": card_hash, "source_run_id": "WO-RUN",
+            "query_id": row["query_id"], "plan_entry_sha256": sha256_json(row)}]
+        candidates = {"patents": [candidate], "trademarks": [], "copyright_assets": [], "enforcement": []}
+        evidence = fixture.evidence
+        evidence["source_runs"] = [{"run_id": "WO-RUN", "provider": provider, "query_id": row["query_id"],
+            "plan_entry_sha256": sha256_json(row), "status": "success", "operation": row["operation"],
+            "jurisdiction": "US", "right_type": "patent", "requirement_ids": row["requirement_ids"]}]
+        evidence["collections"]["patents"].append({"evidence_id": "EV-WO-RUN", "source_run_id": "WO-RUN",
+            "provider": provider, "query_id": row["query_id"], "operation": row["operation"],
+            "jurisdiction": "US", "right_type": "patent", "requirement_ids": row["requirement_ids"],
+            "plan_entry_sha256": sha256_json(row),
+            "payload": {"candidates": [{"title": "WO family record", "publication_number": "WO2026123456A1",
+                "source_record_sha256": card_hash}]}})
+        fixture.ledger["annotations"].append(fixture.annotation("not_selected",
+            candidate_relation=fixture.basis(gaps=["target_jurisdiction"])))
+        error, _ = source_card_state(task, evidence, candidates, fixture.ledger, row,
+            evidence["source_runs"][0])
+        self.assertIsNone(error)
+
+    def test_bounded_needs_info_requires_current_waiting_record_for_every_action(self):
+        from api_first_planning import _bounded_waiting_decision_valid
+        from candidate_followup import REVISION, _append
+        self.task["triage_followup_revision"] = REVISION
+        self.task["triage_scope_revision"] = "candidate-triage-scope-v1"
+        evidence = {"collections": {"patents": [{"evidence_id": "E1", "payload": {"summary": "retained"}}]},
+            "source_runs": []}
+        def action(action_id):
+            return {"action_id": action_id, "kind": "professional_review", "purpose": "interpret retained drawing",
+                "question": "Does the line type define the claimed boundary?", "followup_basis": {
+                    "missing_fact": "drawing-line classification", "decision_effect": "claim boundary remains unknown",
+                    "evidence_needed": "professional classification of the retained drawing", "existing_material_review": "all retained views read",
+                    "existing_evidence_refs": ["E1"], "obligation_ids": ["OBL-DRAWING-LINES"],
+                    "completion_condition": "state solid versus broken lines", "new_value": "an external professional opinion"}}
+        actions = [action("A1"), action("A2")]
+        decision = {"annotation": {"annotation_id": "ANN1", "decision": "needs_info"}, "next_actions": actions}
+        def record(aid):
+            _append(self.task, {"kind": "result_review", "annotation_id": "ANN1", "action_id": aid,
+                "run_id": None, "run_sha256": None, "result_evidence_refs": ["E1"],
+                "result_evidence_sha256": {"E1": sha256_json(evidence["collections"]["patents"][0])},
+                "outcome": "waiting", "dependency": "Independent patent drawing interpretation",
+                "resume_condition": "Resume when the professional opinion is retained",
+                "reason": "Original raster does not resolve the line type", "reviewer": "offline reviewer"})
+        record("A1")
+        self.assertFalse(_bounded_waiting_decision_valid(self.task, evidence, decision))
+        record("A2")
+        self.assertTrue(_bounded_waiting_decision_valid(self.task, evidence, decision))
+        evidence["collections"]["patents"][0]["payload"]["summary"] = "changed"
+        self.assertFalse(_bounded_waiting_decision_valid(self.task, evidence, decision))
+        evidence["collections"]["patents"][0]["payload"]["summary"] = "retained"
+        user_action = {"action_id": "ASK-SUPPLIER", "kind": "user_information", "purpose": "request the product source fact",
+            "question": "Can the supplier provide the missing internal drive details?",
+            "user_exclusive_reason": "Only the seller's supplier holds this private product information.",
+            "followup_basis": {"missing_fact": "actual motor and sensor construction", "decision_effect": "product mapping remains open",
+                "evidence_needed": "supplier specification or teardown", "existing_material_review": "listing claims read; internals not shown",
+                "existing_evidence_refs": ["E1"], "obligation_ids": ["OBL-PRODUCT-INTERNALS"],
+                "completion_condition": "provide the exact internal configuration", "new_value": "private product facts"}}
+        decision["next_actions"] = [user_action]
+        self.assertTrue(_bounded_waiting_decision_valid(self.task, evidence, decision))
+        user_action.pop("user_exclusive_reason")
+        self.assertFalse(_bounded_waiting_decision_valid(self.task, evidence, decision))
+
+    def test_legacy_pagination_cannot_exceed_frozen_parent_scope(self):
+        from api_first_planning import _pagination_frozen_scope_block
+        evidence = {"source_runs": [{"run_id": "PARENT-RUN", "metadata": {
+            "range_start": 1, "range_end": 25, "retrieved_hits": 25, "total_hits": 1048}}]}
+        one_page = {"discovery_scope": {"max_pages": 1, "max_candidates": 25,
+            "pagination_basis": {"source_run_id": "PARENT-RUN"}}}
+        self.assertEqual(_pagination_frozen_scope_block(one_page, evidence), "DISCOVERY_VERSION_PAGE_LIMIT")
+        multi_page = {"discovery_scope": {"max_pages": 8, "max_candidates": 25,
+            "pagination_basis": {"source_run_id": "PARENT-RUN"}}}
+        self.assertEqual(_pagination_frozen_scope_block(multi_page, evidence), "DISCOVERY_VERSION_CANDIDATE_LIMIT")
+        multi_page["discovery_scope"]["max_candidates"] = 50
+        self.assertIsNone(_pagination_frozen_scope_block(multi_page, evidence))
+
+    def test_legacy_pagination_is_superseded_only_by_current_exact_parent_stop(self):
+        from api_first_planning import pagination_parent_stop_valid
+        parent = {"query_id": "P", "q": "same query", "jurisdiction": "US", "right_type": "patent",
+            "requirement_ids": ["R"], "search_dimension": "text", "action_purpose": "discovery",
+            "discovery_scope": {"mode": "bounded", "max_pages": 1}}
+        run = {"run_id": "P-RUN", "provider": "epo_ops", "query_id": "P",
+            "plan_entry_sha256": sha256_json(parent), "status": "success"}
+        child = {**deepcopy(parent), "query_id": "PAGE2", "discovery_role": "pagination",
+            "parent_query_id": "P", "parent_plan_entry_sha256": sha256_json(parent),
+            "discovery_scope": {"pagination_basis": {"source_run_id": "P-RUN", "source_run_sha256": sha256_json(run)}}}
+        plan = {"queries": {"epo_ops": [parent, child]}}
+        task = {"discovery_followups": [{"role": "review", "parent_query_id": "P",
+            "source_run_id": "P-RUN", "outcome": "stop_bounded_discovery"}]}
+        evidence = {"source_runs": [run]}
+        with patch("api_first_planning.review_validation", return_value=None):
+            self.assertTrue(pagination_parent_stop_valid(task, plan, evidence, {}, {}, child))
+            evidence["source_runs"].append({"run_id": "PAGE2-RUN", "provider": "epo_ops",
+                "query_id": "PAGE2", "plan_entry_sha256": sha256_json(child), "status": "pending"})
+            self.assertFalse(pagination_parent_stop_valid(task, plan, evidence, {}, {}, child))
+            evidence["source_runs"].pop()
+            task["discovery_followups"].clear()
+            self.assertFalse(pagination_parent_stop_valid(task, plan, evidence, {}, {}, child))
 
     def test_unknown_card_type_requires_identity_review_instead_of_skipping_scope(self):
         from api_first_planning import source_card_state
@@ -297,6 +568,37 @@ class ApiFirstPlanningTests(unittest.TestCase):
         self.assertFalse(row["discovery_scope"]["response_limit_enforceable"])
         self.assertEqual(row["discovery_scope"]["max_pages"], 1)
         self.assertNotIn("num", row)
+
+    def test_v3_initial_plan_shares_one_lens_slot_before_budget_exhaustion(self):
+        self.task['retrieval_workflow_revision'] = 'api-first-v3'
+        self.task['serpapi_free_enhancement'] = serpapi_free_enhancement(True, 'api-first-v3')
+        self.task['serpapi_free_enhancement']['max_queries_per_task'] = 1
+        self.task['coverage_requirements'] = [r for r in self.task['coverage_requirements']
+            if r['right_type'] in {'design', 'copyright'}]
+        term = {**self.task['query_terms'][1], 'discovery_channel': 'image',
+            'image_url': 'https://m.media-amazon.com/images/I/test.jpg'}
+        queries, gaps, queue = {}, [], []
+        with patch('api_first_planning._eligible_scope_terms', return_value=[term]), \
+                patch('api_first_planning._preferred_providers', return_value=['serpapi_google_lens']), \
+                patch('product_delivery.selected_public_image', return_value=None):
+            append_initial(self.path, self.task, [term], queries, gaps, queue)
+        rows = queries['serpapi_google_lens']
+        self.assertEqual(len(rows), 2)
+        reuse = rows[1]['discovery_scope']['physical_response_plan_reuse']
+        self.assertEqual(reuse['query_id'], rows[0]['query_id'])
+        self.assertEqual(reuse['plan_entry_sha256'], sha256_json(rows[0]))
+        self.assertFalse(gaps)
+        self.assertEqual(queue[1]['reason'], 'reuse_planned_physical_response')
+        from candidate_api_actions import _physical_planned
+        self.assertEqual(len(_physical_planned(self.task, {}, queries, {'serpapi_google_lens'})), 1)
+        failed = {'source_runs': [{'provider': 'serpapi_google_lens', 'query_id': rows[0]['query_id'],
+            'status': 'failed', 'submission_state': 'submitted', 'quota': {'network_request_attempted': True}}]}
+        self.assertEqual(len(_physical_planned(self.task, failed, queries, {'serpapi_google_lens'})), 1)
+        # A contradictory real or uncertain execution on the logical row must
+        # retain its own reservation instead of laundering it as free reuse.
+        failed['source_runs'].append({'provider': 'serpapi_google_lens', 'query_id': rows[1]['query_id'],
+            'status': 'failed', 'submission_state': 'unknown', 'quota': {}})
+        self.assertEqual(len(_physical_planned(self.task, failed, queries, {'serpapi_google_lens'})), 2)
 
     def test_lower_frozen_limits_control_browser_and_refinement(self):
         self.task["retrieval_policy"].update(max_refinement_rounds=1, browser_fallback_max_candidates=15, max_pages_per_query=2)

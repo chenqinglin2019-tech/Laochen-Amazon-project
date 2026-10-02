@@ -1,0 +1,9 @@
+{
+  "schema": "IPR-REVIEW-HOST-SETTINGS/1.0",
+  "model": "gpt-6-astra",
+  "model_context_window": 872000,
+  "model_auto_compact_token_limit": 800000,
+  "model_reasoning_effort": "medium",
+  "provider_base_url": "https://chatgpt.com/backend-api/codex",
+  "tool_free_codex_sandbox": "read-only"
+}

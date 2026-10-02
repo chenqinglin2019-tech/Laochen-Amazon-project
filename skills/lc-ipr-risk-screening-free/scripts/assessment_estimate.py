@@ -30,7 +30,9 @@ from assessment_v24 import (candidate_applies, coverage_by_scope, evidence_index
                            NON_PRODUCTION, RESULTS, CONFIDENCE_FACTS)
 
 POLICY = "evidence-estimate-v1"
-PARTIAL_EVIDENCE_REVISION = "partial-evidence-v1"
+PARTIAL_EVIDENCE_REVISION = "partial-evidence-v2"
+LEGACY_PARTIAL_EVIDENCE_REVISION = "partial-evidence-v1"
+KNOWN_FINDINGS_REVISION = "known-findings-risk-v1"
 SCHEMA = "2.4-free"
 CONTRACT = "EVIDENCE-ESTIMATE/1.0"
 RISKS = ("极低", "低", "中", "高", "极高")
@@ -49,9 +51,15 @@ def partial_evidence_enabled(task):
     """An explicit rating-only opt-in; unknown revisions never use old rules."""
     if "assessment_revision" not in task:
         return False
-    if task["assessment_revision"] != PARTIAL_EVIDENCE_REVISION:
+    if task["assessment_revision"] not in {PARTIAL_EVIDENCE_REVISION, LEGACY_PARTIAL_EVIDENCE_REVISION, KNOWN_FINDINGS_REVISION}:
         raise ValueError("UNSUPPORTED_ASSESSMENT_REVISION")
-    return True
+    return task["assessment_revision"] != KNOWN_FINDINGS_REVISION
+
+
+def known_findings_enabled(task):
+    """Versioned operating grade; raw pending facts and work remain unchanged."""
+    partial_evidence_enabled(task)
+    return task.get("assessment_revision") == KNOWN_FINDINGS_REVISION
 
 
 def _decision_enabled(task):
@@ -67,11 +75,24 @@ def _correction_enabled(task):
 
 def review_digest(evidence, candidates, ledger, plan, task, supplement=None) -> str:
     """Bind independent judgments to the exact policy and all original inputs."""
+    from final_review import enabled as final_enabled, digest as final_digest
+    if final_enabled(task):
+        return final_digest(evidence, candidates, ledger, plan, task, supplement)
     payload = {"assessment_policy": POLICY,
                         "base_evidence_digest": legacy_review_digest(evidence, candidates, ledger, plan, task),
                         "supplement": supplement}
-    if partial_evidence_enabled(task):
+    if partial_evidence_enabled(task) or known_findings_enabled(task):
         payload["assessment_revision"] = task["assessment_revision"]
+    from product_scope import enabled as scope_enabled
+    if scope_enabled(task): payload["product_scope"] = task["product_scope"]
+    from product_change import enabled as product_change_enabled
+    if product_change_enabled(task):
+        payload['product_change'] = {'version':task['product_change_version'],
+            'history':task['product_change_history'],
+            'applicability':task.get('product_applicability_reviews',[])}
+    from product_feedback import enabled as product_feedback_enabled
+    if product_feedback_enabled(task):
+        payload['product_feedback'] = task['product_feedback_history']
     if "assessment_scope_exclusions" in task:
         payload["assessment_scope_exclusions"] = task["assessment_scope_exclusions"]
     if "screening_revision" in task:
@@ -124,6 +145,25 @@ def _verify_file(path: Path, digest: Any, size: Any = None) -> None:
         raise ValueError("EVIDENCE_ARTIFACT_HASH_OR_SIZE_MISMATCH: " + str(path))
 
 
+def product_image_index(task, task_dir):
+    """Admit hash-bound task image IDs as product evidence references only."""
+    from common import resolve_retained_path
+    result = {}
+    for image in task.get("images", []):
+        if not isinstance(image, dict) or not image.get("image_id"):
+            continue
+        identifier = image["image_id"]
+        if (not isinstance(identifier, str) or identifier in result
+                or not image.get("path") or not image.get("sha256")
+                or type(image.get("bytes")) is not int or task_dir is None):
+            raise ValueError("PRODUCT_IMAGE_EVIDENCE_INVALID")
+        path = resolve_retained_path(Path(task_dir), image["path"],
+            expected_sha256=image["sha256"], expected_bytes=image["bytes"])
+        result[identifier] = {**image, "path": str(path), "provider": "product",
+                              "source_form": "product_image", "evidence_id": identifier}
+    return result
+
+
 def validate_supplement(supplement, evidence_root=None, *, task=None, evidence=None) -> dict[str, dict[str, Any]]:
     """A retained-file index is never converted into an accepted adapter receipt."""
     if supplement is None:
@@ -146,7 +186,11 @@ def validate_supplement(supplement, evidence_root=None, *, task=None, evidence=N
             raise ValueError("DUPLICATE_EVIDENCE_ID: " + item["evidence_id"])
         path = _resolve(item["path"], root)
         if not path.is_relative_to(root):
-            raise ValueError("SUPPLEMENT_PATH_OUTSIDE_EVIDENCE_ROOT: " + str(path))
+            from common import resolve_retained_path
+            try:
+                path = resolve_retained_path(root, item['path'], expected_sha256=item['sha256'], expected_bytes=item['bytes'])
+            except ValueError as exc:
+                raise ValueError("SUPPLEMENT_PATH_OUTSIDE_EVIDENCE_ROOT: " + str(path)) from exc
         _verify_file(path, item["sha256"], item["bytes"])
         if not _text(item.get("source_url")) and not _text(item.get("source_document")):
             raise ValueError("SUPPLEMENT_SOURCE_URL_OR_DOCUMENT_REQUIRED")
@@ -156,6 +200,15 @@ def validate_supplement(supplement, evidence_root=None, *, task=None, evidence=N
                 raise ValueError("SUPPLEMENT_SOURCE_URL_INVALID")
         if item.get("source_document"):
             document = _resolve(item["source_document"], root)
+            if not document.is_relative_to(root):
+                from common import resolve_retained_path
+                if not item.get('source_document_sha256'):
+                    raise ValueError('SUPPLEMENT_SOURCE_DOCUMENT_INVALID')
+                try:
+                    document = resolve_retained_path(root, item['source_document'],
+                        expected_sha256=item['source_document_sha256'])
+                except ValueError as exc:
+                    raise ValueError('SUPPLEMENT_SOURCE_DOCUMENT_INVALID') from exc
             if not document.is_file() or not document.is_relative_to(root):
                 raise ValueError("SUPPLEMENT_SOURCE_DOCUMENT_INVALID")
         try:
@@ -169,6 +222,10 @@ def validate_supplement(supplement, evidence_root=None, *, task=None, evidence=N
     if task is not None and _correction_enabled(task):
         from pdf_page_evidence import validate_page_binding
         parents = {**evidence_index(evidence or {}), **result}
+        parent_index = {}
+        for parent in parents.values():
+            if parent.get("path"):
+                parent_index.setdefault((_resolve(parent["path"], root), parent.get("sha256")), parent)
         page_cache = {}
         for item in result.values():
             if "page_verification" not in item:
@@ -181,13 +238,11 @@ def validate_supplement(supplement, evidence_root=None, *, task=None, evidence=N
             if ("page_number" not in item and Path(item["path"]).suffix.lower() not in
                     {".png", ".jpg", ".jpeg", ".webp", ".gif", ".tif", ".tiff", ".bmp", ".svg"}):
                 continue  # A retained PDF/text extract is not a rendered page image.
-            matches = [parent for parent in parents.values()
-                if parent.get("path") and _resolve(parent["path"], root) == _resolve(item["source_document"], root)
-                and parent.get("sha256") == item.get("source_document_sha256")]
-            if not matches:
+            parent = parent_index.get((_resolve(item["source_document"], root), item.get("source_document_sha256")))
+            if parent is None:
                 continue  # The report records an unbound-parent visual gap.
             try:
-                validate_page_binding(item, matches[0], root, cache=page_cache)
+                validate_page_binding(item, parent, root, cache=page_cache)
             except ValueError as exc:
                 if str(exc) != "PDF_PAGE_PROVENANCE_MISSING_OR_STALE":
                     raise
@@ -200,7 +255,10 @@ def _verify_declared_artifacts(value: Any, root: Path | None, checked: set, *, i
     if isinstance(value, dict):
         bindings = []
         for name, raw in value.items():
-            if isinstance(raw, str) and (name == "path" or name.endswith("_path")):
+            # `source_path` is also used as a JSON field locator (for example,
+            # `product.structure[0]`), not a retained filesystem artifact.
+            # Do not resolve those provenance locators against the task root.
+            if isinstance(raw, str) and (name == "path" or (name.endswith("_path") and name != "source_path")):
                 stem = name[:-5] if name.endswith("_path") else ""
                 hashes = ([stem + "_sha256", stem + "_hash"] if stem else []) + ["sha256"]
                 sizes = ([stem + suffix for suffix in ("_bytes", "_byte_count", "_size_bytes")] if stem else []) + ["bytes", "byte_count", "size_bytes", "file_bytes"]
@@ -246,9 +304,21 @@ def task_artifact_root(task, evidence_root=None, task_dir=None):
 
 def validate_inputs(task, evidence, candidates, plan, ledger, *, evidence_root=None, supplement=None, task_dir=None) -> list[str]:
     assert_active_free_policy(task)
+    from product_entry import assert_frozen, enabled as entry_enabled, evidence_errors
+    assert_frozen(task)
+    if entry_enabled(task):
+        if task_dir is None:
+            raise ValueError("PRODUCT_ENTRY_TASK_DIRECTORY_REQUIRED")
+        errors = evidence_errors(task, evidence, Path(task_dir))
+        if errors:
+            raise ValueError("PRODUCT_EVIDENCE_INVALID: " + "; ".join(errors))
+    import product_scope as ps
+    if ps.enabled(task): ps.verify(task,evidence,task_dir)
+    from product_change import assessment_gate
+    assessment_gate(task,evidence,[])
     if task.get("assessment_policy") != POLICY:
         raise ValueError("RATING_POLICY_NOT_SELECTED")
-    if partial_evidence_enabled(task):
+    if partial_evidence_enabled(task) or known_findings_enabled(task):
         if not recall_integrity_enabled(task) or not _decision_enabled(task):
             raise ValueError("PARTIAL_EVIDENCE_REQUIRES_RECALL_INTEGRITY_AND_SCENARIO_WORKFLOW")
         # Identity confirmation is distinct from readiness to plan a query.
@@ -256,7 +326,7 @@ def validate_inputs(task, evidence, candidates, plan, ledger, *, evidence_root=N
         from workflow_v24 import product_identity_digest
         product = task.get("product") or {}
         analysis = product.get("analysis") or {}
-        if (not isinstance(analysis, dict) or analysis.get("status") != "confirmed"
+        if not ps.enabled(task) and (not isinstance(analysis, dict) or analysis.get("status") != "confirmed"
                 or analysis.get("identity_sha256") != product_identity_digest(product, task=task)):
             raise ValueError("PARTIAL_EVIDENCE_PRODUCT_IDENTITY_NOT_CONFIRMED")
     if _correction_enabled(task) and plan.get("workflow_correction_revision") != task["workflow_correction_revision"]:
@@ -278,9 +348,13 @@ def validate_inputs(task, evidence, candidates, plan, ledger, *, evidence_root=N
             or plan.get("assessment_policy", POLICY) != POLICY):
         raise ValueError("SEARCH_PLAN_IDENTITY_MISMATCH")
     for label, document in (("EVIDENCE", evidence), ("CANDIDATES", candidates)):
+        if label == "CANDIDATES" and document == {} and (partial_evidence_enabled(task) or known_findings_enabled(task)):
+            # A source-limited round may have no normalized candidate batch at all.
+            # This is an empty candidate set, never a zero-result search receipt.
+            continue
         if document.get("task_id") != task["task_id"] or document.get("schema_version") != SCHEMA:
             raise ValueError(label + "_IDENTITY_MISMATCH")
-    assert_default_discovery_plan_contract(task, plan)
+    assert_default_discovery_plan_contract(task, plan, task_dir=task_artifact_root(task, evidence_root, task_dir), evidence=evidence)
     from finalize_assessment import verification_plan_binding_errors
     errors = verification_plan_binding_errors(task, evidence, candidates, plan)
     if errors:
@@ -392,6 +466,49 @@ def _review_scope_key(row, task=None):
     return (*key, row.get("scenario_id", "")) if _decision_enabled(task or {}) else key
 
 
+def required_product_scopes(task, rights=None):
+    """Declared scenario/country scopes shared by whole-input and module reviews."""
+    from decision_workflow import scenario_right_types
+    allowed = set(RIGHT_TYPES if rights is None else rights)
+    return [{"scenario_id": scenario["scenario_id"], "jurisdiction": str(country).upper(),
+             "right_type": right}
+            for scenario in task.get("assessment_scenarios", [])
+            for country in task.get("target_jurisdictions", [])
+            for right in sorted(scenario_right_types(scenario) & allowed)]
+
+
+def complete_product_review_required(task):
+    """The digest-bound task contract decides scope, never missing receipt metadata.
+
+    necessary-work-v1/v2 retain their historical source-scoped stage contract.
+    Module tasks and the current continuous/final routes require whole-product
+    coverage. Legacy tasks cannot become current by editing a reviewer receipt.
+    """
+    from final_review import enabled as final_enabled
+    stage = task.get("completion_policy_revision") in {"necessary-work-v1", "necessary-work-v2"}
+    return bool(task.get("completion_policy_revision") == "necessary-work-v3" or
+                task.get("final_review_execution_revision") is not None or
+                not stage and (task.get("execution_policy_revision") == "continuous-work-v2"
+                               or final_enabled(task)))
+
+
+def missing_product_scopes(rows, task, rights=None):
+    """Return missing current overall scopes; never invent their judgments."""
+    covered = {(row.get("scenario_id"), row.get("jurisdiction"), row.get("right_type"))
+               for row in rows if isinstance(row, dict) and not row.get("candidate_id")
+               and _assessment_object(row) == "product"
+               and row.get("future_signal") is not True and row.get("signal_only") is not True}
+    return [scope for scope in required_product_scopes(task, rights)
+               if (scope["scenario_id"], scope["jurisdiction"], scope["right_type"]) not in covered]
+
+
+def validate_product_scope_coverage(rows, task, rights=None, *, error_code="REVIEW_PRODUCT_SCOPE_MISSING"):
+    """Check completeness after row validation, without inventing judgments."""
+    missing = missing_product_scopes(rows, task, rights)
+    if missing:
+        raise ValueError(error_code + ": " + json.dumps(missing, ensure_ascii=False, sort_keys=True))
+
+
 def _validate_scenario_binding(row, task):
     from decision_workflow import scenario_index, scenario_sha256, scenario_right_types
     scenarios = scenario_index(task)
@@ -439,6 +556,11 @@ def _validate_implementation_claims(row):
                 and not any(element.get("result") == "excludes_risk"
                             and element.get("evidence_refs") for element in claim["elements"])):
             raise ValueError("CLAIM_EXCLUSION_REQUIRES_OWN_MISSING_ELEMENT")
+        if (claim["conclusion"] == "supports_risk"
+                and not all(element.get("result") == "supports_risk"
+                            and element.get("evidence_refs")
+                            for element in claim["elements"])):
+            raise ValueError("CLAIM_SUPPORT_REQUIRES_ALL_ELEMENTS_SUPPORTED")
 
 
 def _validate_assessment_object(row):
@@ -570,6 +692,13 @@ def _validate_row(row, known, candidates, jurisdictions, task, registry=None):
         raise ValueError("UNSUPPORTED_ASSESSMENT_SCOPE: " + str(key))
     if key[2] and (key[2] not in candidates or candidates[key[2]][1].get("right_type") != key[1]):
         raise ValueError("ASSESSMENT_CANDIDATE_IDENTITY_MISMATCH: " + str(key))
+    applicability = row.get("scope_applicability")
+    if applicability is not None:
+        if (not isinstance(applicability, dict) or applicability.get("status") not in {"applicable", "not_applicable", "unassessed"}
+                or not _text(applicability.get("reasoning"))
+                or not _refs(applicability.get("evidence_refs", []), known, required=applicability.get("status") != "unassessed")
+                or applicability.get("status") == "not_applicable" and (key[2] or row.get("risk") in {"中", "高", "极高"})):
+            raise ValueError("ASSESSMENT_SCOPE_APPLICABILITY_INVALID")
     if _correction_enabled(task) and _future_labeled(row):
         if row.get("risk") is not None:
             raise ValueError("FUTURE_SIGNAL_CANNOT_CARRY_CURRENT_RISK")
@@ -665,13 +794,25 @@ def _validate_row(row, known, candidates, jurisdictions, task, registry=None):
         raise ValueError("ROW_EVIDENCE_REFS_MUST_INCLUDE_ARGUMENT_REFS")
 
 
-def _validate_review(review, digest, known, candidates, jurisdictions, task, registry=None):
+def _validate_review(review, digest, known, candidates, jurisdictions, task, registry=None, *, check_product_scopes=True):
     if not isinstance(review, dict):
         raise ValueError("REVIEW_REQUIRED")
+    # A validated projection is a source for explicit unit reuse, never a final review.
+    if review.get("registration_scope") == "validated_unit_subset":
+        raise ValueError("FINAL_REVIEW_PARTIAL_NOT_PUBLISHABLE")
+    from final_review import enabled as final_enabled, validate_envelope
+    if final_enabled(task):
+        validate_envelope(review)
     context = review.get("review_context", {})
     if (not _text(review.get("reviewer")) or not _text(context.get("session_id"))
             or context.get("evidence_digest") != digest or context.get("first_review_visible") is not False):
         raise ValueError("REVIEW_CONTEXT_INVALID")
+    if task.get("execution_policy_revision") == "continuous-work-v2":
+        execution = context.get("execution")
+        if (not isinstance(execution, dict) or not _text(execution.get("agent_id"))
+                or not _text(execution.get("run_id")) or execution.get("input_digest") != digest
+                or execution.get("assessment_digest") != sha256_json(review.get("assessments"))):
+            raise ValueError("REVIEW_EXECUTION_ATTESTATION_REQUIRED")
     if (review.get("coverage_confidence_cap") not in CONFIDENCES
             or not _text(review.get("coverage_confidence_reasoning"))):
         raise ValueError("COVERAGE_CONFIDENCE_CAP_REQUIRED")
@@ -684,6 +825,15 @@ def _validate_review(review, digest, known, candidates, jurisdictions, task, reg
         if key in seen:
             raise ValueError("DUPLICATE_ASSESSMENT_SCOPE: " + str(key))
         seen.add(key)
+    execution = context.get("execution", {})
+    if isinstance(execution, dict):
+        for name in ("host_audit", "module_execution"):
+            if name in execution and not isinstance(execution[name], dict):
+                raise ValueError("REVIEW_EXECUTION_AUDIT_INVALID:" + name)
+    if check_product_scopes and (complete_product_review_required(task) or
+            isinstance(execution, dict) and (isinstance(execution.get("host_audit"), dict)
+                or isinstance(execution.get("module_execution"), dict))):
+        validate_product_scope_coverage(review["assessments"], task)
     for name in ("future_applications", "enforcement_signals"):
         if not isinstance(review.get(name, []), list):
             raise ValueError("SUPPLEMENTAL_SIGNAL_ARRAY_REQUIRED")
@@ -696,9 +846,75 @@ def _validate_review(review, digest, known, candidates, jurisdictions, task, reg
                 _future_review_qualified(row, known, candidates, task, registry)
 
 
+STRUCTURED_CONFLICTS_REVISION = "structured-conflicts-v1"
+
+
+def _structured_conflicts_enabled(task):
+    value = (task or {}).get("review_conflict_revision")
+    if value is None:
+        return False
+    if value != STRUCTURED_CONFLICTS_REVISION:
+        raise ValueError("REVIEW_CONFLICT_REVISION_INVALID")
+    return True
+
+
+def _claim_number(value):
+    """Reviewers label the same claim 'claim 1', 'Claim 1' or '1'; compare the number."""
+    import re
+    match = re.search(r"\d+", str(value if value is not None else ""))
+    return match.group(0) if match else str(value if value is not None else "").strip().casefold()
+
+
+def _structured_row_conflicts(left, right):
+    """structured-conflicts-v1: two reviewers conflict only on outcomes, never on wording.
+
+    Compared: risk, right state, exclusion basis, per-criterion and per-claim conclusions
+    (claims keyed by their number), visual coverage (artifact hashes), confidence and its
+    basis flags, scope flags, and the presence/kind of a decisive exclusion, applicability
+    exception and scope applicability. Free text (reasoning, quotes, product-feature
+    descriptions, implementation titles/ids/descriptions) and evidence-ref order never conflict.
+    """
+    result = []
+    for name, default in (("risk", None), ("right_state", "unknown"), ("exclusion_basis", None)):
+        if left.get(name, default) != right.get(name, default):
+            result.append(name)
+    criteria = lambda row: {item.get("criterion"): item.get("result")
+                            for item in row.get("comparison", {}).get("criteria", []) if isinstance(item, dict)}
+    a, b = criteria(left), criteria(right)
+    result += ["comparison:" + str(key) for key in sorted(set(a) | set(b), key=str) if a.get(key) != b.get(key)]
+    claims = lambda row: sorted({(_claim_number(claim.get("claim_id")), str(claim.get("claim_type")), str(claim.get("conclusion")))
+                                 for claim in row.get("comparison", {}).get("claims", []) if isinstance(claim, dict)})
+    if claims(left) != claims(right):
+        result.append("comparison:claims")
+    def views(row):
+        value = row.get("comparison", {}).get("visual_coverage", {})
+        return {"required": sorted(value.get("required_views", [])),
+                **{side: sorted((view.get("view", ""), view.get("artifact_sha256", "")) for view in value.get(side, []))
+                   for side in ("product_views", "right_views")}}
+    if views(left) != views(right):
+        result.append("visual_views")
+    for field in ("evidence_confidence", "out_of_scope", "module_id", "future_signal", "signal_only", "scope_exclusion_basis"):
+        if left.get(field) != right.get(field):
+            result.append(field)
+    if bool(left.get("decisive_exclusion")) != bool(right.get("decisive_exclusion")):
+        result.append("decisive_exclusion")
+    kind = lambda row: (row.get("applicability_exception") or {}).get("kind")
+    if kind(left) != kind(right):
+        result.append("applicability_exception")
+    status = lambda row: (row.get("scope_applicability") or {}).get("status")
+    if status(left) != status(right):
+        result.append("scope_applicability")
+    for name in sorted(set(left.get("confidence_basis", {})) | set(right.get("confidence_basis", {}))):
+        if left.get("confidence_basis", {}).get(name, {}).get("satisfied") != right.get("confidence_basis", {}).get(name, {}).get("satisfied"):
+            result.append("confidence_basis:" + name)
+    return result
+
+
 def _row_conflicts(left, right, task=None):
+    if _structured_conflicts_enabled(task):
+        return _structured_row_conflicts(left, right)
     result = _conflicts(left, right)
-    for field in ("evidence_confidence", "out_of_scope", "module_id", "future_signal", "signal_only", "decisive_exclusion", "applicability_exception", "scope_exclusion_basis"):
+    for field in ("evidence_confidence", "out_of_scope", "module_id", "future_signal", "signal_only", "decisive_exclusion", "applicability_exception", "scope_exclusion_basis", "scope_applicability"):
         if left.get(field) != right.get(field):
             result.append(field)
     # The conflict list is persisted in assessment.json and then recomputed by
@@ -708,9 +924,31 @@ def _row_conflicts(left, right, task=None):
         if left.get("confidence_basis", {}).get(name, {}).get("satisfied") != right.get("confidence_basis", {}).get(name, {}).get("satisfied"):
             result.append("confidence_basis:" + name)
     if _decision_enabled(task or {}):
-        for field in ("implementations", "claims"):
-            if left.get("comparison", {}).get(field) != right.get("comparison", {}).get(field):
-                result.append("comparison:" + field)
+        def implementations(row):
+            return {str(item.get("implementation_id")): {
+                "description": item.get("description"),
+                "product_evidence_refs": sorted(set(item.get("product_evidence_refs", []))),
+            } for item in row.get("comparison", {}).get("implementations", [])}
+
+        def claims(row):
+            normalized = {}
+            for claim in row.get("comparison", {}).get("claims", []):
+                key = (str(claim.get("implementation_id")), str(claim.get("claim_id")))
+                normalized[key] = {
+                    "claim_type": claim.get("claim_type"), "conclusion": claim.get("conclusion"),
+                    "evidence_refs": sorted(set(claim.get("evidence_refs", []))),
+                    "elements": {str(element.get("claim_element")): {
+                        field: element.get(field) for field in
+                        ("result", "claim_quote", "product_feature", "reasoning")
+                    } | {"evidence_refs": sorted(set(element.get("evidence_refs", [])))}
+                    for element in claim.get("elements", [])},
+                }
+            return normalized
+
+        if implementations(left) != implementations(right):
+            result.append("comparison:implementations")
+        if claims(left) != claims(right):
+            result.append("comparison:claims")
     return result
 
 
@@ -925,12 +1163,21 @@ def _apply_recall_integrity(rows, task, evidence, candidates, plan, coverage, re
         row["screening_revision"] = task["screening_revision"]
         if row.get("out_of_scope") or row.get("future_signal") or row.get("signal_only") or row["right_type"] == "enforcement":
             continue
+        import product_scope as ps
+        if ps.enabled(task) and (ps.candidate_scope(task,row.get('scenario_id'),row['right_type'],{'candidate_id':row.get('candidate_id')},evidence)!='included' if row.get('candidate_id') else bool(ps.coverage_gaps(task,row.get('scenario_id'),row['right_type']))):
+            if row.get('risk') in RISKS: raise ValueError('PRODUCT_DEPENDENCY_PENDING_REVIEW_REQUIRED')
         row.setdefault("assessment_status", "assessed" if row.get("risk") in RISKS else "pending")
         retained_refs = (_historical_review_refs(row, coverage, registry, validated_supplements)
                          if _decision_enabled(task) else set())
         actual = _substantive_refs(row.get("evidence_refs", []), registry, runs, row=row) | retained_refs
         candidate = next((item for _, item in iter_candidates(candidates) if item.get("candidate_id") == row.get("candidate_id")), {})
         candidate_refs = set(candidate.get("evidence_refs", [])) | set(candidate.get("verification_refs", []))
+        from trusted_api import enabled as trusted_enabled, accepted_candidate_facts
+        if trusted_enabled(task) and candidate:
+            accepted = accepted_candidate_facts(task, evidence, candidate, row["jurisdiction"], row["right_type"])
+            accepted_refs = {ref for fact in accepted.values() for ref in fact["evidence_refs"]}
+            candidate_refs.update(accepted_refs)
+            actual.update(accepted_refs.intersection(row.get("evidence_refs", [])))
         exact_document_ids = set()
         if _correction_enabled(task):
             from decision_workflow import candidate_document_entries
@@ -966,7 +1213,7 @@ def _apply_recall_integrity(rows, task, evidence, candidates, plan, coverage, re
         # reviewer has mislabeled its narrative as an exclusion.
         retained, rejected = [], []
         allowed = (_substantive_refs(row.get("evidence_refs", []), registry, runs, row=row)
-                   | retained_refs | _recall_refs(row, coverage, registry, runs, task, plan))
+                   | actual | retained_refs | _recall_refs(row, coverage, registry, runs, task, plan))
         for argument in row.get("counter_evidence", []):
             (retained if set(argument.get("evidence_refs", [])) & allowed else rejected).append(argument)
         if rejected:
@@ -1060,6 +1307,12 @@ def _compute_scenario_assessment(task, evidence, candidates, plan, ledger, first
                           and _text(legal.get("comparison_not_required_reasoning"))
                           and any(entry.get("kind") in {"official_record", "rights_record", "license"}
                                   and entry.get("authority_scope") != "published_document_only" for entry in legal_refs))
+            from trusted_api import enabled as trusted_enabled, accepted_candidate_facts
+            if trusted_enabled(task) and legal.get("basis") == "legal_status_or_scope" and _text(
+                    legal.get("comparison_not_required_reasoning")):
+                accepted = accepted_candidate_facts(task, evidence, candidate, row["jurisdiction"], row["right_type"])
+                status_refs = set(accepted.get("current_status", {}).get("evidence_refs", []))
+                legal_only = legal_only or bool(status_refs.intersection(legal.get("evidence_refs", [])))
             if not legal_only and not any(claim.get("claim_type") == "independent" for claim in claims):
                 raise ValueError("SELECTED_PATENT_INDEPENDENT_CLAIM_COMPARISON_REQUIRED")
     basic_gaps, _ = _apply_recall_integrity(rows, task, evidence, candidates, plan, coverage,
@@ -1119,7 +1372,9 @@ def _compute_scenario_assessment(task, evidence, candidates, plan, ledger, first
         risk = local_highest
         reasons = ["同一销售情景内，取有具体依据的最高适用当前风险；条件情景与未来申请分别列示。",
                    "完成度记录必要证据义务是否满足，不清空已有依据的当前风险，也不把失败查询当成排除事实。"]
-        if risk in {"低", "极低"} and not (retrieval_complete and triage_complete and verification_complete and not gaps):
+        if (task.get("assessment_revision") not in {PARTIAL_EVIDENCE_REVISION, KNOWN_FINDINGS_REVISION}
+                and risk in {"低", "极低"}
+                and not (retrieval_complete and triage_complete and verification_complete and not gaps)):
             risk = None
             reasons.append("目前只有局部低风险或排除结论，必要负面检索或入选比较仍不足，不能外推该情景总体低风险。")
         if risk == "极低":
@@ -1127,7 +1382,7 @@ def _compute_scenario_assessment(task, evidence, candidates, plan, ledger, first
             if decisive.get("scenario_id") != sid or decisive.get("scenario_sha256") != scenario["scenario_sha256"]:
                 risk = "低"
                 reasons.append("单件的决定性排除不足以支持整个情景极低风险。")
-        if risk is None:
+        if risk is None and not known_findings_enabled(task):
             gaps.append("SCENARIO_RISK_BASIS_PENDING")
         completed = retrieval_complete and triage_complete and verification_complete and not gaps
         chosen_caps = [caps[2][sid]] if sid in caps[2] else [cap[sid] for cap in caps[:2] if sid in cap]
@@ -1194,6 +1449,9 @@ def _apply_partial_evidence_revision(task, result):
         return result
     result["assessment_revision"] = task["assessment_revision"]
     incomplete = result["status"] != "completed"
+    # v1 is retained solely to render frozen historical tasks.  New v2 tasks
+    # never turn an unassessed/unknown scope into a low-risk finding.
+    legacy_fallback = task.get("assessment_revision") == LEGACY_PARTIAL_EVIDENCE_REVISION
     rows = result["assessments"]
 
     def current(row):
@@ -1202,13 +1460,13 @@ def _apply_partial_evidence_revision(task, result):
                     or row.get("triage_decision") not in (None, "selected"))
 
     for row in rows:
-        row["risk_aggregation_included"] = current(row) and (incomplete or bool(row.get("aggregation_included")))
+        row["risk_aggregation_included"] = current(row) and (incomplete if legacy_fallback else bool(row.get("aggregation_included")))
         if not current(row):
             continue
         original_risk = row.get("risk")
         supported = original_risk in RISKS and row.get("assessment_status") != "pending"
         row["risk_basis"] = "evidence_supported" if supported else "policy_fallback"
-        if incomplete:
+        if incomplete and legacy_fallback:
             if not supported or original_risk not in {"中", "高", "极高"}:
                 row["risk"] = "低"
                 if not supported or original_risk != "低":
@@ -1226,8 +1484,16 @@ def _apply_partial_evidence_revision(task, result):
             if summary.get("risk") in RISKS:
                 summary["risk_basis"] = "evidence_supported"
             return
-        included = [row for row in selected if row.get("risk_aggregation_included")]
-        highest = max((row["risk"] for row in included), key=RISKS.index, default="低")
+        included = [row for row in selected if row.get("risk_aggregation_included") and row.get("risk") in RISKS]
+        highest = max((row["risk"] for row in included), key=RISKS.index, default=None)
+        if highest is None and not legacy_fallback:
+            summary.update(risk=None, confidence="低", coverage_confidence_cap="低", risk_basis="insufficient_evidence",
+                           drivers=[])
+            summary["reasons"] = ["没有足以支持当前风险等级的单项证据；未定级范围不会按低风险参与综合判断。",
+                                  "未执行、失败、截断和权利状态未知均保留为覆盖限制，不构成排除侵权的反证。"]
+            return
+        if highest is None:
+            highest = "低"
         drivers = [row for row in included if row["risk"] == highest]
         summary.update(risk=highest, confidence="低", coverage_confidence_cap="低",
             risk_basis="evidence_supported" if highest in {"中", "高", "极高"}
@@ -1245,12 +1511,114 @@ def _apply_partial_evidence_revision(task, result):
     overall = result["overall"]
     primary_rows = [row for row in rows if row.get("scenario_id") == overall.get("scenario_id")] if summaries else rows
     risk_summary(overall, primary_rows)
-    if incomplete:
+    if incomplete and legacy_fallback:
         prefix = next((item["title"] + "：" for item in summaries if item.get("primary")), "")
         overall["report_lead"] = prefix + f"{overall['risk']}风险／低置信度；查询未完成"
         overall["report_summary"] = " ".join(overall["reasons"])
         for value in result.get("module_confidence_caps", {}).values():
             value.update(confidence="低", reasoning="整体查询未完成；本次报告评级置信度统一为低。")
+    return result
+
+
+def _apply_known_findings_revision(task, result):
+    """Aggregate established findings, independently of unfinished work.
+
+    Original assessments, confidence, queues and completion remain available
+    unchanged to the professional evidence appendix.
+    """
+    if not known_findings_enabled(task):
+        return result
+    result["assessment_revision"] = KNOWN_FINDINGS_REVISION
+    rows = result["assessments"]
+
+    def current(row):
+        return (not row.get("out_of_scope") and not _future_labeled(row)
+                and row.get("right_type") != "enforcement"
+                and row.get("triage_decision") in (None, "selected"))
+
+    def established(row):
+        return (current(row) and row.get("aggregation_included", True)
+                and row.get("assessment_status") != "pending" and row.get("risk") in RISKS)
+
+    for row in rows:
+        row["risk_aggregation_included"] = established(row)
+        row["known_finding_status"] = ("specific_risk" if established(row) and row["risk"] in {"中", "高", "极高"}
+            else "scoped_assessment" if established(row) else "signal" if _future_labeled(row)
+            or row.get("right_type") == "enforcement" else "not_applicable" if row.get("out_of_scope")
+            else "awaiting_judgment")
+
+    def grade(selected, decisive=None):
+        included = [row for row in selected if established(row)]
+        highest = max((row["risk"] for row in included), key=RISKS.index, default=None)
+        # Individual exclusions never establish whole-product extremely low.
+        risk = (highest if highest in {"中", "高", "极高"} else
+                "极低" if highest == "极低" and decisive else
+                "低" if highest is not None else None)
+        drivers = [row for row in included if row["risk"] == highest]
+        return {"risk": risk,
+            "risk_basis": "insufficient_evidence" if risk is None else
+                "evidence_supported" if risk in {"中", "高", "极高", "极低"} else "known_findings_screening",
+            "evidence_supported_risk": highest,
+            "finding_status": "insufficient_evidence" if risk is None else
+                "specific_risk" if risk in {"中", "高", "极高"} else "no_established_specific_risk",
+            "pending_count": sum(current(row) and not established(row) for row in selected),
+            "drivers": [{key: row.get(key) for key in ("scenario_id", "scenario_sha256", "jurisdiction", "right_type",
+                "candidate_id", "module_id", "title", "risk", "evidence_confidence")} for row in drivers]}
+
+    def apply_summary(summary, selected, decisive=None):
+        value = grade(selected, decisive)
+        summary.update(value)
+        summary.update(assessment_status="assessed" if value["risk"] else "pending",
+            screening_grade=bool(value["risk"]), all_scope_clearance=False,
+            reasons=["已知结果风险取本次情景中有具体依据的最高当前风险，不按候选数量或相似图片数量加权。",
+                "未完成、失败、额度耗尽和未知事实只列入进度及待判断事项，不参与风险评级。"])
+        if value["risk"] is None:
+            summary["reasons"].append("尚无完成复核的适用风险判断，当前风险待定；不能按低风险上架。")
+        if value["finding_status"] == "no_established_specific_risk":
+            summary["reasons"].append("低风险表示本轮已查结果未发现已证实的具体风险；未查询范围与待判断候选仍分别披露。")
+        return value
+
+    input_reviews = result.get("review", {}).get("input_reviews", {})
+    decisive = (input_reviews.get("adjudication") or {}).get("overall_decisive_exclusion")
+    for summary in result.get("scenario_summaries", []):
+        scoped_decisive = decisive if decisive and all(decisive.get(key) == summary.get(key)
+            for key in ("scenario_id", "scenario_sha256")) else None
+        apply_summary(summary, [row for row in rows if row.get("scenario_id") == summary["scenario_id"]], scoped_decisive)
+    overall = result["overall"]
+    primary_rows = [row for row in rows if row.get("scenario_id") == overall.get("scenario_id")] if result.get("scenario_summaries") else rows
+    primary_decisive = decisive if not result.get("scenario_summaries") or decisive and all(
+        decisive.get(key) == overall.get(key) for key in ("scenario_id", "scenario_sha256")) else None
+    apply_summary(overall, primary_rows, primary_decisive)
+    overall["report_lead"] = (overall["risk"] + "风险｜基于本轮已查结果"
+        if overall["risk"] else "风险待定｜缺少完成复核的适用判断")
+    overall["listing_recommendation"] = ("不建议上架" if overall["risk"] in {"高", "极高"}
+        else "暂缓上架" if overall["risk"] in {None, "中"} or overall["pending_count"]
+        or result.get("status") != "complete" else "可考虑上架")
+    overall["listing_reason"] = ("存在已查明的高风险项目。" if overall["risk"] in {"高", "极高"}
+        else "风险待定或仍有未完成复核事项，不能据此放行。" if overall["listing_recommendation"] == "暂缓上架"
+        else "已查适用范围未发现中高风险；上架前仍需核对实际销售版本和授权资料。")
+    overall["report_summary"] = " ".join(overall["reasons"])
+    keys = {tuple(scope.get(key) or "" for key in ("scenario_id", "jurisdiction", "right_type"))
+        for scope in result.get("coverage", {}).get("scopes", [])}
+    keys.update(tuple(row.get(key) or "" for key in ("scenario_id", "jurisdiction", "right_type")) for row in rows)
+    by_scope = [{**dict(zip(("scenario_id", "jurisdiction", "right_type"), key)),
+        **grade([row for row in rows if tuple(row.get(field) or "" for field in
+            ("scenario_id", "jurisdiction", "right_type")) == key]),
+        "screening_grade": True, "all_scope_clearance": False} for key in sorted(keys)]
+    for scope in by_scope:
+        selected = [row for row in rows if all((row.get(key) or "") == scope[key]
+            for key in ("scenario_id", "jurisdiction", "right_type")) and not row.get("out_of_scope")]
+        declarations = [row.get("scope_applicability") for row in selected]
+        if declarations and all(isinstance(value, dict) and value.get("status") == "not_applicable" for value in declarations):
+            scope.update(applicability="not_applicable", query_not_required_reason="；".join(dict.fromkeys(
+                value["reasoning"] for value in declarations)), applicability_evidence_refs=sorted({ref
+                for value in declarations for ref in value["evidence_refs"]}))
+        else:
+            scope["applicability"] = "applicable" if selected else "unassessed"
+    result["known_findings"] = {"revision": KNOWN_FINDINGS_REVISION,
+        "completion_affects_risk": False, "default_grade": None, "by_scope": by_scope,
+        "overall": {key: deepcopy(overall[key]) for key in
+            ("risk", "risk_basis", "evidence_supported_risk", "finding_status", "pending_count", "drivers")}}
     return result
 
 
@@ -1262,7 +1630,26 @@ def compute_assessment(task, evidence, candidates, plan, ledger, first, second=N
         result = _compute_assessment(task, evidence, candidates, plan, ledger, first, second,
             adjudication, supplement=supplement, evidence_root=evidence_root, generated_at=generated_at,
             task_dir=task_dir)
-        return _apply_partial_evidence_revision(task, result)
+        result = _apply_partial_evidence_revision(task, result)
+        result = _apply_known_findings_revision(task, result)
+        from final_review import enabled as final_enabled, pair_summary
+        if final_enabled(task):
+            result["final_review"] = pair_summary(first, second,
+                review_digest(evidence, candidates, ledger, plan, task, supplement))
+        from product_change import enabled as product_change_enabled, assessment_gate
+        if product_change_enabled(task):
+            assessment_gate(task,evidence,result['assessments'])
+            result['product_version_binding'] = {'version':task['product_change_version'],
+                'target_sha256':task['product_identity']['sha256'],
+                'scope_sha256':task.get('product_scope',{}).get('scope_sha256','')}
+        from product_feedback import assessment_gate as feedback_assessment_gate
+        feedback_assessment_gate(task,result['assessments'])
+        result['review']['scope_contract'] = ('whole_product' if complete_product_review_required(task)
+                                              else 'legacy_stage_scopes')
+        result['review']['product_scope_gaps'] = {
+            'first': missing_product_scopes((first or {}).get('assessments', []), task),
+            'second': missing_product_scopes((second or {}).get('assessments', []), task)}
+        return result
 
 
 def _compute_assessment(task, evidence, candidates, plan, ledger, first, second=None,
@@ -1274,7 +1661,10 @@ def _compute_assessment(task, evidence, candidates, plan, ledger, first, second=
     canonical = evidence_index(evidence)
     if set(canonical) & set(supplemental_index):
         raise ValueError("SUPPLEMENT_CANONICAL_EVIDENCE_ID_COLLISION")
-    known = set(canonical) | set(supplemental_index)
+    product_images = product_image_index(task, task_dir or evidence_root)
+    if (set(canonical) | set(supplemental_index)) & set(product_images):
+        raise ValueError("PRODUCT_IMAGE_EVIDENCE_ID_COLLISION")
+    known = set(canonical) | set(supplemental_index) | set(product_images)
     runs_by_id = {run["run_id"]: run for run in evidence.get("source_runs", [])}
     def nonproduction(value):
         if isinstance(value, dict):
@@ -1305,7 +1695,13 @@ def _compute_assessment(task, evidence, candidates, plan, ledger, first, second=
         raise ValueError("; ".join(errors))
     digest = review_digest(evidence, candidates, ledger, plan, task, supplement)
     jurisdictions = {str(value).upper() for value in task.get("target_jurisdictions", [])}
-    registry = {**canonical, **supplemental_index}
+    registry = {**canonical, **supplemental_index, **product_images}
+    from final_review import enabled as final_enabled, inputs as final_inputs, validate_envelope
+    if final_enabled(task):
+        material = final_inputs(evidence, candidates, ledger, plan, task, supplement)
+        for review in (first, second):
+            if review is not None:
+                validate_envelope(review, material)
     _validate_review(first, digest, known, index, jurisdictions, task, registry)
     if second is None:
         raise ValueError("SECOND_REVIEW_REQUIRED: complete independent work before publishing")
@@ -1313,6 +1709,12 @@ def _compute_assessment(task, evidence, candidates, plan, ledger, first, second=
     if (first["reviewer"] == second["reviewer"]
             or first["review_context"]["session_id"] == second["review_context"]["session_id"]):
         raise ValueError("SECOND_REVIEW_NOT_INDEPENDENT")
+    if task.get("execution_policy_revision") == "continuous-work-v2":
+        left_execution = first["review_context"]["execution"]
+        right_execution = second["review_context"]["execution"]
+        if (left_execution["agent_id"] == right_execution["agent_id"]
+                or left_execution["run_id"] == right_execution["run_id"]):
+            raise ValueError("SECOND_REVIEW_EXECUTION_NOT_INDEPENDENT")
     left = {_review_scope_key(row, task): row for row in first["assessments"]}
     right = {_review_scope_key(row, task): row for row in second["assessments"]}
     decisions = {}
@@ -1324,6 +1726,9 @@ def _compute_assessment(task, evidence, candidates, plan, ledger, first, second=
                 or context.get("evidence_digest") != digest or not isinstance(adjudication.get("decisions"), list)):
             raise ValueError("ADJUDICATION_CONTEXT_INVALID")
         expected_refs = {"first": sha256_json(first), "second": sha256_json(second)}
+        # Legacy row-bound decisions may omit the envelope; supplied refs must agree.
+        if "review_refs" in adjudication and adjudication["review_refs"] != expected_refs:
+            raise ValueError("ADJUDICATION_ENVELOPE_REVIEW_BINDING_INVALID")
         for decision in adjudication["decisions"]:
             _validate_row(decision, known, index, jurisdictions, task, registry)
             key = _review_scope_key(decision, task)
@@ -1388,15 +1793,15 @@ def _compute_assessment(task, evidence, candidates, plan, ledger, first, second=
         rows.append(row)
     if _decision_enabled(task):
         return _compute_scenario_assessment(task, evidence, candidates, plan, ledger, first, second,
-                    adjudication, rows, digest, {**canonical, **supplemental_index},
+                    adjudication, rows, digest, registry,
                     supplemental_index, supplement, evidence_root, generated_at)
     strict = recall_integrity_enabled(task)
     coverage = coverage_by_scope(task, evidence, candidates, plan, strict_lineage=True)
     completion_gaps, execution_gaps = (_apply_recall_integrity(rows, task, evidence, candidates, plan, coverage,
-                       {**canonical, **supplemental_index},
+                       registry,
                        validated_supplements=supplemental_index) if strict else ([], []))
     included = [row for row in rows if row["aggregation_included"] and row.get("risk") in RISKS]
-    if not included and not (strict and any(row.get("assessment_status") == "pending" for row in rows)):
+    if not included and not known_findings_enabled(task) and not (strict and any(row.get("assessment_status") == "pending" for row in rows)):
         raise ValueError("NO_CURRENT_IN_SCOPE_ASSESSMENT: do not invent an overall grade")
     highest = max((row["risk"] for row in included), key=RISKS.index, default=None)
     drivers = [row for row in included if row["risk"] == highest]
@@ -1624,9 +2029,18 @@ def finalize(task_dir, task, first_path, second_path=None, *, adjudication_path=
                 snapshots[name] = read_object(path, name)
             elif return_context:
                 source_hashes[path] = None
-    publication = publication_context(task, evidence, candidates, plan, ledger, assessment,
-        mode=publication_mode, stop_reason=stop_reason, snapshots=snapshots,
-        task_dir=task_dir, evidence_root=root)
+    if known_findings_enabled(task) and completion_enabled(task):
+        from necessary_completion import collect_publication_issues
+        preflight = collect_publication_issues(task, evidence, candidates, plan, ledger, assessment,
+            mode=publication_mode, stop_reason=stop_reason, snapshots=snapshots,
+            task_dir=task_dir, evidence_root=root)
+        if preflight['errors']:
+            raise ValueError('PUBLICATION_PREFLIGHT_FAILED: ' + '; '.join(preflight['errors']))
+        publication = preflight['context']
+    else:
+        publication = publication_context(task, evidence, candidates, plan, ledger, assessment,
+            mode=publication_mode, stop_reason=stop_reason, snapshots=snapshots,
+            task_dir=task_dir, evidence_root=root)
     if publication is not None:
         assessment["completion_policy_revision"] = task["completion_policy_revision"]
         assessment["publication"] = publication

@@ -15,6 +15,29 @@ from workflow_v24 import product_identity_digest
 
 
 class TaskArtifactContextTests(unittest.TestCase):
+    def test_explicit_reassessment_supplement_uses_exact_retained_copy(self):
+        copied = self.source / 'copied-historical.txt'
+        copied.write_bytes(self.historical.read_bytes())
+        record = deepcopy(self.supplement['evidence'][1])
+        mapping = {'source_path': record['path'], 'copied_path': copied.name,
+                   'sha256': record['sha256'], 'bytes': record['bytes']}
+        atomic_write_json(self.source / 'recovery-manifest.json', {'file_mappings': [mapping]})
+        retained = {'schema': 'retained-test', 'evidence': [record]}
+        result = assessment.validate_supplement(retained, self.source)
+        self.assertEqual(result[record['evidence_id']]['path'], record['path'])
+        copied.write_text('changed copied bytes')
+        with self.assertRaisesRegex(ValueError, 'SUPPLEMENT_PATH_OUTSIDE'):
+            assessment.validate_supplement(retained, self.source)
+
+    def test_reassessment_copy_cannot_escape_or_change_declared_hash(self):
+        record = deepcopy(self.supplement['evidence'][1])
+        for copied_path, digest in (('../historical.txt', record['sha256']), ('local-document.txt', '0' * 64)):
+            atomic_write_json(self.source / 'recovery-manifest.json', {'file_mappings': [{
+                'source_path': record['path'], 'copied_path': copied_path,
+                'sha256': digest, 'bytes': record['bytes']}]})
+            with self.assertRaisesRegex(ValueError, 'SUPPLEMENT_PATH_OUTSIDE'):
+                assessment.validate_supplement({'schema': 'retained-test', 'evidence': [record]}, self.source)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="ipr-path-context-")
         self.addCleanup(self.temp.cleanup)
@@ -131,7 +154,7 @@ class TaskArtifactContextTests(unittest.TestCase):
             result = publish(self.source, self.source / "first-review.json", self.source / "second-review.json",
                              output_dir=output)
         self.assertEqual(result["file_integrity"], "valid")
-        self.assertEqual(compute.call_count, 2)
+        self.assertEqual(compute.call_count, 1)
         self.assertTrue(all(Path(call.kwargs["task_dir"]) == self.source for call in compute.call_args_list))
         data = load_json(output / "report-data.json")
         files = {item.get("evidence_id"): item.get("source_path") for item in data["evidence_index"]}

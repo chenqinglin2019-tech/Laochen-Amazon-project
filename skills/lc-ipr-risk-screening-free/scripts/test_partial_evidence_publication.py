@@ -127,9 +127,13 @@ class PartialReassessmentIntegrationTests(unittest.TestCase):
             root = Path(tmp)
             fixture = build_evidence_delivery_fixture(root / "source", scenario="all_discovery_failed")
             source = Path(fixture["directory"])
-            baseline = {str(path): sha256_file(path) for path in source.rglob("*") if path.is_file()}
             task = load_json(source / "task.json")
             self.assertNotIn("assessment_revision", task)
+            # Preserve the historical reassessment contract in this fixture;
+            # 10A's current-stage projection is covered separately.
+            task.pop("report_presentation_revision", None)
+            atomic_write_json(source / "task.json", task)
+            baseline = {str(path): sha256_file(path) for path in source.rglob("*") if path.is_file()}
             task["assessment_revision"] = "partial-evidence-v1"
             evidence = load_json(source / "evidence.json")
             candidates = load_json(source / "normalized-candidates.json")
@@ -140,6 +144,7 @@ class PartialReassessmentIntegrationTests(unittest.TestCase):
             for name in ("first-review.json", "second-review.json"):
                 review = load_json(source / name)
                 review["review_context"]["evidence_digest"] = digest
+                review["review_context"]["execution"]["input_digest"] = digest
                 path = root / name
                 atomic_write_json(path, review)
                 paths.append(path)
@@ -175,6 +180,48 @@ class PartialExecutionIsolationTests(unittest.TestCase):
             finally:
                 fixture.tearDown()
 
+
+
+class AuditedConstraintSubmissionTests(unittest.TestCase):
+    def setUp(self):
+        self.task={'retrieval_workflow_revision':'api-first-v3'}
+        self.run={'run_id':'OPS-zero','query_id':'Q1','provider':'epo_ops','jurisdiction':'US',
+            'right_type':'design','status':'access_limited','submission_state':'unknown',
+            'plan_entry_sha256':'query-sha'}
+        self.evidence={'source_runs':[self.run],'submission_state_reviews':[
+            {'method':'epo_search_receipt_audit','source_run_id':'OPS-zero',
+             'source_run_sha256':sha256_json(self.run),'query_id':'Q1','plan_entry_sha256':'query-sha',
+             'submission_state':'submitted','result':'no_result','reviewer':'original-reader',
+             'reasoning':'Exact retained 404 No results found audited','reviewed_at':'2026-09-29'}]}
+        self.gap={'code':'API_DISCOVERY_BUDGET_EXHAUSTED','jurisdiction':'US','right_type':'design'}
+        self.plan={'queries':{},'planning_gaps':[self.gap]}
+        self.entry={'kind':'plan_repair','state':'blocked','reason':'API_DISCOVERY_BUDGET_EXHAUSTED',
+            'jurisdiction':'US','right_type':'design','delivery_limit':{'kind':'source_constraint',
+                'reason':'API_DISCOVERY_BUDGET_EXHAUSTED','official_verification':'not_verified',
+                'source_run_refs':[{'run_id':'OPS-zero','sha256':sha256_json(self.run)}],
+                'capability_refs':[],'planning_gap_sha256':sha256_json(self.gap)}}
+
+    def valid(self):
+        with patch('api_first_planning.gap_limit_still_current',return_value=True):
+            return completion._delivery_limit_valid(self.entry,self.task,self.evidence,self.plan,{})
+
+    def test_v3_accepts_exact_existing_audit_without_changing_original_run(self):
+        before=deepcopy(self.evidence)
+        self.assertTrue(self.valid());self.assertEqual(self.evidence,before)
+        self.task['retrieval_workflow_revision']='api-first-v2';self.assertFalse(self.valid())
+
+    def test_unknown_stale_audit_raw_run_tamper_and_scope_mismatch_remain_rejected(self):
+        before=deepcopy(self.evidence)
+        self.evidence['submission_state_reviews']=[];self.assertFalse(self.valid())
+        self.evidence=deepcopy(before);self.evidence['submission_state_reviews'][0]['source_run_sha256']='stale'
+        self.assertFalse(self.valid())
+        self.evidence=deepcopy(before);self.evidence['source_runs'][0]['status']='changed'
+        self.assertFalse(self.valid())
+        self.evidence=deepcopy(before);self.entry['jurisdiction']='GB';self.assertFalse(self.valid())
+
+    def test_actual_route_or_budget_recovery_still_reopens(self):
+        with patch('api_first_planning.gap_limit_still_current',return_value=False):
+            self.assertFalse(completion._delivery_limit_valid(self.entry,self.task,self.evidence,self.plan,{}))
 
 if __name__ == "__main__":
     unittest.main()

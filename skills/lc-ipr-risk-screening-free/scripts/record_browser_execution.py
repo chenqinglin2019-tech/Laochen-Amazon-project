@@ -379,6 +379,15 @@ def planned_browser_query(provider: str, entry: dict, task: dict | None = None) 
             "requested_field": field, "language_filter_applied": False}
 
 
+def ppubs_query_text_equal(actual: str, expected: str) -> bool:
+    """Ignore only outer/parenthesis spacing; preserve quoted phrase content."""
+    def normalize(value):
+        parts = re.split(r'("[^"\\]*(?:\\.[^"\\]*)*")', value)
+        return ''.join((part if index % 2 else re.sub(r'\s*([()])\s*', r'\1', re.sub(r'\s+', ' ', part))).lower()
+                       for index, part in enumerate(parts)).strip()
+    return isinstance(actual, str) and isinstance(expected, str) and normalize(actual) == normalize(expected)
+
+
 def validate_browser_execution(capture: dict, task: dict, task_dir: Path,
                                provider: str) -> dict:
     if task.get("schema_version") != "2.4-free":
@@ -404,6 +413,11 @@ def validate_browser_execution(capture: dict, task: dict, task_dir: Path,
         raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: query must resolve to one source-bound plan entry")
     entry = matches[0][1]
     execution = planned_browser_query(provider, entry, task)
+    def matches_query(actual):
+        expected_query = execution["rendered_query"]
+        return (ppubs_query_text_equal(actual, expected_query)
+                if provider == "uspto_patent_browser" and entry.get("strategy") == "boolean"
+                else actual == expected_query)
     if entry.get("query_compiler_revision") == "tm-figurative-fields-v1" and (capture.get("query_semantics") != execution or capture.get("rendered_query") != execution["rendered_query"]):
         raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: figurative query semantics differ from plan")
     expected = {"task_id": task.get("task_id"), "provider": provider,
@@ -458,7 +472,7 @@ def validate_browser_execution(capture: dict, task: dict, task_dir: Path,
                 raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: record navigation differs from plan")
         else:
             rendered = execution["rendered_query"]
-            if any(e.get("action") != "submit_query" or e.get("rendered_query") != rendered for e in submissions):
+            if any(e.get("action") != "submit_query" or not matches_query(e.get("rendered_query")) for e in submissions):
                 raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: submitted query differs from plan")
         if observations[-1].get("stable") is not True:
             raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: result state was not stable")
@@ -504,7 +518,7 @@ def validate_browser_execution(capture: dict, task: dict, task_dir: Path,
                     or document.get("rendered_text_sha256") != canonical_digest(capture["rendered_text"])):
                 raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: published document identity or text differs")
             bindings = [event for event in events if event.get("action") == "observe_query_binding"]
-            if not bindings or bindings[-1].get("query") != execution["rendered_query"] or not bindings[-1].get("result_set_id"):
+            if not bindings or not matches_query(bindings[-1].get("query")) or not bindings[-1].get("result_set_id"):
                 raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: published document search history missing")
             history_shot = Path(str(bindings[-1].get("screenshot_path") or "")).resolve()
             if not history_shot.is_file() or not path_within(history_shot, task_dir / "screenshots") or sha256_file(history_shot) != bindings[-1].get("screenshot_sha256"):
@@ -525,7 +539,7 @@ def validate_browser_execution(capture: dict, task: dict, task_dir: Path,
             if not result_set or observations[-1].get("result_set_id") != result_set or observations[-1].get("query_bound") is not True:
                 raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: result set is not bound to the submitted query")
             bindings = [event for event in events if event.get("action") == "observe_query_binding"]
-            if not bindings or bindings[-1].get("result_set_id") != result_set or bindings[-1].get("query") != execution["rendered_query"]:
+            if not bindings or bindings[-1].get("result_set_id") != result_set or not matches_query(bindings[-1].get("query")):
                 raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: search history does not bind the result set")
             history_shot = Path(str(bindings[-1].get("screenshot_path") or "")).resolve()
             if not history_shot.is_file() or not path_within(history_shot, task_dir / "screenshots") or sha256_file(history_shot) != bindings[-1].get("screenshot_sha256"):
@@ -538,7 +552,7 @@ def validate_browser_execution(capture: dict, task: dict, task_dir: Path,
                 if page.get("page_index") != page_index or page.get("result_set_id") != result_set:
                     raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: result page identity differs")
                 for viewport in page.get("viewports") or []:
-                    if viewport.get("result_set_id") != result_set or viewport.get("editor_value") != execution["rendered_query"]:
+                    if viewport.get("result_set_id") != result_set or not matches_query(viewport.get("editor_value")):
                         raise ValueError("AUTOMATIC_QUERY_EXECUTION_MISMATCH: viewport query differs")
                     shot = Path(str(viewport.get("screenshot_path") or "")).resolve()
                     if not shot.is_file() or not path_within(shot, task_dir / "screenshots") or sha256_file(shot) != viewport.get("screenshot_sha256"):

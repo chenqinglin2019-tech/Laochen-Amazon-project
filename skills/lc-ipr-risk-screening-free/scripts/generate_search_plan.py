@@ -487,7 +487,7 @@ def jp_jplatpat_requests(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build official/free-only search-plan.json.")
     parser.add_argument("--task-dir", type=Path, required=True)
-    parser.add_argument("--expand", action="store_true", help="Append candidate-derived 2.4 searches without rewriting existing query hashes")
+    parser.add_argument("--expand", action="store_true", help="Append candidate-derived 2.4 searches without rewriting existing query hashes; api-first-v3 also persists new scoped candidate actions")
     parser.add_argument("--discovery-followup", type=Path, help="Append an API-first reviewed follow-up, bounded stop review, or unsubmitted primary repair")
     args = parser.parse_args()
     task_dir = args.task_dir.resolve()
@@ -1033,6 +1033,8 @@ def main() -> None:
         "serper_free_enhancement": task.get("serper_free_enhancement"),
         "signa_free_enhancement": task.get("signa_free_enhancement"),
         "serpapi_free_enhancement": task.get("serpapi_free_enhancement"),
+        **({"execution_policy_revision": task["execution_policy_revision"]}
+           if task.get("execution_policy_revision") else {}),
         "execution_policy": {
             "waves": [
                 {"wave": 1, "rule": "execute high-precision official/free queries"},
@@ -1051,7 +1053,7 @@ def main() -> None:
         },
     }
     try:
-        assert_default_discovery_plan_contract(task, plan)
+        assert_default_discovery_plan_contract(task, plan, task_dir=task_dir)
     except ValueError as exc:
         raise SystemExit(str(exc)) from None
     atomic_write_json(task_dir / "search-plan.json", plan)

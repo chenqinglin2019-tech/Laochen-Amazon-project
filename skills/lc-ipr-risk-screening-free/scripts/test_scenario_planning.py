@@ -26,14 +26,34 @@ class ScenarioPlanningTests(unittest.TestCase):
         subprocess.run([sys.executable, str(Path(__file__).with_name("create_task.py")), "--url", "https://www.amazon.com/dp/B012345678",
                         "--jurisdictions", "US", "--output-dir", str(self.path)], capture_output=True, check=True)
         self.task = load_json(self.path / "task.json")
+        self.task.pop("product_entry_revision", None)  # Historical fixture supplies facts without the new entry recorder.
+        self.task.pop("product_scope_required", None)  # Historical contract.
+        self.task.pop("triage_scope_revision", None)  # Historical scenario fixture predates 05A relation records.
+        self.task.pop("triage_followup_revision", None)  # Historical fixture predates 05B action/result reviews.
+        self.task.pop("triage_stage_revision", None)  # Historical fixture predates 05C completion.
+        self.task.pop("specialty_analysis_revision", None)  # Historical fixture predates 06 specialty records.
+        self.task.pop("distinctive_rights_revision", None)  # Historical fixture predates 07A factual records.
+        self.task.pop("discovery_semantics_revision", None)  # Historical scenario-routing fixture.
         self.task.pop("retrieval_workflow_revision", None)
         self.task.pop("retrieval_policy", None)
+        self.task.pop("review_policy_revision", None)
+        self.task.pop("presentation_policy_revision", None)  # Historical routing/report fixture.
+        self.task.pop("final_review_execution_revision", None)  # Module host has separate contracts.
+        self.task["source_operation_revision"] = "source-operation-v1"
+        from workflow_v24 import build_coverage_requirements_v24
+        self.task["coverage_requirements"] = build_coverage_requirements_v24(
+            self.task["target_jurisdictions"], screening_revision=self.task.get("screening_revision"),
+            specialty_workflow_revision=self.task.get("specialty_workflow_revision"))
         from common import serper_free_enhancement, serpapi_free_enhancement
         self.task["serper_free_enhancement"] = serper_free_enhancement(False)
         self.task["serpapi_free_enhancement"] = serpapi_free_enhancement(False)
         self.task.pop("completion_policy_revision", None)  # Frozen scenario routing/consumer compatibility fixture.
         self.task.pop("assessment_revision", None)  # Keep historical rating expectations; new policy has separate tests.
         self.task.pop("recall_planning_revision", None)  # This fixture isolates scenario routing from clue handoff.
+        # These cases assert conditional-brand routing explicitly.  Continuous
+        # v2 defaults to the primary scenario, so opt this historical fixture
+        # into both scenarios instead of relying on the old implicit behavior.
+        self.task["execution_scenario_ids"] = ["product_entry", "brand_reuse"]
         self.task["state"] = "collecting"
         self.task["product"].update(actual_asin="B012345678", variant={"confirmed": True, "value": "fixture"},
                                     brand="TEST", own_brand="TEST", title="Synthetic strap", language="en", structure=["strap with holes"], specifications={})
@@ -324,6 +344,21 @@ class ScenarioPlanningTests(unittest.TestCase):
         network.assert_not_called()
         self.assertEqual(output["results"][0]["status"], "cancelled")
         self.assertEqual(load_json(self.path / "evidence.json")["source_runs"], self.evidence["source_runs"])
+
+    def test_expansion_rederives_candidate_gaps_instead_of_erasing_or_copying(self):
+        old = load_json(self.path / "search-plan.json")
+        old["candidate_action_gaps"] = [{"code": "STALE_DECISION"}]
+        atomic_write_json(self.path / "search-plan.json", old)
+        current_gap = {"code": "US_PATENT_STATUS_ROUTE_UNIMPLEMENTED",
+                       "required_facts": ["current_status"], "candidate_id": "P1"}
+        def derive(task_dir, task, candidates, *, gaps_only=False):
+            self.assertTrue(gaps_only)
+            return {"candidate_action_gaps": [current_gap], "triage_action_queue": []}
+        with patch("workflow_v24.append_scenario_candidate_actions", side_effect=derive) as rebuild:
+            expanded = generate_plan(self.path, expand=True)
+        rebuild.assert_called_once()
+        self.assertEqual(expanded["candidate_action_gaps"], [current_gap])
+        self.assertEqual(load_json(self.path / "search-plan.json"), expanded)
 
     def test_needs_info_has_one_bound_lookup_and_never_auto_promotes(self):
         params = {"q": "88418732", "serial_number": "88418732", "candidate_id": self.candidate["candidate_id"], "mode": "agent", "strategy": "record_number"}

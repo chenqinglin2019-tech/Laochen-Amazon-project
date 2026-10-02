@@ -120,7 +120,7 @@ def field_values(root, names):
     return list(dict.fromkeys(values))
 
 
-def candidate_from_xml(row, right_type: str, fallback_country='FR') -> dict:
+def candidate_from_xml(row, right_type: str, fallback_country='FR', *, retrieval_workflow_revision: str | None = None) -> dict:
     names = {'patent': {'PUBN', 'publication-number'}, 'utility_model': {'PUBN', 'publication-number'}, 'trademark_word': {'ApplicationNumber'}, 'trademark_figurative': {'ApplicationNumber'}, 'design': {'DesignApplicationNumber'}}[right_type]
     numbers = field_values(row, names)
     if not numbers:
@@ -150,10 +150,18 @@ def candidate_from_xml(row, right_type: str, fallback_country='FR') -> dict:
         candidate['publication_number'] = number
     if right_type == 'design':
         candidate['locarno'] = classes
+    if retrieval_workflow_revision == 'api-first-v3':
+        candidate.update(owners=field_values(row, {'TINM', 'HolderName'}),
+                         applicants=field_values(row, {'DENM', 'DENE', 'DEPOSANT', 'ApplicantName', 'ApplicantNameText'}),
+                         party_names_unclassified=field_values(row, {'DEPOTIT'}),
+                         retrieval_workflow_revision=retrieval_workflow_revision, source_updated_at=None,
+                         field_provenance={'owners': ['TINM', 'HolderName'],
+                                           'applicants': ['DENM', 'DENE', 'DEPOSANT', 'ApplicantName', 'ApplicantNameText'],
+                                           'legal_status': ['MarkCurrentStatusCode', 'PatentCurrentStatusCode', 'DesignCurrentStatusCode', 'CurrentStatusCode']})
     return candidate
 
 
-def normalize_search(body: bytes, right_type: str, position=0, size=25, collections=None) -> dict:
+def normalize_search(body: bytes, right_type: str, position=0, size=25, collections=None, *, retrieval_workflow_revision: str | None = None) -> dict:
     root = xml_tree(body)
     # Solr XML result/doc is a defined envelope. DTO envelopes are accepted only
     # with an explicit record collection and a numeric declared total.
@@ -172,18 +180,18 @@ def normalize_search(body: bytes, right_type: str, position=0, size=25, collecti
         raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'INPI result count is invalid')
     total = int(raw_total)
     fallback = collections[0] if isinstance(collections, list) and len(collections) == 1 else ''
-    candidates = [candidate_from_xml(row, right_type, fallback) for row in rows]
+    candidates = [candidate_from_xml(row, right_type, fallback, retrieval_workflow_revision=retrieval_workflow_revision) for row in rows]
     if total < len(candidates) or total > position and not candidates:
         raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'INPI result count contradicts the returned records')
     truncated = position > 0 or total > len(candidates)
     return {'candidates': candidates, 'search_metadata': {'total_hits': total, 'retrieved_hits': len(candidates), 'reviewed_hits': None, 'truncated': truncated, 'stop_reason': 'page_limit' if truncated else 'query_exhausted', 'source_updated_at': None, 'schema_valid': True, 'position': position, 'page_size': size}}
 
 
-def normalize_notice(body: bytes, item: dict, media: list | None = None):
+def normalize_notice(body: bytes, item: dict, media: list | None = None, *, retrieval_workflow_revision: str | None = None):
     media = media or []
     root = xml_tree(body)
     requested = re.sub(r'\s+', '', str(item.get('identifier') or item.get('q') or '')).upper()
-    candidate = candidate_from_xml(root, item['right_type'], requested[:2])
+    candidate = candidate_from_xml(root, item['right_type'], requested[:2], retrieval_workflow_revision=retrieval_workflow_revision)
     actual = str(candidate.get('publication_number') or candidate.get('application_number') or '')
     # Known INPI patent notice lookup omits the kind, but do not ignore the office
     # or number, and never equate designs with separate sequence numbers.
@@ -202,6 +210,8 @@ def normalize_notice(body: bytes, item: dict, media: list | None = None):
     candidate.update(candidate_id=item.get('candidate_id', ''), authoritative_for_final_rating=authoritative,
         official_verification={'status': 'verified' if authoritative and not missing else 'partial', 'identity_match': True, 'authority': 'INPI', 'source': 'DATA INPI PI API notice', 'url': BASE + notice_path(item), 'checked_at': now_iso(), 'owner': candidate['owners'], 'legal_status': candidate['legal_status'], 'classes': candidate['classifications'], 'media': media, 'reason': ','.join(missing + ([] if authoritative else ['non_national_authority_scope'])), 'method': 'official_free_api'})
     candidate['media'] = media
+    if retrieval_workflow_revision == 'api-first-v3':
+        candidate.update(missing_facts=missing, record_scope='target_record')
     return candidate
 
 
@@ -225,7 +235,8 @@ def fetch_trademark_image(session: InpiSession, task_dir: Path, item: dict) -> l
 
 def execute(task_dir: Path, query_id: str):
     task_dir = task_dir.resolve()
-    _, item, params = load_action(task_dir, PROVIDER, query_id, {'search', 'candidate_verification'})
+    task, item, params = load_action(task_dir, PROVIDER, query_id, {'search', 'candidate_verification'})
+    revision = task.get('retrieval_workflow_revision')
     operation = item['operation']
     environment = 'test_fixture' if os.environ.get('LC_IPR_TEST_MODE') == '1' else 'production'
     options = dict(provider=PROVIDER, operation=operation, query=item.get('q', ''), jurisdiction=item.get('jurisdiction', ''), evidence_type='official_verification' if operation == 'candidate_verification' else 'trademark' if item.get('right_type', '').startswith('trademark') else 'patent', request_params=params, query_id=query_id, source_environment=environment)
@@ -238,19 +249,21 @@ def execute(task_dir: Path, query_id: str):
         session = InpiSession(credential(config, 'inpi_username'), credential(config, 'inpi_password'))
         body = session.call(path, payload)
         if operation == 'search':
-            normalized = normalize_search(body, item['right_type'], payload['position'], payload['size'], payload['collections'])
+            normalized = normalize_search(body, item['right_type'], payload['position'], payload['size'], payload['collections'], retrieval_workflow_revision=revision)
             status = 'success' if normalized['candidates'] else 'no_result'
             authoritative = False
         else:
             # Verify identity before requesting a media resource. Missing media
             # preserves the notice as a partial official record.
-            normalized = normalize_notice(body, item)
+            normalized = normalize_notice(body, item, retrieval_workflow_revision=revision)
             try:
-                media = fetch_trademark_image(session, task_dir, item)
-                normalized = normalize_notice(body, item, media)
+                missing = item.get('missing_facts', item.get('required_facts', []))
+                missing = missing if isinstance(missing, list) else []
+                media = fetch_trademark_image(session, task_dir, item) if revision != 'api-first-v3' or 'representative_figures' in missing else []
+                normalized = normalize_notice(body, item, media, retrieval_workflow_revision=revision)
             except ProviderError as media_error:
                 normalized['official_verification']['reason'] += ',' + media_error.code
-            status = 'success' if normalized['official_verification']['status'] == 'verified' else 'access_limited'
+            status = 'success' if revision == 'api-first-v3' or normalized['official_verification']['status'] == 'verified' else 'access_limited'
             authoritative = normalized['authoritative_for_final_rating']
         normalized['source_environment'] = environment
         if environment != 'production':

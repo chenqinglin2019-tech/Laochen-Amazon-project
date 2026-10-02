@@ -389,9 +389,10 @@ def main() -> None:
             if "representative_figures" in obtained and (not planned["reading_scope"].get("page_numbers")
                     or not set(planned["reading_scope"]["page_numbers"]) <= {page["page"] for page in pages}):
                 raise ValueError("Requested representative pages are incomplete")
+            has_claim_section = re.search(r"(?:^|\n)\s*(?:claims?|what is claimed)\b", str(capture.get("rendered_text") or ""), re.I)
             if "protection_content" in obtained and (not capture.get("rendered_text")
-                    or len(capture["rendered_text"]) >= 200000
-                    or capture.get("media_coverage", {}).get("completeness") != "complete"):
+                    or len(capture["rendered_text"]) >= 200000 or not has_claim_section
+                    or right_type == "design" and capture.get("media_coverage", {}).get("completeness") != "complete"):
                 raise ValueError("Protection-content document coverage is incomplete")
             if status == "success" and not set(planned["required_facts"]) <= set(obtained):
                 raise ValueError("Successful content retrieval lacks requested facts")

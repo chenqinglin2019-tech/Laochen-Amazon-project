@@ -26,7 +26,7 @@ from common import (
 )
 from provider_utils import (
     ProviderError, authorize_exact_plan_execution, http_json, record_error,
-    record_result, sanitize_evidence_url,
+    planned_query_metadata, record_result, sanitize_evidence_url,
 )
 
 
@@ -253,6 +253,7 @@ def normalize_verification(
     progress: dict[str, Any], registration: dict[str, Any], fixed_address: dict[str, Any],
     candidate_id: str = "", checked_at: str = "", *, requested_number: str = "",
     requested_number_kind: str = "application", number_reference: dict[str, Any] | None = None,
+    retrieval_workflow_revision: str | None = None,
 ) -> tuple[dict[str, Any], bool, str]:
     """Return normalized evidence, whether it is complete, and any fallback reason."""
     api_right_type = SUPPORTED_RIGHT_TYPES[requested_right_type]
@@ -270,12 +271,24 @@ def normalize_verification(
         "trademark": "trademarkForDisplay",
     }[api_right_type]
     title = str(_first_value(progress.get(title_key), registration.get(title_key))).strip()
+    v3 = retrieval_workflow_revision == "api-first-v3"
+    if v3:
+        for endpoint, value in (("app_progress", progress), ("registration_info", registration)):
+            declared = value.get("applicationNumber")
+            if declared and normalize_application_number(declared) != application_number:
+                raise ProviderError("RESPONSE_IDENTITY_MISMATCH", "failed", "JPO " + endpoint + " returned a different application identity")
+        if not identity_match:
+            raise ProviderError("RESPONSE_IDENTITY_MISMATCH", "failed", "JPO record lacks the requested application identity")
     owners = _strings(registration.get("rightPersonInformation"), "rightPersonName")
     owner_basis = "registered_right_person"
-    if not owners:
+    if not owners and not v3:
         owners = _applicant_owners(progress.get("applicantAttorney"))
         owner_basis = "application_party"
     legal_status = _legal_status(progress, registration)
+    if v3 and legal_status == "registered":
+        # A historical registration number proves a registration event, not
+        # an absence of later cancellation/termination in this response.
+        legal_status = ""
     updated_date = _date_text(_first_value(registration.get("updateDate"), progress.get("updateDate")))
     official_url = sanitize_evidence_url(fixed_address.get("URL"))
     parsed_official_url = urlparse(official_url)
@@ -299,7 +312,7 @@ def normalize_verification(
         missing.append("legal_status")
     if not updated_date:
         missing.append("updated_date")
-    if not official_url:
+    if not official_url and not v3:
         missing.append("jplatpat_fixed_url")
     if requested_right_type == "design" and not classes:
         missing.append("design_class")
@@ -382,6 +395,22 @@ def normalize_verification(
             ]
             if isinstance(item, dict) and str(item.get("goodsServiceName") or "").strip()
         ]
+    if v3:
+        payload.update(retrieval_workflow_revision=retrieval_workflow_revision,
+                       applicants=_applicant_owners(progress.get("applicantAttorney")),
+                       record_scope="target_record", source_updated_at=updated_date or None,
+                       missing_facts=list(missing),
+                       field_provenance={"owners": "registration_info.rightPersonInformation",
+                                         "applicants": "app_progress.applicantAttorney[class=1]",
+                                         "legal_status": "registration_info/app_progress.disappearanceDate,erasureIdentifier,expireDate"})
+        payload["registration_event"] = {"number": payload["registration_number"], "date": payload["registration_date"]}
+        if requested_right_type.startswith("trademark"):
+            payload["application_goods_services"] = [str(row.get("goodsServiceName") or "").strip()
+                for row in (progress.get("goodsServiceInformation") if isinstance(progress.get("goodsServiceInformation"), list) else []) if isinstance(row, dict) and row.get("goodsServiceName")]
+            payload["goods_services"] = [str(row.get("goodsServiceName") or "").strip()
+                for row in (registration.get("goodsServiceInformation") if isinstance(registration.get("goodsServiceInformation"), list) else []) if isinstance(row, dict) and row.get("goodsServiceName")]
+            payload["field_provenance"]["goods_services"] = "registration_info.goodsServiceInformation"
+        payload["official_verification"].update(fallback_provider="", fallback_required=False)
     return payload, complete, fallback_reason
 
 
@@ -627,6 +656,7 @@ class JpoApiClient:
     def verify(
         self, right_type: str, case_number: str, candidate_id: str = "", *,
         number_kind: str = "application", task_dir: Path | None = None,
+        retrieval_workflow_revision: str | None = None,
     ) -> tuple[dict[str, Any] | None, dict[str, Any], bytes, bool, str]:
         if right_type == "utility_model":
             raise ProviderError(
@@ -646,6 +676,8 @@ class JpoApiClient:
             )
         requested_number = normalize_case_number(case_number, number_kind)
         endpoint_pools = required_endpoint_pools(number_kind)
+        if retrieval_workflow_revision == "api-first-v3":
+            endpoint_pools.discard(ENDPOINT_LIMIT_KEYS["jpp_fixed_address"])
         if task_dir is not None:
             quota_reason = persisted_quota_block_reason(task_dir, endpoint_pools, self.daily_limits)
             if quota_reason:
@@ -700,7 +732,8 @@ class JpoApiClient:
                 raw_payload["endpoints"][endpoint] = {"response_schema": "unparseable"}
         if not endpoint_data["app_progress"]:
             return None, quota, json.dumps(raw_payload, ensure_ascii=False).encode("utf-8"), False, "no_applicable_data"
-        for endpoint in ("registration_info", "jpp_fixed_address"):
+        endpoint_data["jpp_fixed_address"] = {}
+        for endpoint in (("registration_info",) if retrieval_workflow_revision == "api-first-v3" else ("registration_info", "jpp_fixed_address")):
             data, endpoint_quota, raw_body = self._get(api_right_type, endpoint, application_number)
             endpoint_data[endpoint] = data
             quota[endpoint] = endpoint_quota
@@ -718,6 +751,7 @@ class JpoApiClient:
             requested_number=requested_number,
             requested_number_kind=number_kind,
             number_reference=number_reference,
+            retrieval_workflow_revision=retrieval_workflow_revision,
         )
         return normalized, quota, json.dumps(raw_payload, ensure_ascii=False).encode("utf-8"), complete, detail
 
@@ -789,6 +823,10 @@ def main() -> None:
         "right_type": args.right_type,
         "candidate_id": args.candidate_id,
     }
+    if task.get("retrieval_workflow_revision") == "api-first-v3":
+        planned = planned_query_metadata(task_dir, PROVIDER, args.query_id)
+        if "missing_facts" in planned:
+            request_params["missing_facts"] = planned["missing_facts"]
     try:
         authorize_exact_plan_execution(
             task_dir, task, PROVIDER, OPERATION, args.query_id,
@@ -802,6 +840,7 @@ def main() -> None:
         normalized, quota, raw_body, complete, fallback_reason = client.verify(
             args.right_type, case_number, args.candidate_id,
             number_kind=args.number_kind, task_dir=task_dir,
+            **({"retrieval_workflow_revision": "api-first-v3"} if task.get("retrieval_workflow_revision") == "api-first-v3" else {}),
         )
         if isinstance(normalized, dict):
             normalized["source_environment"] = client.source_environment
@@ -817,7 +856,7 @@ def main() -> None:
             status = "access_limited"
             error_code = "OFFICIAL_VERIFICATION_NOT_FOUND"
             detail = "JPO returned no applicable application data; verify the identifier in J-PlatPat"
-        elif complete:
+        elif complete or task.get("retrieval_workflow_revision") == "api-first-v3":
             status = "success"
             error_code = ""
             detail = ""

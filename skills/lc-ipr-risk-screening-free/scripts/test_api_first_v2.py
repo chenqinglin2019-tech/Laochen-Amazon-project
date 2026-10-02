@@ -1,5 +1,6 @@
 """Synthetic offline convergence tests; fixtures are not live IP evidence."""
 from copy import deepcopy
+import sys
 import unittest
 from unittest.mock import patch
 
@@ -41,8 +42,8 @@ class ApiFirstV2Tests(unittest.TestCase):
         self.task = load_json(self.path / "task.json")
 
     def no_api(self):
-        self.task["serper_free_enhancement"] = serper_free_enhancement(False, "api-first-v1")
-        self.task["serpapi_free_enhancement"] = serpapi_free_enhancement(False, "api-first-v1")
+        self.task["serper_free_enhancement"] = serper_free_enhancement(False, self.task["retrieval_workflow_revision"])
+        self.task["serpapi_free_enhancement"] = serpapi_free_enhancement(False, self.task["retrieval_workflow_revision"])
         self.task["signa_free_enhancement"]["enabled"] = False
         snapshot = {"schema_version": "2.4-free", "task_id": self.task["task_id"], "sources": [
             {"provider": provider, "state": "unvalidated", "reason": "browser_adapter_requires_real_route_acceptance",
@@ -130,7 +131,7 @@ class ApiFirstV2Tests(unittest.TestCase):
                 "API_DISCOVERY_RESERVE_RELEASE_INVALID")
 
     def test_selected_lens_supports_design_and_figurative_images(self):
-        self.task["serpapi_free_enhancement"] = serpapi_free_enhancement(True, "api-first-v1")
+        self.task["serpapi_free_enhancement"] = serpapi_free_enhancement(True, self.task["retrieval_workflow_revision"])
         term = {"kind": "design", "value": "strap", "language": "en", "derived_from": "product.structure[0]",
             "discovery_channel": "image", "image_url": "https://example.com/product.png"}
         for right in ("design", "trademark_figurative", "copyright"):
@@ -211,6 +212,31 @@ class ApiFirstV2Tests(unittest.TestCase):
         current = [r for r in entries if r.get("query_id") == row["query_id"]]
         self.assertTrue(current)
         self.assertEqual({r["state"] for r in current}, {"submission_unknown"})
+
+    def test_triage_and_discovery_review_commit_in_one_batch(self):
+        import annotate_materiality as recorder
+        row = self.primary()
+        run = self.source(row)
+        payload = {"decisions": [{
+            "candidate_id": self.candidate["candidate_id"], "scenario_id": "product_entry",
+            "decision": "not_selected", "reason": "Synthetic trademark is unrelated to the patent result scope.",
+            "reviewer": "offline-agent", "evidence_refs": ["E1"], "reading_level": "registry_record",
+            "basis_summary": "Read the retained synthetic registry card.",
+            "reopen_conditions": ["The product mark or goods change."]}],
+            "discovery_reviews": [{"query_id": row["query_id"], "source_run_id": run["run_id"],
+                "reason": "Read the complete retained empty response.", "reviewer": "offline-agent",
+                "outcome": "stop_bounded_discovery", "evidence_ids": ["EV-" + run["run_id"]],
+                "triage_digest": triage_digest(self.task, self.evidence, self.candidates, self.ledger,
+                                                query_id=row["query_id"])}]}
+        batch = self.path / "combined-review.json"
+        atomic_write_json(batch, payload)
+        with patch.object(sys, "argv", ["annotate_materiality.py", "--task-dir", str(self.path),
+                                        "--input", str(batch)]), patch.object(recorder, "assert_active_free_policy"):
+            recorder.main()
+        saved_task = load_json(self.path / "task.json")
+        saved_ledger = load_json(self.path / "materiality-annotations.json")
+        self.assertEqual(saved_ledger["annotations"][-1]["decision"], "not_selected")
+        self.assertEqual(saved_task["discovery_followups"][-1]["parent_query_id"], row["query_id"])
 
     def test_reviewed_unknown_has_bound_disclosable_limit_without_rewriting_run(self):
         row, run, record = self.audited_unknown()

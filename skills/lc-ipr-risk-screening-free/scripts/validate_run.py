@@ -561,7 +561,7 @@ def main() -> None:
     if is_v2:
         if not plan_free_policy_matches_task(task, plan):
             errors.append("FREE_POLICY_INVALID: search plan policy/revision does not match task")
-        default_discovery_error = default_discovery_plan_error(task, plan)
+        default_discovery_error = default_discovery_plan_error(task, plan, task_dir=task_dir, evidence=evidence)
         if default_discovery_error:
             errors.append(default_discovery_error)
         errors.extend(

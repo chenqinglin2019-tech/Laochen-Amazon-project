@@ -18,7 +18,7 @@ from common import (
     atomic_write_json, build_coverage_requirements, is_v24, load_json,
     normalize_text, now_iso, sha256_json, serper_free_enabled, serpapi_free_enabled,
     signa_free_enabled, load_skill_config, recall_integrity_enabled, RECALL_INTEGRITY_REVISION,
-    DECISION_PLAN_META_KEYS,
+    DECISION_PLAN_META_KEYS, API_FIRST_PLAN_META_KEYS,
 )
 
 TARGET_COUNTRIES = {"US", "GB", "FR", "DE", "IT", "ES", "JP", "EU"}
@@ -30,10 +30,17 @@ WORKFLOW_CORRECTION_REVISION = "workflow-correction-v1"
 REQUIRED_FACTS = frozenset({"abstract", "representative_figures", "protection_content", "current_status", "goods_services"})
 # These dispositions describe a temporary execution/work state, not a removal
 # of an authorized obligation. A later pass must reconsider them.
-TEMPORARY_DISPATCH_CODES = frozenset({"TRIAGE_BOUNDED_ACTION_ALREADY_ATTEMPTED",
-    "TRIAGE_ATTEMPT_STATE_UNKNOWN", "TRIAGE_REVIEW_REQUIRED"})
+TEMPORARY_DISPATCH_CODES = frozenset({"PRODUCT_SCOPE_WAITING", "PRODUCT_SCOPE_REVIEW_REQUIRED", "QUERY_IMAGE_INPUT_OR_PERMISSION_UNAVAILABLE", "PRODUCT_FACT_VERSION_REVIEW_REQUIRED", "PRODUCT_TARGET_CHANGE_REVIEW_REQUIRED", "PRODUCT_CHANGE_QUERY_REVIEW_REQUIRED", "TRIAGE_BOUNDED_ACTION_ALREADY_ATTEMPTED",
+    "TRIAGE_ATTEMPT_STATE_UNKNOWN", "TRIAGE_REVIEW_REQUIRED", "DISCOVERY_DIRECTION_REVIEW_REQUIRED",
+    "DISCOVERY_EXPRESSION_REVIEW_REQUIRED", "DISCOVERY_EXPRESSION_MISMATCH",
+    "SOURCE_OPERATION_UNAVAILABLE", "SOURCE_FAILURE_RECOVERY_REVIEW_REQUIRED",
+    "PRE_SUBMISSION_REPAIR_REVIEW_REQUIRED", "REVIEW_PROGRESS_QUERY_NOT_PLANNED",
+    "SOURCE_RETRY_DEPENDENCY_REQUIRED", "SOURCE_RESULT_PENDING",
+    "SOURCE_AUTOMATIC_RETRY_EXHAUSTED", "RECOVERY_REQUEST_IDENTITY_UNKNOWN",
+    "SUBMISSION_UNKNOWN_EVIDENCED_LIMIT", "SUBMISSION_UNKNOWN_DEPENDENCY",
+    "VERIFY_PRIOR_SUBMISSION_BEFORE_RETRY", "RETAINED_RESULT_REVIEW_REQUIRED"})
 RECALL_PLANNING_REVISION = "identity-discovery-v1"
-RETRIEVAL_WORKFLOW_REVISION = "api-first-v1"
+RETRIEVAL_WORKFLOW_REVISION = "api-first-v2"
 AXES = {
     "patent": ["text", "classification"], "utility_model": ["text", "classification"],
     "design": ["text", "classification", "image"],
@@ -47,8 +54,9 @@ def identity_discovery_enabled(task: dict) -> bool:
 
 
 def api_first_enabled(task: dict) -> bool:
+    from common import api_first_revision_enabled
     return (scenario_workflow_enabled(task) and correction_enabled(task)
-            and task.get("retrieval_workflow_revision") == RETRIEVAL_WORKFLOW_REVISION)
+            and api_first_revision_enabled(task.get("retrieval_workflow_revision")))
 
 
 def scenario_workflow_enabled(task: dict) -> bool:
@@ -124,11 +132,12 @@ def action_attempt_state(evidence: dict, provider: str, row: dict) -> dict:
     runs = _snapshot_value("workflow_attempts", (evidence,), indexed).get((provider, row.get("query_id"), sha256_json(row)), [])
     meaningful = [run for run in runs if run.get("status") not in {"cancelled", "not_applicable"}]
     reviewed = {}
+    audited_submitted = set()
     for review in evidence.get("submission_state_reviews", []):
-        if not isinstance(review, dict) or review.get("method") != "pre_source_guard_audit":
+        if not isinstance(review, dict):
             continue
         for run in meaningful:
-            if (review.get("source_run_id") == run.get("run_id")
+            if (review.get("method") == "pre_source_guard_audit" and review.get("source_run_id") == run.get("run_id")
                     and review.get("source_run_sha256") == sha256_json(run)
                     and review.get("query_id") == row.get("query_id")
                     and review.get("plan_entry_sha256") == sha256_json(row)
@@ -136,8 +145,15 @@ def action_attempt_state(evidence: dict, provider: str, row: dict) -> dict:
                     and review.get("reviewer") and review.get("reasoning") and review.get("reviewed_at")
                     and _pre_source_guard_failure(run)):
                 reviewed[run["run_id"]] = review
-    submitted = [run for run in meaningful if run.get("submission_state") == "submitted"]
-    unknown = [run for run in meaningful if run.get("submission_state") not in {"submitted", "not_submitted"}
+            if (review.get("method") == "epo_search_receipt_audit" and review.get("source_run_id") == run.get("run_id")
+                    and review.get("source_run_sha256") == sha256_json(run)
+                    and review.get("query_id") == row.get("query_id") and review.get("plan_entry_sha256") == sha256_json(row)
+                    and review.get("submission_state") == "submitted" and review.get("result") == "no_result"
+                    and review.get("reviewer") and review.get("reasoning") and review.get("reviewed_at")):
+                audited_submitted.add(run["run_id"])
+    from recovery_stage_b import effective_submission
+    submitted = [run for run in meaningful if effective_submission(evidence, run) == "submitted" or run.get("run_id") in audited_submitted]
+    unknown = [run for run in meaningful if effective_submission(evidence, run) == "unknown"
                and run.get("run_id") not in reviewed]
     return {"state": "submitted" if submitted else "unknown" if unknown else "not_submitted",
             "run": (submitted or unknown or meaningful or [None])[-1], "attempted": bool(meaningful),
@@ -176,7 +192,7 @@ def review_pre_source_guard_failure(task_dir: Path, run_id: str, *, reviewer: st
 
 
 def record_action_recovery(task_dir: Path, provider: str, row: dict, *, implementation_sha256: str = "") -> dict | None:
-    """Append a retry intention only when the exact previous run proves no submission.
+    """Append a pre-dispatch intention for a reviewed bounded retry or no-submit repair.
 
     This is not a replacement receipt or a grant to retry unknown/submitted work.
     Call under the scheduler's existing execution lock, immediately before dispatch.
@@ -185,18 +201,32 @@ def record_action_recovery(task_dir: Path, provider: str, row: dict, *, implemen
     if not correction_enabled(task):
         return None
     evidence = load_json(task_dir / "evidence.json")
-    state = action_attempt_state(evidence, provider, row)
-    if not state["attempted"] or state["state"] != "not_submitted":
-        return None
-    prior = state["run"]
-    identity = {"provider": provider, "query_id": row["query_id"], "plan_entry_sha256": sha256_json(row),
-                "prior_source_run_id": prior.get("run_id"), "prior_source_run_sha256": sha256_json(prior),
-                "implementation_sha256": implementation_sha256}
-    recovery = {**identity, "recovery_id": "REC-" + sha256_json(identity)[:24], "created_at": now_iso(),
-                "reason": "confirmed_not_submitted_retry", "prior_submission_state": "not_submitted"}
-    if state.get("submission_reviews"):
-        recovery["prior_submission_state_recorded"] = prior.get("submission_state")
-        recovery["submission_review_ids"] = [item["review_id"] for item in state["submission_reviews"]]
+    from continuation_stage_c import dispatch_block as continuation_dispatch_block
+    if continuation_dispatch_block(task, evidence, row):
+        raise ValueError("USER_ACTIVE_PAUSE")
+    from recovery_stage_b import recovery_state
+    bounded = recovery_state(task, evidence, provider, row)
+    if bounded and bounded.get("reason") == "SOURCE_BOUNDED_RECOVERY_READY":
+        prior = bounded["source_run_refs"][-1]
+        identity = {"recovery_object_id": bounded["recovery_object_id"],
+                    "prior_source_run_id": prior["run_id"], "prior_source_run_sha256": prior["sha256"],
+                    "recovery_review_id": bounded["recovery_review_id"]}
+        recovery = {**identity, "recovery_id": "REC-" + sha256_json(identity)[:24],
+                    "created_at": now_iso(), "reason": "reviewed_submitted_failure_retry",
+                    "prior_submission_state": "submitted", "external_attempt_ordinal": 2}
+    else:
+        state = action_attempt_state(evidence, provider, row)
+        if not state["attempted"] or state["state"] != "not_submitted":
+            return None
+        prior = state["run"]
+        identity = {"provider": provider, "query_id": row["query_id"], "plan_entry_sha256": sha256_json(row),
+                    "prior_source_run_id": prior.get("run_id"), "prior_source_run_sha256": sha256_json(prior),
+                    "implementation_sha256": implementation_sha256}
+        recovery = {**identity, "recovery_id": "REC-" + sha256_json(identity)[:24], "created_at": now_iso(),
+                    "reason": "confirmed_not_submitted_retry", "prior_submission_state": "not_submitted"}
+        if state.get("submission_reviews"):
+            recovery["prior_submission_state_recorded"] = prior.get("submission_state")
+            recovery["submission_review_ids"] = [item["review_id"] for item in state["submission_reviews"]]
     # API and browser have distinct dispatcher locks. Use an existing file-lock
     # primitive and a separate appendix so retry notes cannot race plan updates.
     from provider_utils import file_lock
@@ -208,6 +238,9 @@ def record_action_recovery(task_dir: Path, provider: str, row: dict, *, implemen
         records = journal["records"]
         existing = next((item for item in records if item.get("recovery_id") == recovery["recovery_id"]), None)
         if existing:
+            from recovery_stage_b import enabled as recovery_enabled
+            if recovery_enabled(task):
+                raise ValueError("RECOVERY_RETRY_INTENTION_UNRESOLVED")
             return existing
         records.append(recovery)
         atomic_write_json(path, journal)
@@ -229,7 +262,8 @@ def browser_submitted_failure_state(task: dict, evidence: dict, provider: str, r
         and run.get("provider") == provider and run.get("query_id") == row.get("query_id")
         and run.get("plan_entry_sha256") == digest and run.get("status") not in {"cancelled", "not_applicable"}]
     reviewed = {item["source_run_id"] for item in action_attempt_state(evidence, provider, row).get("submission_reviews", [])}
-    unknown = [run for run in runs if run.get("submission_state") not in {"submitted", "not_submitted"}
+    from recovery_stage_b import effective_submission
+    unknown = [run for run in runs if effective_submission(evidence, run) not in {"submitted", "not_submitted"}
         and run.get("run_id") not in reviewed]
     if unknown:
         return {"state": "submission_unknown", "reason": "VERIFY_PRIOR_SUBMISSION_BEFORE_RETRY",
@@ -330,6 +364,35 @@ def browser_partial_recovery_state(task: dict, evidence: dict, provider: str, ro
         "source_run_refs": [{"run_id": run["run_id"], "sha256": sha256_json(run)} for run in runs[first_index:]]}
 
 
+def _identity_user_actions(task, evidence, record, supplement=None):
+    """Current validated user-only prerequisites can defer identity investigation."""
+    from candidate_followup import enabled as followup_enabled, action_errors, latest_event
+    from decision_workflow import evidence_index
+    if (task.get('retrieval_workflow_revision') != 'api-first-v3' or not followup_enabled(task)
+            or record.get('current') is not True or record.get('decision') != 'needs_info'):
+        return []
+    annotation = record.get('annotation', {})
+    actions = record.get('next_actions')
+    if (not isinstance(actions, list) or not actions or not annotation.get('annotation_id')
+            or annotation.get('reading_level') not in {'result_record','title','abstract','fulltext','protection_content'}):
+        return []
+    known = set(evidence_index(evidence, supplement))
+    refs = annotation.get('evidence_refs')
+    if not isinstance(refs, list) or not refs or not set(refs) <= known:
+        return []
+    for action in actions:
+        basis = action.get('followup_basis', {}) if isinstance(action, dict) else {}
+        if (not isinstance(action, dict) or action.get('kind') != 'user_information'
+                or not str(action.get('question') or '').strip()
+                or action_errors(action, known_evidence=known)
+                or not basis.get('existing_evidence_refs')):
+            return []
+        review = latest_event(task, 'result_review', annotation['annotation_id'], action.get('action_id'))
+        if review is not None and review.get('outcome') != 'waiting':
+            return []
+    return actions
+
+
 def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, ledger: dict, *,
                      supplement=None, evidence_root=None, task_dir=None, coverage=None,
                      browser_status=None, source_capabilities=None) -> dict:
@@ -339,7 +402,7 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
     reasoning work, and receipts decide dispatch state. Historical attempts are
     retained elsewhere and do not contaminate this necessary-work view.
     """
-    from decision_workflow import decision_snapshot, triage_summary
+    from decision_workflow import decision_snapshot, triage_summary, triage_scope_enabled, UNLOCATED
     from assessment_v24 import scenario_coverage_by_scope
     from runtime_v24 import operation_accepted
     if not correction_enabled(task):
@@ -365,6 +428,11 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                     add({**scope, "kind": "plan_repair", "query_id": query_id, "state": "blocked", "reason": "PLAN_QUERY_IDENTITY_INVALID"})
                     continue
                 provider, row = matches[0]
+                if (task.get('retrieval_workflow_revision') == 'api-first-v3'
+                        and validated_query_cancellation(task, plan, row)
+                        and not any(run.get('provider') == provider and run.get('query_id') == query_id
+                            for run in evidence.get('source_runs', []) if isinstance(run, dict))):
+                    continue  # Unsubmitted, explicitly withdrawn; no evidence or obligation completion is claimed.
                 # A successful qualified alternative satisfies the obligation;
                 # do not schedule every unavailable backup for the same fact.
                 if result.get("complete") or row.get("evidence_obligation_id") in complete_obligations:
@@ -373,19 +441,30 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                         "action_id": row.get("triage_action_id"), "kind": "agent_investigation" if provider == "asset_provenance" else "source_lookup",
                         "required_facts": row.get("required_facts", []), "reading_scope": row.get("reading_scope"),
                         "evidence_obligation_id": row.get("evidence_obligation_id")}
-                block = scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence, supplement=supplement)
+                block = scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence,
+                                                supplement=supplement, task_dir=task_dir)
                 attempt = action_attempt_state(evidence, provider, row)
                 run = attempt["run"] or {}
                 current = browser_rows.get(query_id, {})
                 if current.get("plan_entry_sha256") != sha256_json(row):
                     current = {}
+                # A not-submitted repair cannot be acted on until the known
+                # route or access dependency is available. Keep that existing
+                # blocker visible in the work queue; dispatch still enforces
+                # the repair review after the dependency is resolved.
+                if block and block.get("reason") == "PRE_SUBMISSION_REPAIR_REVIEW_REQUIRED" and (
+                    run.get("error_code") in {"CURRENT_STATUS_ROUTE_UNAVAILABLE", "AUTOMATION_NOT_VALIDATED",
+                        "AUTOMATION_PROHIBITED", "INTERNAL_ROUTE_CONTRACT_ERROR"}
+                    or (provider in capabilities and not capabilities[provider].get("executable")
+                        and capabilities[provider].get("reason") != "browser_adapter_requires_real_route_acceptance")):
+                    block = None
                 failed_submission = browser_submitted_failure_state(task, evidence, provider, row)
                 partial_recovery = browser_partial_recovery_state(task, evidence, provider, row, current)
                 material = scenario_reading_material(task, plan, evidence, candidates, ledger, provider, row,
                     supplement=supplement, evidence_root=evidence_root, task_dir=task_dir) if not block or block.get("reason") in TEMPORARY_DISPATCH_CODES else None
                 external_actions = result.get("external_information_actions")
                 if (necessary_work_enabled(task) and provider == "asset_provenance"
-                        and not block and result.get("investigation_status") == "completed"
+                        and result.get("investigation_status") == "completed"
                         and result.get("retrieval_complete") is True and isinstance(external_actions, list) and external_actions):
                     # query_coverage validates the completed public investigation
                     # and each supplier-only question before exposing these.
@@ -402,7 +481,7 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                     state, reason = "awaiting_review", result.get("gap") or "RETRIEVED_RESULTS_REQUIRE_TRIAGE"
                 elif block:
                     reason = block["reason"]
-                    state = "submission_unknown" if reason == "TRIAGE_ATTEMPT_STATE_UNKNOWN" else "awaiting_review" if reason in TEMPORARY_DISPATCH_CODES else "blocked"
+                    state = "submission_unknown" if reason == "TRIAGE_ATTEMPT_STATE_UNKNOWN" else "awaiting_user" if reason == "PRODUCT_SCOPE_WAITING" else "awaiting_access" if reason == "SOURCE_OPERATION_UNAVAILABLE" else "awaiting_review" if reason in TEMPORARY_DISPATCH_CODES else "blocked"
                 elif provider == "asset_provenance":
                     state, reason = "ready", "AGENT_INVESTIGATION_REQUIRED"
                 else:
@@ -424,6 +503,12 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                         state, reason = failed_submission["state"], failed_submission["reason"]
                     elif attempt["attempted"] and attempt["state"] == "unknown":
                         state, reason = "submission_unknown", "VERIFY_PRIOR_SUBMISSION_BEFORE_RETRY"
+                    elif run.get("error_code") == "BROWSER_QUERY_BINDING_FAILED":
+                        # A received result set without an exact history binding
+                        # needs an adapter repair/observation, not another blind
+                        # submission of the same query.
+                        base.update(kind="plan_repair")
+                        state, reason = "ready", "BROWSER_QUERY_BINDING_REPAIR_REQUIRED"
                     elif run.get("error_code") in {"USPTO_QUERY_REJECTED", "UNSUPPORTED_QUERY_SEMANTICS"}:
                         state, reason = "ready", run["error_code"]
                     elif failed_submission:
@@ -457,8 +542,53 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
             row.get("scenario_id"), row.get("triage_jurisdiction") or row.get("jurisdiction"), row.get("right_type"),
             row.get("triage_action_id"), row.get("triage_decision_sha256"))
             for provider, rows in plan.get("queries", {}).items() for row in rows if row.get("triage_action_id")}
+        candidate_origins = {item.get("candidate_id"): str(item.get("jurisdiction") or "").upper()
+            for rows in candidates.values() if isinstance(rows, list)
+            for item in rows if isinstance(item, dict)}
+        for disposition in triage.get('scope_dispositions',[]):
+            if disposition['scope_status']=='pending':
+                add({**disposition,'kind':'product_analysis','state':'ready','reason':'CANDIDATE_OBJECT_SCOPE_REVIEW_REQUIRED'})
         for record in triage["records"]:
             scope = {key: record[key] for key in ("scenario_id", "jurisdiction", "right_type")}
+            if triage_scope_enabled(task) and (record["jurisdiction"] == UNLOCATED
+                    or record["right_type"] == "unknown"
+                    or candidate_origins.get(record["candidate_id"]) != record["jurisdiction"]):
+                base = {**scope, "candidate_id": record["candidate_id"]}
+                state = record["decision"] if record.get("current") else "unreviewed"
+                if state == "unreviewed":
+                    add({**base, "kind": "triage", "state": "awaiting_review",
+                         "reason": "CANDIDATE_TRIAGE_REQUIRED"})
+                elif state in {"selected", "needs_info"}:
+                    relation = record.get("annotation", {}).get("candidate_relation", {})
+                    from public_identity import current as public_identity_current, limitation as public_identity_limit
+                    public_review = public_identity_current(task,evidence,candidates,ledger,base,
+                        supplement=supplement,task_dir=task_dir)
+                    if public_review:
+                        add(public_identity_limit(public_review,{**base,'kind':'agent_investigation',
+                            'reason':'CANDIDATE_IDENTITY_DIRECTION_PENDING'}))
+                        continue
+                    user_actions = _identity_user_actions(task, evidence, record, supplement)
+                    if user_actions:
+                        for action in user_actions:
+                            add({**base, 'kind':'user_information', 'state':'awaiting_user',
+                                'reason':'CANDIDATE_IDENTITY_DIRECTION_PENDING',
+                                'action_id':action['action_id'], 'action':deepcopy(action),
+                                'identity_gaps':relation.get('identity_gaps', []),
+                                'identity_location':relation.get('identity_location', {}),
+                                'evidence_refs':list(dict.fromkeys([*record['annotation']['evidence_refs'],
+                                    *action['followup_basis']['existing_evidence_refs']])),
+                                'dependency':action['followup_basis']['missing_fact'],
+                                'resume_condition':action['followup_basis']['completion_condition'],
+                                'user_dependency_binding':{'annotation_id':record['annotation']['annotation_id'],
+                                    'annotation_sha256':sha256_json(record['annotation']),
+                                    'action_sha256':sha256_json(action)}})
+                        continue
+                    add({**base, "kind": "agent_investigation", "state": "awaiting_review",
+                         "reason": "CANDIDATE_IDENTITY_DIRECTION_PENDING",
+                         "identity_gaps": relation.get("identity_gaps", []),
+                         "identity_location": relation.get("identity_location", {}),
+                         "evidence_refs": record.get("annotation", {}).get("evidence_refs", [])})
+                continue
             if tuple(scope.values()) not in scope_keys:
                 continue
             state = record["decision"] if record.get("current") else "unreviewed"
@@ -467,7 +597,38 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                 add({**base, "kind": "triage", "state": "awaiting_review", "reason": record.get("stale_reason") or "CANDIDATE_TRIAGE_REQUIRED"})
             elif state == "needs_info":
                 actions = record.get("next_actions", [])
+                from candidate_followup import (enabled as followup_enabled, latest_event as followup_event,
+                    professional_wait_proof)
+                followup = followup_enabled(task)
                 for action in actions:
+                    prior_review = (followup_event(task, "result_review", record["annotation"]["annotation_id"],
+                        action.get("action_id")) if followup else None)
+                    if prior_review:
+                        if prior_review["outcome"] in {"waiting", "limited"}:
+                            add({**base, "kind": "agent_investigation", "action_id": action.get("action_id"),
+                                "state": ("awaiting_access" if action.get("kind") == "professional_review"
+                                          else "awaiting_user") if prior_review["outcome"] == "waiting" else "blocked",
+                                "reason": "FOLLOWUP_" + prior_review["outcome"].upper(),
+                                "action_kind": action.get("kind"),
+                                "dependency": prior_review.get("dependency"),
+                                "resume_condition": prior_review.get("resume_condition"),
+                                "limit_evidence": prior_review.get("limit_evidence"),
+                                "delivery_limit": professional_wait_proof(
+                                    task, evidence, record, action, supplement=supplement)})
+                        elif prior_review["outcome"] == "continue":
+                            add({**base, "kind": "triage", "action_id": action.get("action_id"),
+                                "state": "awaiting_review", "reason": "FOLLOWUP_NEXT_DECISION_REQUIRED"})
+                        continue
+                    if followup and action.get("kind") == "discovery_binding":
+                        from candidate_followup import latest_event
+                        bound = latest_event(task, "discovery_binding", record["annotation"]["annotation_id"],
+                                             action.get("action_id"))
+                        if not bound:
+                            add({**base, "kind": "agent_investigation", "action_id": action.get("action_id"),
+                                "query_id": action.get("query_id"), "state": "ready",
+                                "reason": "FOLLOWUP_DISCOVERY_BINDING_REQUIRED"})
+                            continue
+                        continue
                     if action.get("kind") == "source_lookup":
                         key = (action.get("provider"), action.get("operation"), record["candidate_id"],
                             record["scenario_id"], record["jurisdiction"], record["right_type"], action.get("action_id"),
@@ -486,6 +647,12 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
                 if not any(item.get("candidate_id") == record["candidate_id"] and item.get("scenario_id") == record["scenario_id"]
                            and item.get("jurisdiction") == record["jurisdiction"] for item in entries):
                     add({**base, "kind": "triage", "state": "awaiting_review", "reason": "NEEDS_INFO_REVIEW_REQUIRED"})
+        from candidate_followup import pending_review_entries
+        for pending in pending_review_entries(task, evidence, plan, ledger, supplement):
+            if not any(item.get("reason") == pending["reason"]
+                    and item.get("action_id") == pending["action_id"]
+                    and item.get("source_run_id") == pending["source_run_id"] for item in entries):
+                add(pending)
         counts = {state: sum(item["state"] == state for item in entries) for state in
                   ("ready", "awaiting_review", "awaiting_access", "awaiting_user", "submission_unknown", "blocked")}
         unresolved_scopes = [{**{key: group[key] for key in ("scenario_id", "jurisdiction", "right_type")}, "gaps": group.get("gaps", [])}
@@ -497,8 +664,10 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
 
 def resolved_work_view(task, evidence, candidates, plan, ledger, *, supplement=None,
                        evidence_root=None, task_dir=None, coverage=None, browser_status=None,
-                       source_capabilities=None):
+                       source_capabilities=None, _skip_selected_disposition=False):
     """One frozen-input work projection for v2 dispatch, delivery and validation."""
+    from discovery_semantics import verify as verify_semantics
+    verify_semantics(task, plan, evidence, task_dir)
     from necessary_completion import refine_work_view, sanitize_snapshots, capability_map
     from runtime_v24 import resolved_capabilities
     snapshots = {"source-capabilities.json": {"task_id": task["task_id"],
@@ -518,8 +687,56 @@ def resolved_work_view(task, evidence, candidates, plan, ledger, *, supplement=N
         additions = next_work_entries(task, plan, evidence, candidates, ledger, supplement,
             task_dir=task_dir, source_capabilities=caps, browser_status=browser_status)
         result["entries"].extend(additions)
+    from discovery_semantics import work_entries as semantic_work_entries
+    result["entries"].extend(semantic_work_entries(task, plan, evidence,
+        candidates=candidates, ledger=ledger, supplement=supplement, task_dir=task_dir))
+    from source_operation import work_entries as operation_work_entries
+    result["entries"].extend(operation_work_entries(task, plan, evidence, task_dir, caps))
+    from source_result_processing import work_entries as result_work_entries
+    result["entries"].extend(result_work_entries(task, evidence, task_dir))
+    if task_dir is not None:
+        from candidate_handoff import work_entries as handoff_work_entries, project as handoff_project
+        result["entries"].extend(handoff_work_entries(task, evidence, candidates, task_dir))
+        if task.get("candidate_handoff_revision") == "candidate-handoff-v1":
+            result["candidate_handoff"] = handoff_project(task, evidence, candidates, task_dir)
     result = refine_work_view(task, result, plan, caps, evidence=evidence, candidates=candidates,
-        ledger=ledger, supplement=supplement, task_dir=task_dir, coverage=coverage)
+        ledger=ledger, supplement=supplement, task_dir=task_dir, coverage=coverage,
+        _skip_selected_disposition=_skip_selected_disposition)
+    if task_dir is not None and task.get("triage_stage_revision"):
+        from candidate_triage_stage import project as triage_stage_project, work_entries as triage_stage_work
+        result["candidate_triage_stage"] = triage_stage_project(task, evidence, candidates, ledger,
+            plan=plan, source_work=result["entries"], task_dir=task_dir, supplement=supplement)
+        result["entries"].extend(triage_stage_work(result["candidate_triage_stage"]))
+    if task.get("specialty_analysis_revision"):
+        from specialty_analysis import project as specialty_project, work_entries as specialty_work
+        result["specialty_analysis"] = specialty_project(task, evidence, candidates, ledger,
+            supplement=supplement, source_work=result["entries"], plan=plan, capabilities=caps, task_dir=task_dir)
+        result["entries"].extend(specialty_work(result["specialty_analysis"]))
+    if task.get("distinctive_rights_revision"):
+        from distinctive_rights import project as m07_project, work_entries as m07_work
+        result["distinctive_rights"] = m07_project(task, evidence, candidates, ledger,
+            supplement=supplement, source_work=result["entries"], plan=plan,
+            capabilities=caps, task_dir=task_dir)
+        result["entries"].extend(m07_work(result["distinctive_rights"]))
+    # A language binding already present on an executed query is coverage
+    # metadata, not a second executable repair.  Keep it auditable without
+    # inflating the completion queue.
+    information = []
+    actionable_entries = []
+    for entry in result["entries"]:
+        reason = str(entry.get("reason") or entry.get("planning_gap") or "")
+        if (entry.get("kind") in {"plan_repair", "coverage_information"}
+                and (reason.endswith(":LOCAL_LANGUAGE_MISSING")
+                     or reason == "LOCAL_LANGUAGE_BOUND_TO_PLANNED_QUERY")):
+            information.append({**deepcopy(entry), "state": "information"})
+            continue
+        actionable_entries.append(entry)
+    result["entries"] = actionable_entries
+    result["information"] = sorted(information, key=lambda entry: sha256_json(entry))
+    for scope in result.get("unresolved_scopes", []):
+        scope["gaps"] = [gap for gap in scope.get("gaps", []) if not str(gap).endswith(":LOCAL_LANGUAGE_MISSING")]
+    result["unresolved_scopes"] = [scope for scope in result.get("unresolved_scopes", []) if scope.get("gaps")]
+
     plan_index = plan_row_index(plan)
     unique = {}
     for original in result["entries"]:
@@ -527,8 +744,17 @@ def resolved_work_view(task, evidence, candidates, plan, ledger, *, supplement=N
         identity = {key: entry.get(key) for key in ("scenario_id", "jurisdiction", "right_type",
             "kind", "query_id", "candidate_id", "action_id", "requirement_id", "dimension",
             "search_dimension", "discovery_intent_id", "planning_gap")}
-        if not entry.get("query_id") and not entry.get("action_id"):
+        if entry.get("obligation_id"):
+            identity["obligation_id"] = entry["obligation_id"]
+        if task.get("triage_stage_revision"):
+            for stage_key in ("reopen_event_id", "identity_correction_event_id"):
+                if entry.get(stage_key):
+                    identity[stage_key] = entry[stage_key]
+        if (not entry.get("query_id") and not entry.get("action_id")) or entry.get("kind") == "plan_repair":
             identity["reason"] = entry.get("reason")
+        if entry.get("reason") in {"SOURCE_RESULTS_PENDING_PROCESSING",
+                                   "SOURCE_RESULT_RECEIPT_OR_INDEX_INVALID"}:
+            identity["source_run_id"] = entry.get("source_run_id")
         entry["work_id"] = "WORK-" + sha256_json(identity)[:24]
         matches = plan_index.get(entry.get("query_id"), [])
         if len(matches) == 1:
@@ -542,58 +768,121 @@ def resolved_work_view(task, evidence, candidates, plan, ledger, *, supplement=N
         if entry.get("provider") in caps:
             entry["capability_sha256"] = sha256_json(caps[entry["provider"]])
         unique[sha256_json(entry)] = entry
-    result["entries"] = sorted(unique.values(), key=lambda entry: (entry["work_id"], sha256_json(entry)))
+    # Multiple axes can describe the same planning repair.  Preserve every
+    # reason on one actionable row while leaving query-specific reviews and
+    # evidence obligations distinct.
+    coalesced = {}
+    for entry in unique.values():
+        if entry.get("kind") == "plan_repair" and not entry.get("query_id") and not entry.get("action_id"):
+            key = tuple(entry.get(name) for name in ("scenario_id", "jurisdiction", "right_type", "kind", "state"))
+            prior = coalesced.get(key)
+            if prior is None:
+                coalesced[key] = entry
+            else:
+                reasons = [*prior.get("related_reasons", [prior.get("reason")]), *entry.get("related_reasons", [entry.get("reason")])]
+                prior["related_reasons"] = sorted({reason for reason in reasons if reason})
+                prior["work_id"] = "WORK-" + sha256_json({"scope": key, "reasons": prior["related_reasons"]})[:24]
+        else:
+            coalesced[("unique", sha256_json(entry))] = entry
+    if task.get("triage_stage_revision") and result.get("candidate_triage_stage"):
+        from candidate_triage_stage import prioritize_work
+        result["entries"] = prioritize_work(list(coalesced.values()), result["candidate_triage_stage"])
+    else:
+        result["entries"] = sorted(coalesced.values(), key=lambda entry: (entry["work_id"], sha256_json(entry)))
     result["counts"] = {state: sum(entry["state"] == state for entry in result["entries"])
         for state in ("ready", "awaiting_review", "awaiting_access", "awaiting_user", "submission_unknown", "blocked")}
     result["status"] = "incomplete" if result["entries"] or result.get("unresolved_scopes") else "complete"
-    return result
+    from product_scope import project_work
+    from continuous_work_stage_a import project as continuous_project
+    from continuation_stage_c import project as continuation_project
+    from continuous_progress_stage_d import project as progress_project
+    from review_progress_stage_a import project as review_progress_project
+    from stage_risk_stage_b import project as stage_risk_project
+    from execution_budget import project as budget_project
+    return budget_project(task, evidence, plan, stage_risk_project(task, review_progress_project(task, progress_project(task, continuation_project(task,
+        continuous_project(task, project_work(task, result, plan), evidence, plan), evidence), evidence), evidence), evidence, task_dir=task_dir), task_dir)
 
 
 def work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabilities=None,
                        first_review=None, second_review=None) -> dict:
     from decision_workflow import decision_snapshot
-    task, plan = load_json(task_dir / "task.json"), load_json(task_dir / "search-plan.json")
+    task = load_json(task_dir / "task.json")
+    import product_scope as ps
+    if ps.enabled(task): ps.verify(task,load_json(task_dir/'evidence.json'),task_dir)
+    if not (task_dir/'search-plan.json').is_file() and (ps.enabled(task) or task.get('product_scope_required')):
+        view=ps.project_work(task,{'entries':[],'status':'incomplete','unresolved_scopes':[]})
+        if not view['entries'] or (ps.enabled(task) and any(ps.direction_state(task,d)=='ready' for d in ps.directions(task))):
+            view['entries'].append({'work_id':'WORK-product-plan','kind':'product_analysis','state':'ready','reason':'PRODUCT_PLAN_REQUIRED'})
+        from continuous_work_stage_a import project as continuous_project
+        from continuation_stage_c import project as continuation_project
+        evidence = load_json(task_dir / 'evidence.json')
+        from continuous_progress_stage_d import project as progress_project
+        from review_progress_stage_a import project as review_progress_project
+        from stage_risk_stage_b import project as stage_risk_project
+        return stage_risk_project(task, review_progress_project(task, progress_project(task, continuation_project(task,
+            continuous_project(task, ps.project_work(task,view)), evidence), evidence), evidence), evidence, task_dir=task_dir)
+    plan = load_json(task_dir / "search-plan.json")
     candidates, ledger, evidence = _scenario_context(task_dir, task)
     supplement = scenario_supplement(task_dir, task=task, evidence=evidence)
-    if browser_status is None and (task_dir / "browser-execution-status.json").is_file():
-        browser_status = load_json(task_dir / "browser-execution-status.json")
-    from necessary_completion import enabled as completion_enabled, capability_map, refine_work_view, review_work
-    strict_completion = completion_enabled(task)
-    if source_capabilities is None and strict_completion:
-        saved = task_dir / "source-capabilities.json"
-        source_capabilities = capability_map(task, load_json(saved) if saved.is_file() else None)
-    if source_capabilities is None and correction_enabled(task):
-        from runtime_v24 import capabilities
-        source_capabilities = {row["provider"]: row for row in capabilities(task, load_skill_config())}
-    scopes = None
-    if strict_completion:
-        from assessment_v24 import scenario_coverage_by_scope
-        scopes = scenario_coverage_by_scope(task, evidence, candidates, plan, ledger=ledger,
-            supplement=supplement, evidence_root=task_dir)
-    if evidence_delivery_enabled(task):
-        result = resolved_work_view(task, evidence, candidates, plan, ledger,
-            supplement=supplement, evidence_root=task_dir, task_dir=task_dir, coverage=scopes,
-            browser_status=browser_status, source_capabilities=source_capabilities)
-        result["work_view_sha256"] = sha256_json(result)
-        result["review_work"] = review_work(task, evidence, candidates, plan, ledger, scopes,
-            first_review, second_review, supplement=supplement, evidence_root=task_dir)
-        return result
-    result = derive_work_view(task, evidence, candidates, plan, ledger, supplement=supplement, task_dir=task_dir,
-        coverage=scopes, browser_status=browser_status, source_capabilities=source_capabilities)
-    if strict_completion:
-        result = refine_work_view(task, result, plan, source_capabilities or {})
-        result["review_work"] = review_work(task, evidence, candidates, plan, ledger, scopes,
-            first_review, second_review, supplement=supplement, evidence_root=task_dir)
-    if api_first_enabled(task):
-        from api_first_planning import next_work_entries
-        additions = next_work_entries(task, plan, evidence, candidates, ledger, supplement, task_dir=task_dir)
-        seen = {sha256_json(item) for item in result["entries"]}
-        result["entries"].extend(item for item in additions if sha256_json(item) not in seen)
-        result["counts"] = {state: sum(item["state"] == state for item in result["entries"])
-            for state in ("ready", "awaiting_review", "awaiting_access", "awaiting_user", "submission_unknown", "blocked")}
-        if result["entries"]:
-            result["status"] = "incomplete"
-    return result
+    # One view owns one immutable pure-index memo, including initial coverage.
+    # Public proof reuse additionally rehashes each actual file at view exit.
+    from public_identity import validation_snapshot
+    with decision_snapshot(task, evidence, candidates, plan, ledger, supplement), \
+            validation_snapshot(task_dir, task, evidence, candidates, plan, ledger, supplement):
+        if browser_status is None and (task_dir / "browser-execution-status.json").is_file():
+            browser_status = load_json(task_dir / "browser-execution-status.json")
+        from necessary_completion import enabled as completion_enabled, capability_map, refine_work_view, review_work
+        strict_completion = completion_enabled(task)
+        if source_capabilities is None and strict_completion:
+            saved = task_dir / "source-capabilities.json"
+            source_capabilities = capability_map(task, load_json(saved) if saved.is_file() else None)
+        if source_capabilities is None and correction_enabled(task):
+            from runtime_v24 import capabilities
+            source_capabilities = {row["provider"]: row for row in capabilities(task, load_skill_config())}
+        scopes = None
+        if strict_completion:
+            from assessment_v24 import scenario_coverage_by_scope
+            scopes = scenario_coverage_by_scope(task, evidence, candidates, plan, ledger=ledger,
+                supplement=supplement, evidence_root=task_dir)
+        if evidence_delivery_enabled(task):
+            result = resolved_work_view(task, evidence, candidates, plan, ledger,
+                supplement=supplement, evidence_root=task_dir, task_dir=task_dir, coverage=scopes,
+                browser_status=browser_status, source_capabilities=source_capabilities)
+            result["review_work"] = review_work(task, evidence, candidates, plan, ledger, scopes,
+                first_review, second_review, supplement=supplement, evidence_root=task_dir)
+            from continuation_stage_c import project as continuation_project
+            result = continuation_project(task, result, evidence)
+            from continuous_progress_stage_d import project as progress_project
+            result = progress_project(task, result, evidence)
+            from review_progress_stage_a import project as review_progress_project
+            result = review_progress_project(task, result, evidence)
+            from stage_risk_stage_b import project as stage_risk_project
+            result = stage_risk_project(task, result, evidence, task_dir=task_dir)
+            result["work_view_sha256"] = sha256_json({key: value for key, value in result.items()
+                if key not in {"work_view_sha256", "review_work"}})
+            return result
+        result = derive_work_view(task, evidence, candidates, plan, ledger, supplement=supplement, task_dir=task_dir,
+            coverage=scopes, browser_status=browser_status, source_capabilities=source_capabilities)
+        if strict_completion:
+            result = refine_work_view(task, result, plan, source_capabilities or {})
+            result["review_work"] = review_work(task, evidence, candidates, plan, ledger, scopes,
+                first_review, second_review, supplement=supplement, evidence_root=task_dir)
+        if api_first_enabled(task):
+            from api_first_planning import next_work_entries
+            additions = next_work_entries(task, plan, evidence, candidates, ledger, supplement, task_dir=task_dir)
+            seen = {sha256_json(item) for item in result["entries"]}
+            result["entries"].extend(item for item in additions if sha256_json(item) not in seen)
+            result["counts"] = {state: sum(item["state"] == state for item in result["entries"])
+                for state in ("ready", "awaiting_review", "awaiting_access", "awaiting_user", "submission_unknown", "blocked")}
+            if result["entries"]:
+                result["status"] = "incomplete"
+        from continuous_work_stage_a import project as continuous_project
+        from continuation_stage_c import project as continuation_project
+        from continuous_progress_stage_d import project as progress_project
+        from review_progress_stage_a import project as review_progress_project
+        from stage_risk_stage_b import project as stage_risk_project
+        return stage_risk_project(task, review_progress_project(task, progress_project(task, continuation_project(task,
+            continuous_project(task, result, evidence, plan), evidence), evidence), evidence), evidence, task_dir=task_dir)
 
 
 def scenario_row_bindings(task: dict, row: dict) -> list[dict]:
@@ -643,6 +932,10 @@ def bind_scenario_action(task: dict, provider: str, row: dict, *, purpose: str,
             # editor/history. Bind new actions to that same exact spelling;
             # never weaken history equality or reinterpret older receipts.
             bound["query_compiler_revision"] = "ppubs-quoted-record-v1"
+    from product_change import enabled as product_change_enabled
+    if product_change_enabled(task):
+        bound['product_target_sha256'] = task['product_identity']['sha256']
+        bound['product_change_version'] = task['product_change_version']
     if decision:
         annotation = decision["annotation"]
         bound.update(scenario_id=decision["scenario_id"], scenario_sha256=decision["scenario_sha256"],
@@ -655,6 +948,16 @@ def bind_scenario_action(task: dict, provider: str, row: dict, *, purpose: str,
                                       and (scenario_id is None or key == scenario_id)]
         if scenario_id is not None and not bound["scenario_bindings"]:
             raise ValueError("ACTION_SCENARIO_NOT_APPLICABLE")
+    import product_scope as ps
+    from product_change import dispatch_reason as product_change_dispatch_reason
+    change_reason = product_change_dispatch_reason(task,row)
+    if change_reason: return blocked(change_reason)
+    if ps.enabled(task):
+        original = bound.get('scenario_bindings') or ([{'scenario_id':bound['scenario_id'],'scenario_sha256':bound['scenario_sha256']}] if bound.get('scenario_id') else [])
+        filtered = ps.bind(task,bound,original)
+        if 'scenario_bindings' in bound: bound['scenario_bindings'] = filtered
+    from product_delivery import bind_fact_versions
+    bind_fact_versions(task, bound)
     bound["evidence_obligation_id"] = "OBL-" + sha256_json({
         "scope": {key: bound.get(key) for key in ("scenario_id", "scenario_sha256", "scenario_bindings", "jurisdiction", "right_type", "triage_jurisdiction")},
         "purpose": purpose, "key": obligation_key if obligation_key is not None else bound.get("candidate_id")})[:20]
@@ -703,6 +1006,12 @@ def scenario_fact_reuse(task: dict, plan: dict, evidence: dict, candidates: dict
                         provider: str, row: dict, *, supplement=None, evidence_root=None,
                         task_dir=None) -> dict | None:
     """Qualified original facts may close an obligation, never become a new run."""
+    import product_scope as ps
+    if ps.dispatch_reason(task,row): return None
+    from trusted_api import action_facts
+    accepted = action_facts(task, evidence, row)
+    if accepted is not None:
+        return accepted
     from same_task_evidence import qualified_fact_reuse
     return qualified_fact_reuse(task, plan, evidence, candidates, ledger, provider, row,
                                supplement=supplement, evidence_root=evidence_root, task_dir=task_dir)
@@ -733,6 +1042,8 @@ def scenario_historical_reuse(task: dict, provider: str, row: dict, candidates: 
     A shared action is skipped only when every currently bound scenario has an
     explicit retained-source review. A scope assessment may consume just its own.
     """
+    import product_scope as ps
+    if ps.enabled(task) and ps.binding_state(task,row,scenario_id)!='ready': return None
     if not scenario_workflow_enabled(task) or not isinstance(supplement, dict):
         return None
     from historical_evidence import historical_action_reuse, historical_evidence_root
@@ -773,14 +1084,15 @@ def scenario_historical_reuse_from_dir(task_dir: Path, provider: str, row: dict)
     plan = load_json(task_dir / "search-plan.json")
     candidates, ledger, evidence = _scenario_context(task_dir, task)
     supplement = scenario_supplement(task_dir, task=task, evidence=evidence)
-    if scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence, supplement=supplement):
+    if scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence,
+                               supplement=supplement, task_dir=task_dir):
         return None
     return scenario_historical_reuse(task, provider, row, candidates, supplement)
 
 
 def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
                             candidates: dict, ledger: dict, evidence: dict, *, supplement: dict | None = None,
-                            for_dispatch: bool = True) -> dict | None:
+                            for_dispatch: bool = True, task_dir: Path | None = None) -> dict | None:
     """Authorization only: a source material flag cannot grant workflow authority."""
     if not scenario_workflow_enabled(task):
         return None
@@ -789,6 +1101,17 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
     def blocked(code):
         return {"code": code, "query_id": row.get("query_id"), "reason": code,
                 "status": "cancelled", "submission_state": "not_submitted"}
+    if for_dispatch:
+        from continuation_stage_c import dispatch_block as continuation_dispatch_block
+        if continuation_dispatch_block(task, evidence, row):
+            return blocked("USER_ACTIVE_PAUSE")
+    def recovery_or_none():
+        if for_dispatch:
+            from recovery_stage_b import dispatch_block as recovery_dispatch_block
+            reason = recovery_dispatch_block(task, evidence, provider, row)
+            if reason:
+                return blocked(reason)
+        return None
     from common import plan_free_policy_matches_task
     from provider_utils import PLAN_META_KEYS, query_identity
     if (task.get("schema_version") != "2.4-free" or plan.get("schema_version") != task.get("schema_version")
@@ -803,6 +1126,45 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
     if (len(matches) != 1 or matches[0][0] != provider or sha256_json(matches[0][1]) != sha256_json(row)
             or row.get("query_id") != query_identity(provider, row.get("operation"), row.get("jurisdiction"), str(row.get("q") or ""), identity)):
         return blocked("SCENARIO_QUERY_IDENTITY_MISMATCH")
+    # A resolved candidate's old action cannot become live again merely because
+    # its progress or product binding now requires review. Keep temporary gates
+    # for current actions, after establishing plan/row identity above.
+    if for_dispatch and row.get("triage_action_id") and row.get("triage_candidate_id"):
+        found_current = [(collection, item) for collection, item in iter_candidates(candidates)
+                         if item.get("candidate_id") == row.get("triage_candidate_id")]
+        if len(found_current) == 1:
+            current_decision = effective_decision(task, ledger, *found_current[0], row.get("scenario_id"),
+                row.get("triage_jurisdiction") or row.get("jurisdiction"), row.get("right_type"),
+                evidence=evidence, supplement=supplement)
+            if (current_decision.get("current") is True
+                    and (current_decision.get("annotation") or {}).get("annotation_id") != row.get("triage_decision_id")):
+                return blocked("TRIAGE_ACTION_STALE")
+    if for_dispatch:
+        from continuous_progress_stage_d import dispatch_block as progress_dispatch_block
+        progress_reason = progress_dispatch_block(task, evidence, provider, row)
+        if progress_reason:
+            return blocked(progress_reason)
+        from review_progress_stage_a import dispatch_block as review_progress_dispatch_block
+        review_progress_reason = review_progress_dispatch_block(task, evidence, provider, row)
+        if review_progress_reason:
+            return blocked(review_progress_reason)
+    from product_delivery import validate_image_query
+    image_reason = validate_image_query(task, provider, row)
+    if image_reason: return blocked(image_reason)
+    from product_delivery import validate_fact_query
+    fact_reason = validate_fact_query(task, row)
+    if fact_reason: return blocked(fact_reason)
+    import product_scope as ps
+    if ps.enabled(task):
+        reason = ps.dispatch_reason(task,row)
+        if reason: return blocked(reason)
+    from source_operation import enabled as operation_review_enabled
+    if for_dispatch and operation_review_enabled(task):
+        from source_operation_registry import latest_states
+        operation_key = tuple(row.get(key, '') for key in
+            ('jurisdiction', 'right_type', 'operation', 'query_compiler_revision', 'search_dimension'))
+        if latest_states(provider).get(operation_key) == 'unavailable':
+            return blocked('SOURCE_OPERATION_UNAVAILABLE')
     if for_dispatch and validated_query_cancellation(task, plan, row):
         return blocked("SCENARIO_ACTION_CANCELLED")
     if for_dispatch and validated_query_substitution(task, plan, row):
@@ -820,7 +1182,8 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
         return blocked("TRIAGE_ATTEMPT_STATE_UNKNOWN")
     if api_first_enabled(task) and for_dispatch:
         from api_first_planning import dispatch_block
-        api_block = dispatch_block(task, plan, evidence, candidates, ledger, provider, row, supplement)
+        api_block = dispatch_block(task, plan, evidence, candidates, ledger, provider, row,
+                                   supplement, task_dir=task_dir)
         if api_block:
             if evidence_delivery_enabled(task):
                 temporary = {"API_DISCOVERY_MERGE_REQUIRED": "TRIAGE_REVIEW_REQUIRED",
@@ -832,6 +1195,16 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
                     # submission audit is pending; do not append cancellation.
                     return {**blocked(temporary[api_block]), "cause": api_block}
             return blocked(api_block)
+    if for_dispatch and task.get("triage_followup_revision"):
+        from candidate_followup import dispatch_error as followup_dispatch_error
+        followup_error = followup_dispatch_error(task, provider, row, candidates, ledger, evidence,
+                                                 supplement=supplement)
+        if followup_error:
+            return blocked(followup_error)
+    if for_dispatch and row.get('action_purpose') == 'discovery':
+        from discovery_semantics import dispatch_error
+        semantic_error = dispatch_error(task, plan, evidence, provider, row)
+        if semantic_error: return blocked(semantic_error)
     if (task.get("specialty_workflow_revision") == "asset-scope-v1"
             and provider == "uspto_tmsearch_browser" and row.get("jurisdiction") == "US"
             and row.get("right_type") == "trademark_figurative"
@@ -860,7 +1233,7 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
                                or not row.get("triage_jurisdiction") or not row.get("scenario_id") or row.get("scenario_bindings")):
         return blocked("TRIAGE_ACTION_BINDING_REQUIRED")
     if not candidate_id and not row.get("triage_decision_id"):
-        return None  # Shared initial product recall/provenance, not candidate authority.
+        return recovery_or_none()  # Shared initial product recall/provenance, not candidate authority.
     found = [(collection, item) for collection, item in iter_candidates(candidates) if item.get("candidate_id") == candidate_id]
     if len(found) != 1:
         return blocked("TRIAGE_CANDIDATE_IDENTITY_MISSING")
@@ -868,6 +1241,11 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
             row.get("jurisdiction") == "EP" and row.get("action_purpose") == "document_content"):
         return blocked("TRIAGE_ACTION_COUNTRY_MISMATCH")
     collection, candidate = found[0]
+    from decision_workflow import triage_scope_enabled, UNLOCATED
+    if triage_scope_enabled(task) and (row.get("triage_jurisdiction") == UNLOCATED
+            or candidate.get("right_type") == "unknown"
+            or str(candidate.get("jurisdiction") or "").upper() != row.get("triage_jurisdiction")):
+        return blocked("TRIAGE_IDENTITY_LOCATION_REQUIRED")
     decision = effective_decision(task, ledger, collection, candidate, row.get("scenario_id"),
                                   row.get("triage_jurisdiction") or row.get("jurisdiction"),
                                   row.get("right_type"), evidence=evidence, supplement=supplement)
@@ -876,7 +1254,7 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
             or sha256_json(annotation) != row.get("triage_decision_sha256")):
         return blocked("TRIAGE_ACTION_STALE")
     if decision.get("decision") == "selected":
-        return None
+        return recovery_or_none()
     if decision.get("decision") == "needs_info" and row.get("triage_action_id"):
         from provider_utils import PLAN_META_KEYS
         params = {key: value for key, value in row.items() if key not in PLAN_META_KEYS and key not in SCENARIO_META_KEYS}
@@ -899,13 +1277,20 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
                         if attempt["state"] == "unknown":
                             return blocked("TRIAGE_ATTEMPT_STATE_UNKNOWN")
                         if attempt["state"] == "submitted":
-                            return blocked("TRIAGE_REVIEW_REQUIRED" if (attempt["run"] or {}).get("status") in {"success", "no_result"}
-                                           else "TRIAGE_BOUNDED_ACTION_ALREADY_ATTEMPTED")
+                            if (attempt["run"] or {}).get("status") in {"success", "no_result"}:
+                                return blocked("TRIAGE_REVIEW_REQUIRED")
+                            # 08B owns the single reviewed recovery of a failed
+                            # submission. Keep legacy bounds and all later
+                            # reading/source gates; never grant a fresh action.
+                            from recovery_stage_b import recovery_state
+                            recovery = recovery_state(task, evidence, provider, row)
+                            if not recovery or recovery["state"] != "ready":
+                                return blocked("TRIAGE_BOUNDED_ACTION_ALREADY_ATTEMPTED")
                     else:
                         return blocked("TRIAGE_BOUNDED_ACTION_ALREADY_ATTEMPTED")
                 if correction_enabled(task) and not reading_contract_valid(row):
                     return blocked("NEEDS_INFO_READING_CONTRACT_INVALID")
-                return None
+                return recovery_or_none()
     return blocked("TRIAGE_ACTION_NOT_SELECTED")
 
 
@@ -919,7 +1304,8 @@ def scenario_dispatch_block_from_dir(task_dir: Path, provider: str, row: dict) -
         return {"code": "SCENARIO_PLAN_ROW_CHANGED", "reason": "SCENARIO_PLAN_ROW_CHANGED", "status": "cancelled"}
     candidates, ledger, evidence = _scenario_context(task_dir, task)
     blocked = scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence,
-                                   supplement=scenario_supplement(task_dir, task=task, evidence=evidence))
+                                   supplement=scenario_supplement(task_dir, task=task, evidence=evidence),
+                                   task_dir=task_dir)
     if blocked:
         return blocked
     if api_first_enabled(task):
@@ -927,6 +1313,16 @@ def scenario_dispatch_block_from_dir(task_dir: Path, provider: str, row: dict) -
         source_error = followup_source_files_error(task_dir, task, evidence, row)
         if source_error:
             return {"code": source_error, "reason": source_error, "status": "cancelled", "submission_state": "not_submitted"}
+        from discovery_budget import source_files_error as purpose_source_files_error
+        source_error = purpose_source_files_error(task_dir, task, plan, evidence, row)
+        if source_error:
+            return {"code": source_error, "reason": source_error, "status": "cancelled", "submission_state": "not_submitted"}
+    from discovery_semantics import enabled as semantics_enabled, verify as verify_semantics
+    if semantics_enabled(task) and row.get('action_purpose') == 'discovery':
+        try:
+            verify_semantics(task, plan, evidence, task_dir)
+        except ValueError as exc:
+            return {"code": str(exc), "reason": str(exc), "status": "cancelled", "submission_state": "not_submitted"}
     failure = browser_submitted_failure_state(task, evidence, provider, row)
     if failure and failure["state"] in {"blocked", "submission_unknown"}:
         return {**failure, "code": failure["reason"], "status": "access_limited", "submission_state": "not_submitted"}
@@ -949,7 +1345,8 @@ def reconcile_scenario_actions(task_dir: Path, task: dict, plan: dict,
     with decision_snapshot(task, evidence, candidates, plan, ledger, supplement):
         for provider, rows in plan.get("queries", {}).items():
             for row in rows:
-                blocked = scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence, supplement=supplement)
+                blocked = scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence,
+                                                  supplement=supplement, task_dir=task_dir)
                 if blocked and not validated_query_cancellation(task, plan, row):
                     if correction_enabled(task) and blocked["code"] in TEMPORARY_DISPATCH_CODES:
                         continue
@@ -962,16 +1359,27 @@ def reconcile_scenario_actions(task_dir: Path, task: dict, plan: dict,
 def assert_recall_planning_contract(task: dict, plan: dict | None = None) -> None:
     correction_enabled(task)
     retrieval_revision = task.get("retrieval_workflow_revision")
-    if retrieval_revision is not None and (retrieval_revision != RETRIEVAL_WORKFLOW_REVISION or not api_first_enabled(task)):
+    from common import api_first_revision_enabled
+    if retrieval_revision is not None and (not api_first_revision_enabled(retrieval_revision) or not api_first_enabled(task)):
         raise ValueError("RETRIEVAL_WORKFLOW_REVISION_INVALID")
     if plan is not None and plan.get("retrieval_workflow_revision") != retrieval_revision:
         raise ValueError("RETRIEVAL_WORKFLOW_REVISION_MISMATCH")
+    epo_revision = task.get("epo_query_revision")
+    if epo_revision not in (None, "ops-cql-v1"):
+        raise ValueError("EPO_QUERY_REVISION_INVALID")
+    if plan is not None and plan.get("epo_query_revision") != epo_revision:
+        raise ValueError("EPO_QUERY_REVISION_MISMATCH")
     if api_first_enabled(task) and plan is not None:
         if (plan.get("retrieval_policy") != task.get("retrieval_policy")
                 or plan.get("retrieval_policy_sha256") != sha256_json(task.get("retrieval_policy"))):
             raise ValueError("RETRIEVAL_POLICY_CHANGED")
     if plan is not None and plan.get("workflow_correction_revision") != task.get("workflow_correction_revision"):
         raise ValueError("WORKFLOW_CORRECTION_REVISION_MISMATCH")
+    execution_revision = task.get("execution_policy_revision")
+    if execution_revision not in (None, "continuous-work-v1", "continuous-work-v2"):
+        raise ValueError("EXECUTION_POLICY_REVISION_INVALID")
+    if plan is not None and plan.get("execution_policy_revision") != execution_revision:
+        raise ValueError("EXECUTION_POLICY_REVISION_MISMATCH")
     specialty = task.get("specialty_workflow_revision")
     if specialty not in (None, "asset-scope-v1") or (specialty and not scenario_workflow_enabled(task)):
         raise ValueError("SPECIALTY_WORKFLOW_REVISION_INVALID")
@@ -1038,6 +1446,19 @@ def clue_handoff_gaps(task: dict) -> list[dict]:
         if row.get("disposition") == "mapped":
             refs = row.get("query_term_sha256")
             valid = valid and isinstance(refs, list) and bool(refs) and all(isinstance(ref, str) and ref in terms for ref in refs)
+        elif row.get("disposition") == "needs_verification":
+            # An uncertain OCR transcription remains a retained, unresolved
+            # fact in the v2 delivery. It cannot silently become a query term.
+            facts = task.get('product_scope', {}).get('facts', [])
+            valid = (valid and task.get('product_delivery_revision') == 'image-fact-v1'
+                     and clue['kind'] == 'ocr_text' and isinstance(row.get('question'), str)
+                     and bool(row['question'].strip()) and not row.get('query_term_sha256')
+                     and not any(term.get('derived_from') == clue['source_path'] for term in terms.values())
+                     and any(fact.get('source_path') == clue['source_path']
+                             and sha256_json(fact.get('value')) == clue['source_sha256']
+                             and fact.get('status') == 'unknown'
+                             and fact.get('verification') == 'unverified'
+                             and fact.get('question') == row['question'] for fact in facts))
         else:
             valid = valid and row.get("disposition") == "excluded"
         if not valid:
@@ -1059,7 +1480,7 @@ def validated_discovery_followup(task_dir: Path, task: dict, plan: dict, evidenc
         if row.get("discovery_role") == "primary":
             return None
         error = followup_validation(task, plan, evidence, candidates, ledger, row,
-            scenario_supplement(task_dir, task=task, evidence=evidence))
+            scenario_supplement(task_dir, task=task, evidence=evidence), task_dir=task_dir)
         if error:
             raise ValueError(error)
         return next(d for d in task.get("discovery_followups", []) if d.get("query_id") == row.get("query_id"))
@@ -1124,11 +1545,21 @@ def product_identity_digest(product: dict[str, Any], *, task: dict | None = None
 
 def product_analysis_readiness(task: dict[str, Any]) -> dict[str, Any]:
     """Separate analysis prerequisites from follow-up work still to be done."""
+    import product_scope as ps
+    if ps.enabled(task): return ps.readiness(task)
+    if task.get("product_scope_required"):
+        return {"ready": False, "gaps": [{"code":"PRODUCT_SCOPE_REVIEW_REQUIRED","blocking_planning":True}], "patent_claim_followup":{"required":False}}
     if not recall_integrity_enabled(task):
         return {"ready": True, "gaps": [], "patent_claim_followup": {"required": False}}
     product = task.get("product", {})
     analysis = product.get("analysis") or {}
     gaps = []
+    from product_entry import enabled as entry_enabled, assert_frozen
+    if entry_enabled(task):
+        try:
+            assert_frozen(task)
+        except ValueError as exc:
+            gaps.append({"code": str(exc), "blocking_planning": True})
     structure = product.get("structure")
     if not isinstance(structure, list) or not any(
             str(item.get("description") or "").strip() if isinstance(item, dict)
@@ -1203,24 +1634,47 @@ def boolean_tokens(value: str, revision: str | None = None) -> list[str]:
 def brand_byline_disposition(task: dict[str, Any]) -> dict[str, Any] | None:
     """An Amazon byline placeholder is not an observed word mark.
 
-    Only the new completion contract uses this filtering. Keep the original
-    byline and a derived reason in the plan; independently observed marks with
+    The new completion contract filters bylines; API v3 also accepts the exact
+    Generic brand-field value. Keep raw metadata and a reason in the plan; marks with
     the same spelling never inherit this source-specific disposition.
     """
-    if not necessary_work_enabled(task):
+    api_v3 = task.get("retrieval_workflow_revision") == "api-first-v3"
+    if not necessary_work_enabled(task) and not api_v3:
         return None
     product = task.get("product") or {}
-    raw = product.get("brand_byline_raw")
-    if not isinstance(raw, str) or not raw.strip():
+    if api_v3 and (task.get("request", {}).get("entry_type") == "user_materials"
+                   or product.get("brand_role") == "own"):
         return None
+    raw = product.get("brand_byline_raw")
+    source_path = "product.brand_byline_raw"
+    if not isinstance(raw, str) or not raw.strip():
+        # Exact Amazon metadata value only; do not match a compound brand,
+        # an independently observed mark, or the user's separately supplied name.
+        value = product.get("brand")
+        if not api_v3 or not isinstance(value, str) or value.strip().casefold() != "generic":
+            return None
+        raw, source_path = value, "product.brand"
     brand = re.sub(r"^Brand\s*:\s*", "", raw.strip(), flags=re.I)
     brand = re.sub(r"^Visit\s+the\s+(.+?)\s+Store$", r"\1", brand, flags=re.I).strip()
     if brand.casefold() not in {"generic", "unbranded"}:
         return None
-    return {"derived_from": "product.brand", "source_path": "product.brand_byline_raw",
+    return {"derived_from": "product.brand", "source_path": source_path,
             "raw_value": raw, "value": brand, "disposition": "excluded",
             "code": "AMAZON_BRAND_BYLINE_PLACEHOLDER",
             "reason": "Amazon brand byline identifies a Generic/Unbranded placeholder, not an independently observed mark"}
+
+
+def brand_name_query_disposition(task: dict[str, Any]) -> dict[str, Any] | None:
+    """Presentation-only applicability for the reference Amazon brand name."""
+    disposition = brand_byline_disposition(task)
+    if (task.get("retrieval_workflow_revision") != "api-first-v3" or not disposition
+            or disposition["value"].strip().casefold() != "generic"):
+        return None
+    return {"status": "not_required", "assessment_object": "reference_brand_name",
+            "right_type": "trademark_word", "source_path": disposition["source_path"],
+            "display": "无风险（Generic 通用占位，仅名称项）",
+            "reason": "Amazon 品牌字段 Generic 是通用占位，不执行该名称的发现或详情查询。",
+            "limitation": "仅适用于参考商品品牌名称；未提供的自有品牌未评估，其他知识产权风险按原专项结论。"}
 
 
 def validated_query_cancellation(task: dict, plan: dict, row: dict) -> dict | None:
@@ -1248,6 +1702,11 @@ def validated_query_cancellation(task: dict, plan: dict, row: dict) -> dict | No
         if (isinstance(item, dict) and item.get("query_id") == query_id
                 and item.get("plan_entry_sha256") == digest and item.get("status") == "cancelled"
                 and isinstance(item.get("reason"), str) and item["reason"].strip()):
+            from source_operation import enabled as operation_review_enabled
+            if operation_review_enabled(task):
+                from scope_cancellation import scope_change_required, valid_scope_cancellation
+                if scope_change_required(task, row) and not valid_scope_cancellation(task, row, item):
+                    continue
             return item
     return None
 
@@ -1404,6 +1863,16 @@ def scenario_execution_gaps(task: dict, plan: dict, evidence: dict, *, candidate
         for gap in scope["gaps"]:
             gaps.append({"code": gap, "scenario_id": scope["scenario_id"], "scenario_sha256": scope["scenario_sha256"],
                          "jurisdiction": scope["jurisdiction"], "right_type": scope["right_type"], "assigned_to": "agent"})
+    for issue in candidates.get("official_export_issues", []):
+        if not isinstance(issue, dict):
+            continue
+        for scope in scopes:
+            if (scope.get("jurisdiction") == issue.get("jurisdiction")
+                    and scope.get("right_type") in issue.get("affected_right_types", [])):
+                gaps.append({"code": "OFFICIAL_EXPORT_UNREADABLE", "scenario_id": scope["scenario_id"],
+                    "scenario_sha256": scope["scenario_sha256"], "jurisdiction": scope["jurisdiction"],
+                    "right_type": scope["right_type"], "evidence_id": issue.get("evidence_id"),
+                    "assigned_to": "agent"})
     return gaps
 
 
@@ -1477,6 +1946,8 @@ def build_coverage_requirements_v24(jurisdictions: list[str], *, screening_revis
 def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
     """Use actual features first and retain only their evidenced language."""
     product = task.get("product", {})
+    import product_scope as ps
+    scoped = ps.enabled(task)
     strict = recall_integrity_enabled(task)
     byline_placeholder = brand_byline_disposition(task)
     terms: list[dict[str, Any]] = []
@@ -1485,8 +1956,13 @@ def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
         if not text:
             return
         actual_language = _text_language(text, language)
+        from product_delivery import fact_for_path
+        fact = fact_for_path(task, source)
+        if fact:
+            extra = {**extra, "fact_id": fact["fact_id"], "fact_version": fact["version"],
+                     "fact_nature": fact["nature"], "fact_verification": fact["verification"]}
         row = {"value": text, "kind": kind, "derived_from": source, "language": actual_language, **extra}
-        if not any((r["value"], r["kind"], r.get("language")) == (text, kind, actual_language) for r in terms):
+        if not any((r["value"], r["kind"], r.get("language")) == (text, kind, actual_language) and (not scoped or r["derived_from"] == source) for r in terms):
             terms.append(row)
     language = product.get("language") or LANGUAGES.get(task.get("request", {}).get("marketplace", ""), "")
     for i, feature in enumerate(product.get("structure", []) if not strict else []):
@@ -1494,7 +1970,11 @@ def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
             add(feature.get("description"), "structural_feature", f"product.structure[{i}]", feature.get("language", language))
         else:
             add(feature, "structural_feature", f"product.structure[{i}]", language)
-    for key in (("brand",) if strict else ("category", "title", "brand", "manufacturer")):
+    if scoped:
+        for i, obj in enumerate(ps.scope(task)['objects']):
+            if obj['kind'] in {'brand','logo'} and obj.get('text'):
+                add(obj['text'], 'brand', f'product.scope_objects[{i}]', obj.get('language','en'), strategy='phrase')
+    for key in (() if scoped else (("brand",) if strict else ("category", "title", "brand", "manufacturer"))):
         if key == "brand" and byline_placeholder:
             continue
         add(product.get(key), {"title": "product", "manufacturer": "owner"}.get(key, key), f"product.{key}", language,
@@ -1529,6 +2009,10 @@ def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
         if kind in {"design_code", "mark_description"}:
             match = re.fullmatch(r"product\.mark_inventory\[(\d+)\]", str(item["derived_from"]))
             inventory = product.get("mark_inventory", [])
+            if scoped:
+                match = re.fullmatch(r"product\.scope_objects\[(\d+)\]", str(item["derived_from"]))
+                inventory = [{'form':'graphic' if o['kind']=='logo' else 'text','evidence_refs':o['source_refs'],
+                              'graphic_description':o['description']} for o in ps.scope(task)['objects']]
             mark = inventory[int(match[1])] if match and int(match[1]) < len(inventory) else {}
             if (mark.get("form") not in {"stylized_text", "graphic", "composite"}
                     or not mark.get("evidence_refs") or not mark.get("graphic_description")):
@@ -1540,6 +2024,17 @@ def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
         if kind == "locarno" and not re.fullmatch(r"\d{2}-\d{2}", str(value)):
             raise ValueError(f"query_terms[{i}] has an invalid Locarno code")
         extra = {"scheme": item["scheme"]} if item.get("scheme") else {}
+        from discovery_budget import enabled as purpose_budget_enabled
+        if purpose_budget_enabled(task):
+            problem = item.get("discovery_problem_id")
+            if problem is not None or any(key in item for key in
+                                          ("discovery_problem_reason", "different_from_purpose_id")):
+                if (not isinstance(problem, str) or not problem.strip()
+                        or any(not isinstance(item.get(key), str) or not item[key].strip()
+                               for key in ("discovery_problem_reason", "different_from_purpose_id"))):
+                    raise ValueError("DISCOVERY_NEW_PURPOSE_REASON_REQUIRED")
+                extra.update({key:item[key] for key in
+                    ("discovery_problem_id", "discovery_problem_reason", "different_from_purpose_id")})
         if strict:
             if not re.match(r"^(?:product\.|images\[|candidate:|evidence:|EV-)", str(item["derived_from"])):
                 raise ValueError(f"query_terms[{i}] must reference product, image, candidate or evidence provenance")
@@ -1578,6 +2073,8 @@ def _dimension(term: dict[str, Any]) -> str:
 
 
 def _applicable(term: dict[str, Any], right: str, *, task: dict | None = None) -> bool:
+    import product_scope as ps
+    if ps.enabled(task or {}) and not ps.term_allowed(task,term,right): return False
     kind = term["kind"]
     # A USPC D-class describes designs, not utility-patent subject matter.
     # Keep the old planner contract unchanged for unmarked historical tasks.
@@ -1627,6 +2124,10 @@ def _api_params(provider: str, term: dict[str, Any], jurisdiction: str, right: s
         if term["kind"] not in {"ipc", "cpc"} and dim == "classification":
             return None
         field = term["kind"] if term["kind"] in {"ipc", "cpc"} else "in" if term["kind"] == "inventor" else "pa" if dim == "owner" else "ta"
+        if query_compiler_revision == "ops-cql-v1":
+            from epo_query import compile_ops_query
+            return {"q": compile_ops_query(countries=_scope(jurisdiction, right), field=field,
+                value=value, strategy=term.get("strategy", "boolean")), "range": "1-25"}
         prefix = " or ".join(f"pn={country}*" for country in _scope(jurisdiction, right))
         if term.get("strategy") == "boolean" and (dim == "text" or term["kind"] == "inventor"):
             expression = " ".join(token.lower() if token in {"AND", "OR", "NOT"} else token if token in {"(", ")"} else f'{field}="{token.strip(chr(34))}"' for token in boolean_tokens(value))
@@ -1711,7 +2212,9 @@ def append_identity_discovery(task: dict, terms: list[dict], queries: dict,
         gaps.append({"code": "IDENTITY_DISCOVERY_GROUP_TRUNCATED", "deferred_sources": [t["derived_from"] for t in identities[8:]], "blocking_planning": False})
     identities = identities[:8]
     features = [t for t in terms if t["kind"] in {"structural_feature", "category", "product", "function", "translation", "synonym", "english", "original_japanese"}]
-    images = [i for i in task.get("images", []) if str(i.get("source_url", "")).startswith("https://")]
+    from product_delivery import selected_public_image, query_row_binding
+    selected_image = selected_public_image(task)
+    images = [selected_image] if selected_image else []
 
     def append(provider: str, row: dict, maximum: int) -> None:
         row.update(search_dimension="text", execution_phase=phase)
@@ -1767,7 +2270,8 @@ def append_identity_discovery(task: dict, terms: list[dict], queries: dict,
     if serpapi_free_enabled(task) and images and not queries.get("serpapi_google_lens"):
         row = entry("serpapi_google_lens", "image_search", task["request"]["marketplace"],
                     {"q": images[0]["source_url"], "image_url": images[0]["source_url"], "type": "all", "hl": "en", "country": "us"},
-                    required=False, right_type="copyright", requirement_ids=[], derived_from=["images[0].source_url"], wave=2)
+                    required=False, right_type="copyright", requirement_ids=[], derived_from=[f"images[{task['images'].index(images[0])}].source_url"], wave=2)
+        row.update(query_row_binding(task, images[0]))
         row.update(role="discovery_only", required_for="discovery_only", execute_by_default=True,
                    authoritative_for_final_rating=False, search_language="")
         append("serpapi_google_lens", row, task["serpapi_free_enhancement"]["max_queries_per_task"])
@@ -1779,6 +2283,13 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
     from generate_search_plan import entry, serper_discovery_entry, serpapi_discovery_entry, signa_discovery_entry
     from common import assert_active_free_policy, assert_default_discovery_plan_contract
     task = load_json(task_dir / "task.json")
+    from product_entry import enabled as entry_enabled, evidence_errors
+    if entry_enabled(task):
+        errors = evidence_errors(task, load_json(task_dir / "evidence.json"), task_dir)
+        if errors:
+            raise ValueError("PRODUCT_EVIDENCE_INVALID: " + "; ".join(errors))
+    import product_scope as ps
+    ps.verify(task,load_json(task_dir / "evidence.json"),task_dir)
     assert_recall_planning_contract(task)
     if recall_integrity_enabled(task):
         for requirement in task.get("coverage_requirements", []):
@@ -1872,6 +2383,8 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
                         necessary_work_enabled(task)
                         and route["provider"] == "uspto_patent_browser"
                         and term.get("strategy") == "boolean" and dimension != "classification" else None)
+                    if route["provider"] == "epo_ops" and task.get("epo_query_revision"):
+                        compiler_revision = task["epo_query_revision"]
                     if compiler_revision:
                         try:
                             boolean_tokens(term["value"], compiler_revision)
@@ -1992,7 +2505,9 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
                 )
                 _add(queries, "signa", row)
         if serpapi_free_enabled(task) and not identity_discovery_enabled(task) and not api_first_enabled(task):
-            images = [i for i in task.get("images", []) if str(i.get("source_url", "")).startswith("https://")]
+            from product_delivery import selected_public_image, query_row_binding
+            selected_image = selected_public_image(task)
+            images = [selected_image] if selected_image else []
             for i, term in enumerate(text[:2 if images else 3]):
                 jurisdiction = jurisdictions[i % len(jurisdictions)]
                 country = "EP" if jurisdiction == "EU" else jurisdiction
@@ -2003,20 +2518,26 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
             if images:
                 row = entry("serpapi_google_lens", "image_search", task["request"]["marketplace"],
                             {"q": images[0]["source_url"], "image_url": images[0]["source_url"], "type": "all", "hl": "en", "country": "us"},
-                            required=False, right_type="copyright", requirement_ids=[], derived_from=["images[0].source_url"], wave=2)
+                            required=False, right_type="copyright", requirement_ids=[], derived_from=[f"images[{task['images'].index(images[0])}].source_url"], wave=2)
+                row.update(query_row_binding(task, images[0]))
                 row.update(role="discovery_only", required_for="discovery_only", execute_by_default=True, authoritative_for_final_rating=False,
                            search_dimension="image", search_language="", execution_phase="initial")
                 _add(queries, "serpapi_google_lens", row)
     if api_first_enabled(task):
         from api_first_planning import append_initial
         append_initial(task_dir, task, [t for t in selected_terms if not t.get("_triage_decision")], queries,
-            planning_gaps, expansion_queue)
+            planning_gaps, expansion_queue, retained_terms=selected_terms)
     elif identity_discovery_enabled(task):
         append_identity_discovery(task, selected_terms, queries, planning_gaps, phase)
+    from product_delivery import enabled as delivery_enabled, selected_public_image
+    if delivery_enabled(task) and task.get('product',{}).get('query_image',{}).get('status')=='selected' and not selected_public_image(task):
+        planning_gaps.append({'code':'QUERY_IMAGE_ROUTE_UNAVAILABLE','dimension':'image','provider':'serpapi_google_lens',
+            'reason':'Selected main image has no supported public URL or provider-and-purpose permission.',
+            'assigned_to':'agent','blocking_planning':False})
+    previous_ids = {row["query_id"] for values in (previous or {}).get("queries", {}).values() for row in values}
     if scenario_workflow_enabled(task):
         # Optional discovery retains its original task budget and one shared
         # product query; bind only newly built rows, never old evidence.
-        previous_ids = {row["query_id"] for values in (previous or {}).get("queries", {}).values() for row in values}
         remapped_ids = {}
         for provider, rows in queries.items():
             for index, row in enumerate(rows):
@@ -2031,6 +2552,11 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
             for row in rows:
                 if row["query_id"] not in previous_ids and row.get("fallback_query_id") in remapped_ids:
                     row["fallback_query_id"] = remapped_ids[row["fallback_query_id"]]
+    from product_delivery import bind_fact_versions
+    for rows in queries.values():
+        for row in rows:
+            if not previous or row['query_id'] not in previous_ids:
+                bind_fact_versions(task,row)
     plan = {
         "schema_version": CURRENT_SCHEMA_VERSION, "task_id": task["task_id"],
         "created_at": previous["created_at"] if previous else now_iso(), "updated_at": now_iso(),
@@ -2042,7 +2568,9 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
         **({"specialty_workflow_revision": task["specialty_workflow_revision"]} if task.get("specialty_workflow_revision") else {}),
         **({"decision_workflow_revision": task["decision_workflow_revision"]} if scenario_workflow_enabled(task) else {}),
         **({"workflow_correction_revision": WORKFLOW_CORRECTION_REVISION} if correction_enabled(task) else {}),
-        **({"retrieval_workflow_revision": RETRIEVAL_WORKFLOW_REVISION} if api_first_enabled(task) else {}),
+        **({"execution_policy_revision": task["execution_policy_revision"]} if task.get("execution_policy_revision") else {}),
+        **({"retrieval_workflow_revision": task["retrieval_workflow_revision"]} if api_first_enabled(task) else {}),
+        **({"epo_query_revision": task["epo_query_revision"]} if task.get("epo_query_revision") else {}),
         **({"retrieval_policy": deepcopy(task.get("retrieval_policy")),
             "retrieval_policy_sha256": sha256_json(task.get("retrieval_policy"))} if api_first_enabled(task) else {}),
         **({"term_dispositions": [brand_byline_disposition(task)]} if brand_byline_disposition(task) else {}),
@@ -2067,9 +2595,98 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
         reconcile_scenario_actions(task_dir, task, plan)
     if expand:
         append_next_pages(task_dir, plan)
-    assert_default_discovery_plan_contract(task, plan)
+    assert_default_discovery_plan_contract(task, plan, task_dir=task_dir)
     atomic_write_json(path, plan)
+    if expand and scenario_workflow_enabled(task):
+        # Rebuild selected-candidate obligations from the current decisions.
+        # Rebuilding the discovery plan must not erase their unresolved gaps;
+        # copying the old gaps would retain obligations for invalid decisions.
+        if task.get("retrieval_workflow_revision") == "api-first-v3":
+            append_scenario_candidate_actions(task_dir, task, candidates)
+            plan = load_json(path)
+        else:
+            derived = append_scenario_candidate_actions(task_dir, task, candidates, gaps_only=True)
+            plan.update(derived)
+            atomic_write_json(path, plan)
     return plan
+
+
+def _pagination_lineage(provider: str, row: dict, plan: dict) -> list[dict] | None:
+    """Resolve only exact pagination-parent links; refinements start their own bound."""
+    lineage, seen = [], set()
+    while True:
+        key = row.get("query_id")
+        if not key or key in seen:
+            return None
+        lineage.append(row)
+        seen.add(key)
+        if row.get("discovery_role") != "pagination":
+            return lineage
+        parents = [item for item in plan.get("queries", {}).get(provider, [])
+                   if item.get("query_id") == row.get("parent_query_id")]
+        if (len(parents) != 1 or sha256_json(parents[0]) != row.get("parent_plan_entry_sha256")
+                or any(row.get(k) != parents[0].get(k) for k in
+                       ("discovery_intent_id", "refinement_round", "q", "jurisdiction", "right_type"))):
+            return None
+        row = parents[0]
+
+
+def _pagination_frozen_scope_block(task_dir: Path, task: dict, plan: dict,
+                                    evidence: dict, provider: str, source: dict,
+                                    next_size: int) -> str | None:
+    if source.get("action_purpose") != "discovery" or not isinstance(source.get("discovery_scope"), dict):
+        return None  # Historical rows without this frozen scope keep their original limit.
+    lineage = _pagination_lineage(provider, source, plan)
+    if lineage is None:
+        return "DISCOVERY_PAGINATION_PARENT_INVALID"
+    root = lineage[-1]
+    scope = root.get("discovery_scope", {})
+    pages_limit, cards_limit = scope.get("max_pages"), scope.get("max_candidates")
+    if (type(pages_limit) is not int or pages_limit < 1
+            or type(cards_limit) is not int or cards_limit < 1):
+        return "DISCOVERY_SCOPE_INVALID"
+    reviews = [review for review in task.get("discovery_followups", [])
+               if isinstance(review, dict) and review.get("role") == "review"
+               and review.get("outcome") == "stop_bounded_discovery"
+               and review.get("parent_query_id") in {row["query_id"] for row in lineage}]
+    if reviews:
+        from api_first_planning import review_validation
+        candidates, ledger, _ = _scenario_context(task_dir, task)
+        supplement = scenario_supplement(task_dir, task=task, evidence=evidence)
+        for row in lineage:
+            if any(review.get("parent_query_id") == row["query_id"]
+                   and review_validation(task, plan, evidence, candidates, ledger, row, review, supplement) is None
+                   for review in reviews):
+                return "API_DISCOVERY_BOUNDED_STOP"
+    branch = []
+    for row in plan.get("queries", {}).get(provider, []):
+        ancestry = _pagination_lineage(provider, row, plan)
+        if ancestry and ancestry[-1].get("query_id") == root["query_id"]:
+            branch.append(row)
+    keys = {(row.get("query_id"), sha256_json(row)) for row in branch}
+    pages, cards, seen = 0, 0, set()
+    from discovery_budget import _run_pages
+    for run in evidence.get("source_runs", []):
+        if (not isinstance(run, dict) or run.get("provider") != provider
+                or (run.get("query_id"), run.get("plan_entry_sha256")) not in keys
+                or run.get("run_id") in seen):
+            continue
+        seen.add(run.get("run_id"))
+        acquired_pages = _run_pages(run, include_valid_failed=True)
+        if not acquired_pages:
+            continue
+        count = run.get("result_processing", {}).get("returned_count")
+        if count is None:
+            count = run.get("metadata", {}).get("search_coverage", {}).get("retrieved_hits")
+        if type(count) is not int or count < 0:
+            return "DISCOVERY_CANDIDATE_COUNT_PENDING_PARSE"
+        pages += acquired_pages
+        cards += count
+    if pages + 1 > pages_limit:
+        return "DISCOVERY_SCOPE_PAGE_LIMIT"
+    if cards + next_size > cards_limit:
+        return "DISCOVERY_SCOPE_CANDIDATE_LIMIT"
+    return None
 
 
 def append_next_pages(task_dir: Path, plan: dict) -> None:
@@ -2102,6 +2719,14 @@ def append_next_pages(task_dir: Path, plan: dict) -> None:
             if not bound or bound[-1].get("status") != "success":
                 continue
             meta = bound[-1].get("metadata", {}).get("search_coverage", {})
+            from discovery_budget import enabled as purpose_budget_enabled, snapshot as purpose_budget_snapshot
+            if purpose_budget_enabled(task) and source.get("action_purpose") == "discovery":
+                budget = purpose_budget_snapshot(task, plan, evidence, source)
+                if budget["remaining_pages"] == 0:
+                    pagination_gaps.append({"query_id": source["query_id"], "provider": provider,
+                        "state": "deferred", "code": "DISCOVERY_VERSION_PAGE_LIMIT",
+                        "purpose_id": budget["purpose_id"], "version": budget["version"]})
+                    continue
             total, retrieved = meta.get("total_hits"), meta.get("retrieved_hits")
             if meta.get("schema_valid") is not True or isinstance(total, bool) or not isinstance(total, int) or not isinstance(retrieved, int) or retrieved <= 0:
                 continue
@@ -2125,13 +2750,31 @@ def append_next_pages(task_dir: Path, plan: dict) -> None:
                 if size <= 0 or offset + size >= total or offset // size + 1 >= limit:
                     continue
                 params["position" if provider == "inpi_api" else "page"] = offset + size if provider == "inpi_api" else offset // size + 1
+            frozen_block = _pagination_frozen_scope_block(task_dir, task, plan, evidence,
+                provider, source, size)
+            if frozen_block:
+                pagination_gaps.append({"query_id": source["query_id"], "provider": provider,
+                    "state": "deferred", "code": frozen_block, "total_hits": total})
+                continue
             row = entry(provider, "search", source["jurisdiction"], params, required=False,
                         right_type=source["right_type"], requirement_ids=source["requirement_ids"], derived_from=source["derived_from"], wave=2)
             row.update(required_for=source["required_for"], execute_by_default=True,
                        **{k: source[k] for k in SEARCH_META_KEYS if k in source})
+            if purpose_budget_enabled(task) and source.get("action_purpose") == "discovery":
+                row.update({key: deepcopy(source[key]) for key in API_FIRST_PLAN_META_KEYS
+                            if key in source and key not in {"parent_query_id", "parent_plan_entry_sha256"}})
+                row.update(discovery_role="pagination", parent_query_id=source["query_id"],
+                           parent_plan_entry_sha256=sha256_json(source),
+                           role="discovery_only", authoritative_for_final_rating=False,
+                           provider_role=source.get("provider_role"), source_upstream=source.get("source_upstream"))
+                row["discovery_scope"] = {**row["discovery_scope"], "max_pages": 1,
+                    "pagination_basis": {"source_run_id": bound[-1]["run_id"],
+                                         "source_run_sha256": sha256_json(bound[-1])}}
             if scenario_workflow_enabled(task):
                 from provider_utils import query_identity
-                row.update({key: deepcopy(source[key]) for key in SCENARIO_META_KEYS if key in source})
+                row.update({key: deepcopy(source[key]) for key in SCENARIO_META_KEYS if key in source
+                            and not (purpose_budget_enabled(task) and source.get("action_purpose") == "discovery"
+                                     and key in API_FIRST_PLAN_META_KEYS)})
                 identity = {key: value for key, value in row.items() if key not in PLAN_META_KEYS or key in SCENARIO_META_KEYS}
                 identity["right_type"] = row["right_type"]
                 row["query_id"] = query_identity(provider, "search", row["jurisdiction"], row["q"], identity)
@@ -2223,6 +2866,17 @@ def append_candidate_actions(task_dir: Path, task: dict, candidates: dict) -> No
                                 right_type=right, requirement_ids=[], derived_from=[f"candidate:{identifier}"], wave=2)
                     row.update(required_for="comparison", execute_by_default=True, search_dimension="claims", search_language="", execution_phase="verification")
                     _add(queries, "epo_publication_server", row)
+                # Google Patents Details is a content fallback only.  It shares
+                # the already opted-in SerpApi account and is never a current-
+                # status verification source.
+                if document and task.get("retrieval_workflow_revision") == RETRIEVAL_WORKFLOW_REVISION and serpapi_free_enabled(task):
+                    row = entry("serpapi_google_patents", "candidate_detail", origin or country,
+                                {"q": document, "patent_id": "patent/" + document + "/en", "candidate_id": identifier},
+                                required=False, right_type=right, requirement_ids=[], derived_from=[f"candidate:{identifier}"], wave=2)
+                    row.update(required_for="comparison", execute_by_default=True, search_dimension="claims",
+                               search_language="", execution_phase="verification", source_upstream="google_patents",
+                               provider_role="fallback")
+                    _add(queries, "serpapi_google_patents", row)
     plan["candidate_action_gaps"] = gaps
     for candidate in candidates.get("copyright_assets", []):
         right = candidate.get("right_type", "copyright")
@@ -2240,9 +2894,25 @@ def append_candidate_actions(task_dir: Path, task: dict, candidates: dict) -> No
     atomic_write_json(path, plan)
 
 
-def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: dict) -> None:
+def _owner_verification_required(task, decision):
+    from specialty_analysis import _intake, events, SCOPE
+    scope = tuple(decision.get(key) for key in SCOPE)
+    intake = _intake(task, scope)
+    if not intake or intake.get("annotation_id") != decision.get("annotation", {}).get("annotation_id"):
+        return False
+    current = [row for row in events(task) if tuple(row.get(key) for key in SCOPE) == scope
+               and row.get("intake_event_id") == intake["event_id"]]
+    facts = [row for row in current if row.get("kind") == "fact" and row.get("fact_kind") == "rights_holder"]
+    if facts:
+        return facts[-1].get("outcome") == "unknown"
+    classifications = {row.get("handoff_gap"): row for row in current
+                       if row.get("kind") == "handoff_classification"}
+    return any("rights_holder" in row.get("fact_kinds", []) for row in classifications.values())
+
+
+def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: dict, *, gaps_only: bool = False):
     """Deep verification is a selected-decision action, not a recall side effect."""
-    from decision_workflow import triage_summary, scenario_index, necessary_scenario_right_types
+    from decision_workflow import triage_summary, scenario_index, necessary_scenario_right_types, triage_scope_enabled, UNLOCATED
     from generate_search_plan import entry
     from merge_candidates import _candidate_document_for_jurisdiction, _jp_candidate_number, _epo_candidate_document
     from annotate_materiality import iter_candidates
@@ -2262,6 +2932,11 @@ def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: di
     for decision in summary.get("records", []):
         candidate = indexed[decision["candidate_id"]]
         country, right = decision["jurisdiction"], decision["right_type"]
+        if triage_scope_enabled(task) and (country == UNLOCATED or right == "unknown"
+                or str(candidate.get("jurisdiction") or "").upper() != country):
+            # A source-backed association is not authority to submit a
+            # country/right-specific verification or needs-info request.
+            continue
         if right not in necessary_scenario_right_types(task, scenarios[decision["scenario_id"]]):
             continue
         if not decision.get("current") or decision.get("decision") not in {"selected", "needs_info"}:
@@ -2277,7 +2952,36 @@ def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: di
                                    "jurisdiction": country, "right_type": right, "queue": action.get("kind"), "action": action})
                     continue
                 provider, operation, params = action.get("provider"), action.get("operation"), action.get("params")
-                eligible = [req for req in requirements if any(route.get("provider") == provider and route.get("operation") == operation for route in req.get("routes", []))]
+                # A candidate-verification action is naturally expressed with
+                # its record_number.  Normalize that identifier into the
+                # planner's exact query field before checking the execution
+                # contract; otherwise a valid approved action is stranded as
+                # "unplanned" solely because it did not duplicate the same
+                # identifier in two input keys.
+                if (provider == "uspto_patent_browser" and operation == "candidate_verification"
+                        and isinstance(params, dict) and not str(params.get("q") or "").strip()
+                        and str(params.get("record_number") or "").strip()):
+                    params = {**params, "q": params["record_number"]}
+                eligible = [req for req in requirements if any(route.get("provider") == provider and route.get("operation") == operation for route in (
+                    req.get("routes", []) + (req.get("gap_only_routes", []) if task.get("retrieval_workflow_revision") == "api-first-v3" else [])))]
+                if (not eligible and task.get("retrieval_workflow_revision") == "api-first-v3"
+                        and provider == "serpapi_google_patents" and operation == "candidate_detail"
+                        and right in {"patent", "utility_model", "design"}):
+                    # The selected-candidate API reader is also available for
+                    # a bounded 05B content gap, using the same exact contract.
+                    from candidate_followup import request_class
+                    from common import provider_execution_error
+                    if (isinstance(params, dict) and request_class(provider, operation, params) == "targeted"
+                            and not provider_execution_error(task, provider, operation, jurisdiction=country, right_type=right)):
+                        eligible = [req for req in requirements if req.get("phase") == "candidate_verification"]
+                if operation == "candidate_verification" and provider == "uspto_patent_browser" and not eligible:
+                    # The US design coverage requirement configures the PPS
+                    # recall route.  Exact-record verification is a narrower
+                    # follow-up on that same official route, not a second
+                    # discovery provider, and remains bound to one candidate.
+                    eligible = [req for req in requirements if any(
+                        route.get("provider") == provider and route.get("operation") == "design_recall"
+                        for route in req.get("routes", []))]
                 if (not eligible or not isinstance(params, dict) or not str(params.get("q") or "").strip()
                         or action.get("max_attempts") != 1 or not action.get("action_id")
                         or (params.get("candidate_id") and params["candidate_id"] != decision["candidate_id"])):
@@ -2330,6 +3034,11 @@ def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: di
                                            decision=decision, obligation_key=action["action_id"])
                 _add(queries, provider, row)
             continue
+        from trusted_api import enabled as api_trust_enabled, REGISTERED as API_REGISTERED
+        if api_trust_enabled(task) and right in API_REGISTERED:
+            from candidate_api_actions import append as append_api_actions
+            gaps.extend(append_api_actions(task, evidence, queries, candidate, decision, requirements, plan=plan, task_dir=task_dir))
+            continue
         origin = str(candidate.get("jurisdiction") or candidate.get("office") or "").upper()
         origin = {"EUIPO": "EU", "EM": "EU", "USPTO": "US"}.get(origin, origin)
         for requirement in requirements:
@@ -2368,11 +3077,31 @@ def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: di
                             right_type=right, requirement_ids=[requirement["requirement_id"]], derived_from=[f"candidate:{decision['candidate_id']}"], wave=2)
                 row.update(required_for="formal", execute_by_default=True, search_dimension="identifier", search_language="", execution_phase="verification")
                 if correction_enabled(task) and provider == "uspto_patent_browser":
-                    row.update(required_facts=["current_status"], reading_scope={"level": "current_status"})
+                    # PPS is an official publication/document source, not a
+                    # current-status or ownership register. Do not send it an
+                    # impossible status request and mislabel the local routing
+                    # refusal as an official-source failure.
                     content = deepcopy(row)
                     content.update(required_for="comparison", search_dimension="claims", required_facts=["protection_content"],
                                    reading_scope={"level": "protection_content"})
                     _add(queries, provider, bind_scenario_action(task, provider, content, purpose="document_content", decision=decision))
+                    route_prefix = "US_DESIGN" if right == "design" else "US_PATENT"
+                    status_reason = ("Accepted candidate-specific current-status register/event and Assignment Center routes "
+                                     "must be implemented and accepted before current status or ownership can be claimed."
+                                     if right == "design" else
+                                     "Patent Center, maintenance-fee and Assignment Center verification must be implemented and accepted before current status or ownership can be claimed.")
+                    gaps.append({"code": route_prefix + "_STATUS_ROUTE_UNIMPLEMENTED", "candidate_id": decision["candidate_id"],
+                                 "scenario_id": decision["scenario_id"], "jurisdiction": country, "right_type": right,
+                                 "required_facts": ["current_status"],
+                                 "requirement_id": requirement["requirement_id"], "assigned_to": "implementation",
+                                 "reason": status_reason})
+                    if _owner_verification_required(task, decision):
+                        gaps.append({"code": route_prefix + "_OWNER_ROUTE_UNIMPLEMENTED", "candidate_id": decision["candidate_id"],
+                                     "scenario_id": decision["scenario_id"], "jurisdiction": country, "right_type": right,
+                                     "required_facts": ["rights_holder"],
+                                     "requirement_id": requirement["requirement_id"], "assigned_to": "implementation",
+                                     "reason": "An accepted candidate-specific Assignment Center route is required to verify the current rights holder; an original publication is only dated bibliographic evidence."})
+                    continue
                 _add(queries, provider, bind_scenario_action(task, provider, row, purpose="official_verification", decision=decision))
         if right == "patent":
             document = _epo_candidate_document(candidate)
@@ -2393,6 +3122,15 @@ def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: di
                             required=False, right_type=right, requirement_ids=[], derived_from=[f"candidate:{decision['candidate_id']}"], wave=2)
                 row.update(required_for="comparison", execute_by_default=True, search_dimension="claims", search_language="", execution_phase="verification")
                 _add(queries, "epo_publication_server", bind_scenario_action(task, "epo_publication_server", row, purpose="document_content", decision=decision))
+            document = _epo_candidate_document(candidate)
+            if document and task.get("retrieval_workflow_revision") == RETRIEVAL_WORKFLOW_REVISION and serpapi_free_enabled(task):
+                row = entry("serpapi_google_patents", "candidate_detail", country,
+                            {"q": document, "patent_id": "patent/" + document + "/en", "candidate_id": decision["candidate_id"]},
+                            required=False, right_type=right, requirement_ids=[], derived_from=[f"candidate:{decision['candidate_id']}"], wave=2)
+                row.update(required_for="comparison", execute_by_default=True, search_dimension="claims", search_language="",
+                           execution_phase="verification", source_upstream="google_patents", provider_role="fallback")
+                _add(queries, "serpapi_google_patents", bind_scenario_action(task, "serpapi_google_patents", row,
+                    purpose="document_content", decision=decision, obligation_key="serpapi_details"))
         if right in NON_REGISTERED_RIGHTS:
             for requirement in requirements:
                 if requirement["phase"] != "provenance":
@@ -2408,6 +3146,10 @@ def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: di
                     row.update(required_for="comparison", execute_by_default=False, search_dimension=dimension, search_language="", execution_phase="verification")
                     _add(queries, "asset_provenance", bind_scenario_action(task, "asset_provenance", row, purpose="provenance", decision=decision,
                         **({"obligation_key": {"dimension": dimension, "scope": scope["scope_sha256"]}} if scope is not None else {})))
+    if gaps_only:
+        # Plan expansion preserves its existing query contract; only refresh
+        # derived work here. The explicit candidate-action stage adds queries.
+        return {"candidate_action_gaps": gaps, "triage_action_queue": queues}
     plan["candidate_action_gaps"], plan["triage_action_queue"] = gaps, queues
     reconcile_scenario_actions(task_dir, task, plan, candidates, ledger, evidence)
     plan["updated_at"] = now_iso()

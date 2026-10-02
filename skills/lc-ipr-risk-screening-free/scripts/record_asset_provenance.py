@@ -7,13 +7,14 @@ It never guesses authorship, registers a right, or claims zero database hits.
 from __future__ import annotations
 
 import argparse
+import json
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 from completion_policy import supported as necessary_work_enabled
 
-from common import assert_active_free_policy, ensure_object, load_json, now_iso, path_within, sha256_file
+from common import assert_active_free_policy, ensure_object, load_json, now_iso, path_within, sha256_file, sha256_json
 from provider_utils import record_result, sanitized_request_params
 
 SPECIALTY_REVISION = "asset-scope-v1"
@@ -63,6 +64,8 @@ def applicable_assets(task: dict, scenario_id: str, right_type: str) -> list[dic
     inventory = product.get("mark_inventory" if right_type == "trademark_figurative" else "assets")
     if not isinstance(inventory, list):
         return []
+    from product_scope import asset_allowed
+    inventory=[item for item in inventory if isinstance(item,dict) and asset_allowed(task,item)]
     if right_type == "trademark_figurative":
         return [item for item in inventory if isinstance(item, dict)
                 and isinstance(item.get("scenario_ids"), list) and scenario_id in item["scenario_ids"]
@@ -80,6 +83,62 @@ def applicable_assets(task: dict, scenario_id: str, right_type: str) -> list[dic
             continue
         assets.append(item)
     return assets
+
+
+def inventory_validation_errors(task: dict, right_type: str = "") -> list[str]:
+    """Return actionable product-inventory defects; never silently drop an item.
+
+    This validates facts before planning and hashing.  It intentionally does
+    not infer an intended use, a scenario, or a missing evidence reference.
+    """
+    from decision_workflow import scenario_index
+    product = task.get("product") or {}
+    try:
+        scenarios = set(scenario_index(task))
+    except ValueError as exc:
+        return [f"assessment_scenarios: {exc}"]
+    errors: list[str] = []
+    def refs(value):
+        return isinstance(value, list) and bool(value) and all(isinstance(v, str) and v.strip() for v in value)
+    check_assets = right_type != "trademark_figurative"
+    check_marks = right_type in {"", "trademark_figurative"}
+    assets = product.get("assets")
+    if check_assets and assets is not None and not isinstance(assets, list):
+        errors.append("product.assets: must be an array")
+    for index, item in enumerate(assets if isinstance(assets, list) and check_assets else []):
+        path = f"product.assets[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{path}: must be an object")
+            continue
+        scenario_ids, right_types, usage = item.get("scenario_ids"), item.get("right_types"), item.get("usage")
+        if not isinstance(item.get("asset_id"), str) or not item["asset_id"].strip(): errors.append(f"{path}.asset_id: required")
+        if not isinstance(scenario_ids, list) or not scenario_ids or any(not isinstance(v, str) or not v.strip() for v in scenario_ids):
+            errors.append(f"{path}.scenario_ids: non-empty known scenario IDs required")
+        elif not set(scenario_ids) <= scenarios: errors.append(f"{path}.scenario_ids: contains unknown scenario")
+        if usage not in ASSET_RIGHTS: errors.append(f"{path}.usage: unsupported value {usage!r}")
+        if not isinstance(right_types, list) or any(not isinstance(v, str) for v in right_types):
+            errors.append(f"{path}.right_types: must be an array")
+        elif usage in ASSET_RIGHTS and not set(right_types) <= ASSET_RIGHTS[usage]:
+            errors.append(f"{path}.right_types: incompatible with usage {usage}")
+        elif not right_types and usage != "reference_only" and not str(item.get("inapplicability_reason") or "").strip():
+            errors.append(f"{path}.right_types: required unless an inapplicability reason is supplied")
+        if not str(item.get("scope_reasoning") or "").strip(): errors.append(f"{path}.scope_reasoning: required")
+        if not refs(item.get("evidence_refs")): errors.append(f"{path}.evidence_refs: non-empty references required")
+    marks = product.get("mark_inventory")
+    if check_marks and marks is not None and not isinstance(marks, list): errors.append("product.mark_inventory: must be an array")
+    for index, item in enumerate(marks if isinstance(marks, list) and check_marks else []):
+        path = f"product.mark_inventory[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{path}: must be an object")
+            continue
+        if not isinstance(item.get("mark_id"), str) or not item["mark_id"].strip(): errors.append(f"{path}.mark_id: required")
+        if item.get("form") not in {"plain_text", "stylized_text", "graphic", "composite"}: errors.append(f"{path}.form: unsupported value")
+        if not str(item.get("graphic_description") or "").strip(): errors.append(f"{path}.graphic_description: required")
+        ids = item.get("scenario_ids")
+        if not isinstance(ids, list) or not ids or any(not isinstance(v, str) or not v.strip() for v in ids): errors.append(f"{path}.scenario_ids: non-empty known scenario IDs required")
+        elif not set(ids) <= scenarios: errors.append(f"{path}.scenario_ids: contains unknown scenario")
+        if not refs(item.get("evidence_refs")): errors.append(f"{path}.evidence_refs: non-empty references required")
+    return errors
 
 
 def asset_scope(task: dict, scenario_id: str, right_type: str) -> dict:
@@ -109,13 +168,16 @@ def asset_scope(task: dict, scenario_id: str, right_type: str) -> dict:
                 and strings(rights, nonempty=False) and set(rights) <= allowed[item["usage"]]
                 and (bool(rights) or item["usage"] == "reference_only" or bool(item.get("inapplicability_reason")))
                 and bool(item.get("scope_reasoning")))
-    inventory_valid = isinstance(inventory, list) and all(valid_item(item) for item in inventory)
+    inventory_valid = isinstance(inventory, list) and all(valid_item(item) for item in inventory) and not inventory_validation_errors(task, right_type)
     inventory_hash = review.get("inventory_identity_sha256")
     if correction_enabled(task) and isinstance(review.get("inventory_identity_sha256_by_right"), dict):
         inventory_hash = review["inventory_identity_sha256_by_right"].get(right_type)
     reviewed = (bool(scenario) and inventory_valid and review.get("status") == "reviewed" and bool(review.get("reviewer"))
                 and bool(review.get("reasoning")) and strings(review.get("evidence_refs"))
                 and inventory_hash == inventory_identity_sha256(task, right_type))
+    import product_scope as ps
+    if ps.enabled(task) and (any(ps.direction_state(task,d) in {'awaiting_user','awaiting_review'} for d in ps.directions(task,scenario_id,right_type)) or any(o['scope_status']=='pending' and right_type in o['right_types'] for o in ps.scope(task)['objects'])):
+        reviewed=False
     ids = [item.get("asset_id") or item.get("mark_id") for item in assets]
     valid = all(isinstance(identity, str) and identity for identity in ids) and len(ids) == len(set(ids))
     scope_content = {"revision": task.get("specialty_workflow_revision"),
@@ -342,7 +404,8 @@ def agent_work_queue(task_dir: Path) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--task-dir", type=Path, required=True)
-    parser.add_argument("--query-id")
+    parser.add_argument("--query-id", action="append",
+                        help="One or more compatible provenance plan rows may share the same retained fact package")
     parser.add_argument("--input", type=Path, help="Agent-authored source/licence review JSON")
     parser.add_argument("--list-work", action="store_true", help="List effective investigations without executing or claiming source coverage")
     args = parser.parse_args()
@@ -350,7 +413,6 @@ def main() -> None:
     task = ensure_object(load_json(task_dir / "task.json"), "task")
     assert_active_free_policy(task)
     if args.list_work:
-        import json
         print(json.dumps(agent_work_queue(task_dir), ensure_ascii=False, indent=2))
         return
     if not args.query_id or not args.input:
@@ -358,26 +420,45 @@ def main() -> None:
     if task.get("schema_version") != "2.4-free":
         raise ValueError("PROVENANCE_REQUIRES_2_4")
     plan = ensure_object(load_json(task_dir / "search-plan.json"), "plan")
-    matches = [(provider, query) for provider, queries in plan.get("queries", {}).items() if isinstance(queries, list) for query in queries if isinstance(query, dict) and query.get("query_id") == args.query_id]
-    if len(matches) != 1 or matches[0][0] != "asset_provenance":
+    requested = list(dict.fromkeys(args.query_id))
+    matches = [(provider, query) for provider, queries in plan.get("queries", {}).items() if isinstance(queries, list)
+               for query in queries if isinstance(query, dict) and query.get("query_id") in requested]
+    if len(matches) != len(requested) or any(provider != "asset_provenance" for provider, _ in matches):
         raise ValueError("PROVENANCE_EXACT_PLAN_REQUIRED")
-    query = matches[0][1]
-    if specialty_enabled(task):
-        from workflow_v24 import scenario_dispatch_block, scenario_supplement
-        from annotate_materiality import load_materiality_ledger
-        blocked = scenario_dispatch_block(task, plan, "asset_provenance", query,
-            load_json(task_dir / "normalized-candidates.json"), load_materiality_ledger(task_dir, task["task_id"], task=task),
-            load_json(task_dir / "evidence.json"), supplement=scenario_supplement(task_dir))
-        if blocked:
-            raise ValueError(blocked["code"])
-    payload = validate_payload(task_dir, ensure_object(load_json(args.input), "provenance"), query,
-                               ensure_object(load_json(task_dir / "normalized-candidates.json"), "candidates"), task)
-    run = record_result(task_dir, provider="asset_provenance", operation="provenance_review",
-        query=str(query.get("q") or query.get("query") or ""), jurisdiction=query["jurisdiction"],
-        evidence_type="asset_provenance", status="success", normalized=payload,
-        request_params=sanitized_request_params(query), query_id=args.query_id,
-        source_environment="local_agent_review", authoritative_for_final_rating=False)
-    print(run["run_id"])
+    queries = [query for _, query in matches]
+    if len(queries) > 1:
+        from workflow_v24 import scenario_row_bindings
+        identities = {(query.get("right_type"), query.get("asset_scope_sha256"),
+                       tuple((binding.get("scenario_id"), binding.get("scenario_sha256"))
+                             for binding in scenario_row_bindings(task, query))) for query in queries}
+        if len(identities) != 1:
+            raise ValueError("PROVENANCE_SHARED_FACT_SCOPE_MISMATCH")
+    candidate_path = task_dir / "normalized-candidates.json"
+    candidates = ensure_object(load_json(candidate_path), "candidates") if candidate_path.is_file() else {}
+    source_payload = ensure_object(load_json(args.input), "provenance")
+    prepared = []
+    for query in queries:
+        if specialty_enabled(task):
+            from workflow_v24 import scenario_dispatch_block, scenario_supplement
+            from annotate_materiality import load_materiality_ledger
+            blocked = scenario_dispatch_block(task, plan, "asset_provenance", query, candidates,
+                load_materiality_ledger(task_dir, task["task_id"], task=task),
+                load_json(task_dir / "evidence.json"), supplement=scenario_supplement(task_dir))
+            if blocked:
+                raise ValueError(blocked["code"])
+        prepared.append((query, validate_payload(task_dir, dict(source_payload), query, candidates, task)))
+    package_id = "FACT-" + sha256_json({"payload": source_payload, "query_ids": sorted(requested)})[:24]
+    run_ids = []
+    for query, payload in prepared:
+        payload["shared_fact_package"] = {"package_id": package_id, "query_ids": sorted(requested),
+                                          "independent_source_count": 1}
+        run = record_result(task_dir, provider="asset_provenance", operation="provenance_review",
+            query=str(query.get("q") or query.get("query") or ""), jurisdiction=query["jurisdiction"],
+            evidence_type="asset_provenance", status="success", normalized=payload,
+            request_params=sanitized_request_params(query), query_id=query["query_id"],
+            source_environment="local_agent_review", authoritative_for_final_rating=False)
+        run_ids.append(run["run_id"])
+    print(json.dumps({"shared_fact_package_id": package_id, "run_ids": run_ids}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

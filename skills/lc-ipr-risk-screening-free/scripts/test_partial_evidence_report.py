@@ -7,7 +7,7 @@ import unittest
 from unittest.mock import patch
 
 import report_estimate as report
-from report_query_trace import build_query_trace, ZERO_WARNING
+from report_query_trace import build_query_trace, query_notes, ZERO_WARNING
 import test_report_estimate as legacy_report_tests
 from common import atomic_write_json, sha256_file, sha256_json
 
@@ -97,6 +97,17 @@ class PartialEvidenceReportTests(unittest.TestCase):
         self.assertEqual((conclusion['risk'], conclusion['confidence']), ('低', '低'))
         self.assertEqual(conclusion['aggregation_included'], 'False')
         self.assertEqual(conclusion['risk_aggregation_included'], 'True')
+
+    def test_local_material_reading_is_complete_without_remote_submission(self):
+        query = self.query(provider='local_agent_review', operation='source_investigation')
+        self.attempt(query, provider='local_agent_review', submission_state='not_submitted')
+        trace = build_query_trace(self.task, self.evidence, self.assessment, {}, self.plan)
+        attempt = trace['queries'][0]['attempts'][0]
+        self.assertEqual(attempt['status'], 'local_review_complete')
+        self.assertTrue(attempt['local_investigation_performed'])
+        self.assertTrue(attempt['response_complete'])
+        self.assertFalse(attempt['source_query_performed'])
+        self.assertFalse(attempt['effective'])
 
     def test_source_valid_bounded_zero_is_effective_response_not_official_coverage(self):
         query, run, _, _ = self.bounded_discovery()
@@ -206,6 +217,23 @@ class PartialEvidenceReportTests(unittest.TestCase):
             self.assertIn('contradicting retained candidate', content)
             self.assertIn('ZERO_RESULT_CONTRADICTION', content)
             self.assertNotIn('本次成功查询无命中', content)
+
+    def test_non_result_error_receipt_overrides_historical_no_result_for_display(self):
+        query = self.query()
+        run = self.attempt(query, status='no_result', total=0, retrieved=0,
+            result_processing={'revision': 'source-result-processing-v1', 'zero_proven': False})
+        with patch('source_result_processing.progress', return_value={
+                'request_status': 'no_result', 'zero_proven': False,
+                'receipt_disposition': {'outcome': 'non_result_error'}}):
+            trace = build_query_trace(self.task, self.evidence, self.assessment, self.candidates,
+                self.plan, source_task_dir=self.fixture.root)
+        attempt = trace['queries'][0]['attempts'][0]
+        self.assertEqual(attempt['status'], 'unknown')
+        self.assertEqual(attempt['recorded_status'], 'no_result')
+        self.assertEqual(attempt['receipt_disposition_outcome'], 'non_result_error')
+        self.assertIs(attempt['zero_proven'], False)
+        self.assertIn('SOURCE_RECEIPT_NON_RESULT_ERROR', attempt['reason'])
+        self.assertIn('当前错误处置：non_result_error', '\n'.join(query_notes(trace['queries'][0])))
 
     def test_states_and_unknown_counts_not_conflated(self):
         cases = [('zero', 'no_result', 0, 0, False, {}, 'no_match'),

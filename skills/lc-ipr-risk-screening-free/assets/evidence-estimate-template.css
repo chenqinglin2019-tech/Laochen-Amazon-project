@@ -6,3 +6,11 @@ html{scroll-behavior:smooth}.main,.wrap,.side,.product-copy,.panel,.module,.modu
 @media(max-width:900px){.side{overflow:visible}.gallery.single img{height:360px}.visual-grid.cols-3{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:580px){.visual-grid.cols-2,.visual-grid.cols-3{grid-template-columns:minmax(0,1fr)}.gallery.single img{height:300px}.header .badge{display:inline-block}.decision-head{align-items:flex-start}.decision-head h2{font-size:18px}.risk-seal{min-width:96px;min-height:96px;padding:10px}.risk-seal small{font-size:9px}.trace .fact{grid-template-columns:1fr;gap:3px}.panel{padding:16px}.main{padding:16px}.product-copy h2{font-size:20px}.visual-copy{padding:12px}}
 @media print{.shell{display:block}.side{display:none}.main{padding:0}.module,.visual-card{break-inside:avoid}.fold-content{display:block}.table-wrap{overflow:visible}.candidate-table{min-width:0}body{background:#fff}a{color:inherit}}
+
+/* 10A derived presentation; historical sample CSS above remains byte-identical. */
+.risk-seal b{font-size:18px;overflow-wrap:anywhere}.risk-seal small{overflow-wrap:anywhere}.stage-a-five{min-width:880px}.stage-a-five th:nth-child(1){width:12%}.stage-a-five th:nth-child(2){width:15%}.stage-a-five th:nth-child(3){width:21%}.stage-a-five th:nth-child(4){width:36%}.stage-a-five th:nth-child(5){width:16%}.stage-a-five td,.stage-a-five th{overflow-wrap:anywhere}.stage-a-five details{margin-top:6px}.stage-a-five summary:focus-visible,.table-wrap:focus-visible{outline:3px solid var(--orange);outline-offset:2px}.review-group .visual-grid{align-items:start}.review-group .gap{min-width:0}.progress[role="progressbar"]{position:relative}
+@media(max-width:900px){.stage-a-five{min-width:760px}}
+@media(max-width:580px){.stage-a-five{min-width:760px}.risk-seal{width:120px;height:120px}.risk-seal b{font-size:15px}}
+.trace .facts,.trace .fact,.trace .fact>div{min-width:0}.trace .fact>div{overflow-wrap:anywhere;word-break:break-word}
+.stage-a-report .header .meta{overflow-wrap:anywhere}.stage-a-report .header>div{min-width:0}.stage-a-report .panel{overflow-wrap:anywhere}.stage-a-report .panel p,.stage-a-report .panel div,.stage-a-report .panel strong{overflow-wrap:anywhere;min-width:0}
+@media(max-width:580px){.stage-a-report .trace .fact{grid-template-columns:minmax(0,1fr)}}

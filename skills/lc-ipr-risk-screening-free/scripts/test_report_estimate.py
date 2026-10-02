@@ -44,6 +44,37 @@ class EstimateReportTests(unittest.TestCase):
         with patch.object(report, '_canonical'), patch.object(report, 'build_report_data', side_effect=legacy):
             return report.build_bundle(self.root, self.task, self.evidence, self.assessment, {}, self.journal, {}, output_dir=self.out, report_content=kwargs.get('content', self.content))
 
+    def test_exact_recovery_mapping_preserves_original_declarations(self):
+        from common import atomic_write_json, sha256_file
+        old = '/historical-task/product.png'
+        mapping = {'source_path': old, 'copied_path': 'main.png',
+                   'sha256': sha256_file(self.root / 'main.png'), 'bytes': len(PNG)}
+        atomic_write_json(self.root / 'recovery-manifest.json', {'file_mappings': [mapping]})
+        declaration = {'path': old, 'sha256': mapping['sha256'], 'bytes': len(PNG)}
+        before = copy.deepcopy(declaration)
+        self.assertEqual(report._resolve(self.root, old), (self.root / 'main.png').resolve())
+        derived = report._task_file_declarations(declaration, self.root, self.root)
+        self.assertEqual(derived['path'], str((self.root / 'main.png').resolve()))
+        self.assertEqual(declaration, before)
+
+    def test_recovery_mapping_requires_exact_integrity_and_bounded_destination(self):
+        from common import atomic_write_json
+        old = '/historical-task/product.png'
+        mapping = {'source_path': old, 'copied_path': 'main.png',
+                   'sha256': '0' * 64, 'bytes': len(PNG)}
+        atomic_write_json(self.root / 'recovery-manifest.json', {'file_mappings': [mapping]})
+        with self.assertRaisesRegex(ValueError, 'RETAINED_PATH_HASH_MISMATCH'):
+            report._resolve(self.root, old)
+        mapping['copied_path'] = '../outside.png'
+        atomic_write_json(self.root / 'recovery-manifest.json', {'file_mappings': [mapping]})
+        with self.assertRaisesRegex(ValueError, 'RETAINED_PATH_MAPPING_ESCAPES_TASK'):
+            report._resolve(self.root, old)
+        with self.assertRaisesRegex(ValueError, 'REPORT_SOURCE_OUTSIDE_EVIDENCE_ROOT'):
+            report._resolve(self.root, '/other/unregistered.png')
+        (self.root / 'recovery-manifest.json').unlink()
+        with self.assertRaisesRegex(ValueError, 'REPORT_SOURCE_OUTSIDE_EVIDENCE_ROOT'):
+            report._resolve(self.root, old)
+
     def test_all_formats_keep_reasons_and_grade(self):
         data, manifest = self.build()
         html = (self.out / 'report.html').read_text()
@@ -56,6 +87,20 @@ class EstimateReportTests(unittest.TestCase):
         self.assertEqual(len(data['modules']), 7)
         self.assertEqual(manifest['section_order'], report.SECTION_ORDER)
         self.assertNotIn('发布阻断项', html)
+
+    def test_generic_reference_name_only_label_preserves_overall_and_frozen_input(self):
+        self.task["retrieval_workflow_revision"] = "api-first-v3"
+        self.task["product"]["brand"] = " Generic "
+        before = copy.deepcopy((self.task, self.assessment))
+        data, _ = self.build()
+        self.assertEqual(data["product"]["brand_name_query"]["display"], "无风险（Generic 通用占位，仅名称项）")
+        for file in ("report.html", "report.md"):
+            output = (self.out / file).read_text()
+            self.assertIn("无风险（Generic 通用占位，仅名称项）", output)
+            self.assertIn("自有品牌未评估", output)
+        self.assertEqual(data["overall"]["risk"], "中")
+        self.assertEqual((self.task, self.assessment), before)
+        self.assertEqual(data["assessments"][0]["risk"], "中")
 
     def test_stage_report_keeps_null_risk_and_labels_pending(self):
         from common import RECALL_INTEGRITY_REVISION

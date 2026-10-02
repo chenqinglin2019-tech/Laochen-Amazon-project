@@ -1,5 +1,17 @@
 # 2.4 数据与审阅契约
 
+新任务默认使用 `api-first-v3` 与 `final-double-review-v1`，以[API 直接采信与一次最终双审](api-direct-final-review.md)为优先契约。已采信 API 字段不生成官方网页重复核验；过程保留事实分析，取消 09C 阶段双审前置。下文旧修订仅约束保留该版本的历史任务。
+
+09D 新任务的 `stage_delivery_revision=stage-delivery-stage-d-v1` 从 `next_work.review_progress`、`next_work.stage_risk` 与当前原始任务／证据只读生成独立可复验的初步阶段结果；完整报告门禁不变。详见[初步阶段结果](stage-delivery-stage-d.md)。
+
+09C 历史任务保留的 `stage_review_revision=stage-review-stage-c-v1` 在 `evidence.json.stage_review_events` 追加冻结批次、两份经宿主隔离凭据认证的审阅和逐项主审；`next_work.stage_risk.stage_review` 投影状态，主审缺事实的最小补证进入原 `next_work.entries`。新任务的 `final-double-review-v1` 不执行该阶段双审。历史规则详见[阶段批次与双审](legacy/stage-review-stage-c.md)。
+
+09B 新任务的 `stage_risk_revision=stage-risk-stage-b-v1` 在 `evidence.json.stage_risk_events` 追加阶段判断、实质失效与信号审阅；`next_work.stage_risk` 分别投影当前阶段等级、核实状态、置信度、旧等级可用性及条件情景。它不将待评默认改低，也不替代任务适用的最终双审或历史 09C 双审及 09D 交付，详见[阶段判断与失效](stage-risk-stage-b.md)。
+
+09A 新任务的 `review_progress_revision=review-progress-stage-a-v1` 在 `evidence.json.review_progress_events` 追加计划初始化、增删／免做、完成及重开。`next_work.review_progress` 按当前唯一计划项投影 C/N、同范围小计与版本；不代替 08D 的工作轮次、风险评级、双审或报告门禁。详见[唯一计划项与进度](review-progress-stage-a.md)。
+
+新任务的候选身份合同另见[候选身份与纠正](candidate-identity.md)：`candidate_identity_revision=candidate-identity-v1` 仅影响新任务，保存来源行锚点、原始／规范号码、字段声明及同申请／同族／地域线索；纠正事件追加到独立账本，`normalized-candidates.json` 投影旧引用别名。历史任务保持原归并规则。
+
 新任务同时绑定 `workflow_correction_revision=workflow-correction-v1`；作用域摘要、统一补充加载、必要审阅、提交恢复以及 `core-risk-evidence-v2/compact-evidence-v1` 数据增量集中见[纠错契约](workflow-correction.md)。下文原修订用于兼容历史；新记录不得沿用失效的旧摘要或回执。
 
 新任务绑定 `completion_policy_revision=necessary-work-v2`，发布模式、范围双审、review_work 与 publication 的冻结来源能力及待办绑定按[有界交付契约](workflow-correction.md#有界取证交付necessary-work-v2)执行。旧 necessary-work-v1 和无标记任务保持原语义，不原地迁移。v2 使用 final/evidence/stage，auto 仅为选择入口；来源证据交付不修改原 risk、assessment.status、coverage 或 source authority。
@@ -24,13 +36,23 @@
 
 `search-plan.json.queries` 按 provider 存储操作。每行包括全局唯一 query_id、operation、jurisdiction、right_type、requirement_ids、required_for、wave、derived_from、execute_by_default、实际请求参数，以及 search_dimension、search_language、execution_phase、publication_scope。query_id 绑定请求语义；整行 SHA-256 同时绑定其元数据。计划只追加，不能为补信息重写已经执行的行。
 
-商业免费发现行的 required_for 固定 discovery_only、requirement_ids=[]、authoritative_for_final_rating=false。EPS 文献的 required_for=comparison、jurisdiction=EP、requirement_ids=[]，不会冒充某国现行状态。asset_provenance 为 Agent 来源/素材比较证据，非登记库 API。
+历史商业发现行的 required_for 固定 discovery_only、requirement_ids=[]、authoritative_for_final_rating=false；v3 详情按对应事实用途生成，原来源身份和字段语义保留。EPS 文献的 required_for=comparison、jurisdiction=EP、requirement_ids=[]，不会冒充某国现行状态。asset_provenance 为 Agent 来源/素材比较证据，非登记库 API。
 
 ## 来源与证据
 
 `source-capabilities.json` 区分 automatic、access_verification_only、unvalidated、unavailable；可尝试真实调用的 unvalidated API 仍须通过其身份、免费条件和响应契约检查。线上验收必须保留具体来源、时间、操作、实际响应与边界；单元测试不充当线上验收。
 
 `evidence.json.source_runs[]` 保存 run_id、query_id、plan_entry_sha256、requirement_ids、provider、operation、jurisdiction、right_type、status、脱敏请求、raw_paths、payload_digest、时间、错误码和配额信息。对应 collections 的 evidence 记录携带同样的计划与范围绑定；缺少或不匹配的哈希不满足发布条件。
+
+04A 新任务的 `result_processing_revision=source-result-processing-v1`：发现类 `source_run.result_processing` 固定原回执哈希、已得结果位置及原行哈希、原始已解析数量和可信零条状态；`evidence.result_dispositions` 追加逐位置人工审阅去向。请求状态、解析／入库进度与结果审阅分开，统一 `next_work` 显示未处理位置，详见[原始结果与处理进度](source-result-processing.md)。旧任务不补造位置或回执。
+
+04C 新任务的 `candidate_acquisition_revision=candidate-acquisition-v1` 在浏览器主动发现的 `source_run.candidate_acquisition` 留执行时去重收据，当前候选数量独立投影；`candidate_handoff_revision=candidate-handoff-v1` 将候选和各国家／情景审阅按批次写入 `candidate-handoffs.json`。待解析、未审阅位置不因局部交接变成材料完成，详见[执行计数与增量交接](candidate-accounting-handoff.md)。
+
+05A 新任务的 `triage_scope_revision=candidate-triage-scope-v1` 让国别未知／非目标国候选先落一条 `UNLOCATED` 分流范围，不由任务目标国或发现查询入口补写候选身份。`materiality-annotations.json` 的新决定须有 `candidate_relation`（已纳入对象、就绪方向、证据、身份缺口）和 `comparison`（候选与产品内容、具体关系、三路决定的专属依据）；`triage_summary.scope_dispositions` 独立保留未纳入／待确认对象。身份未定位的关联入选保留为有效相关性决定，专项动作仍须候选真实国家、类型与目标范围一致；详见[候选分流范围](candidate-triage-scope.md)。历史任务不补该标记。
+
+05B 新任务的 `triage_followup_revision=candidate-followup-v1` 为每个 `needs_info.next_actions[]` 增加 `followup_basis`，按实际请求区分留存材料阅读、唯一对象定向读取和发现／混合用途。`discovery_binding` 在执行前把原分流动作连到现有发现计划行、计划哈希及两类义务；原发现预算和同一 `source_run` 继续作计数真源。`task.candidate_followup_events` 追加结果审阅事件，绑定原 annotation/action、来源运行哈希、证据、审阅出口与依赖；充分时仍须另有引用新证据的当前分流决定。历史任务不补事件或重写计划；详见[候选补证闭环](candidate-followup.md)。
+
+05C 新任务的 `triage_stage_revision=candidate-triage-stage-v1` 按实际来源运行及结果位置投影接收批次进度，`task.candidate_triage_stage_events` 追加被选候选专项交接、实质变化重开／复核或重复来源引用。每个受影响旧决定在新决定完成证据复核前暂停当前可用性，交接绑定决定与产品／候选版本。`next_work.candidate_triage_stage` 单独投影本模块完成、等待与受限，不替代专项核验或交付；详见[候选阶段闭环](candidate-triage-stage.md)。
 
 状态限定 success、no_result、not_applicable、needs_user_action、access_limited、failed。no_result 必须明确成功且响应结构有效并确实为零；错误 JSON/XML、空异常 envelope、超时、429、登录页和不完整页面不是零结果。
 
@@ -73,7 +95,7 @@ right_type 包括 patent、utility_model、design、trademark_word、trademark_f
 
 ## 历史策略的两轮审阅
 
-以下审阅与发布门禁保留给没有 `assessment_policy` 的历史任务。新策略结构见下节。
+以下审阅与发布门禁保留给没有 `assessment_policy` 的历史任务。新策略结构见下节。**注意：本节的审阅行结构（assessments、comparison.criteria／claims／visual_coverage、confidence_basis）同样是新任务模块审阅行和主审 `adjudication.json` 决定行的结构；“历史”仅指本节的两轮发布门禁与 `SCOPED-IPR/1.0` 产物合同。**
 
 first-review.json / second-review.json 使用以下结构，由 Agent 完成：
 
@@ -106,7 +128,7 @@ assessment 使用 `SCOPED-IPR/1.0`。assessments[] 各自有 risk、evidence_con
 
 ## evidence-estimate-v1 审阅与主审
 
-策略定义见 [risk-estimate-rules.md](risk-estimate-rules.md)。两轮审阅各保留 `reviewer`、`review_context={session_id,evidence_digest,first_review_visible:false}` 和 `assessments`；两轮 reviewer/session 必须不同，第二轮不得读取首轮结论。旧审阅文件不能直接覆盖为新意见；重评产出新的审阅和主审记录。新任务默认 `assessment_revision=partial-evidence-v1`；完整任务保持原评级，只有不完整报告生成下述派生评级。
+策略定义见 [risk-estimate-rules.md](risk-estimate-rules.md)。两轮审阅各保留 `reviewer`、`review_context={session_id,evidence_digest,first_review_visible:false}` 和 `assessments`；两轮 reviewer/session 必须不同，第二轮不得读取首轮结论。旧审阅文件不能直接覆盖为新意见；重评产出新的审阅和主审记录。新任务默认 `assessment_revision=partial-evidence-v2`；完整任务保持原评级，证据不足范围保持暂不定级。
 
 `risk` 的数据枚举为 `极低、低、中、高、极高`，`evidence_confidence` 与 `coverage_confidence_cap` 为 `低、中、高`。每个纳入范围的 assessment 必须提供：
 
@@ -133,6 +155,10 @@ assessment 使用 `SCOPED-IPR/1.0`。assessments[] 各自有 risk、evidence_con
 ### 可信外部案号入库
 
 `record_candidate_lead.py --task-dir DIR --input FILE` 是显式的已知原文线索入口，不是搜索或官方登记适配器。当前仅支持 strict 2.4 任务中的美国 patent/design 公开号（含 kind code）；已完成任务与旧任务只读。先把实际阅读的原始文献登记在本任务 evidence 或 supplemental 清单，再导入。
+
+新任务的 `specialty_analysis_revision=specialty-analysis-v1` 把模块 05 的当前入选交接接入模块 06 追加事件 `task.specialty_analysis_events`。事件链分别记录接收、取得／阅读／用途充分性、基础事实、免做、逐权利项／设计比较、补证、依赖变化、批次去向和局部交接；`next_work.specialty_analysis` 单独投影本阶段范围与状态。评级输入和最终报告须继续保留模块 09／10 原门禁，不能把专项事件当作官方原始来源、风险等级或发布许可。具体字段和执行边界见[专利外观专项核验](specialty-analysis.md)。
+
+新任务的 `distinctive_rights_revision=distinctive-rights-v1` 启用 `task.distinctive_rights_events`，以当前 05C 入选交接为基础记录具体对象／版本、独立评估日、登记与公开事实路线、材料阅读、时点及受影响旧事实复核。07B 记录商标逐维比较、版权来源版本／主体关系／表达问题和许可逐范围覆盖；07C 记录商业外观主张／地域规则／使用／功能性／视觉及混淆，以及按事件去重的公开维权层级和查询观察。审阅须绑定本轮实际阅读材料与事实，变化后待复核。`next_work.distinctive_rights` 投影 07A—07D 当前义务，包含逐缺口补证、变化复核、批次去向、范围化完成及增量交接；当前专项完成也不代表风险审阅或发布许可。字段和用途见[模块 07 专项调查](distinctive-rights.md)。
 
 输入结构：
 
@@ -191,19 +217,19 @@ python scripts/validate_run.py --task-dir /absolute/original-run --output-dir /a
 
 `--supplement` 和 `--evidence-root` 用于存在真实补充资料的场景；仅原任务证据的重评省略它们。`--report-content` 用于补充模板正文/图证，不代替评级或产品身份；普通构建可省略。`partial-evidence-v1` 只能在新输出目录中显式重评，使用新摘要和盲双审；不得原地改 task、plan、evidence、原审阅或旧产物。未带该修订的历史任务继续原行为。
 
-展示内容的 `product_facts` 只能与冻结 `task.product` 一致；主图须匹配 `task.product.main_visual` 或 task.images 中已冻结主图的路径与哈希。lead/summary 来自 canonical overall；范围来自 `task.product.report_scope/intended_use`；模块置信度上限由 `adjudication.module_confidence_caps` 裁决。展示文件必须已登记于任务/证据，来源 URL 必须与登记值绑定，不能为同一文件换成未登记网址。旧宽松输入若不满足新校验，应修复输入后在新目录重评，不回退策略规避，也不改旧导出原件。
+展示内容的 `product_facts` 只能与冻结 `task.product` 一致；主图须匹配 `task.product.main_visual` 或 task.images 中已冻结主图的路径与哈希。lead/summary 来自 canonical overall；范围来自 `task.product.report_scope/intended_use`；模块置信度上限由 `adjudication.module_confidence_caps` 裁决（仅无情景工作流的历史任务；`scenario-triage-v1` 任务改用 `adjudication.scenario_confidence_caps`，出现 `module_confidence_caps` 会以 `UNSCOPED_MODULE_CAP_NOT_ALLOWED_IN_SCENARIO_WORKFLOW` 被拒）。展示文件必须已登记于任务/证据，来源 URL 必须与登记值绑定，不能为同一文件换成未登记网址。旧宽松输入若不满足新校验，应修复输入后在新目录重评，不回退策略规避，也不改旧导出原件。
 
 ## 新策略结论与报告
 
 新策略结论合同为 `EVIDENCE-ESTIMATE/1.0`。每个纳入评价的最终项均有五级 risk 和三级 evidence_confidence。总体 `overall` 包括 `risk`、`confidence`、`drivers`、`reasons`、`coverage_confidence_cap`、`provisional:true`、`all_scope_clearance:false`；`drivers` 追溯最高适用当前风险，未纳入范围及补充信号不参与聚合。没有覆盖整个未知权利空间的“清白”字段推断。
 
-`assessment_revision=partial-evidence-v1` 在全任务 `status:incomplete` 时启用兜底，`risk_basis` 区分证据结论与规则回退。有证据支持的中／高／极高保留 `evidence_supported`；有效同国同权利检索及比较支持的单项低风险可保留 `evidence_supported`；其余当前适用项为 `低/policy_fallback`，所有派生置信度均为低。不完整模块、情景及总体若仅汇总到低风险，均为 `policy_fallback`，不能据局部排除推定整个范围已排除风险。原始双审的 pending/null、权属 unknown 和完成状态不变。报告必须显示“未排除侵权风险”，不能把低风险解释成无权利或可安全销售。
+`assessment_revision=partial-evidence-v2` 在全任务 `status:incomplete` 时保留原始 pending/null、权属 unknown 和完成状态；证据不足项为 `risk:null/risk_basis:insufficient_evidence`，不参与总体汇总。有充分比较依据的五级结论保留 `evidence_supported` 与自身置信度，不能因无关缺口降级。报告必须显示“未排除侵权风险”，不能把低风险解释成无权利或可安全销售。`partial-evidence-v1` 仅兼容历史已冻结报告。
 
 无新评级修订、仅 `recall-integrity-v1` 而无情景修订的历史任务保留整体未就绪时 `overall.risk:null` 和 `overall.known_scoped_risk` 行为；历史情景策略保留已有中高风险及其原置信度。原始阶段性项仍可用 `risk:null,assessment_status:pending,pending_reasoning` 保留事实；pending 不是 out_of_scope 或第六级风险。无候选的 `evidence_supported` 低风险仍需 search_comparison={reasoning,evidence_refs}，绑定已完成的同国同权利召回与比较；失败、未执行、截断或提交未知只能作为 `policy_fallback` 的缺口说明。
 
 `scenario-triage-v1` 两轮及主审的每个判断再绑定 scenario_id/scenario_sha256；不能把跨情景判断当作评级分歧合并。scenario_confidence_caps 按情景声明摘要、confidence、reasoning、evidence_refs，避免全局缺口重复压低已核实单项。专利实施方案和独立权利项合同集中见 [评级规则](risk-estimate-rules.md)。
 
-新合同 `overall.risk` 表示主情景当前预判：完整任务及历史策略按证据规则，新修订不完整时区分证据支持的中高极高与规则兜底的低。`status/business_completion` 独立表示工作状态。scenario_summaries 分别呈现各情景的风险、置信度及分流/必要核验/必要召回完成度，条件情景不参加主情景最大值。有效的局部中高风险在 incomplete 时仍保留；只有局部排除不能证明全情景低风险，规则兜底也不作此证明。未入选与已审未来申请不算当前漏评；未审、待补充、真实截断和缺失必要证据仍算工作缺口。
+新合同 `overall.risk` 表示主情景当前预判：完整任务及历史策略按证据规则，新修订有完成复核的适用依据时保留对应等级，无依据时保持 `null/pending`，不为零依据兜底补低。`status/business_completion` 独立表示工作状态。scenario_summaries 分别呈现各情景的风险、置信度及分流/必要核验/必要召回完成度，条件情景不参加主情景最大值。有效的局部中高风险在 incomplete 时仍保留；只有局部排除不能证明全情景低风险，规则兜底也不作此证明。未入选与已审未来申请不算当前漏评；未审、待补充、真实截断和缺失必要证据仍算工作缺口。
 
 新修订 CSV 的 `assessment_status` 与 JSON 相同，表示已有当前预判或待评（assessed/pending）；`assessment_completion` 单独表示必要评级工作的 complete/incomplete，不能混用。overall 行的 `business_completion` 表示全任务完成度，其余工作状态对应主情景。摘要区分必要范围分流、本情景全量台账及全任务分流台账；跨情景及权利范围记录不等于独立候选数，未纳入必要工作范围也不是法律排除。
 
@@ -222,3 +248,19 @@ python scripts/validate_run.py --task-dir /absolute/original-run --output-dir /a
 按情景→候选→核心权利页分组，保留关键反证以及直接用于比较的必要产品图，不自动重复整套相册。被引用的原始PDF通过完整公开号、国家/权利类型、source_document及source_document_sha256反查已登记页图；页图另有自身path/sha256/bytes。页图登记 visual_role=document_identity/patent_claims/patent_drawings/registry_record/product_comparison、1-based page_number、可选figure_labels、visual_reason。页码、案号与页面内容须实际核对；缺失页从原始已核验PDF渲染，不凭文件名猜测、不重绘。只展示必要页，但不固定页数上限造成遗漏。
 
 缺核心页时记录具体 visual_gaps 和原文链接，不隐藏已知风险。卡片含情景、候选/案号、风险、用途、原取证日期及原图/完整文献离线链接；HTML内嵌原图字节。不同判断共用同一图像字节时保留各自关联；board数量与整个HTML图片资产数量分别计算。HTML/Markdown/CSV与manifest由统一模型生成；核心图证EV可追溯至原文EV。详细筛选由report_estimate及行为测试集中维护，不以通过格式锁替代业务图证验收。
+10A 新任务的 `report_presentation_revision=report-presentation-stage-a-v1` 仅改变报告呈现：同一 09D 快照投影到 HTML、Markdown、CSV、JSON 与 Manifest，保留历史八区样式前缀，分别显示阶段风险、核实、审阅与 C/N。业务状态由 10B 独立投影，按需材料、独立验收与实际本地入口分别沿 10C—10E 执行，详见[10A 阶段报告呈现](report-presentation-stage-a.md)。
+
+10B 新任务的 `business_status_revision=business-status-stage-b-v1` 在 10A 当前报告投影内增加只读业务状态；`business_status_stage_b` 记录当前业务判定、原待办限制核对、缺口、版本／审阅截止及 `delivery_status=not_verified`。原待办和 09C 批次均不因此自动完成，实际本地可访问入口由 10E 单独验收，详见[10B 业务状态与受限结束](business-status-stage-b.md)。
+
+10C 新任务增加 `report_package_revision=report-package-stage-c-v1`，`report_exports` 默认为空，`stage_carriers` 默认为 `reply`。报告数据保存本次核心／约定文件和必要材料引用；Manifest 将真实附件字节和稳定证据 ID 绑定于 `material_files`，未取得材料另列业务缺口。阶段载体取自同一校验模型并保存其摘要，详见[10C 文件与材料包](report-package-stage-c.md)。
+
+
+10D 独立校验及有界修复见 [delivery-inspection-stage-d.md](delivery-inspection-stage-d.md)。新任务启用 `delivery-inspection-stage-d-v1`；校验记录 `IPR-DELIVERY-INSPECTION/1.0` 仅证明本地当前文件，不能声明实际送达。
+
+10E 固定构建及交付版本使用原任务 `delivery-versions.json`（`IPR-DELIVERY-VERSIONS/1.0`），沿 [delivery-versions-stage-e.md](delivery-versions-stage-e.md) 核实际入口、失败步骤及更正关系；不写入第二套业务判断或改变暂停。
+
+## v3 API 采信与最终审阅记录
+
+证据条目的 `trusted_api_record` 保存提供方、实际上游、原始响应哈希、run/plan/操作/国家/权利绑定、准确记录身份和查询时点；字段采信统一由 `trusted_api` 计算。未知来源更新时间不补为查询日期。
+
+最终审阅使用 `review_context.final_review`，保存每个判断单元的内容绑定、当前总体/范围/限制判断、明确复用单元及不可修改的本人旧审阅。`task.final_review_freeze` 固定事实评估时点；两位旧审凭据不可共用同一原审阅人。最终结论与 HTML 共读 `assessment.final_review`，不要求另建 09C 批次。

@@ -20,6 +20,29 @@ from offline_test_support import isolated_test_environment, offline_environment
 ROOT = Path(__file__).resolve().parent.parent
 
 
+def verification_runtime():
+    """Reject installation errors before they look like business regressions."""
+    from setup_skill import PYTHON_MIN
+    required = next(line.strip().split("==", 1)[1] for line in
+                    (ROOT / "requirements.txt").read_text(encoding="utf-8").splitlines()
+                    if line.strip().startswith("pypdf=="))
+    from runtime_compat import dependency_info
+    pdf = dependency_info("pypdf")
+    toml = dependency_info("tomllib")
+    installed = pdf["version"]
+    issues = []
+    if sys.version_info[:2] < PYTHON_MIN:
+        issues.append("PYTHON_VERSION_UNSUPPORTED")
+    if installed != required:
+        issues.append("PYPDF_VERSION_MISMATCH" if installed else "PYPDF_MISSING")
+    if not toml["available"]:
+        issues.append("TOML_PARSER_MISSING")
+    return {"name": "python-runtime", "status": "failed" if issues else "passed",
+            "executable": sys.executable, "version": list(sys.version_info[:3]),
+            "minimum_version": list(PYTHON_MIN), "pypdf_version": installed,
+            "required_pypdf_version": required, "dependencies": {"pypdf": pdf, "tomllib": toml}, "issues": issues}
+
+
 def run_check(name, command, output, *, cwd=ROOT, env=None, timeout=180):
     started = time.monotonic()
     env = {**offline_environment(env), "LC_IPR_FREE_SEARCH_LEDGER_DIR": str(output / (name + "-test-ledger"))}
@@ -40,6 +63,10 @@ def run_check(name, command, output, *, cwd=ROOT, env=None, timeout=180):
     match = re.search(r"Ran (\d+) tests? in", text)
     if match:
         counts["tests"] = int(match.group(1))
+    for key in ("failures", "errors"):
+        match = re.search(r"\b" + key + r"=(\d+)", text)
+        if match:
+            counts[key] = int(match.group(1))
     result = {"name": name, "status": "passed" if code == 0 else "failed",
               "exit_code": code, "elapsed_seconds": round(time.monotonic() - started, 3),
               "counts": counts, "log": name + ".log"}
@@ -120,12 +147,22 @@ def _main():
     if output.exists() and any(output.iterdir()):
         parser.error("Use a new or empty --output-dir; existing verification is read-only")
     output.mkdir(parents=True, exist_ok=True)
+    runtime = verification_runtime()
+    if runtime["status"] != "passed":
+        manifest = {"mode": args.mode, "status": "incomplete", "checks": [runtime],
+                    "scope": "Runtime preparation failed; no test or provider invocation was performed.",
+                    "remediation": "Use Python >= 3.9 and the existing pinned dependencies verified by setup_skill.py --check. Set LC_IPR_DEPENDENCY_ROOT to an existing compatible dependency runtime if automatic installation-path discovery does not find them."}
+        (output / "verification.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print("python-runtime: failed (" + ", ".join(runtime["issues"]) + ")", flush=True)
+        print(manifest["remediation"], flush=True)
+        print(str(output / "verification.json"), flush=True)
+        return 1
     env = offline_environment()
     env["LC_IPR_PYTHON"] = sys.executable
     env.pop("REPORT_V2_HTML", None)
     env.pop("REPORT_ESTIMATE_HTML", None)
     env["LC_IPR_RELEASE_CHECK"] = "1" if args.mode == "release" else "0"
-    results = []
+    results = [runtime]
     for directory in ("scripts", "tests"):
         results.append(run_check("python-" + directory,
             [sys.executable, "-m", "unittest", "discover", "-s", directory, "-p", "test_*.py"],

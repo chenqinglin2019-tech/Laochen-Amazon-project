@@ -203,7 +203,9 @@ class SameTaskEvidenceTests(unittest.TestCase):
         digest = review_digest(f.evidence, f.candidates, f.ledger, f.plan, f.task)
         for label in ("first", "second"):
             atomic_write_json(f.path / (label + ".json"), {"reviewer": label,
-                "review_context": {"session_id": label, "evidence_digest": digest, "first_review_visible": False},
+                "review_context": {"session_id": label, "evidence_digest": digest, "first_review_visible": False,
+                    "execution": {"agent_id": "offline-fixture-" + label, "run_id": "fixture-run-" + label,
+                                  "input_digest": digest, "assessment_digest": sha256_json([])}},
                 "assessments": [], "coverage_confidence_cap": "低", "coverage_confidence_reasoning": "Synthetic incomplete scopes remain."})
         output = f.path / "stage-output"
         assessment = finalize(f.path, f.task, f.path / "first.json", f.path / "second.json", output_dir=output)

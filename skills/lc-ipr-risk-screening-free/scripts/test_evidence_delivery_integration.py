@@ -7,7 +7,9 @@ from common import atomic_write_json, load_json, sha256_json, sha256_file, now_i
 from offline_test_support import isolated_test_environment
 
 
-def build_evidence_delivery_fixture(directory, *, scenario="pending"):
+def build_evidence_delivery_fixture(directory, *, scenario="pending", report_exports=None, independent_inspection=False,
+                                    reliable_delivery=False, operator_policy=False, transaction=False,
+                                    official_export_fixture=False):
     """Run retained synthetic receipts through real review and delivery gates.
 
     pending/all_discovery_failed/mixed_high/browser_scope_high and the
@@ -26,6 +28,10 @@ def build_evidence_delivery_fixture(directory, *, scenario="pending"):
         raise ValueError("Unknown offline fixture scenario")
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=False)
+    if transaction:
+        if not operator_policy:
+            raise ValueError("Offline transaction fixture requires explicit operator policy")
+        independent_inspection = reliable_delivery = True
     with isolated_test_environment():
         seed = ApiFirstPlanningTests()
         seed.setUp()
@@ -36,11 +42,42 @@ def build_evidence_delivery_fixture(directory, *, scenario="pending"):
             ledger = deepcopy(seed.ledger)
         finally:
             seed.tearDown()
+        if reliable_delivery:
+            task["delivery_versions_revision"] = "delivery-versions-stage-e-v1"
+        else:
+            task.pop("delivery_versions_revision", None)
+        if independent_inspection:
+            task["delivery_inspection_revision"] = "delivery-inspection-stage-d-v1"
+        else:
+            task.pop("delivery_inspection_revision", None)
         task["completion_policy_revision"] = "necessary-work-v2"
+        # This fixture intentionally keeps the original partial-evidence-v2
+        # policy; the operator contract is covered by explicit new-policy tests.
+        task.pop('presentation_policy_revision', None)
+        if operator_policy:
+            task['assessment_revision'] = 'known-findings-risk-v1'
+            task['presentation_policy_revision'] = 'operator-report-v1'
+            task['review_policy_revision'] = 'final-double-review-v1'
+            report_exports = [] if report_exports is None else report_exports
+        if report_exports is not None:
+            task['report_package_revision'] = 'report-package-stage-c-v1'
+            task['report_exports'] = report_exports
+        else:
+            # Preserve the frozen legacy five-file regression. 10C core-only
+            # publication is exercised by test_report_package_stage_c.
+            task.pop('report_package_revision', None)
+        task.pop("continuous_recovery_revision", None)  # Frozen 07 delivery fixture; 08B has its own cases.
+        # This frozen v2 delivery fixture has no operation-level reviewer events.
+        # 03C acceptance is exercised separately by test_source_operation.
+        task.pop("source_operation_revision", None)
+        # The retained synthetic copyright candidate predates source-bound
+        # 04C handoff. Keep this delivery regression on its frozen contract;
+        # new-task handoff is exercised by test_candidate_handoff.
+        task.pop("candidate_handoff_revision", None)
         if browser_scope:
             from common import serper_free_enhancement, serpapi_free_enhancement
-            task["serper_free_enhancement"] = serper_free_enhancement(False, "api-first-v1")
-            task["serpapi_free_enhancement"] = serpapi_free_enhancement(False, "api-first-v1")
+            task["serper_free_enhancement"] = serper_free_enhancement(False, task["retrieval_workflow_revision"])
+            task["serpapi_free_enhancement"] = serpapi_free_enhancement(False, task["retrieval_workflow_revision"])
             task["signa_free_enhancement"]["enabled"] = False
         task["task_id"] = evidence["task_id"] = candidates["task_id"] = ledger["task_id"] = "IPRF-OFFLINE-EVIDENCE-DELIVERY-V2"
         task["product"].update(title="离线合成流程样本（不是实际商品排查）", source_url="https://example.org/offline-product",
@@ -65,6 +102,35 @@ def build_evidence_delivery_fixture(directory, *, scenario="pending"):
             "checked_at": "2026-01-01T00:00:00Z"}
         evidence["source_runs"] = []
         evidence["collections"] = {"product": [product_evidence], "public_sources": [source_evidence]}
+        if official_export_fixture:
+            import hashlib
+            import zipfile
+            from official_tmsearch_export import HEADERS, candidate_entries
+            valid = directory / 'tmsearch-valid.xlsx'
+            header = ''.join('<c r="%s4" t="inlineStr"><is><t>%s</t></is></c>' %
+                (chr(65 + index), value) for index, value in enumerate(HEADERS))
+            sheet = ('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                '<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>Search results from 1 to 0</t></is></c></row>'
+                '<row r="2"><c r="C2" t="inlineStr"><is><t>CM:SYNTHETIC</t></is></c></row>'
+                '<row r="4">' + header + '</row></sheetData></worksheet>')
+            with zipfile.ZipFile(valid, 'w') as workbook:
+                workbook.writestr('xl/sharedStrings.xml', '<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"/>')
+                workbook.writestr('xl/worksheets/sheet1.xml', sheet)
+            broken = directory / 'tmsearch-broken.xlsx'
+            broken.write_bytes(b'offline damaged XLSX, not an empty search')
+            sources = []
+            variants = ([('EV-TM-VALID', valid, 'trademark_word')]
+                if official_export_fixture != 'all_broken' else [])
+            for name, path, right in [*variants, ('EV-TM-BROKEN', broken, 'trademark_figurative')]:
+                sources.append({'provider': 'public_source', 'kind': 'official_record',
+                    'evidence_id': name, 'jurisdiction': 'US', 'right_type': right,
+                    'source_url': 'https://tmsearch.uspto.gov/search/search-results',
+                    'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest(),
+                    'bytes': path.stat().st_size})
+            evidence['collections']['sources'] = sources
+            export_issues = []
+            assert len(candidate_entries(directory, evidence, issues=export_issues)) == len(variants)
+            candidates['official_export_issues'] = export_issues
         for key in ("patents", "trademarks", "copyright_assets", "enforcement"):
             candidates[key] = []
         ledger["annotations"] = []
@@ -116,7 +182,11 @@ def build_evidence_delivery_fixture(directory, *, scenario="pending"):
             planned_rights = {row["right_type"] for provider, rows in plan["queries"].items() if provider.endswith("browser")
                 for row in rows if row.get("search_language") == "en"}
             language = [item for item in initial_work["entries"] if "LANGUAGE" in item["reason"] and item["right_type"] in planned_rights]
-            if not language or any(item["state"] == "ready" or not item.get("query_refs") for item in language):
+            # A current main-scenario-only plan can have no language repair at
+            # all.  When one is emitted it must still be bound and non-ready;
+            # do not make a historical conditional-scenario fixture invent a
+            # translation obligation merely to satisfy this test.
+            if any(item["state"] == "ready" or not item.get("query_refs") for item in language):
                 raise AssertionError("Compiled English browser plans left an orphan translation todo")
             absence = [item for item in initial_work["entries"] if item.get("right_type") in {"copyright", "trade_dress"}
                 and item.get("delivery_limit", {}).get("route_absence")]
@@ -251,8 +321,21 @@ def build_evidence_delivery_fixture(directory, *, scenario="pending"):
                         no_supporting_evidence_reasoning="")
                     rows[-1].pop("pending_reasoning", None)
             review = {"reviewer": "offline-" + role, "review_context": {"session_id": "separate-offline-session-" + role,
-                "first_review_visible": False, "evidence_digest": work["review_work"]["evidence_digest"]},
+                "first_review_visible": False, "evidence_digest": work["review_work"]["evidence_digest"],
+                "execution": {"agent_id": "offline-fixture-" + role, "run_id": "fixture-run-" + role,
+                              "input_digest": work["review_work"]["evidence_digest"], "assessment_digest": sha256_json(rows)}},
                 "coverage_confidence_cap": "低", "coverage_confidence_reasoning": "Synthetic retained evidence only; no live verification.", "assessments": rows}
+            if operator_policy:
+                from final_review import inputs, prepare_rows
+                material = inputs(evidence, candidates, ledger, plan, task)
+                rows, binding = prepare_rows({'final_review_statement': {
+                    'overall': 'The synthetic source-only case has no established infringement conflict; unknown facts remain pending.',
+                    'scope': 'Reviewed all actual synthetic query receipts and their US scope, including bounded unavailable routes.',
+                    'limitations': 'Ownership and exhaustive coverage remain unknown. This is an offline fixture, not a real product conclusion.'}}, rows, material)
+                review['assessments'] = rows
+                review['review_context']['final_review'] = binding
+                review['review_context']['execution']['assessment_digest'] = sha256_json(rows)
+                review['review_context']['execution']['final_review_digest'] = sha256_json(binding)
             atomic_write_json(directory / (role + "-review.json"), review)
             reviews.append(review)
         reviewed = work_view_from_dir(directory, first_review=reviews[0], second_review=reviews[1])
@@ -271,8 +354,24 @@ def build_evidence_delivery_fixture(directory, *, scenario="pending"):
                 return {"directory": str(directory), "publication_rejected": str(exc), "unread_work": unread,
                     "candidate_id": candidates["patents"][0]["candidate_id"]}
             raise AssertionError("Summary-only candidate incorrectly passed the evidence publication gate")
+        transaction_options = {}
+        if transaction:
+            chief = directory / 'adjudication.json'
+            atomic_write_json(chief, {'reviewer': 'offline-operator-chief', 'review_context': {
+                'session_id': 'offline-operator-chief-session',
+                'evidence_digest': reviews[0]['review_context']['evidence_digest']},
+                'decisions': [], 'review_refs': {'first': sha256_json(reviews[0]), 'second': sha256_json(reviews[1])}})
+            transaction_options = {'adjudication': chief,
+                'deliver_to': directory.parent / (directory.name + '-delivered'), 'require_complete': True}
         outcome = publish(directory, directory / "first-review.json", directory / "second-review.json",
-            output_dir=directory / "report", mode="auto")
+            output_dir=directory / "report", mode="auto",
+            **transaction_options)
+        if transaction:
+            # One real transaction owns semantic QA, registration, byte-exact
+            # copy and completion. Standalone entrypoints below retain their
+            # legacy regression behavior without adding checks to this path.
+            return {'directory': str(directory), 'transaction': outcome,
+                'delivered': str(directory.parent / (directory.name + '-delivered'))}
         output_task = load_json(directory / "report/task.json")
         errors = validate_run(directory, output_task, output_dir=directory / "report")
         if errors:

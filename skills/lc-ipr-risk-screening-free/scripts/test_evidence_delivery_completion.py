@@ -191,6 +191,14 @@ class EvidenceDeliveryBoundedProofTests(unittest.TestCase):
         item = self.resolve([extra])["entries"][1]
         self.assertEqual(item["reason"], "SUBMISSION_UNKNOWN_AFTER_RECEIPT_REVIEW")
         self.assertEqual(run["submission_state"], "unknown")
+        live_caps = {"uspto_patent_browser": {"provider": "uspto_patent_browser", "state": "automatic",
+            "executable": True, "reason": "accepted"}}
+        refined = completion.refine_work_view(self.f.task,
+            {"entries": [extra], "unresolved_scopes": []}, self.f.plan, live_caps,
+            evidence=self.f.evidence, candidates=self.f.candidates, ledger=self.f.ledger, task_dir=self.f.path)
+        audited = next(x for x in refined["entries"] if x.get("query_id") == row["query_id"])
+        self.assertEqual(audited["state"], "blocked")
+        self.assertEqual(audited["reason"], "SUBMISSION_UNKNOWN_AFTER_RECEIPT_REVIEW")
         self.assertTrue(completion._delivery_limit_valid(item, self.f.task, self.f.evidence, self.f.plan, {},
             candidates=self.f.candidates, ledger=self.f.ledger, task_dir=self.f.path))
         item["delivery_limit"]["submission_review_refs"][0]["review_sha256"] = "tampered"
@@ -442,6 +450,34 @@ class BrowserScopeCompletionTests(unittest.TestCase):
         self.assertTrue(any(item.get("query_id") == row["query_id"] and item["reason"] == "API_DISCOVERY_MERGE_REQUIRED"
             and item["state"] == "awaiting_review" for item in work))
 
+    def test_full_refinement_preserves_empty_route_proof_and_agent_obligations(self):
+        from api_first_planning import next_work_entries
+        self.f.task["query_terms"].append({"kind": "product", "value": "strap", "language": "en", "derived_from": "product.title"})
+        self.f.regenerate()
+        work = next_work_entries(self.f.task, self.f.plan, self.f.evidence, self.f.candidates, self.f.ledger,
+            task_dir=self.f.path, source_capabilities=self.caps)
+        original = next(item for item in work if item.get("right_type") == "copyright"
+            and item["reason"] == "API_DISCOVERY_ROUTE_UNAVAILABLE")
+        agent = {"scenario_id": original["scenario_id"], "jurisdiction": "US", "right_type": "copyright",
+            "provider": "asset_provenance", "kind": "agent_investigation", "state": "ready",
+            "reason": "AGENT_INVESTIGATION_REQUIRED", "work_id": "TEST-AGENT"}
+        refined = completion.refine_work_view(self.f.task, {"entries": [original, agent]}, self.f.plan,
+            self.caps, evidence=self.f.evidence, candidates=self.f.candidates, ledger=self.f.ledger,
+            task_dir=self.f.path)
+        entry = next(item for item in refined["entries"] if item.get("delivery_limit"))
+        self.assertEqual(entry["reason"], "API_DISCOVERY_ROUTE_UNAVAILABLE")
+        self.assertEqual(entry["delivery_limit"]["route_absence"]["qualified_providers"], [])
+        self.assertTrue(completion._delivery_limit_valid(entry, self.f.task, self.f.evidence, self.f.plan,
+            self.caps, candidates=self.f.candidates, ledger=self.f.ledger, task_dir=self.f.path))
+        self.assertTrue(any(item.get("work_id") == "TEST-AGENT" and item["state"] == "ready"
+            for item in refined["entries"]))
+        self.assertFalse(completion._delivery_limit_valid(entry, self.f.task, self.f.evidence, self.f.plan,
+            {}, candidates=self.f.candidates, ledger=self.f.ledger, task_dir=self.f.path))
+        forged = deepcopy(entry)
+        forged["reason"] = "NO_SUPPORTED_ROUTE"
+        self.assertFalse(completion._delivery_limit_valid(forged, self.f.task, self.f.evidence, self.f.plan,
+            self.caps, candidates=self.f.candidates, ledger=self.f.ledger, task_dir=self.f.path))
+
     def test_empty_qualified_route_set_needs_frozen_policy_term_and_actual_snapshot(self):
         from api_first_planning import next_work_entries
         self.f.task["query_terms"].append({"kind": "product", "value": "strap", "language": "en", "derived_from": "product.title"})
@@ -470,3 +506,16 @@ class BrowserScopeCompletionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CountryRightRouteTests(unittest.TestCase):
+    def test_us_design_does_not_use_ops_discovery_but_patent_keeps_it(self):
+        routes = [{"provider": "epo_ops", "operation": "search"},
+            {"provider": "uspto_patent_browser", "operation": "design_recall"}]
+        task = {"retrieval_workflow_revision": "api-first-v2"}
+        req = {"jurisdiction": "US", "right_type": "design", "routes": routes}
+        self.assertEqual([x["provider"] for x in completion._route_options(task, req, "text")],
+                         ["uspto_patent_browser"])
+        req = {**req, "right_type": "patent", "routes": [routes[0],
+            {"provider": "uspto_patent_browser", "operation": "patent_recall"}]}
+        self.assertIn("epo_ops", [x["provider"] for x in completion._route_options(task, req, "text")])

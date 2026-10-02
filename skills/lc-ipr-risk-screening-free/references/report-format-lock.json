@@ -1,18 +1,70 @@
 {
-  "purpose": "User requires the current eight-section, seven-module HTML format to remain unchanged during logic/performance optimization. Explicit format changes require updating this lock with visual acceptance.",
+  "purpose": "Explicit operator-report-v1 uses the user-approved readable nine-module format. Historical eight-section/seven-module branches retain their approved CSS and sample.",
   "css_path": "assets/evidence-estimate-template.css",
-  "css_sha256": "00a9d553569189bd72a6dfbbfbb7b8524142a77dbcac1bb9ff67d3e098ce9810",
+  "css_sha256": "b5018e1962ef53cf989863995d67068df6061a89fd47952f5b8c974b66a02319",
   "render_source_sha256": {
     "_Inline": "700a316ca04f3c301217a0d7894e32f488b1cbd55dddb9f09957e7aaa2b8a718",
     "_inline": "067ac7bc0ad03088bda62e2978cd3ff8e6b0e17d5c8606cf8f3fb6b3235cff4f",
     "_pill": "31e29cc23394ea4e6ba43e03aba910b50ee835d893379370dca66d41b2ca3a94",
     "_list_html": "7482387503cb867fb095736edc87d17b66ecac6e6ab2439d73521d934e63a9f0",
-    "_refs_html": "4d021860af8c73f7815b0cb50d81c1aad27856aec49854a080d48451a4b30fd6",
+    "_refs_html": "862cc661ffe48c29471753fcb25508a6a013643806efcb2c313bc3de6c14b762",
     "_reason_html": "5aa908519127f2f190564f6b725967db556bbad4794189b002fcba48c1fd5e0b",
-    "_figure": "175165c30af4895e6b94969fc7ca82e4babfa031a78b3c5c6a247215a502824f",
+    "_figure": "7b28a96993cb36f7ead97c2975ba7eae8b60273f0b59148f01c8caed2a64daf9",
     "_blocks_html": "74b951554b48f890eb3f6eb4fdddd1f66a3101ff9690a9495174bea4bd7d0ca4",
     "_human_priority": "f8ce3f8f39c67acb53056a7b0824160517046705c803914f952ecba81cbc0c64",
     "_gaps_html": "e1ec0c70289fb67aa30ae2682591cfedbcbef8260f90db321e23d8609b5411de",
-    "render_html": "397d8328a063aadc224d047e7eeaa0f4d281d1208f07e9313cbd243ce3768a45"
+    "render_html": "4c82bd77833b6ae449f19cf659f104108055fef8770acceca059ef4a112f2a74"
+  },
+  "historical_sample": {
+    "bytes": 244761,
+    "sha256": "c48b415e79845913355f6658fb2c2b9580fa1915a9d8de326a837b2d861c6177",
+    "style_sha256": "ed6460f1f4c53dbf1b53f2bc7758886d5123124ba967b7d42ad0246ac4485120"
+  },
+  "derived_revision": "report-presentation-stage-a-v1",
+  "package_revision": "report-package-stage-c-v1",
+  "presentation_render_source_sha256": {
+    "build": "46953b96f6aa2da6f4e10a18637d6602ac180de746352297541fb7c34df165fd",
+    "render_markdown": "fe047a129d0e52843717f2294abedf79ca7be173d326017e3ca08aebac32c308",
+    "render_csv": "64551eed5bfb1b612a2e0f4907a7633f85f63238fff039a4716393406bb88f34",
+    "render": "3aa640a6d091727d1a6a1795ef566cba05fb73301fc44da4cffd6dd80bb31b08"
+  },
+  "approved_logic_revision": "api-first-v3/final-double-review-v1/known-findings-risk-v1/operator-report-v1: exact Generic reference-name exemption; risk follows known facts independently of progress; operator presentation and separate complete annexes explicitly approved by user; historical rendering remains versioned.",
+  "operator_revision": "operator-report-v1",
+  "operator_css_path": "assets/operator-report.css",
+  "operator_css_sha256": "5912d13fa9b24e027f402ef9c6ce6ae9654e47b6de6369d3a8ef6cc8fe9708bf",
+  "operator_section_order": [
+    "product",
+    "decision",
+    "modules",
+    "candidates",
+    "gaps",
+    "coverage",
+    "trace"
+  ],
+  "operator_required_appendices": [
+    "operator-appendix.html",
+    "technical-audit.html"
+  ],
+  "operator_render_source_sha256": {
+    "enabled": "d60f47ba9373f628d94bc443343d2c9f429224add06acea0e13b4d13141358ad",
+    "human": "70370acf223bff74408221aa58f815d21ac824f6ff7db8ba4239f2f5605a0559",
+    "unique": "0a64ffb034b81ddfbdf4d28d688e398df50d703747aacf29643046e233679ce9",
+    "_scope": "b89b38cebd837dbc793537032d69c254194dbf01d35b50499ccc0db5710d3533",
+    "_primary": "3d5ad6a3df72385a57032eb5e2d6165409a07deee3e37d5beb277a61196fd247",
+    "_step": "29cbc9450b1f25e0c39f81b87c77dd737357032b8f3da9963e4eb0e3da65ca00",
+    "_candidate_key": "27b3a2dd6900fde96079c802eb4c1b73f1ca93a07426f05a208adc1c5e2b7125",
+    "_pending_key": "323062ada77394ae21afba8c71988ab4896a28f2cdd46ad5fb9d8eb86d65e29e",
+    "_comparison_performed": "b3fa167b77f1bef3ed9765eca730ded933409ecab83db7d6e13ed9bb19829b87",
+    "build": "a1cd9046232bddc659a2a6849d1c9ea08d3ac4dddf9fba99bc2e0c16dd123200",
+    "project": "409da0182ee7ec199cf92f67c6a1825ac384cccfacb63d1f82f5c2c3792f0fc4",
+    "_e": "2f935c5d7842e5db9d18f0533c3623e726cf869d6e3f8c70e1904a843ac66287",
+    "_paragraphs": "66ac84a72338029700a5772ae5110878383a6ca8f069286b0c82ed11b7fbcf58",
+    "_page": "0b7804910466e123153f898ccf68e23fcf64300200685f24f24f509fd1271267",
+    "_figure": "b5e5bda6faba37d539375441232f1134004273c126de4ffb851797c1b7a08f64",
+    "render": "c915211babae885ffdf85ff1078be7f4258cd455eca11aafc9d762b70cf7748a",
+    "render_appendix": "afd3647b9925b60528b722632ad458c2e031d88dafb36d53a07af49f91862d22",
+    "render_audit": "2b2d16ce6a13668ae36a48e87fd68d73bb61decafc874692a8c2cd7fc276b804",
+    "render_markdown": "b4dec9c08a223ea82d99c2f36935fd3e1347a40d9156dc841f4bdc3a5bbc22cc",
+    "render_csv": "655a20878b41b3535f4b7f9f8eb0bee9b369339782c70b18292fe3444e7ac4b0"
   }
 }

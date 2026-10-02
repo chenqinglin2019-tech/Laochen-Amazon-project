@@ -79,6 +79,26 @@ class IdentityDiscoveryTests(unittest.TestCase):
         self.assertEqual(len(product_clue_inventory(self.task)), 4)
         self.assertTrue(product_analysis_readiness(self.task)["ready"])
 
+    def test_uncertain_ocr_requires_retained_unknown_fact_and_question(self):
+        self.task['query_terms']=[term for term in self.task['query_terms']
+                                  if term['derived_from']!='product.raw_capture.ocr_text[0]']
+        clue=next(item for item in product_clue_inventory(self.task)
+                  if item['source_path']=='product.raw_capture.ocr_text[0]')
+        disposition=next(item for item in self.task['product']['analysis']['clue_dispositions']
+                         if item['source_path']==clue['source_path'])
+        disposition.update(disposition='needs_verification',question='What does the mark actually say?',
+                           reason='The OCR is blurred; source image must be checked.')
+        disposition.pop('query_term_sha256')
+        self.task['product_delivery_revision']='image-fact-v1'
+        self.task['product_scope']={'facts':[{'fact_id':'uncertain-mark','source_path':clue['source_path'],
+            'value':clue['value'],'status':'unknown','verification':'unverified',
+            'question':disposition['question']}]}
+        readiness=product_analysis_readiness(self.task)
+        self.assertTrue(readiness['ready'],readiness['gaps'])
+        self.task['product_scope']['facts'][0]['value']='invented mark'
+        self.assertIn('PRODUCT_CLUE_UNACCOUNTED',
+                      [gap['code'] for gap in product_analysis_readiness(self.task)['gaps']])
+
     def test_existing_plan_is_unchanged_and_new_clues_are_checked(self):
         before = generate_plan(self.path)
         self.task["product"]["raw_capture"]["ocr_text"].append("New mark")

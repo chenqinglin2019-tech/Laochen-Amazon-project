@@ -6,9 +6,13 @@
 
 目标环境：macOS 14 及以上的 Intel x64／Apple Silicon ARM64；Windows 10 22H2 x64、Windows 11 24H2／25H2 x64。安装器分别记录宿主架构、Python 进程架构及 Rosetta；Windows ARM、32 位进程、未知系统组合不标为兼容。版本识别成功只表示满足项目目标条件，原生端到端验收另记。
 
-本次完整工作流要求 Python 3.12 及以上、Node 22 及以上，建议选择 Node 22 LTS，并保留实际版本。package.json 的 Node 20 下限仅描述 CDP 组件，不代表完整安装验收基线。Python 依赖只安装既有 pypdf；Node 使用包内 package-lock.json 的 playwright-core。Chrome 用系统安装版本，不自动下载浏览器。PDF 页图需要本机 `pdftoppm`（Poppler）可在 PATH 找到，并实际运行成功；Windows 还须具备配套 DLL。
+本次完整工作流支持 Python 3.9 及以上、Node 22 及以上，建议选择 Node 22 LTS，并保留实际版本。package.json 的 Node 20 下限仅描述 CDP 组件，不代表完整安装验收基线。Python PDF 依赖为 pypdf==6.10.0；Node 使用包内 package-lock.json 的 playwright-core。Chrome 用系统安装版本，不自动下载浏览器。PDF 页图需要本机 `pdftoppm`（Poppler）可在 PATH 找到，并实际运行成功；Windows 还须具备配套 DLL。
 
-Windows 10 是本项目需单独实测的兼容目标，不能因带有 Windows 二进制便宣称完整支持。Playwright 的当前上游系统要求从 Windows 11 起；本 Skill 使用系统 Chrome 的 CDP 路线，Windows 10 仍须独立实际验证。
+Python 3.9/3.10 缺少内置 `tomllib`，脚本通过 `runtime_compat` 仅加载现有纯 Python `pypdf` 与 `tomllib` 包。优先使用解释器原有包；缺包时检查本 Skill 已有 `.venv` 和本机 Codex dependency runtime，不安装、复制依赖或把其他环境整个加入 `sys.path`。可用 `LC_IPR_DEPENDENCY_ROOT` 指定接收者已有依赖根目录；显式目录缺包或版本不符时拒绝执行，不静默回退。实际代码仍在所选 Python 3.9 解释器内运行，诊断记录依赖版本及真实来源。新机器没有这些包时仍须按安装步骤补足依赖，不能从本机兼容测试推断任意缺依赖环境可运行。
+
+已有依赖的本机先运行 `python3 -X utf8 scripts/setup_skill.py --check`，满足检查后直接使用 `python3`。下方初始化/安装命令适用于缺依赖的新安装；可使用已安装的 Python 3.9 或更高版本。
+
+Windows 10 是本项目需单独实测的兼容目标，不能因带有 Windows 二进制便宣称完整支持。Windows 上的最终双审使用 `report_review_host.py --isolation tool-free-process`（Windows 上 `auto` 即此后端；无内核级读边界，详见 [完整报告双审宿主](report-review-host.md)），需要原生 `codex.exe` 且已用 ChatGPT 登录；该后端已用伪 Codex 可执行文件离线验证，**尚未在 Windows 真机实测**，首次使用前先做一次冒烟：`codex.exe login status`、`codex.exe exec --sandbox read-only --json --ephemeral -` 是否被接受，以及输出事件中是否出现除 `report-review-host.md` 所列以外的启动提示。Playwright 的当前上游系统要求从 Windows 11 起；本 Skill 使用系统 Chrome 的 CDP 路线，Windows 10 仍须独立实际验证。
 
 ## 初始化与依赖
 
@@ -17,16 +21,16 @@ Windows 10 是本项目需单独实测的兼容目标，不能因带有 Windows 
 macOS：
 
 ```bash
-python3.12 -X utf8 scripts/setup_skill.py --init
-python3.12 -X utf8 scripts/setup_skill.py --install-deps
+python3 -X utf8 scripts/setup_skill.py --init
+python3 -X utf8 scripts/setup_skill.py --install-deps
 .venv/bin/python -X utf8 scripts/setup_skill.py --check
 ```
 
 Windows PowerShell：
 
 ```powershell
-py -3.12 -X utf8 scripts/setup_skill.py --init
-py -3.12 -X utf8 scripts/setup_skill.py --install-deps
+py -3.9 -X utf8 scripts/setup_skill.py --init
+py -3.9 -X utf8 scripts/setup_skill.py --install-deps
 & .\.venv\Scripts\python.exe -X utf8 scripts/setup_skill.py --check
 ```
 
@@ -40,6 +44,8 @@ BOM／CRLF 在配置读取时兼容；文件写入使用 UTF-8。建议命令始
 
 ## 接收者检查
 
+结束保护需另按[结束保护与断点恢复](continuation-guard.md)安装并由用户原生信任。Python 离线通过不等于桌面 Stop 钩子生效；未完成桌面冒烟时明确标“保护未启用”。
+
 1. 执行 setup 的 --check，保留脱敏安装诊断。仅有 Key 不证明该来源获授权、免费额度足够或生产审批通过。
 2. 用自己的 Token 执行 auth_gate.py；首次业务鉴权通过后创建任务，credentials 预检仍再次鉴权。
 3. 以新目录做本机 Chrome/CDP、PDF 页渲染、中文空格路径及跨进程锁测试；Rosetta 结果不能当成 Intel 真机结果。
@@ -51,5 +57,7 @@ BOM／CRLF 在配置读取时兼容；文件写入使用 UTF-8。建议命令始
 使用包内 `scripts/package_skill.py --output-dir 新空目录`。它按 [明确文件清单](distribution-files.json) 读取所需文件，在独立暂存目录检查空模板、已知秘密值和机器路径，生成逐文件 SHA-256 清单并原子生成 ZIP。新增业务文件需经审阅后显式加入清单，不能通过递归“全目录打包”带入用户状态。
 
 分发不含发送者真实 config.json、config.local.json、.env、任务、报告、日志、浏览器会话、虚拟环境、额度账本或账户证明。包内 `.env` 在暂存目录从已校验的空 `.env.example` 生成，权限记录为 0600，来源与文件哈希纳入清单；不复制本机现用 `.env`。历史文档中的发送者本机恢复路径只在暂存副本中脱敏；不会修改发送者原文，也不会提供不可用的接收者恢复命令。最终 ZIP 解压后应从空配置开始；不要附送个人凭据来“方便使用”。
+
+修改 Skill 后先运行 `scripts/verify_skill.py --mode fast --output-dir <新目录>`，交付前运行 `--mode release`（release 还需要系统 Chrome 与浏览器版面验收）；在没有系统 Chrome 的环境里 `tools/cdp` 中依赖 Chrome 的用例会失败，属环境原因，须在有 Chrome 的机器上复核。改动 `codex_guard.py`／`completion_check.py` 后，需重新运行 `scripts/install_codex_guard.py` 并在 Codex `/hooks` 重新信任。
 
 交付验收记录必须区分：代码／离线测试、本机原生实测、独立账号真实查询、仍待验收的平台。未取得 Windows 或 Intel 真机结果时明确记待验收，不能用 mock 覆盖或 Rosetta 代替。

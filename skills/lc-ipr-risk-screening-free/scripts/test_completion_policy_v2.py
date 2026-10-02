@@ -28,7 +28,8 @@ class CompletionPolicyV2Tests(unittest.TestCase):
 
     def test_revision_predicates_are_closed_and_old_fields_are_not_mutated(self):
         for revision, active, delivery in ((None, False, False), ("necessary-work-v1", True, False),
-                                         (CURRENT_REVISION, True, True), ("necessary-work-v3", False, False)):
+                                         ("necessary-work-v2", True, True), (CURRENT_REVISION, True, True),
+                                         ("necessary-work-v4", False, False)):
             task = {"completion_policy_revision": revision}
             before = deepcopy(task)
             self.assertEqual(supported(task), active)

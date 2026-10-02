@@ -13,6 +13,22 @@ import serpapi_patents_client as patents
 import serpapi_lens_client as lens
 
 
+class IntrinsicUsUtilityTypeTests(unittest.TestCase):
+    def test_exact_us_utility_kind_uses_existing_office_rule(self):
+        from common import intrinsic_patent_right_type
+        for number, kind in [('US20260233409A1', ''), ('US12593823B1', ''),
+                             ('US7104222B2', 'B2'), ('USRE50000E1', ''), ('US12345678', 'C1')]:
+            with self.subTest(number=number, kind=kind):
+                self.assertEqual(intrinsic_patent_right_type('US', number, kind), 'patent')
+        for number, kind in [('USPP12345P2', ''), ('US12345P1', ''),
+                             ('US12345678', ''), ('US12345678Z9', ''), ('12345678', 'A1'),
+                             ('US20260233409A12', ''), ('EP12345A1', '')]:
+            with self.subTest(number=number, kind=kind):
+                self.assertEqual(intrinsic_patent_right_type('US', number, kind), '')
+        self.assertEqual(intrinsic_patent_right_type('US', 'USD123456S1'), 'design')
+        self.assertEqual(intrinsic_patent_right_type('WO', 'WO2026019310A1'), 'patent')
+
+
 class RetainedCardTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -83,6 +99,23 @@ class RetainedCardTests(unittest.TestCase):
         self.entry['payload']['candidates'][0]['source_record_sha256'] = 'f' * 64
         with self.assertRaises(ValueError): lens.retained_source_records(self.evidence, self.run, self.root)
 
+    def test_reassessment_reuses_only_exact_hash_bound_copy(self):
+        before = copy.deepcopy(self.evidence)
+        clone = self.root / 'clone'
+        clone.mkdir()
+        copy_path = clone / 'retained.json'
+        copy_path.write_bytes(self.path.read_bytes())
+        receipt = {'source_path': str(self.path), 'copied_path': str(copy_path),
+                   'sha256': sha256_file(copy_path), 'bytes': copy_path.stat().st_size}
+        (clone / 'recovery-manifest.json').write_text(json.dumps({'file_mappings': [receipt]}))
+        self.assertEqual(len(lens.retained_source_records(self.evidence, self.run, clone)), 2)
+        self.assertEqual(self.evidence, before)
+        copy_path.write_text('{}')
+        with self.assertRaises(ValueError): lens.retained_source_records(self.evidence, self.run, clone)
+        copy_path.write_bytes(self.path.read_bytes())
+        (clone / 'recovery-manifest.json').unlink()
+        with self.assertRaises(ValueError): lens.retained_source_records(self.evidence, self.run, clone)
+
     def test_historical_normalization_has_no_new_stage(self):
         self.assertNotIn('source_record_hash_stage', lens.normalize(self.raw)['candidates'][0])
         self.assertNotIn('source_record_sha256', lens.normalize(self.raw)['candidates'][0])
@@ -131,6 +164,12 @@ class PatentTypeTests(unittest.TestCase):
         rows = merge('patent', [{'provider': 'serper_patents', 'right_type': 'design',
                                'payload': {'candidates': self.cards('US9047691B2', None)}}], {})
         self.assertEqual(rows[0]['right_type'], 'design')
+        self.assertIn(':design:', rows[0]['normalization_key'])
+        # Current identity mode uses intrinsic official utility identity.
+        current = merge('patent', [{'provider': 'epo_ops', 'right_type': 'design',
+            'payload': {'candidates': self.cards('US9047691B2', None)}}], {},
+            identity_revision='candidate-identity-v1')
+        self.assertEqual(current[0]['right_type'], 'patent')
         web = serper.normalize('serper_web', 'search', {'organic': [{'title': 'Toy provenance', 'link': 'https://example.test/toy'}]}, retrieval_workflow_revision=API_FIRST_REVISION)
         rows = merge('enforcement', [{'provider': 'serper_web', 'right_type': 'trade_dress', 'payload': {'candidates': web}}], {})
         self.assertEqual(rows[0]['right_type'], 'trade_dress')

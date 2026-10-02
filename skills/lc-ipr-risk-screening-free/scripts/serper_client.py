@@ -18,7 +18,7 @@ from common import (
     SERPER_PROVIDER_QUERY_CAPS, SERPER_PROVIDERS, active_free_policy,
     authorize_serper_free_plan_entry,
     credential, ensure_object, load_json, load_skill_config,
-    api_first_enabled, API_FIRST_REVISION, sha256_json, api_discovery_patent_right_type,
+    api_first_enabled, API_FIRST_REVISION, api_first_revision_enabled, sha256_json, api_discovery_patent_right_type,
 )
 from free_search_budget import attempt_context, reserve_search
 from serper_entitlement import load_entitlement
@@ -278,12 +278,12 @@ def normalize(
     candidates: list[dict[str, Any]] = []
     for item in raw_items:
         if not isinstance(item, dict):
-            if retrieval_workflow_revision == API_FIRST_REVISION:
+            if api_first_revision_enabled(retrieval_workflow_revision):
                 raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'A returned discovery card is not an object; all original cards must be retained for review')
             continue
-        if retrieval_workflow_revision == API_FIRST_REVISION and not any(item.get(k) for k in ('title', 'link', 'url', 'imageUrl', 'image', 'publicationNumber', 'publication_number')):
+        if api_first_revision_enabled(retrieval_workflow_revision) and not any(item.get(k) for k in ('title', 'link', 'url', 'imageUrl', 'image', 'publicationNumber', 'publication_number')):
             raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'A returned discovery card has no readable identity fields')
-        if retrieval_workflow_revision == API_FIRST_REVISION:
+        if api_first_revision_enabled(retrieval_workflow_revision):
             item = sanitize_for_evidence(item)
         source_url = str(item.get("link") or item.get("url") or "")
         publication = ""
@@ -308,13 +308,19 @@ def normalize(
                 "status": "not_checked", "source": "", "url": "", "checked_at": "",
             },
         }
-        if retrieval_workflow_revision == API_FIRST_REVISION:
-            candidate['retrieval_workflow_revision'] = API_FIRST_REVISION
+        if api_first_revision_enabled(retrieval_workflow_revision):
             candidate.update(google_patent_fields(item) if operation == 'patents' else {
                 'thumbnail_url': str(item.get('thumbnailUrl') or ''),
                 'source_index': 'google_images' if operation == 'images' else 'google_search',
             })
             candidate.update(source_record_sha256=sha256_json(item), source_position=item.get('position'), source_record_hash_stage='retained-v1')
+            candidate['retrieval_workflow_revision'] = retrieval_workflow_revision
+        if retrieval_workflow_revision == 'api-first-v3':
+            candidate.update(source_upstream={'patents': 'google_patents', 'images': 'google_images', 'search': 'google_search'}[operation],
+                             source_updated_at=item.get('updated_at') or item.get('source_updated_at') or None)
+            if operation != 'patents':
+                candidate.update(right_type='unknown', candidate_nature='visual_match' if operation == 'images' else 'web_result',
+                                 field_provenance={key: key for key in ('title', 'snippet') if key in item})
         candidates.append(candidate)
     return candidates
 
@@ -325,8 +331,8 @@ def retained_source_records(evidence: dict, run: dict, task_dir: Path | None = N
     if run.get('operation') != 'images':
         raise ValueError('SERPER_IMAGES_RETAINED_NORMALIZATION_INVALID')
     return retained_records(evidence, run, task_dir, provider='serper_images',
-        normalize_records=lambda raw: normalize('serper_images', 'images', raw,
-            retrieval_workflow_revision=API_FIRST_REVISION),
+        normalize_records=lambda raw, revision, entry: normalize('serper_images', 'images', raw,
+            retrieval_workflow_revision=revision),
         invalid='SERPER_IMAGES_RETAINED_NORMALIZATION_INVALID',
         projection_revision='serper-images-retained-projection-v1')
 

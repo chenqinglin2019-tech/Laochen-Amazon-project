@@ -267,7 +267,7 @@ class CorrectedPublicationInputs(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SOURCE_CHANGED"):
             context.consume()
 
-    def test_publish_computes_twice_and_keeps_standalone_validation(self):
+    def test_publish_computes_once_and_keeps_standalone_validation(self):
         from publish_report import publish
         from report_estimate import build_bundle, validate_run
         values = fixture(self.directory)
@@ -276,7 +276,7 @@ class CorrectedPublicationInputs(unittest.TestCase):
         with patch("assessment_estimate.compute_assessment", wraps=assessment.compute_assessment) as calculate:
             result = publish(self.directory, self.directory / "first-review.json", self.directory / "second-review.json",
                              output_dir=self.directory / "published")
-        self.assertEqual(calculate.call_count, 2)
+        self.assertEqual(calculate.call_count, 1)
         self.assertEqual(result["file_integrity"], "valid")
         self.assertEqual((self.directory / "task.json").read_bytes(), original_task)
         for name in ("report.html", "report.md", "report-data.json", "report-findings.csv", "report-manifest.json"):

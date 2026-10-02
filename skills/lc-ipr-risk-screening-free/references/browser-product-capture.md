@@ -1,5 +1,7 @@
 # Amazon browser capture contract
 
+New `dual-entry-v1` tasks first follow [product-entry.md](product-entry.md): accept the first verified current child, then compare recaptures with that frozen target. Request and current ASIN may differ on first capture. The equality rule below remains the legacy no-marker contract; media, provenance and file-integrity checks remain required. User-materials entries never use this recorder.
+
 Use visible Chrome desktop through `tools/cdp/cdp-cli.mjs capture-amazon`. Run credential preflight first. The CDP launcher uses a dedicated non-default profile and a loopback-only random port. Do not inspect cookies, local storage, the default browser profile, or passwords. If Amazon requires authentication or CAPTCHA, preserve the visible page and let the user complete it.
 
 Save a UTF-8 JSON object with:

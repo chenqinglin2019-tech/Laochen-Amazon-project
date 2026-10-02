@@ -293,9 +293,20 @@ def _identity_mismatch_resolved_after(
     allowed_routes: list[dict[str, Any]], *, jurisdiction: str, right_type: str,
     requirement_ids: set[str], mismatch_at: Any,
     search_plan: dict[str, Any] | None = None,
+    task: dict[str, Any] | None = None,
 ) -> bool:
     if evidence is None or mismatch_at is None:
         return False
+    from trusted_api import enabled as trusted_enabled, accepted_verification
+    if trusted_enabled(task):
+        accepted = accepted_verification(task, evidence, item, jurisdiction, right_type)
+        identity = accepted.get("supported", {}).get("identity", {})
+        if accepted.get("complete") and identity.get("checked_at"):
+            try:
+                if parse_iso(identity["checked_at"]) > mismatch_at:
+                    return True
+            except (ValueError, TypeError):
+                pass
     return bool(allowed_routes) and any(
         _official_payload_complete(official, right_type)
         and parse_iso(str(official.get("checked_at") or "")) > mismatch_at
@@ -573,7 +584,14 @@ def official_verification_complete(
     right_type: str = "",
     requirement_ids: set[str] | None = None,
     search_plan: dict[str, Any] | None = None,
+    task: dict[str, Any] | None = None,
 ) -> bool:
+    # New policy admits the independently validated API facts without creating
+    # an official_verification flag or changing the historical browser contract.
+    from trusted_api import enabled as trusted_enabled, accepted_verification
+    if trusted_enabled(task) and evidence is not None:
+        if accepted_verification(task, evidence, item, jurisdiction or None, right_type or None)["complete"]:
+            return True
     verification = item.get("official_verification", {})
     if not isinstance(verification, dict):
         return False
@@ -636,6 +654,7 @@ def material_unverified(
                             requirement_ids={str(scope.get("requirement_id") or "")},
                             mismatch_at=scope.get("checked_at"),
                             search_plan=search_plan,
+                            task=task,
                         )
                     ):
                         unresolved_mismatch = True
@@ -655,6 +674,7 @@ def material_unverified(
                         right_type=right_type,
                         requirement_ids={str(requirement.get("requirement_id") or "")},
                         search_plan=search_plan,
+                        task=task,
                     )
                     for requirement in matching_requirements
                 ):
@@ -782,6 +802,13 @@ def formal_rating_evidence_by_module(
                 requirement_id = str(requirement.get("requirement_id") or "").strip()
                 if not requirement_id:
                     continue
+                from trusted_api import enabled as trusted_enabled, accepted_verification
+                if trusted_enabled(task):
+                    accepted = accepted_verification(task, evidence, item,
+                        str(requirement.get("jurisdiction") or ""), right_type)
+                    if accepted["complete"]:
+                        result[module_id].update(accepted["evidence_refs"])
+                        continue
                 matches = _verification_evidence_records(
                     item, evidence,
                     [route for route in requirement.get("routes", []) if isinstance(route, dict)],
@@ -1015,6 +1042,7 @@ def coverage_requirement_gaps(
                 jurisdiction=jurisdiction, right_type=right_type,
                 requirement_ids={requirement_id},
                 search_plan=search_plan,
+                task=task,
             ) for item in material):
                 gaps.add(requirement_id)
             continue
@@ -1056,6 +1084,16 @@ def coverage_requirement_gaps(
                     requirement = requirements.get(requirement_id)
                     if not requirement:
                         continue
+                    if requirement.get("phase") == "candidate_verification":
+                        from trusted_api import enabled as trusted_enabled, accepted_verification
+                        if trusted_enabled(task):
+                            applicable = _material_candidates_for(candidates,
+                                str(requirement.get("jurisdiction") or "").upper(),
+                                str(requirement.get("right_type") or ""))
+                            if applicable and all(accepted_verification(task, evidence, candidate,
+                                str(requirement.get("jurisdiction") or "").upper(),
+                                str(requirement.get("right_type") or ""))["complete"] for candidate in applicable):
+                                continue
                     if requirement.get("completion_policy") == "any":
                         jurisdiction = str(requirement.get("jurisdiction") or "")
                         if any(
@@ -1567,7 +1605,7 @@ def main() -> None:
     parser.add_argument("--first-review", type=Path, required=True)
     parser.add_argument("--second-review", type=Path)
     parser.add_argument("--assessment-policy", choices=("evidence-estimate-v1",))
-    parser.add_argument("--assessment-revision", choices=("partial-evidence-v1",))
+    parser.add_argument("--assessment-revision", choices=("partial-evidence-v1", "partial-evidence-v2"))
     parser.add_argument("--adjudication", type=Path)
     parser.add_argument("--supplement", type=Path)
     parser.add_argument("--evidence-root", type=Path)
@@ -1622,7 +1660,7 @@ def main() -> None:
         or not plan_free_policy_matches_task(task, search_plan)
     ):
         raise ValueError("SEARCH_PLAN_IDENTITY_MISMATCH: plan does not belong to this task/free policy")
-    assert_default_discovery_plan_contract(task, search_plan)
+    assert_default_discovery_plan_contract(task, search_plan, task_dir=task_dir, evidence=evidence)
     verification_binding_errors = verification_plan_binding_errors(
         task, evidence, candidates, search_plan,
     )

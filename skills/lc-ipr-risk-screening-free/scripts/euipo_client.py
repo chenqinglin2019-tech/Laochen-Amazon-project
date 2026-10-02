@@ -17,7 +17,7 @@ from common import (
 )
 from provider_utils import (
     ProviderError, authorize_exact_plan_execution, http_json, http_request,
-    quota_summary, record_error, record_result,
+    planned_query_metadata, quota_summary, record_error, record_result,
 )
 
 
@@ -300,6 +300,24 @@ def applicant_names(item: dict) -> list[str]:
     ]
 
 
+def _v3_parties(candidate: dict, item: dict) -> None:
+    """Use explicit owner fields only; preserve application parties separately."""
+    owners = []
+    fields = []
+    for key in ("ownerName", "currentOwner", "owners", "currentOwners"):
+        raw = item.get(key)
+        values = raw if isinstance(raw, list) else [raw] if raw else []
+        names = [str(value.get("name") or "").strip() if isinstance(value, dict) else value.strip() if isinstance(value, str) else "" for value in values]
+        if any(names):
+            fields.append(key)
+        owners.extend(name for name in names if name and name not in owners)
+    applicants = item.get("applicants") if isinstance(item.get("applicants"), list) else []
+    candidate.update(owners=owners, owner="; ".join(owners), applicants=applicant_names({"applicants": applicants}),
+                     applicant_records=applicants, retrieval_workflow_revision="api-first-v3",
+                     field_provenance={"owners": fields, "applicants": "applicants", "legal_status": "status"},
+                     source_updated_at=item.get("updatedAt") or item.get("lastUpdateDate") or None)
+
+
 def _rsql_contains_value(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", str(value or "")).strip()
     if not normalized:
@@ -386,7 +404,7 @@ def _product_indications(item: dict) -> list[str]:
     return list(dict.fromkeys(output))
 
 
-def normalize(product: str, payload: dict, right_type: str = "") -> list[dict]:
+def normalize(product: str, payload: dict, right_type: str = "", *, retrieval_workflow_revision: str | None = None) -> list[dict]:
     environment, authoritative = source_profile()
     if not isinstance(payload, dict) or payload.get("error") or payload.get("errors"):
         raise ProviderError("RESPONSE_SCHEMA_CHANGED", "failed", "EUIPO response is not a successful search envelope")
@@ -424,6 +442,8 @@ def normalize(product: str, payload: dict, right_type: str = "") -> list[dict]:
                 "authoritative_for_final_rating": authoritative,
                 "official_verification": {"status": "not_checked", "source": "", "url": "", "checked_at": ""},
             })
+        if retrieval_workflow_revision == "api-first-v3":
+            _v3_parties(candidates[-1], item)
     return candidates
 
 
@@ -445,6 +465,7 @@ def search_metadata(payload: dict, candidates: list, page: int, size: int) -> di
 
 def verified_detail(
     product: str, identifier: str, payload: dict, media: list[dict], right_type: str = "",
+    *, retrieval_workflow_revision: str | None = None,
 ) -> dict:
     environment, authoritative = source_profile()
     if product == "trademark":
@@ -475,6 +496,9 @@ def verified_detail(
             "owners": owners, "locarno": _locarno_classes(payload),
             "views": media,
         }
+    if retrieval_workflow_revision == "api-first-v3":
+        _v3_parties(candidate, payload)
+        candidate["media"] = media
     verification_owner = candidate.get("owners") or ([candidate.get("owner")] if candidate.get("owner") else [])
     verification_classes = candidate.get("nice_classes") or candidate.get("locarno") or []
     verification_legal_status = str(candidate.get("status") or candidate.get("legal_status") or "")
@@ -536,6 +560,9 @@ def verified_detail(
             ),
         },
     })
+    if retrieval_workflow_revision == "api-first-v3":
+        candidate["missing_facts"] = missing
+        candidate["record_scope"] = "target_record"
     return candidate
 
 
@@ -630,6 +657,10 @@ def main() -> None:
         }
         if args.verify else search_request_params
     )
+    if args.verify and task.get("retrieval_workflow_revision") == "api-first-v3":
+        planned = planned_query_metadata(args.task_dir.resolve(), provider, args.query_id)
+        if "missing_facts" in planned:
+            selected_request_params["missing_facts"] = planned["missing_facts"]
     try:
         authorize_exact_plan_execution(
             args.task_dir.resolve(), task, provider, operation, args.query_id,
@@ -650,8 +681,22 @@ def main() -> None:
             if not identifier:
                 raise ProviderError("INVALID_QUERY", "failed", "EUIPO verification requires an identifier")
             payload, headers, body = api_get(args.product, f"{path}/{identifier}")
-            media = fetch_media(args.task_dir.resolve(), args.product, identifier, payload)
-            candidate = verified_detail(args.product, identifier, payload, media, right_type)
+            v3 = task.get("retrieval_workflow_revision") == "api-first-v3"
+            media_error = ""
+            try:
+                plan = load_json(args.task_dir.resolve() / "search-plan.json") if v3 else {}
+                row = next((value for value in plan.get("queries", {}).get(provider, []) if value.get("query_id") == args.query_id), {})
+                missing = row.get("missing_facts", row.get("required_facts", []))
+                missing = missing if isinstance(missing, list) else []
+                media = fetch_media(args.task_dir.resolve(), args.product, identifier, payload) if not v3 or "representative_figures" in missing else []
+            except ProviderError as exc:
+                if not v3:
+                    raise
+                media, media_error = [], exc.code
+            candidate = verified_detail(args.product, identifier, payload, media, right_type,
+                                        retrieval_workflow_revision=task.get("retrieval_workflow_revision"))
+            if media_error:
+                candidate["media_acquisition"] = {"complete": False, "error_code": media_error}
             candidate["right_type"] = right_type
             if args.candidate_id.strip():
                 candidate["candidate_id"] = args.candidate_id.strip()
@@ -659,14 +704,11 @@ def main() -> None:
             run = record_result(
                 args.task_dir.resolve(), provider=provider, operation="candidate_verification", query=identifier,
                 jurisdiction="EU", evidence_type="official_verification",
-                status="success" if verified else "access_limited",
+                status="success" if verified or v3 else "access_limited",
                 normalized=candidate, raw_body=body, quota=quota_summary(headers, payload),
-                error_code="" if verified else "OFFICIAL_VERIFICATION_INCOMPLETE",
+                error_code="" if verified or v3 else "OFFICIAL_VERIFICATION_INCOMPLETE",
                 detail="" if verified else str(candidate["official_verification"].get("reason") or "EUIPO detail is incomplete"),
-                request_params={
-                    "identifier": identifier, "candidate_id": args.candidate_id.strip(),
-                    "detail": True, "right_type": right_type,
-                },
+                request_params=selected_request_params,
                 query_id=args.query_id,
                 source_environment=source_environment,
                 authoritative_for_final_rating=authoritative_for_final_rating,
@@ -683,7 +725,7 @@ def main() -> None:
                 )
             search_request_params = request_params
             payload, headers, body = api_get(args.product, path, api_params)
-            candidates = normalize(args.product, payload, right_type)
+            candidates = normalize(args.product, payload, right_type, retrieval_workflow_revision=task.get("retrieval_workflow_revision"))
             run = record_result(args.task_dir.resolve(), provider=provider, operation="search", query=args.query,
                 jurisdiction="EU", evidence_type=evidence_type, status="success" if candidates else "no_result",
             normalized={
@@ -699,10 +741,7 @@ def main() -> None:
         run = record_error(args.task_dir.resolve(), provider=provider, operation=operation, query=query,
             jurisdiction="EU", evidence_type="official_verification" if args.verify else evidence_type, error_value=exc,
             request_params=(
-                {
-                    "identifier": query, "candidate_id": args.candidate_id.strip(),
-                    "detail": True, "right_type": right_type,
-                }
+                selected_request_params
                 if args.verify else search_request_params
             ), query_id=args.query_id,
             source_environment=(

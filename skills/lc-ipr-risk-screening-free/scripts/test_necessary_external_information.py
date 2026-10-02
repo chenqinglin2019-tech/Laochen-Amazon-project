@@ -165,7 +165,8 @@ class ExternalInformationTests(unittest.TestCase):
         from common import atomic_write_json
         from record_asset_provenance import inventory_identity_sha256
         from test_scenario_planning import ScenarioPlanningTests
-        from workflow_v24 import generate_plan, product_identity_digest, work_view_from_dir
+        from workflow_v24 import (derive_work_view, generate_plan, product_identity_digest,
+                                  scenario_supplement, work_view_from_dir, _scenario_context)
         fixture = ScenarioPlanningTests()
         fixture.setUp()
         self.addCleanup(fixture.tearDown)
@@ -204,7 +205,19 @@ class ExternalInformationTests(unittest.TestCase):
             atomic_write_json(fixture.path / "evidence.json", fixture.evidence)
         append_revision({**payload, "outstanding_actions": []})
         append_revision(payload)
-        view = work_view_from_dir(fixture.path)
+        # A review-progress receipt may make this query undispatchable after
+        # the public provenance work is already complete. That must not turn
+        # the separately validated supplier-only request into agent review.
+        candidates, ledger, evidence = _scenario_context(fixture.path, fixture.task)
+        from assessment_v24 import scenario_coverage_by_scope
+        coverage = scenario_coverage_by_scope(fixture.task, evidence, candidates, fixture.plan,
+            ledger=ledger, supplement=scenario_supplement(fixture.path, task=fixture.task, evidence=evidence),
+            evidence_root=fixture.path)
+        with patch("workflow_v24.scenario_dispatch_block",
+                   return_value={"reason": "REVIEW_PROGRESS_QUERY_NOT_PLANNED"}):
+            view = derive_work_view(fixture.task, evidence, candidates, fixture.plan, ledger,
+                supplement=scenario_supplement(fixture.path, task=fixture.task, evidence=evidence),
+                evidence_root=fixture.path, task_dir=fixture.path, coverage=coverage)
         rows = [row for row in view["entries"] if row.get("query_id") == query["query_id"]]
         self.assertEqual(len(rows), 1)
         self.assertEqual((rows[0]["kind"], rows[0]["state"]), ("user_information", "awaiting_user"))

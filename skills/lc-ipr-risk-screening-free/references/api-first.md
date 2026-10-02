@@ -1,10 +1,12 @@
 # API 优先检索契约
 
-适用 `retrieval_workflow_revision=api-first-v1`。新任务同时采用 `completion_policy_revision=necessary-work-v2`；调度和交付增量以[统一规则](workflow-correction.md#有界取证交付necessary-work-v2)为准，下文未覆盖的细则及历史 v1 保留。继续先执行原包业务鉴权，不改来源消费授权或风险依据门槛。
+新任务采用 `retrieval_workflow_revision=api-first-v3`、`review_policy_revision=final-double-review-v1` 与 `completion_policy_revision=necessary-work-v3`，先按 [API 直接采信与最终双审](api-direct-final-review.md) 执行。已满足的 API 事实不再要求官方网页复核；美国外观保留 SerpApi DESIGN 路线，图像和维权查询按实际权利路由。下文 v2 的来源发现、预算和历史补搜合同在不冲突处继续适用，标记为 v2 的官方核验与双审前置只适用于历史任务；两者冲突时以本节及 [API 直接采信与最终双审](api-direct-final-review.md) 的 v3 规则为准。鉴权和来源消费授权保持原规则。
 
 ## 执行与分工
 
-产品事实及素材盘点 → API 发现 → 合并与全量轻分流 → 最小必要补证 → 官方准确记录核验 → 专项调查 → 现有独立双审和发布。
+产品事实及素材盘点 → API 发现 → 合并与全量轻分流 → 按字段直接采信并最小补证 → 专项调查与比较 → 冻结后最终独立双审 → 发布。官方网页仅用于影响结论且 API 尚未解决的具体缺口或冲突。
+
+新修订按“国家 × 权利类型 × 阶段”选择路由：首选完成最适合的步骤，配合来源补全内容或维度，备选只在首选不可用、已审结果不足或不覆盖时启用。候选发现、保护内容和目标国状态是不同步骤；Google Patents 的 Serper 与 SerpApi 是同一上游，不作为独立交叉验证。OPS 用于跨国发现，但 US、DE、JP 的权利要求全文不得作为 OPS 必经成果；JPO 仅用于已知号核验，不能生成关键词召回。具体冻结顺序由 `scripts/provider_routing.py` 保存至计划行的 `provider_role`、`source_upstream`。
 
 `next_work.py` 是唯一工作入口。`run_api_plan.py --phase discovery` 运行初始及已获审阅依据的发现；`--phase verification` 运行候选核验、必要补证和原文读取。`run_browser_plan.py --phase verification` 只核验准确记录；`--phase fallback` 只执行已经绑定依据的有限补搜。指定 query ID 或直接客户端也必须经过同一情景分流门禁。历史任务保留原 wave 参数与语义。
 
@@ -20,9 +22,13 @@ API 可用性按来源、国家、权利、操作和当前账号能力判断。�
 
 `needs_info` 的素材来源补查使用现有 `source_lookup`，指定 `provider=asset_provenance`、`operation=provenance_review`；Agent 的 `params` 必须包含准确候选 ID 与当前 `asset_scope_sha256`，`reading_scope.investigation_step` 必须明确为该权利允许的调查步骤（如版权的 `provenance` 或 `visual_comparison`）。生成器保持参数原样，把合法步骤写入 `search_dimension`；缺失、过期或不适用时留下 `NEEDS_INFO_ACTION_UNSUPPORTED` 计划缺口，先修正分流动作再追加计划，不生成无法登记的调查行。历史无修订标记的动作保持原语义。
 
-后续动作绑定父 query ID、父计划哈希、实际 source run、审阅理由及当前分流摘要。同意图最多两轮细化，切换来源不重新计轮数；每查询最多八页，不支持分页的路线明确止于首批。预算按意图分配，未分配范围保留可见缺口。v2 首轮按国家、权利及检索维度轮转，不让结构同义词先占满共享额度；共享额度不少于 8 次时预留约四分之一供已审补搜。该来源首批全部审阅后，运行 `generate_search_plan.py --task-dir TASK --expand` 可释放预留名额，优先补未覆盖范围；新行绑定首批回执和审阅哈希，不提高总额度。`API_DISCOVERY_BUDGET_RESERVED_FOR_FOLLOWUP` 仍是待完成工作，不能作为预算耗尽的报告依据。版权与商业外观的商品范围不自动复用独立品牌标识词。
+`API_DISCOVERY_TERMS_MISSING` 只适用于存在关键词/API 发现路线但没有可用搜索词的范围。无合格搜索词且当前适用范围只有 `asset_provenance/provenance_review` 的 Agent 路线时，该范围继续保留独立素材来源调查队列，不生成缺词待办；旧计划中遗留的同类缺词 gap 也不再投影为待办。有合格商品线索时仍按冻结路由和策略生成补充 API 发现；缺少 Agent provenance 路线也不会因此被视为已覆盖。
 
-SerpApi Google Patents 在主来源不可用或已审结果相关性不足时补搜；Lens 可独立承担图片发现。Serper Patents 与 SerpApi Google Patents 的上游均为 Google Patents，不算两个独立数据库。精确公开号去重并保留两份原始回执；同族不等于同一国家权利。
+后续动作绑定父 query ID、父计划哈希、实际 source run、审阅理由及当前分流摘要。同意图最多两轮细化，切换来源不重新计轮数；每查询最多八页（同一发现目的同一版本跨来源另有合计上限，见[发现目的与版本预算](discovery-purpose-budget.md)，二者取更严者），不支持分页的路线明确止于首批。预算按意图分配，未分配范围保留可见缺口。v2 首轮按国家、权利及检索维度轮转，不让结构同义词先占满共享额度；共享额度不少于 8 次时预留约四分之一供已审补搜。该来源首批全部审阅后，运行 `generate_search_plan.py --task-dir TASK --expand` 可释放预留名额，优先补未覆盖范围；新行绑定首批回执和审阅哈希，不提高总额度。`API_DISCOVERY_BUDGET_RESERVED_FOR_FOLLOWUP` 仍是待完成工作，不能作为预算耗尽的报告依据。版权与商业外观的商品范围不自动复用独立品牌标识词。
+
+SerpApi Google Patents 在主来源不可用或已审结果相关性不足时补搜；美国外观在 v3 保留 DESIGN 专用首选路线。Lens 可独立承担适用的图片发现。Serper Patents 与 SerpApi Google Patents 的上游均为 Google Patents，不算两个独立数据库。精确公开号去重并保留原始回执；同族不等于同一国家权利，不为增加来源数量重复查询同一事实。
+
+API-first-v3 在初始规划时就把同一 Lens 实际请求、国家及有效图像许可绑定到一条物理请求。各权利用途保留独立的逻辑范围和分流任务，后续逻辑用途引用 `discovery_scope.physical_response_plan_reuse`，不占第二份调用预留，不经过“先创建重复调用再取消”的流程。可用已存响应须通过原文件完整性、原卡片契约及48小时有效期检查；运行时再次核对当前产品图像许可。同源未取得可用响应时，引用用途等待源回执，不自行重复提交同一请求。实际失败、未知消耗和其他国家请求不释放额度，复用也不增加独立来源数量。
 
 有限浏览器补搜须有当前 API 失败或已审但相关性不足的证据，每必要范围最多两条收窄查询，每条最多保留 50 个去重候选。取得限定样本即返回 Agent，保留总量、未采部分及 stop reason；不得自动重复采同一批样本。普通收窄不是旧宽查询的等价替代。
 
@@ -39,6 +45,10 @@ v2 若首查没有可用且已授权的 API，不必制造失败请求来取得�
 v2 的未知提交先检查原始回执。未审阅时保留 `submission_unknown`，不得重复请求；若实际审阅后仍无法确认，使用同一 `role=review` 接口，设置 `outcome=blocked`、具体 `blocker`，并提供 `submission_review.state=unknown_after_receipt_review` 和具体 `submission_review.reasoning`。若原运行没有原始回执路径，还必须说明 `submission_review.raw_receipt_absence_reason`；其余审阅字段仍全部必填。记录器从本地实际文件计算回执哈希、字节数和 source run 哈希，绑定当前分流，不接受自填哈希代替取证。有效审阅仅允许把这一限制披露为未官方核验，不改原提交状态、不释放未知消费、不允许重发；回执、运行记录或审阅依据变化后重新打开待办。
 
 `triage_digest` 由 `api_first_planning.triage_digest(..., query_id=父查询ID)` 生成；它绑定该查询全部候选的当前分流。来源成功不直接清空待办：真实响应中的每张卡片先按来源记录哈希关联归一化候选，再按候选实际权利类型完成必要范围的轻审，最后作补搜或停止判断。缺卡、缺哈希、原始回执与载荷不一致、未分流、未决补证均不能授权后续搜索。跨类型卡片保留真实类型，专利查询返回外观记录时也须据实际类型审阅。
+
+跨境或来源法域未知的卡片按其实际候选范围分流；例如 WO 文献可在 `UNLOCATED` 范围作当前判断，不能借用同批 US 候选判断。`stop_bounded_discovery` 可保留当前 `needs_info` 卡片，但每个 action 都须有当前有效依据和准确材料引用；`professional_review` 必须有匹配的追加式 `waiting` 结果记录、外部依赖和恢复条件，`user_information` 须由当前注释明确记为仅用户可提供的信息。遗漏或失效的动作继续阻止停止。`needs_info` 仍显示未解决，不会被改记为 ordinary triage complete。此例外仅服务有界停止，普通来源卡片门禁仍要求 `selected` 或 `not_selected`。
+
+历史追加的分页行不能扩展父查询冻结的 `max_pages`／`max_candidates` 预算。超出预算的行保留原计划和回执，但在执行／工作视图投影为版本限额阻断，不能重置计数或提交超范围页面。
 
 `next_work.py` 派生显示 `API_DISCOVERY_MERGE_REQUIRED`、`API_DISCOVERY_TRIAGE_REQUIRED` 和 `API_DISCOVERY_REVIEW_REQUIRED` 等待办，继续保留原有官方范围缺口。查询和计划错误、尚未支持的 USPC 等原生分类字段与额度不足分别留下具体计划缺口；不能把不支持的字段改作普通文本后宣称分类已检索。
 

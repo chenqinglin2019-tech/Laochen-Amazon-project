@@ -72,6 +72,11 @@ def command_for(
             "--query-id", str(item.get("query_id") or ""),
         ]
     if provider == SERPAPI_PROVIDER:
+        if item.get("operation") == "candidate_detail":
+            return [
+                sys.executable, str(scripts / "serpapi_patent_details_client.py"),
+                "--task-dir", str(task_dir), "--query-id", str(item.get("query_id") or ""),
+            ]
         return [
             sys.executable, str(scripts / "serpapi_patents_client.py"),
             "--task-dir", str(task_dir),
@@ -87,7 +92,7 @@ def command_for(
         planned_operation = str(item.get("operation") or "search")
         detail_operation = str(item.get("detail_operation") or "")
         if planned_operation == "candidate_detail":
-            if detail_operation not in {"biblio", "family", "legal"}:
+            if detail_operation not in {"biblio", "family", "legal", "fulltext", "images"}:
                 raise ValueError(f"Unsupported EPO candidate detail operation: {detail_operation!r}")
             if not q or not str(item.get("candidate_id") or "").strip():
                 raise ValueError("EPO candidate detail requires a document and candidate_id")
@@ -304,6 +309,25 @@ def completed_result(provider: str, item: dict[str, Any], result: subprocess.Com
     }
 
 
+_HEALTHY_RESULT_STATES = {"success", "no_result", "not_applicable", "cancelled", "fact_reused"}
+
+
+def compact_batch_result(result: dict, task_dir: Path) -> dict:
+    """Agent-facing summary of a 2.4 batch; the complete record stays in execution-status.json."""
+    rows = [row for row in result.get("results", []) if isinstance(row, dict)]
+    problems = [{key: row[key] for key in ("provider", "query_id", "status", "dispatch", "error_code",
+                                          "submission_state") if row.get(key) is not None}
+                for row in rows if row.get("status") not in _HEALTHY_RESULT_STATES
+                or row.get("dispatch") in {"failed", "blocked", "blocked_reused"}]
+    summary = {key: result[key] for key in ("schema_version", "task_id", "status", "batch_status", "counts",
+                                            "workers", "elapsed_ms", "work_status") if key in result}
+    summary.update(result_rows=len(rows), problem_rows=problems,
+                   agent_browser_queue=[row.get("query_id") for row in result.get("agent_browser_queue", [])
+                                        if isinstance(row, dict)],
+                   details_file=str(task_dir / "execution-status.json"))
+    return summary
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run official/free API entries from search-plan.json.")
     parser.add_argument("--task-dir", type=Path, required=True)
@@ -312,12 +336,19 @@ def main() -> None:
     parser.add_argument("--max-workers", type=int, default=0)
     parser.add_argument("--query-ids", nargs="+", help="Execute exact API IDs as one resumable batch (2.4 only)")
     parser.add_argument("--phase", choices=("discovery", "verification"), default="")
+    parser.add_argument("--skip-final-view", action="store_true",
+                        help="2.4 only: do not derive/serialize the closing work view (the dispatcher derives its own)")
+    parser.add_argument("--output-format", choices=("compact", "full"), default="compact",
+                        help="2.4 only: compact prints a summary; the full record is always in execution-status.json")
     args = parser.parse_args()
     task_dir = args.task_dir.resolve()
     if load_json(task_dir / "task.json").get("schema_version") == "2.4-free":
         from runtime_v24 import execute_api_plan
-        result = execute_api_plan(task_dir, wave=args.wave, include_optional=args.include_optional, max_workers=args.max_workers, query_ids_filter=args.query_ids, phase=args.phase)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        result = execute_api_plan(task_dir, wave=args.wave, include_optional=args.include_optional, max_workers=args.max_workers, query_ids_filter=args.query_ids, phase=args.phase, skip_final_view=args.skip_final_view)
+        if args.output_format == "full":
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps(compact_batch_result(result, task_dir), ensure_ascii=False, separators=(",", ":")))
         if result.get("status") != "success":
             raise SystemExit(2)
         return
@@ -335,7 +366,7 @@ def main() -> None:
     if not task_free_policy_valid(task) or not plan_free_policy_matches_task(task, plan):
         raise SystemExit("FREE_POLICY_INVALID: task and plan must use the same immutable recognized free policy")
     try:
-        assert_default_discovery_plan_contract(task, plan)
+        assert_default_discovery_plan_contract(task, plan, task_dir=task_dir, evidence=evidence)
     except ValueError as exc:
         raise SystemExit(str(exc)) from None
     query_providers = set(plan.get("queries", {}))
@@ -370,6 +401,7 @@ def main() -> None:
                     authorize_serpapi_free_plan_entry(
                         task, plan, str(item.get("operation") or ""),
                         str(item.get("query_id") or ""),
+                        task_dir=task_dir, evidence=evidence,
                     )
                 elif provider == SIGNA_PROVIDER:
                     authorize_signa_free_plan_entry(

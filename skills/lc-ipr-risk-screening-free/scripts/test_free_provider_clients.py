@@ -26,9 +26,16 @@ class SerperEntitlementTests(unittest.TestCase):
             path = Path(temporary)
             subprocess.run([sys.executable, str(Path(__file__).with_name('create_task.py')), '--url', 'https://www.amazon.com/dp/B012345678', '--jurisdictions', 'US', '--output-dir', str(path), '--enable-serper-free', '--enable-serpapi-free'], capture_output=True, check=True)
             task = load_json(path / 'task.json')
+            task.pop('product_entry_revision', None)  # Hand-built historical account-entitlement fixture.
+            task.pop('discovery_semantics_revision', None)
             # Preserve the historical 2.4 account-proof/fallback expectation.
             task.pop('retrieval_workflow_revision', None)
             task.pop('retrieval_policy', None)
+            task['source_operation_revision'] = 'source-operation-v1'
+            from workflow_v24 import build_coverage_requirements_v24
+            task['coverage_requirements'] = build_coverage_requirements_v24(
+                task['target_jurisdictions'], screening_revision=task.get('screening_revision'),
+                specialty_workflow_revision=task.get('specialty_workflow_revision'))
             task['serper_free_enhancement']['max_queries_per_task'] = 10
             task['serpapi_free_enhancement']['max_queries_per_task'] = 3
             task['serpapi_free_enhancement']['fallback_only_when_serper_enabled'] = True
@@ -38,6 +45,9 @@ class SerperEntitlementTests(unittest.TestCase):
             task['query_terms'] = [{'kind': 'structural_feature', 'value': 'hinged housing', 'language': 'en', 'derived_from': 'product.structure[0]'}]
             task['product']['analysis'] = {'status': 'confirmed', 'identity_sha256': product_identity_digest(task['product'], task=task)}
             atomic_write_json(path / 'task.json', task)
+            task_path=path/'task.json'
+            historical=load_json(task_path);historical.pop('product_scope_required',None)
+            atomic_write_json(task_path,historical)  # This fixture tests the historical entitlement contract.
             plan = generate_plan(path)
             query = plan['queries']['serper_patents'][0]
             with patch.object(serper, 'credential', return_value='configured-fixture-key'), patch.object(serper, 'call') as call, patch.object(serper, 'http_json') as network:

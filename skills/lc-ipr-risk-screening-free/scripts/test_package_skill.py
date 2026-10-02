@@ -54,6 +54,31 @@ class PackageSkillTests(unittest.TestCase):
             self.build(**kwargs)
         self.assertFalse(self.output.exists() and list(self.output.iterdir()))
 
+    def test_distribution_covers_local_imports_and_script_entrypoints(self):
+        # Worktree-only passing tests must not hide missing deployed dependencies.
+        import ast
+        import re
+        root = Path(package.__file__).resolve().parent.parent
+        spec = json.loads((root / "references/distribution-files.json").read_text())
+        distributed = {row["path"] for row in spec["files"]}
+        local_modules = {path.stem: "scripts/" + path.name for path in (root / "scripts").glob("*.py")}
+        missing = set()
+        for relative in sorted(distributed):
+            if not relative.startswith("scripts/") or not relative.endswith(".py"):
+                continue
+            text = (root / relative).read_text()
+            for node in ast.walk(ast.parse(text)):
+                names = [alias.name.split(".")[0] for alias in node.names] if isinstance(node, ast.Import) else [node.module.split(".")[0]] if isinstance(node, ast.ImportFrom) and node.module else []
+                for name in names:
+                    if name in local_modules and local_modules[name] not in distributed:
+                        missing.add((relative, local_modules[name]))
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    for name in re.findall(r"(?<![\w-])([a-z][a-z0-9_]*\.py)(?![\w])", node.value):
+                        path = "scripts/" + name
+                        if (root / path).is_file() and path not in distributed:
+                            missing.add((relative, path))
+        self.assertEqual(sorted(missing), [], "Local dependencies are absent from the recipient package")
+
     def test_only_allowlist_with_empty_templates_manifest_hashes_and_modes(self):
         secret = "offline-Fabricated-Credential-9281"
         self.put(".env", ("SERPER_API_KEY="+secret).encode())

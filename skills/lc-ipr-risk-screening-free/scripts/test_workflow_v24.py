@@ -23,8 +23,11 @@ class WorkflowTests(unittest.TestCase):
         self.path = Path(self.temp.name)
         subprocess.run([sys.executable, str(Path(__file__).with_name("create_task.py")), "--url", "https://www.amazon.com/dp/B012345678", "--jurisdictions", "US,GB,FR,DE,IT,ES,JP", "--output-dir", str(self.path), "--enable-serper-free", "--enable-signa-free", "--enable-serpapi-free"], check=True, capture_output=True)
         self.task = load_json(self.path / "task.json")
+        self.task.pop("product_entry_revision", None)  # Historical fixture supplies facts without the new entry recorder.
+        self.task.pop("product_scope_required", None)  # Historical contract.
         # These fixtures assert the frozen pre-API-first routing contract.
         self.task.pop("retrieval_workflow_revision", None)
+        self.task["source_operation_revision"] = "source-operation-v1"
         self.task.pop("retrieval_policy", None)
         self.task["serper_free_enhancement"]["max_queries_per_task"] = 10
         self.task["serpapi_free_enhancement"]["max_queries_per_task"] = 3
@@ -186,8 +189,11 @@ class RecallIntegrityTests(unittest.TestCase):
         self.path = Path(self.temp.name)
         subprocess.run([sys.executable, str(Path(__file__).with_name("create_task.py")), "--url", "https://www.amazon.com/dp/B012345678", "--jurisdictions", "US", "--output-dir", str(self.path)], check=True, capture_output=True)
         self.task = load_json(self.path / "task.json")
+        self.task.pop("product_entry_revision", None)  # Historical fixture supplies facts without the new entry recorder.
+        self.task.pop("product_scope_required", None)  # Historical contract.
         # These fixtures assert the frozen pre-API-first routing contract.
         self.task.pop("retrieval_workflow_revision", None)
+        self.task["source_operation_revision"] = "source-operation-v1"
         self.task.pop("retrieval_policy", None)
         self.task["serper_free_enhancement"]["max_queries_per_task"] = 10
         self.task["serpapi_free_enhancement"]["max_queries_per_task"] = 3

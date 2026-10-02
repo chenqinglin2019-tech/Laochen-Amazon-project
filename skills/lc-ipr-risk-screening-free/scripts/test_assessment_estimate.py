@@ -60,6 +60,26 @@ class EstimateTests(unittest.TestCase):
                         review_refs={"first": sha256_json(first), "second": sha256_json(second)})
         return {"reviewer": "chief", "review_context": {"session_id": "chief-session", "evidence_digest": first["review_context"]["evidence_digest"]}, "decisions": [decision]}
 
+    def test_supplied_envelope_binding_must_match_actual_reviews(self):
+        chief = self.adjudication()
+        refs = deepcopy(chief["decisions"][0]["review_refs"])
+        for invalid in (None, {}, [], "invalid", {"first": refs["first"]},
+                        {**refs, "first": "0" * 64}, {**refs, "extra": "unexpected"}):
+            with self.subTest(envelope=invalid):
+                chief["review_refs"] = invalid
+                with self.assertRaisesRegex(ValueError, "ADJUDICATION_ENVELOPE_REVIEW_BINDING_INVALID"):
+                    self.calculate(adjudication=chief)
+        chief["review_refs"] = refs
+        self.assertEqual(self.calculate(adjudication=chief)["overall"]["risk"], "高")
+
+    def test_legacy_row_bound_chief_without_envelope_is_preserved(self):
+        chief = self.adjudication()
+        self.assertNotIn("review_refs", chief)
+        self.assertEqual(self.calculate(adjudication=chief)["overall"]["risk"], "高")
+        chief["decisions"][0]["review_refs"]["second"] = "0" * 64
+        with self.assertRaisesRegex(ValueError, "ADJUDICATION_REASONING_OR_REVIEW_BINDING_INVALID"):
+            self.calculate(adjudication=chief)
+
     def test_keeps_grade_with_real_coverage_gaps(self):
         result = self.calculate()
         self.assertEqual(result["overall"]["risk"], "高")

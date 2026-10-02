@@ -119,6 +119,46 @@ class CorrectedIdentityTests(TestCase):
             self.supplement["evidence"][1] = {**self.page(), **change}
             self.assertEqual(len(workflow.candidate_document_entries(self.f.candidate, self.f.evidence, self.supplement)), 1)
 
+    def test_exact_presentation_copy_does_not_reopen_facts(self):
+        self.task["assessment_revision"] = "known-findings-risk-v1"
+        original = self.document("ORIGINAL")
+        original.pop("authority_scope")
+        self.supplement["evidence"] = [original]
+        self.annotation()
+        display = self.document()
+        display.update(evidence_use="presentation_only", presentation_source_evidence_id="ORIGINAL")
+        page = self.page()
+        page.update(evidence_use="presentation_only", presentation_source_evidence_id="ORIGINAL")
+        self.supplement["evidence"].extend([display, page])
+        self.assertEqual(self.effective()["decision"], "selected")
+        self.assertEqual(len(workflow.candidate_document_entries(self.f.candidate, self.f.evidence, self.supplement)), 2)
+        self.f.candidate.setdefault("verification_refs", []).append(page["evidence_id"])
+        self.assertEqual(self.effective()["decision"], "unreviewed")
+
+    def test_presentation_flag_cannot_hide_changed_or_unknown_original(self):
+        self.task["assessment_revision"] = "known-findings-risk-v1"
+        original = self.document("ORIGINAL")
+        original.pop("authority_scope")
+        self.supplement["evidence"] = [original]
+        self.annotation()
+        for change in ({"presentation_source_evidence_id": "ABSENT"}, {"sha256": "f" * 64},
+                       {"bytes": 101}):
+            display = self.document()
+            display.update(evidence_use="presentation_only", presentation_source_evidence_id="ORIGINAL")
+            display.update(change)
+            self.supplement["evidence"] = [original, display]
+            self.assertEqual(self.effective()["decision"], "unreviewed")
+
+    def test_legacy_does_not_accept_presentation_digest_exemption(self):
+        original = self.document("ORIGINAL")
+        original.pop("authority_scope")
+        self.supplement["evidence"] = [original]
+        self.annotation()
+        display = self.document()
+        display.update(evidence_use="presentation_only", presentation_source_evidence_id="ORIGINAL")
+        self.supplement["evidence"].append(display)
+        self.assertEqual(self.effective()["decision"], "unreviewed")
+
     def test_old_revision_preserves_global_identity_and_document_digest(self):
         self.task.pop("workflow_correction_revision")
         before = self.digest()

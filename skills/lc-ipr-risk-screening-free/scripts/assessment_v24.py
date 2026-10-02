@@ -193,8 +193,10 @@ def _triage_review_check(task, candidates, ledger, evidence, supplement, scenari
 
 
 def query_coverage(evidence: dict[str, Any], candidates: dict[str, Any], plan: dict[str, Any], provider: str, query: dict[str, Any], task: dict[str, Any] | None = None, *, strict_lineage: bool = False,
-                   ledger: dict | None = None, supplement: dict | None = None, scenario_id: str | None = None) -> dict[str, Any]:
+                   ledger: dict | None = None, supplement: dict | None = None, scenario_id: str | None = None,
+                   evidence_root=None) -> dict[str, Any]:
     from workflow_v24 import scenario_workflow_enabled
+    from source_result_processing import zero_result_proven
     scenario_mode = scenario_workflow_enabled(task or {})
     review_check = _triage_review_check(task, candidates, ledger, evidence, supplement, scenario_id, query.get("jurisdiction")) if scenario_mode else materiality_annotation_complete
     candidates_for_query = _query_candidates(candidates, evidence, str(query.get("query_id") or ""))
@@ -206,9 +208,44 @@ def query_coverage(evidence: dict[str, Any], candidates: dict[str, Any], plan: d
     if scenario_mode:
         output.update(retrieval_complete=False, triage_complete=reviewed == len(candidates_for_query))
     for run in reversed(bound_runs(evidence, plan, provider, query)):
-        output["source_status"] = run.get("status")
-        if run.get("status") not in {"success", "no_result"}:
+        from review_progress_stage_a import operating_progress_enabled
+        audited = operating_progress_enabled(task or {})
+        from recovery_stage_b import effective_submission, effective_result
+        source_status = effective_result(evidence, run) if audited else run.get("status")
+        output["source_status"] = source_status
+        if audited:
+            output.update(recorded_source_status=run.get("status"),
+                recorded_submission_state=run.get("submission_state"),
+                effective_submission_state=effective_submission(evidence, run))
+        if source_status not in {"success", "no_result"}:
             continue
+        from trusted_api import enabled as api_trust_enabled, api_run_accepted
+        if api_trust_enabled(task or {}) and query.get("action_purpose") == "discovery":
+            from api_first_planning import source_card_state, review_validation
+            if not api_run_accepted(task, evidence, run):
+                output["gap"] = "API_RESPONSE_NOT_ACCEPTED"
+                continue
+            error, _ = source_card_state(task, evidence, candidates, ledger or {}, query, run, supplement)
+            if error:
+                output["gap"] = error
+                continue
+            reviews = [review for review in task.get("discovery_followups", [])
+                if review.get("source_run_id") == run.get("run_id")
+                and review_validation(task, plan, evidence, candidates, ledger or {}, query, review, supplement) is None]
+            metadata = run.get("metadata", {}).get("search_coverage", {})
+            if not reviews:
+                output["gap"] = "API_DISCOVERY_REVIEW_REQUIRED"
+            elif (run.get("status") == "no_result"
+                  and not zero_result_proven(run, evidence, evidence_root)):
+                output["gap"] = "ZERO_RESULT_UNVERIFIED"
+            elif metadata.get("truncated") is True:
+                output.update(gap="API_RETURNED_SCOPE_TRUNCATED", retrieval_complete=True,
+                              search_coverage=metadata)
+            else:
+                output.update(complete=True, retrieval_complete=True, gap="", scope="reviewed_bounded_api_query",
+                    evidence_refs=[entry["evidence_id"] for entry in evidence_index(evidence).values()
+                                   if _entry_matches_run(entry, run)], search_coverage=metadata)
+            return output
         if provider == "asset_provenance":
             from record_asset_provenance import specialty_enabled, investigation_complete, external_information_actions
             if specialty_enabled(task or {}):
@@ -255,10 +292,18 @@ def query_coverage(evidence: dict[str, Any], candidates: dict[str, Any], plan: d
             output["gap"] = "ASSET_INVENTORY_OR_PROVENANCE_INCOMPLETE"
             continue
         from finalize_assessment import _authoritative_run
-        if (not _authoritative_run(evidence, run)
+        from trusted_api import api_run_accepted
+        if (not api_run_accepted(task or {}, evidence, run) and (not _authoritative_run(evidence, run)
                 or str(run.get("source_environment") or "").casefold() in NON_PRODUCTION
-                or run.get("authoritative_for_final_rating") is False):
+                or run.get("authoritative_for_final_rating") is False)):
             output["gap"] = "NON_AUTHORITATIVE_RECALL_SOURCE"
+            continue
+        result_index = run.get("result_processing")
+        if (isinstance(result_index, dict)
+                and result_index.get("revision") == "source-result-processing-v1"
+                and run.get("status") == "no_result"
+                and not zero_result_proven(run, evidence, evidence_root)):
+            output["gap"] = "ZERO_RESULT_UNVERIFIED"
             continue
         metadata = run.get("metadata", {}).get("search_coverage", {})
         if not isinstance(metadata, dict):
@@ -312,7 +357,8 @@ def query_coverage(evidence: dict[str, Any], candidates: dict[str, Any], plan: d
 
 
 def _complete_paginated_series(checked: list[dict[str, Any]], rows: list[tuple[str, dict[str, Any]]], evidence: dict[str, Any], candidates: dict[str, Any], plan: dict[str, Any], *, strict_lineage: bool = False,
-                               task: dict | None = None, ledger: dict | None = None, supplement: dict | None = None, scenario_id: str | None = None) -> None:
+                               task: dict | None = None, ledger: dict | None = None, supplement: dict | None = None, scenario_id: str | None = None,
+                               evidence_root=None) -> None:
     """A complete set of actual distinct records can satisfy a paginated query.
 
     Counts alone never establish completeness. Repeated pages and conflicting
@@ -320,6 +366,7 @@ def _complete_paginated_series(checked: list[dict[str, Any]], rows: list[tuple[s
     """
     groups: dict[str, list[tuple[str, dict[str, Any]]]] = {}
     from workflow_v24 import scenario_workflow_enabled
+    from source_result_processing import zero_result_proven
     scenario_mode = scenario_workflow_enabled(task or {})
     by_id = {row["query_id"]: row for row in checked}
     meta_keys = {"query_id", "range", "page", "page_size", "size", "start", "offset", "position", "pagination_parent_id", "derived_from", "wave"}
@@ -341,10 +388,19 @@ def _complete_paginated_series(checked: list[dict[str, Any]], rows: list[tuple[s
                 valid = False
                 break
             run = runs[-1]
+            result_index = run.get("result_processing")
+            if (isinstance(result_index, dict)
+                    and result_index.get("revision") == "source-result-processing-v1"
+                    and run.get("status") == "no_result"
+                    and not zero_result_proven(run, evidence, evidence_root)):
+                valid = False
+                by_id[query["query_id"]]["gap"] = "ZERO_RESULT_UNVERIFIED"
+                break
             from finalize_assessment import _authoritative_run
-            if (not _authoritative_run(evidence, run)
+            from trusted_api import api_run_accepted
+            if (not api_run_accepted(task or {}, evidence, run) and (not _authoritative_run(evidence, run)
                     or run.get("authoritative_for_final_rating") is False
-                    or str(run.get("source_environment") or "").casefold() in NON_PRODUCTION):
+                    or str(run.get("source_environment") or "").casefold() in NON_PRODUCTION)):
                 valid = False
                 break
             meta = run.get("metadata", {}).get("search_coverage", {})
@@ -414,8 +470,10 @@ def coverage_by_scope(task: dict[str, Any], evidence: dict[str, Any], candidates
         rows = [(provider, row) for provider, row in _plan_rows(plan)
                 if requirement_id in row.get("requirement_ids", []) and (provider, row.get("operation")) in routes
                 and str(row.get("jurisdiction") or "").upper() == key[0] and row.get("right_type") == key[1]]
-        checked = [query_coverage(evidence, candidates, plan, provider, query, task, strict_lineage=strict_lineage) for provider, query in rows]
-        _complete_paginated_series(checked, rows, evidence, candidates, plan, strict_lineage=strict_lineage)
+        checked = [query_coverage(evidence, candidates, plan, provider, query, task, strict_lineage=strict_lineage,
+                                 evidence_root=evidence_root) for provider, query in rows]
+        _complete_paginated_series(checked, rows, evidence, candidates, plan, strict_lineage=strict_lineage,
+                                   evidence_root=evidence_root)
         group["queries"].extend(checked)
         # A convenient zero-result keyword must not hide another incomplete
         # query on the same axis. Providers are alternative whole routes.
@@ -444,9 +502,12 @@ def coverage_by_scope(task: dict[str, Any], evidence: dict[str, Any], candidates
     return sorted(groups.values(), key=lambda row: (row["jurisdiction"], row["right_type"]))
 
 
-def _scenario_action_complete(evidence: dict, plan: dict, provider: str, row: dict) -> bool:
+def _scenario_action_complete(evidence: dict, plan: dict, provider: str, row: dict, task: dict | None = None) -> bool:
     """A response is not current-effect proof unless its bound payload says so."""
     from finalize_assessment import _authoritative_run
+    from trusted_api import action_facts
+    if task and action_facts(task, evidence, row):
+        return True
     for run in reversed(bound_runs(evidence, plan, provider, row)):
         if (run.get("status") != "success" or str(run.get("source_environment") or "").casefold() in NON_PRODUCTION
                 or (row.get("action_purpose") == "official_verification"
@@ -481,6 +542,20 @@ def _scenario_action_complete(evidence: dict, plan: dict, provider: str, row: di
     return False
 
 
+def _operating_coverage_status(task, group, checked):
+    """Derive display status from accepted work, retaining every real gap."""
+    from review_progress_stage_a import operating_progress_enabled
+    if not operating_progress_enabled(task):
+        return group["status"]
+    if all(group.get(name) == "complete" for name in
+            ("retrieval_status", "triage_status", "verification_status")):
+        return "部分完成" if group["gaps"] else "满足已定义要求"
+    if (group.get("retrieval_status") == "complete" or any(result.get("complete")
+            or result.get("retrieval_complete") for result in checked)) and group["gaps"]:
+        return "部分完成"
+    return group["status"]
+
+
 def scenario_coverage_by_scope(task: dict, evidence: dict, candidates: dict, plan: dict, *,
                                ledger: dict | None = None, supplement: dict | None = None, evidence_root=None) -> list[dict]:
     from decision_workflow import scenario_index, triage_summary, necessary_scenario_right_types
@@ -490,6 +565,8 @@ def scenario_coverage_by_scope(task: dict, evidence: dict, candidates: dict, pla
     ledger = ledger or {"schema_version": "2.0", "task_id": task.get("task_id"), "annotations": []}
     triage = triage_summary(task, candidates, ledger, evidence=evidence, supplement=supplement)
     rows = _plan_rows(plan)
+    from discovery_semantics import work_entries as semantic_work_entries
+    semantic_pending = semantic_work_entries(task, plan, evidence, task_dir=evidence_root)
     outputs = []
     for sid, scenario in scenarios.items():
         groups = {}
@@ -503,20 +580,33 @@ def scenario_coverage_by_scope(task: dict, evidence: dict, candidates: dict, pla
                 "gaps": [], "queries": [], "obligations": [], "queues": {"unreviewed": [], "needs_info": [], "selected": []}})
             group["requirement_ids"].append(requirement["requirement_id"])
         for key, group in groups.items():
+            group['gaps'].extend('SEMANTIC:' + item['reason'] for item in semantic_pending
+                if (item.get('scenario_id'),item.get('jurisdiction'),item.get('right_type')) ==
+                   (sid,key[0],key[1]))
+            import product_scope as ps
+            if ps.enabled(task): group["gaps"].extend(ps.coverage_gaps(task,sid,key[1]))
+            if any(v['scope_status']=='pending' and v['scenario_id']==sid and v['right_type']==key[1]
+                   and v['jurisdiction']==key[0] for v in triage.get('scope_dispositions',[])):
+                group['gaps'].append('CANDIDATE_OBJECT_SCOPE_REVIEW_REQUIRED')
             scope_rows = [(provider, row) for provider, row in rows
                           if {"scenario_id": sid, "scenario_sha256": scenario["scenario_sha256"]} in necessary_scenario_row_bindings(task, row)
                           and (row.get("triage_jurisdiction") or row.get("jurisdiction"), row.get("right_type")) == key
-                          and row.get("required_for") not in {"discovery_only", "optional_enrichment"}
+                          and (not ps.enabled(task) or ps.binding_state(task,row,sid)=="ready")
+                          and (row.get("required_for") not in {"discovery_only", "optional_enrichment"}
+                               or task.get("retrieval_workflow_revision") == "api-first-v3" and row.get("action_purpose") == "discovery")
                           and not scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence, supplement=supplement, for_dispatch=False)]
-            recall_rows = [(provider, row) for provider, row in scope_rows if row.get("action_purpose") in {"recall", "provenance"}]
+            recall_purposes = {"recall", "provenance"} | ({"discovery"} if task.get("retrieval_workflow_revision") == "api-first-v3" else set())
+            recall_rows = [(provider, row) for provider, row in scope_rows if row.get("action_purpose") in recall_purposes]
             checked = [query_coverage(evidence, candidates, plan, provider, row, task, strict_lineage=True,
-                                     ledger=ledger, supplement=supplement, scenario_id=sid) for provider, row in recall_rows]
+                                     ledger=ledger, supplement=supplement, scenario_id=sid,
+                                     evidence_root=evidence_root) for provider, row in recall_rows]
             _complete_paginated_series(checked, recall_rows, evidence, candidates, plan, strict_lineage=True,
-                                       task=task, ledger=ledger, supplement=supplement, scenario_id=sid)
+                                       task=task, ledger=ledger, supplement=supplement, scenario_id=sid,
+                                       evidence_root=evidence_root)
             by_id = {item["query_id"]: item for item in checked}
             for provider, row in scope_rows:
                 if row["query_id"] not in by_id:
-                    complete = _scenario_action_complete(evidence, plan, provider, row)
+                    complete = _scenario_action_complete(evidence, plan, provider, row, task)
                     by_id[row["query_id"]] = {"query_id": row["query_id"], "provider": provider,
                         "complete": complete, "gap": "" if complete else "NECESSARY_CANDIDATE_EVIDENCE_MISSING",
                         "execution_phase": row.get("execution_phase"), "search_dimension": row.get("search_dimension"),
@@ -606,6 +696,16 @@ def scenario_coverage_by_scope(task: dict, evidence: dict, candidates: dict, pla
                 if decision in {"unreviewed", "needs_info"}:
                     group["gaps"].append("TRIAGE_" + decision.upper() + ":" + record["candidate_id"])
                 elif decision == "selected" and key[1] in REGISTERED:
+                    from trusted_api import enabled as api_trust_enabled, accepted_verification
+                    if api_trust_enabled(task):
+                        selected_candidate = next((item for _, item in iter_candidates(candidates)
+                            if item.get("candidate_id") == record["candidate_id"]), {})
+                        acceptance = accepted_verification(task, evidence, selected_candidate, key[0], key[1],
+                            scope=record, candidates=candidates, ledger=ledger, supplement=supplement, task_dir=evidence_root)
+                        if not acceptance["complete"]:
+                            group["gaps"].extend("SELECTED_FACT_MISSING:" + record["candidate_id"] + ":" + fact
+                                                 for fact in acceptance["missing"])
+                        continue
                     candidate_rows = [row for _, row in scope_rows if row.get("triage_candidate_id") == record["candidate_id"] and row.get("action_purpose") == "official_verification"]
                     if not candidate_rows:
                         group["gaps"].append("SELECTED_VERIFICATION_UNPLANNED:" + record["candidate_id"])
@@ -619,10 +719,10 @@ def scenario_coverage_by_scope(task: dict, evidence: dict, candidates: dict, pla
                 if specialty_enabled(task) and row.get("action_purpose") == "provenance"
                 and row.get("execution_phase") == "verification" and row.get("triage_candidate_id")}
             retrieval_obligations = [item for item in obligations.values()
-                if item["action_purpose"] in {"recall", "provenance"}
+                if item["action_purpose"] in recall_purposes
                 and item["evidence_obligation_id"] not in candidate_provenance]
             verification_obligations = [item for item in obligations.values()
-                if item["action_purpose"] not in {"recall", "provenance"}
+                if item["action_purpose"] not in recall_purposes
                 or item["evidence_obligation_id"] in candidate_provenance]
             group["retrieval_status"] = "complete" if retrieval_obligations and all(item["retrieval_complete"] for item in retrieval_obligations) and not any(":AXIS_MISSING:" in gap or ":LOCAL_LANGUAGE_MISSING" in gap for gap in group["gaps"]) else "incomplete"
             group["triage_status"] = "incomplete" if group["queues"]["unreviewed"] else "complete"
@@ -657,6 +757,7 @@ def scenario_coverage_by_scope(task: dict, evidence: dict, candidates: dict, pla
                 group["work_reasons"] = reasons
                 if group["gaps"] and not any(item["complete"] for item in obligations.values()):
                     group["status"] = "访问受限" if reasons and all(item["kind"] == "access_limited" for item in reasons) else "待执行"
+            group["status"] = _operating_coverage_status(task, group, by_id.values())
             outputs.append(group)
     return sorted(outputs, key=lambda row: (row["scenario_id"], row["jurisdiction"], row["right_type"]))
 
@@ -750,6 +851,10 @@ def validate_review(review: dict[str, Any], digest: str, evidence: dict[str, Any
 
 
 def official_refs(task: dict[str, Any], evidence: dict[str, Any], plan: dict[str, Any], candidate: dict[str, Any], jurisdiction: str, right_type: str) -> set[str]:
+    from trusted_api import enabled as api_trust_enabled, accepted_candidate_facts
+    if api_trust_enabled(task):
+        return {ref for fact in accepted_candidate_facts(task, evidence, candidate, jurisdiction, right_type).values()
+                for ref in fact["evidence_refs"]}
     from finalize_assessment import _verification_evidence_records, _official_payload_complete
     found = set()
     for requirement in task.get("coverage_requirements", []):
@@ -819,7 +924,7 @@ def _document_number(value: Any) -> str:
     return re.sub(r"[^A-Z0-9]", "", str(value or "").upper())
 
 
-def _claim_documents(evidence: dict[str, Any], plan: dict[str, Any], candidate: dict[str, Any], official: set[str]) -> dict[str, dict[str, str]]:
+def _claim_documents(evidence: dict[str, Any], plan: dict[str, Any], candidate: dict[str, Any], official: set[str], task: dict | None = None) -> dict[str, dict[str, str]]:
     """Return claim number/text only from same-document retained original content.
 
     EPS XML is supported now. Official record adapters can also retain typed
@@ -828,6 +933,21 @@ def _claim_documents(evidence: dict[str, Any], plan: dict[str, Any], candidate: 
     """
     identifiers = {_document_number(candidate.get(key)) for key in ("publication_number", "grant_number", "record_number") if candidate.get(key)}
     found = {}
+    from trusted_api import accepted_candidate_facts
+    fact = accepted_candidate_facts(task or {}, evidence, candidate).get("protection_content")
+    if fact:
+        claims = fact["value"] if isinstance(fact["value"], list) else [fact["value"]]
+        for ordinal, claim in enumerate(claims, 1):
+            if isinstance(claim, dict):
+                number, content = claim.get("number"), claim.get("text")
+            elif isinstance(claim, str):
+                match = re.match(r"\s*(\d+)\s*[.)]\s*", claim)
+                number, content = match.group(1) if match else str(ordinal), claim
+            else:
+                continue
+            if number and content:
+                for ref in fact["evidence_refs"]:
+                    found.setdefault(ref, {})[str(number).lstrip("0") or "0"] = " ".join(str(content).split())
     for provider, query in _plan_rows(plan):
         if query.get("candidate_id") != candidate.get("candidate_id"):
             continue
@@ -886,7 +1006,7 @@ def _typed_comparison_gaps(row: dict[str, Any], task: dict[str, Any], evidence: 
         if not set(criteria[key].get("evidence_refs", [])) & product_refs:
             gaps.append("PRODUCT_SIDE_EVIDENCE_REQUIRED:" + key)
     if row["right_type"] in {"patent", "utility_model"}:
-        documents = _claim_documents(evidence, plan, candidate, authoritative)
+        documents = _claim_documents(evidence, plan, candidate, authoritative, task)
         for key in {"current_claims", "element_mapping"}:
             if not set(criteria.get(key, {}).get("evidence_refs", [])) & set(documents):
                 gaps.append("CLAIM_ORIGINAL_EVIDENCE_REQUIRED:" + key)
@@ -921,6 +1041,11 @@ def _typed_comparison_gaps(row: dict[str, Any], task: dict[str, Any], evidence: 
             gaps.append("CLAIM_FULL_TEXT_MAPPING_INCOMPLETE")
     if row["right_type"] in {"design", "trademark_figurative", "unregistered_design"}:
         rights = {}
+        from trusted_api import accepted_candidate_facts
+        media_fact = accepted_candidate_facts(task, evidence, candidate).get("representative_figures")
+        if media_fact:
+            for ref in media_fact["evidence_refs"]:
+                rights[ref] = _valid_media_hashes(media_fact["value"])
         for ref in authoritative:
             entry = evidence_index(evidence)[ref]
             for record in _payload_records(entry.get("payload")):
@@ -1051,7 +1176,7 @@ def evaluate_row(row: dict[str, Any], second: dict[str, Any] | None, task: dict[
     complete_facts = all(facts.get(key, {}).get("satisfied") is True and second_facts.get(key, {}).get("satisfied") is True for key in CONFIDENCE_FACTS)
     product_bound = all(bool(set(basis.get("product", {}).get("evidence_refs", [])) & set(products)) for basis in (facts, second_facts))
     if candidate:
-        comparison_sources = set(_claim_documents(evidence, plan, candidate, authoritative)) if row["right_type"] in {"patent", "utility_model"} else authoritative
+        comparison_sources = set(_claim_documents(evidence, plan, candidate, authoritative, task)) if row["right_type"] in {"patent", "utility_model"} else authoritative
         for basis in (facts, second_facts):
             if any(not set(basis.get(key, {}).get("evidence_refs", [])) & authoritative for key in ("identity", "scope", "status")):
                 complete_facts = False

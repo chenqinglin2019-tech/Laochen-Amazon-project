@@ -3,7 +3,8 @@ from __future__ import annotations
 
 
 def selected_phase(task: dict, phase: str, transport: str) -> str:
-    if task.get("retrieval_workflow_revision") != "api-first-v1":
+    from common import api_first_revision_enabled
+    if not api_first_revision_enabled(task.get("retrieval_workflow_revision")):
         if phase:
             raise ValueError("RETRIEVAL_PHASE_REQUIRES_API_FIRST_TASK")
         return ""

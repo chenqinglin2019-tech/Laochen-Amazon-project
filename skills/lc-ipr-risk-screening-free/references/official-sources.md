@@ -14,7 +14,9 @@
 
 免费可用的信息入口：
 
-- [USPTO Patent Public Search](https://ppubs.uspto.gov/basic/)：发明及设计专利公开文献发现、原文及图像；授权文献本身不证明今日有效。
+- [USPTO Patent Public Search](https://ppubs.uspto.gov/basic/)：发明及设计专利公开文献发现、原文及图像；授权文献本身不证明今日有效，也不得被分配 `current_status` 事实。
+- [USPTO Patent Center](https://patentcenter.uspto.gov/)：申请状态和档案入口；当前版本在没有逐操作验收的只读适配器前，将其明确记录为内部待实现路线，而不是“官方查无”或“来源受限”。
+- [USPTO Maintenance Fees](https://fees.uspto.gov/)：维护费记录入口；费用事件只能作为状态证据的一部分。
 - [USPTO Assignment Center](https://assignmentcenter.uspto.gov/)：权利转让记录补证，不能单独代替全部现行所有权和专利效力判断。
 - [USPTO Trademark Search](https://tmsearch.uspto.gov/)：文字、读音近似、商品服务及图形检索；[design search codes](https://www.uspto.gov/trademarks/search/design-search-codes) 用于图形召回。
 - [TSDR](https://tsdr.uspto.gov/)：已知商标案的状态、权利人、商品服务、图样和档案核验。
@@ -96,3 +98,7 @@ SerpApi 与 Signa 经账户门禁后可使用免费额度发现。Serper 新任�
 所有升级为自动可用的路线需有当前日期、官方契约、允许的操作范围、真实正例/零结果/详情/截断及访问失败证据。用户只解决登录或验证码后，Agent 应能完成剩余业务。当前验收记录见 [provider-live-acceptance-v24.json](provider-live-acceptance-v24.json)，其中未实测项不能据离线测试改成通过。
 
 历史 `2.3-free` 的来源选择和计划保持冻结，不按此文静默改写；`2.1/2.2` 仅保留历史证据及报告读取。任何未完成路线都应具体说明影响的国家、权利、检索维度或比较字段；未公开申请、未知授权链和未注册权利的覆盖限制不能被转述为无风险。
+
+## Generic 通用占位品牌
+
+`api-first-v3` 对 Amazon 品牌字段（无 byline 时取 `product.brand`；有 byline 时去掉 `Brand:` 前缀或 `Visit the … Store` 包装后）精确 `strip().casefold() == "generic"` 的通用占位，不执行该名称的文字商标发现或详情查询；所有支持国家一致。报告参考品牌名称查询项显示 **无风险（Generic 通用占位，仅名称项）**。真实复合品牌、独立图样／OCR／标识清单中的标识和用户另行提供的自有品牌仍按相应范围处理；未提供的自有品牌保持未评估。此名称项不改变专利、版权、商业外观、图形商标或总体评级。保留原始品牌字段、历史任务和已发布报告，不新增查询或阶段审核。

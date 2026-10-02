@@ -53,7 +53,6 @@
     "discovery_results_per_query": 10,
     "max_refinement_rounds": 2,
     "max_pages_per_query": 8,
-    "browser_fallback_queries_per_scope": 2,
     "browser_fallback_max_candidates": 50,
     "entitlement_max_age_minutes": 30
   },
@@ -567,5 +566,12 @@
       "allow_paid": false,
       "allow_overage": false
     }
+  },
+  "execution_budget": {
+    "active_seconds": 1800,
+    "review_seconds": 900,
+    "review_reserve_seconds": 600,
+    "max_action_rounds": 96,
+    "max_no_progress_rounds": 12
   }
 }

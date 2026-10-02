@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 import math
 import os
@@ -33,9 +35,12 @@ from provider_utils import (
     authorize_current_scenario_action,
     file_lock,
     http_json,
+    http_request,
     json_body,
     quota_summary,
+    raw_path,
     record_result,
+    sanitize_for_evidence,
 )
 from free_search_budget import attempt_context, reserve_search
 
@@ -87,6 +92,13 @@ POST_BODY_KEYS = {
     "options",
     "limit",
 }
+KNOWN_RECORD_OPERATIONS = {"candidate_detail", "trademark_media"}
+MARK_FEATURE_TYPES = {"word", "figurative", "combined", "three_dimensional"}
+V3_FILTER_KEYS = {"offices", "nice_classes", "status_stage", "mark_feature_type", "has_media"}
+
+
+def _v3(task: dict | None) -> bool:
+    return isinstance(task, dict) and task.get("retrieval_workflow_revision") == "api-first-v3"
 
 
 def _is_number(value: Any) -> bool:
@@ -446,8 +458,12 @@ def _request_from_plan(item: dict[str, Any], max_results: int, *, task: dict | N
     metadata = set(PLAN_META_KEYS)
     if task is not None and api_first_enabled(task):
         metadata |= API_FIRST_PLAN_META_KEYS | DECISION_PLAN_META_KEYS | {
-            'search_dimension', 'search_language', 'execution_phase', 'publication_scope'}
-    unexpected = sorted(set(item) - metadata - POST_BODY_KEYS)
+            'search_dimension', 'search_language', 'execution_phase', 'publication_scope',
+            'provider_role', 'source_upstream'}
+    if task is not None and task.get("product_delivery_revision") == "image-fact-v1":
+        metadata |= {"product_delivery_revision", "product_fact_refs"}
+    body_keys = POST_BODY_KEYS | ({"include"} if _v3(task) else set())
+    unexpected = sorted(set(item) - metadata - body_keys)
     if unexpected:
         raise ProviderError(
             "SIGNA_PLAN_PARAMETERS_INVALID",
@@ -456,7 +472,7 @@ def _request_from_plan(item: dict[str, Any], max_results: int, *, task: dict | N
         )
     request_payload = {
         key: value for key, value in item.items()
-        if key in POST_BODY_KEYS
+        if key in body_keys
     }
     raw_query = request_payload.pop("q", None)
     query = raw_query.strip() if isinstance(raw_query, str) else ""
@@ -498,11 +514,12 @@ def _request_from_plan(item: dict[str, Any], max_results: int, *, task: dict | N
         raise ProviderError(
             "SIGNA_PLAN_PARAMETERS_INVALID", "failed", "Signa filters must be an object",
         )
-    if set(filters) != {"offices"}:
+    if ((not _v3(task) and set(filters) != {"offices"})
+            or (_v3(task) and ("offices" not in filters or set(filters) - V3_FILTER_KEYS))):
         raise ProviderError(
             "SIGNA_PLAN_PARAMETERS_INVALID",
             "failed",
-            "Opted-in Signa discovery permits only the explicit offices filter",
+            "Signa filters must match the versioned public search contract",
         )
     nice_classes = filters.get("nice_classes", [])
     if (
@@ -518,6 +535,16 @@ def _request_from_plan(item: dict[str, Any], max_results: int, *, task: dict | N
             "Signa Nice classes must be integers from 1 through 45",
         )
     _target_offices(request_payload)
+    if _v3(task):
+        if "mark_feature_type" in filters and (not isinstance(filters["mark_feature_type"], str) or filters["mark_feature_type"] not in MARK_FEATURE_TYPES):
+            raise ProviderError("SIGNA_PLAN_PARAMETERS_INVALID", "failed", "Signa mark_feature_type must be one public mark type")
+        if "has_media" in filters and not isinstance(filters["has_media"], bool):
+            raise ProviderError("SIGNA_PLAN_PARAMETERS_INVALID", "failed", "Signa has_media must be a boolean")
+        if "status_stage" in filters and (not isinstance(filters["status_stage"], list)
+                or not filters["status_stage"] or any(not isinstance(value, str) or not re.fullmatch(r"[a-z_]+", value) for value in filters["status_stage"])):
+            raise ProviderError("SIGNA_PLAN_PARAMETERS_INVALID", "failed", "Signa status_stage must be a nonempty array of stage names")
+        if "include" in request_payload and request_payload["include"] != ["full_goods_services"]:
+            raise ProviderError("SIGNA_PLAN_PARAMETERS_INVALID", "failed", "Only full_goods_services is a supported Signa row projection")
     return request_payload
 
 
@@ -544,7 +571,7 @@ def consumed_queries(evidence: dict[str, Any]) -> int:
         for run in evidence.get("source_runs", [])
         if isinstance(run, dict)
         and run.get("provider") == SIGNA_PROVIDER
-        and run.get("operation") == SIGNA_OPERATION
+        and run.get("operation") in {SIGNA_OPERATION, *KNOWN_RECORD_OPERATIONS}
         and _search_was_attempted(run)
     )
 
@@ -553,7 +580,7 @@ def query_was_attempted(evidence: dict[str, Any], query_id: str, attempt_id: str
     return any(
         isinstance(run, dict)
         and run.get("provider") == SIGNA_PROVIDER
-        and run.get("operation") == SIGNA_OPERATION
+        and run.get("operation") in {SIGNA_OPERATION, *KNOWN_RECORD_OPERATIONS}
         and str(run.get("query_id") or "") == query_id
         and _search_was_attempted(run)
         and (run.get('quota') or {}).get('attempt_id', 'initial') == attempt_id
@@ -565,7 +592,7 @@ def persisted_stop_reason(evidence: dict[str, Any]) -> str:
     for run in evidence.get("source_runs", []):
         if run.get("provider") != SIGNA_PROVIDER:
             continue
-        if run.get("operation") != SIGNA_OPERATION:
+        if run.get("operation") not in {SIGNA_OPERATION, *KNOWN_RECORD_OPERATIONS}:
             # Credential preflight is non-metered and must be recoverable when
             # the user later configures or replaces the optional credential.
             continue
@@ -658,6 +685,7 @@ def _classifications(value: Any) -> tuple[list[int], list[dict[str, Any]]]:
 
 def normalize(
     payload: dict[str, Any], expected_offices: list[str] | None = None,
+    *, retrieval_workflow_revision: str | None = None,
 ) -> tuple[list[dict[str, Any]], bool, list[dict[str, Any]]]:
     rows = payload.get("data")
     has_more = payload.get("has_more")
@@ -708,15 +736,17 @@ def normalize(
                 "failed",
                 f"Signa returned office {office} outside the task-authorized office filter",
             )
-        primary, stage = _status_parts(item.get("status"))
-        owners = _owners(item.get("owners"))
-        nice, goods = _classifications(item.get("classifications"))
+        v3 = retrieval_workflow_revision == "api-first-v3"
+        status_value = item.get("status")
+        primary, stage = ("", "") if v3 and status_value is None else _status_parts(status_value)
+        owners = _owners([] if item.get("owners") is None else item["owners"]) if v3 else _owners(item.get("owners"))
+        nice, goods = _classifications([] if item.get("classifications") is None else item["classifications"]) if v3 else _classifications(item.get("classifications"))
         image_url = item.get("primary_image_url")
         if image_url is not None and not isinstance(image_url, str):
             raise ProviderError(
                 "RESPONSE_SCHEMA_CHANGED", "failed", "Signa primary image URL schema changed",
             )
-        design_codes = item.get("design_codes")
+        design_codes = item.get("design_codes", [] if v3 else None)
         if not isinstance(design_codes, list):
             raise ProviderError(
                 "RESPONSE_SCHEMA_CHANGED", "failed", "Signa design_codes schema changed",
@@ -758,9 +788,9 @@ def normalize(
             "status_detail": {
                 "primary": primary,
                 "stage": stage,
-                "reason": item["status"].get("reason"),
-                "challenges": item["status"].get("challenges", []),
-                "effective_date": item["status"].get("effective_date"),
+                "reason": (status_value or {}).get("reason"),
+                "challenges": (status_value or {}).get("challenges", []),
+                "effective_date": (status_value or {}).get("effective_date"),
             },
             "nice_classes": nice,
             "classifications": goods,
@@ -805,6 +835,8 @@ def normalize(
                 "checked_at": "",
             },
         }
+        if v3:
+            _enrich_record(candidate, item, retrieval_workflow_revision)
         candidates.append(candidate)
     if has_more and not candidates:
         raise ProviderError(
@@ -813,6 +845,183 @@ def normalize(
             "Signa reported additional pages without returning a result row",
         )
     return candidates, has_more, warnings
+
+
+def _enrich_record(candidate: dict, item: dict, revision: str) -> None:
+    """Preserve direct record fields; never inherit another territory's state."""
+    item = sanitize_for_evidence(item)
+    provenance = item.get("provenance") if isinstance(item.get("provenance"), dict) else {}
+    feature = str(item.get("mark_feature_type") or "")
+    candidate.update(
+        retrieval_workflow_revision=revision, source_upstream="signa",
+        source_record_sha256=sha256_json(item), source_record_hash_stage="retained-v1",
+        candidate_nature="trademark_record", record_identity=candidate["provider_record_id"],
+        right_type="trademark_word" if feature == "word" else "trademark_figurative" if feature in MARK_FEATURE_TYPES else "unknown",
+        right_type_status="source_mark_feature_type" if feature in MARK_FEATURE_TYPES else "unresolved",
+        source_updated_at=provenance.get("office_updated_at") or item.get("office_updated_at") or item.get("updated_at") or None,
+        source_data_date=provenance.get("source_data_date") or candidate.get("source_data_date") or "",
+        source_provenance=provenance, record_scope="target_record",
+        field_provenance={name: name for name in item if name not in {"derived", "relationships", "coverage"}},
+    )
+    for name in ("office_record_id", "office_url", "filing_date", "registration_date", "expiry_date",
+                 "renewal_due_date", "last_renewal_date", "publication_date", "termination_date", "priority_date",
+                 "register", "media", "has_media", "statements", "filing_bases", "priority_claims", "publications",
+                 "relationships", "coverage", "derived", "text_variants", "events_count", "assignments_count", "documents_count"):
+        if name in item:
+            candidate[name] = item[name]
+    candidate["owner_records"] = item.get("owners") if isinstance(item.get("owners"), list) else []
+    candidate["status_detail"].update({
+        "basis": (item.get("status") or {}).get("basis"),
+        "raw": (item.get("status") or {}).get("raw"),
+        "record_scope": "target_record", "jurisdiction": candidate["jurisdiction"],
+        "provider_record_id": candidate["provider_record_id"], "source_field": "status",
+    })
+    raw_goods = item.get("classifications") if isinstance(item.get("classifications"), list) else []
+    for row, raw in zip(candidate["goods_services"], raw_goods):
+        # Missing completeness metadata is unknown, not a complete registration.
+        row["truncated"] = raw.get("goods_services_text_truncated")
+        if "scope" in raw:
+            row["scope"] = raw["scope"]
+    candidate["satisfied_facts"] = ["record_identity"]
+    if candidate.get("status_primary") and candidate.get("status_stage"):
+        candidate["satisfied_facts"].append("legal_status")
+    if candidate["owners"]:
+        candidate["satisfied_facts"].append("holder_identity")
+    if raw_goods and all(row.get("text") and row.get("truncated") is False and row.get("scope") != "as_filed" for row in candidate["goods_services"]):
+        candidate["satisfied_facts"].append("goods_services")
+
+
+def normalize_detail(payload: dict, item: dict) -> dict:
+    """Normalize one public Signa detail record, requiring its exact ID and office."""
+    if payload.get("object") != "trademark" or payload.get("id") != item.get("provider_record_id"):
+        raise ProviderError("RESPONSE_IDENTITY_MISMATCH", "failed", "Signa detail does not match the requested trademark ID")
+    expected = str(item.get("jurisdiction") or "").upper()
+    office = "EM" if expected == "EU" else expected
+    actual_country = str(payload.get("jurisdiction_code") or payload.get("office_code") or "").upper()
+    if ("EU" if actual_country == "EM" else actual_country) != expected:
+        raise ProviderError("SIGNA_OFFICE_SCOPE_VIOLATION", "failed", "Signa detail belongs to a different target territory")
+    envelope = {"object": "list", "data": [payload], "has_more": False,
+                "pagination": {"cursor": None}, "request_id": payload.get("request_id", "")}
+    candidate = normalize(envelope, [office], retrieval_workflow_revision="api-first-v3")[0][0]
+    candidate["candidate_id"] = item["candidate_id"]
+    candidate["source_role"] = "api_record"
+    return candidate
+
+
+def _known_record_params(item: dict, task: dict) -> dict:
+    if not _v3(task):
+        raise ProviderError("SIGNA_OPERATION_MISMATCH", "failed", "Known Signa record operations require api-first-v3")
+    operation = item.get("operation")
+    if operation not in KNOWN_RECORD_OPERATIONS or not item.get("candidate_id"):
+        raise ProviderError("QUERY_PLAN_SCOPE_MISMATCH", "failed", "A Signa known-record action must bind a candidate")
+    record = item.get("provider_record_id")
+    if not isinstance(record, str) or not re.fullmatch(r"tm_[A-Za-z0-9_-]{1,120}", record):
+        raise ProviderError("SIGNA_RECORD_ID_INVALID", "failed", "Signa detail requires a retained tm_ record ID")
+    missing = item.get("missing_facts")
+    if not isinstance(missing, list) or not missing or any(not isinstance(value, str) or not value.strip() for value in missing):
+        raise ProviderError("SIGNA_DETAIL_GAP_REQUIRED", "failed", "Signa details and media must bind concrete missing or truncated facts")
+    jurisdiction = item.get("jurisdiction")
+    if not isinstance(jurisdiction, str) or not re.fullmatch(r"[A-Z]{2}", jurisdiction) or jurisdiction == "WO":
+        raise ProviderError("SIGNA_OFFICE_SCOPE_VIOLATION", "failed", "Signa detail requires one target territory")
+    params = {name: item[name] for name in ("candidate_id", "provider_record_id", "missing_facts", "right_type") if name in item}
+    if operation == "trademark_media":
+        media = item.get("media_id")
+        if not isinstance(media, str) or not re.fullmatch(r"med_[A-Za-z0-9_-]{1,120}", media):
+            raise ProviderError("SIGNA_MEDIA_ID_INVALID", "failed", "Signa media must use a retained med_ identifier")
+        params["media_id"] = media
+    return params
+
+
+def _media_result(body: bytes, headers: dict, item: dict, base: str) -> tuple[dict, str]:
+    mime = next((str(value).split(";", 1)[0].lower().strip() for key, value in headers.items() if key.lower() == "content-type"), "")
+    signatures = {
+        "image/png": ("png", body.startswith(b"\x89PNG\r\n\x1a\n")),
+        "image/jpeg": ("jpg", body.startswith(b"\xff\xd8\xff")),
+        "image/gif": ("gif", body.startswith((b"GIF87a", b"GIF89a"))),
+        "image/webp": ("webp", body.startswith(b"RIFF") and body[8:12] == b"WEBP"),
+        "image/tiff": ("tiff", body.startswith((b"II*\x00", b"MM\x00*"))),
+    }
+    suffix, valid = signatures.get(mime, ("bin", False))
+    if not body or not valid:
+        raise ProviderError("RESPONSE_SCHEMA_CHANGED", "failed", "Signa media response is not a supported image byte stream")
+    try:
+        from PIL import Image
+    except ImportError as exc:
+        raise ProviderError("RESPONSE_SCHEMA_CHANGED", "failed", "The installed image reader is unavailable") from exc
+    try:
+        with Image.open(io.BytesIO(body)) as picture:
+            width, height = picture.size
+            picture.verify()
+        if width <= 0 or height <= 0:
+            raise ValueError("empty image")
+    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+        raise ProviderError("RESPONSE_SCHEMA_CHANGED", "failed", "Signa image bytes could not be decoded or verified") from exc
+    media = {"media_id": item["media_id"], "provider_record_id": item["provider_record_id"],
+             "mime_type": mime, "sha256": hashlib.sha256(body).hexdigest(), "bytes": len(body),
+             "width": width, "height": height,
+             "url": base + "/v1/trademarks/" + item["provider_record_id"] + "/media/" + item["media_id"],
+             "content_downloaded": True}
+    return {"candidate_id": item["candidate_id"], "provider_record_id": item["provider_record_id"],
+            "jurisdiction": item["jurisdiction"], "right_type": item.get("right_type"),
+            "retrieval_workflow_revision": "api-first-v3", "source_upstream": "signa", "source_role": "api_record",
+            "record_identity": item["provider_record_id"], "record_scope": "target_record",
+            "media": [media], "source_updated_at": None, "satisfied_facts": ["representative_figures"],
+            "field_provenance": {"media": "response_bytes"}, "authoritative_for_final_rating": False}, suffix
+
+
+def _execute_known_record(task_dir: Path, query_id: str, task: dict, item: dict, *, attempt_id: str = "initial", retry_reason: str = "") -> dict:
+    params = _known_record_params(item, task)
+    operation = item["operation"]
+    evidence = ensure_object(load_json(task_dir / "evidence.json"), "evidence.json")
+    attempt = attempt_context(attempt_id, retry_reason)
+    body = b""
+    suffix = "json"
+    quota = dict(attempt)
+    attempted = False
+    precheck = None
+    normalized = None
+    options = {"provider": SIGNA_PROVIDER, "operation": operation, "query": str(item.get("q") or ""),
+               "jurisdiction": item["jurisdiction"], "evidence_type": "trademark", "query_id": query_id,
+               "request_params": params, "mandatory": False, "authoritative_for_final_rating": False,
+               "source_environment": "test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1" else "commercial_freemium_beta_free"}
+    try:
+        if query_was_attempted(evidence, query_id, attempt_id):
+            raise ProviderError(QUERY_ALREADY_ATTEMPTED_CODE, "access_limited", "This exact Signa action has already attempted its request")
+        if consumed_queries(evidence) >= SIGNA_FREE_MAX_QUERIES_PER_TASK:
+            raise ProviderError(LOCAL_LIMIT_CODE, "access_limited", "Shared Signa task request limit is exhausted")
+        stop = persisted_stop_reason(evidence)
+        if stop and attempt_id == "initial":
+            raise ProviderError("SIGNA_PERSISTED_STOP", "access_limited", "A Signa zero-payment stop is recorded: " + stop)
+        config, base, key = settings()
+        office = "EM" if item["jurisdiction"] == "EU" else item["jurisdiction"]
+        precheck = _precheck(config, base, key, {"filters": {"offices": [office]}})
+        precheck["local_reservation"] = reserve_search("signa", key, base, remaining=precheck["usage"]["remaining"],
+            task_dir=task_dir, query_id=query_id, plan_entry_sha256=sha256_json(item), **attempt,
+            max_queries_per_task=SIGNA_FREE_MAX_QUERIES_PER_TASK)
+        timeout = int(config.get("http", {}).get("timeout_seconds", 30))
+        path = "/v1/trademarks/" + item["provider_record_id"]
+        attempted = True
+        if operation == "candidate_detail":
+            payload, headers, body = http_json(base + path, headers=auth_headers(key), timeout=timeout, retries=0)
+            normalized = normalize_detail(payload, item)
+        else:
+            # The public media proxy needs no bearer token, and redirects remain same-origin.
+            _, headers, body = http_request(base + path + "/media/" + item["media_id"], headers={"Accept": "image/*"}, timeout=timeout, retries=0)
+            normalized, suffix = _media_result(body, headers, item, base)
+            normalized["media"][0]["path"] = str(raw_path(task_dir, SIGNA_PROVIDER, query_id, normalized["media"][0]["sha256"], suffix))
+        try:
+            postcheck = _postcheck(config, base, key)
+        except ProviderError as exc:
+            quota.update(_quota_record(headers, network_attempted=True, precheck=precheck, billing_safe=False))
+            raise ProviderError("SIGNA_POSTCHECK_UNVERIFIED", "access_limited", "Signa returned data but its post-request zero-payment state could not be proved: " + exc.code) from None
+        quota.update(_quota_record(headers, network_attempted=True, precheck=precheck, postcheck=postcheck, billing_safe=True))
+        if quota.get("quota_headers_valid") is not True:
+            raise ProviderError("SIGNA_QUOTA_STATE_UNVERIFIED", "access_limited", "Signa quota headers are malformed")
+        return record_result(task_dir, **options, status="success", normalized=normalized, raw_body=body, raw_suffix=suffix, quota=quota)
+    except ProviderError as exc:
+        quota.update(network_request_attempted=attempted, search_request_attempted=attempted)
+        return record_result(task_dir, **options, status=exc.source_status, error_code=exc.code, detail=exc.detail,
+                             normalized=normalized, raw_body=body or None, raw_suffix=suffix, quota=quota)
 
 
 def _quota_record(
@@ -909,7 +1118,7 @@ def _record_failure(
         mandatory=False,
         request_params={
             key: value for key, value in item.items()
-            if key in POST_BODY_KEYS or key == "right_type"
+            if key in POST_BODY_KEYS or key in {"right_type", "include"}
         },
         query_id=str(item.get("query_id") or ""),
         quota=quota or {
@@ -932,6 +1141,8 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
         plan = ensure_object(load_json(task_dir / "search-plan.json"), "search-plan.json")
         item = authorize_signa_free_plan_entry(task, plan, query_id)
         authorize_current_scenario_action(task_dir, task, SIGNA_PROVIDER, item)
+        if item.get("operation") in KNOWN_RECORD_OPERATIONS:
+            return _execute_known_record(task_dir, query_id, task, item, attempt_id=attempt_id, retry_reason=retry_reason)
         evidence = ensure_object(load_json(task_dir / "evidence.json"), "evidence.json")
         used = consumed_queries(evidence)
         stop = persisted_stop_reason(evidence)
@@ -1005,7 +1216,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
                 retries=0,
             )
             candidates, has_more, warnings = normalize(
-                payload, _target_offices(request_payload),
+                payload, _target_offices(request_payload), retrieval_workflow_revision=task.get("retrieval_workflow_revision"),
             )
         except ProviderError as exc:
             if exc.http_status == 400:
@@ -1096,7 +1307,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
             name for name in ("monthly_remaining", "daily_remaining")
             if _nonnegative_integer(quota.get(name)) == 0
         ]
-        if exhausted_dimensions:
+        if exhausted_dimensions and not _v3(task):
             return _record_failure(
                 task_dir,
                 item,
@@ -1118,7 +1329,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
         if warnings:
             warning_codes = [str(value.get("code") or "warning") for value in warnings]
             incomplete_reasons.append("provider warnings: " + ", ".join(warning_codes))
-        if incomplete_reasons:
+        if incomplete_reasons and not _v3(task):
             return _record_failure(
                 task_dir,
                 item,
@@ -1138,6 +1349,15 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
             "role": "discovery_only",
             "authoritative_for_final_rating": False,
         }
+        if _v3(task):
+            pagination = payload.get("pagination") or {}
+            normalized["search_metadata"] = {
+                "total_hits": pagination.get("total_count"), "retrieved_hits": len(candidates), "reviewed_hits": None,
+                "truncated": bool(has_more or warnings), "stop_reason": "additional_pages_or_warnings" if incomplete_reasons else "query_exhausted",
+                "source_updated_at": None, "schema_valid": True, "warnings": warnings,
+            }
+            if exhausted_dimensions:
+                quota["free_quota_exhausted_after_response"] = True
         return record_result(
             task_dir,
             provider=SIGNA_PROVIDER,
@@ -1153,7 +1373,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
             mandatory=False,
             request_params={
                 key: value for key, value in item.items()
-                if key in POST_BODY_KEYS or key == "right_type"
+                if key in POST_BODY_KEYS or key in {"right_type", "include"}
             },
             query_id=query_id,
             source_environment=(

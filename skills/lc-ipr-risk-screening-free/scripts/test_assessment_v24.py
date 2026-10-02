@@ -360,6 +360,20 @@ class ScopedAssessmentTests(unittest.TestCase):
 
 
 class SearchCoverageTests(unittest.TestCase):
+    def test_operating_total_status_matches_completed_components_and_preserves_gaps(self):
+        from assessment_v24 import _operating_coverage_status
+        task = {'assessment_revision':'known-findings-risk-v1'}
+        scope = {'status':'待执行', 'retrieval_status':'complete', 'triage_status':'complete',
+            'verification_status':'complete', 'gaps':[]}
+        self.assertEqual(_operating_coverage_status(task, scope, []), '满足已定义要求')
+        scope['gaps'] = ['PRODUCT_FACT_UNKNOWN']
+        self.assertEqual(_operating_coverage_status(task, scope, []), '部分完成')
+        self.assertEqual(scope['gaps'], ['PRODUCT_FACT_UNKNOWN'])
+        self.assertEqual(_operating_coverage_status({}, scope, []), '待执行')
+        scope['retrieval_status'] = 'incomplete'
+        self.assertEqual(_operating_coverage_status(task, scope, []), '待执行')
+        self.assertEqual(_operating_coverage_status(task, scope, [{'retrieval_complete':True}]), '部分完成')
+
     def setUp(self):
         self.query = {"query_id": "Q", "operation": "search", "jurisdiction": "US", "right_type": "patent",
                       "requirement_ids": ["COV"], "search_dimension": "text", "search_language": "en", "execution_phase": "initial"}

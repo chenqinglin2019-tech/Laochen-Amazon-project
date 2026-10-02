@@ -36,15 +36,14 @@ test("PPS stale zero is not bound before this submission changes results", async
   assert.equal(fresh.query_bound,true); assert.equal(fresh.history_binding.result_set_id,"L2");
 });
 
-test("PPS stops at the sample boundary and retains explicit omitted rows", async t => {
+test("PPS retains all 57 cards on a returned page before stopping active acquisition", async t => {
   const {page, dir} = await fixture(t);
-  const rows = Array.from({length:4},(_,i)=>`<div class="slick-row"><span class="slick-cell" aria-describedby="slickgrid_1documentId">US 1140108${i} B2</span><span class="slick-cell" aria-describedby="slickgrid_1inventionTitle">Toy ${i}</span></div>`).join("");
+  const rows = Array.from({length:57},(_,i)=>`<div class="slick-row"><span class="slick-cell" aria-describedby="slickgrid_1documentId">US ${114010800+i} B2</span><span class="slick-cell" aria-describedby="slickgrid_1inventionTitle">Toy ${i}</span></div>`).join("");
   await page.setContent(`<trix-editor class="trix" aria-label="Enter query text">toy</trix-editor><div id="searchResults-content"><div class="resultInfo"><span class="lQuery">L1:</span><span class="resultNumber">1000</span> results found.</div><div id="search-results-table"><div class="slick-viewport" style="height:200px;overflow:auto">${rows}</div></div></div>`);
-  const result=await collectPpubsRenderedResults(page,{result_set_id:"L1",rendered_query:"toy"},dir,"sample",{maxCandidates:2});
-  assert.equal(result.candidates.length,2); assert.equal(result.result_coverage.stop_reason,"bounded_sample_limit");
+  const result=await collectPpubsRenderedResults(page,{result_set_id:"L1",rendered_query:"toy"},dir,"sample",{maxCandidates:50});
+  assert.equal(result.candidates.length,57); assert.equal(result.result_coverage.stop_reason,"bounded_sample_limit");
   assert.equal(result.result_coverage.truncated,true); assert.equal(result.result_coverage.total_hits,1000);
-  assert.equal(result.result_pages[0].viewports[0].omitted_visible_row_count,2);
-  assert.equal(result.result_pages[0].viewports[0].rows.length,2);
+  assert.equal(result.result_pages[0].viewports[0].rows.length,57);
 });
 
 test("bounded diagnostics never retain query tokens, response bodies or arbitrary errors",()=>{

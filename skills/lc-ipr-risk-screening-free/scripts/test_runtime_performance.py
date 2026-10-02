@@ -21,6 +21,67 @@ class SchedulingTests(unittest.TestCase):
     setUp = test_workflow_v24.WorkflowTests.setUp
     tearDown = test_workflow_v24.WorkflowTests.tearDown
 
+    def _ops_fault_pass(self, fault):
+        plan = generate_plan(self.path)
+        rows = plan['queries']['epo_ops'][:3]
+        plan['queries'] = {'epo_ops': rows}
+        atomic_write_json(self.path / 'search-plan.json', plan)
+        def execute(command, **kwargs):
+            row = next(item for item in rows if item['query_id'] == command[1])
+            retained = self.path / ('fault-' + row['query_id'] + '.xml')
+            retained.write_text('<fault xmlns="http://ops.epo.org"><code>' + fault +
+                '</code><message>' + ('No results found' if fault == 'SERVER.EntityNotFound'
+                    else 'No match for accept header') + '</message></fault>')
+            result = runtime.record_gap(self.path, 'epo_ops', row, 'HTTP_ERROR', 'Retained synthetic OPS fault')
+            evidence = load_json(self.path / 'evidence.json')
+            run = next(item for item in evidence['source_runs'] if item['run_id'] == result['run_id'])
+            run.update(raw_paths=[str(retained)], payload_digest=sha256_file(retained),
+                submission_state='submitted', quota={'network_request_attempted': True})
+            atomic_write_json(self.path / 'evidence.json', evidence)
+            return subprocess.CompletedProcess(command, 0,
+                '{"status":"access_limited","error_code":"HTTP_ERROR"}', '')
+        with patch('runtime_v24.capabilities', return_value=[{'provider': 'epo_ops', 'executable': True}]), \
+                patch('run_api_plan.command_for', side_effect=lambda root, task, provider, row: [provider, row['query_id']]), \
+                patch('runtime_v24.subprocess.run', side_effect=execute) as network:
+            output = runtime.execute_api_plan(self.path)
+        return output, network, load_json(self.path / 'evidence.json')
+
+    def test_ops_accept_protocol_fault_stops_same_operation_after_first_attempt(self):
+        output, network, evidence = self._ops_fault_pass('CLIENT.NotAcceptable')
+        self.assertEqual(network.call_count, 1)
+        self.assertEqual(output['counts']['executed'], 1)
+        self.assertEqual(output['counts']['blocked'], 2)
+        physical = [run for run in evidence['source_runs'] if run.get('quota', {}).get('network_request_attempted')]
+        self.assertEqual(len(physical), 1)
+        self.assertEqual(physical[0]['error_code'], 'HTTP_ERROR')
+        blocked = [row for row in output['results'] if row.get('operation_stop')]
+        self.assertEqual(len(blocked), 2)
+        self.assertTrue(all(row['operation_stop']['reason'] == 'CLIENT.NotAcceptable' for row in blocked))
+        # Repeated advancement must not submit the same unchanged fault again.
+        for _ in range(2):
+            with patch('runtime_v24.capabilities', return_value=[{'provider': 'epo_ops', 'executable': True}]), \
+                    patch('runtime_v24.subprocess.run') as resumed:
+                repeated = runtime.execute_api_plan(self.path)
+            resumed.assert_not_called()
+            self.assertEqual(repeated['counts']['blocked'] + repeated['counts']['blocked_reused'], 3)
+        physical_after = [run for run in load_json(self.path / 'evidence.json')['source_runs']
+            if run.get('quota', {}).get('network_request_attempted')]
+        self.assertEqual(physical_after, physical)
+
+    def test_ops_missing_individual_record_does_not_stop_batch(self):
+        output, network, evidence = self._ops_fault_pass('SERVER.EntityNotFound')
+        self.assertEqual(network.call_count, 3)
+        self.assertEqual(output['counts']['executed'], 3)
+        self.assertTrue(all(not row.get('operation_stop') for row in output['results']))
+
+    def test_operation_circuit_is_bound_to_operation_and_current_context(self):
+        row = {'operation': 'search', 'query_compiler_revision': 'ops-v1'}
+        with patch('source_operation.operation_acceptance_context', return_value={'adapter_version': 'a'}) as context:
+            a = runtime._operation_stop_key(self.task, 'epo_ops', row)
+            self.assertNotEqual(a, runtime._operation_stop_key(self.task, 'epo_ops', {**row, 'operation': 'images'}))
+            context.return_value = {'adapter_version': 'b'}
+            self.assertNotEqual(a, runtime._operation_stop_key(self.task, 'epo_ops', row))
+
     def test_deferred_owner_terms_reach_later_wave_without_rehashing(self):
         generate_plan(self.path)
         atomic_write_json(self.path / "normalized-candidates.json", {"patents": [

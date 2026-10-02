@@ -20,7 +20,7 @@ from urllib.parse import urlsplit
 from platform_runtime import inspect_platform
 
 ROOT = Path(__file__).resolve().parents[1]
-PYTHON_MIN = (3, 12)
+PYTHON_MIN = (3, 9)
 NODE_MIN = 22
 
 
@@ -131,9 +131,10 @@ def python_probe(executable):
     code = ("import json,sys,importlib.util,importlib.metadata; "
             f"sys.path.insert(0,{str(Path(__file__).resolve().parent)!r}); "
             "from platform_runtime import inspect_platform; "
-            "s=importlib.util.find_spec('pypdf'); "
-            "print(json.dumps({'version':list(sys.version_info[:3]),'executable':sys.executable,'pypdf':bool(s),"
-            "'pypdf_version':importlib.metadata.version('pypdf') if s else None,"
+            "from runtime_compat import install_existing_dependencies,dependency_info; "
+            "install_existing_dependencies(); p=dependency_info('pypdf'); t=dependency_info('tomllib'); "
+            "print(json.dumps({'version':list(sys.version_info[:3]),'executable':sys.executable,'pypdf':p['available'],"
+            "'pypdf_version':p['version'],'dependencies':{'pypdf':p,'tomllib':t},"
             "'is_venv':sys.prefix!=sys.base_prefix,'prefix':sys.prefix,'platform':inspect_platform()}))")
     rc, stdout, _ = _probe([str(executable), "-c", code])
     try:
@@ -207,7 +208,8 @@ def inspect_install(root=ROOT, python=None):
     auth = {"file": component, "hash_matches": bool(binary and _regular(binary) and
             hashlib.sha256(binary.read_bytes()).hexdigest() == hashes.get(component))}
     files = local_file_checks(root)
-    deps_ready = bool(py and py["supported"] and py["pypdf"] and py.get("pypdf_version") == "6.10.0" and node_result["supported"]
+    deps_ready = bool(py and py["supported"] and py["pypdf"] and py.get("pypdf_version") == "6.10.0"
+                      and py.get("dependencies", {}).get("tomllib", {}).get("available") and node_result["supported"]
                       and installed == expected and browser.get("status") == "available" and pdf["available"])
     configured = files["config.json"]["status"] == "configured" and files[".env"]["status"] == "valid"
     runs = Path(str(runtime.get("default_runs_dir") or "runs-free")).expanduser()

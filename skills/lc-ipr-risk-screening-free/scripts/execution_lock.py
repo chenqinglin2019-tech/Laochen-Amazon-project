@@ -6,7 +6,7 @@ import os
 
 @contextmanager
 def execution_lock(task_dir: Path, name: str):
-    if name not in {"api", "browser"}:
+    if name not in {"api", "browser", "product", "discovery-semantics", "source-operation", "scope-cancellation", "delivery", "budget"}:
         raise ValueError("Unknown execution lock")
     with (task_dir / f".{name}-execution.lock").open("a+b") as handle:
         try:

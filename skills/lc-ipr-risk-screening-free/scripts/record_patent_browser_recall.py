@@ -120,7 +120,7 @@ def main() -> None:
     try:
         if args.provider == "espacenet_browser" and task.get("schema_version") != "2.1-free":
             raise ValueError("Espacenet browser automation is legacy-only; use EPO OPS")
-        allowed_transports = {"manual"} if args.provider == "wipo_patentscope_browser" else {"cdp"}
+        allowed_transports = {"manual"} if args.provider == "wipo_patentscope_browser" else ({"cdp", "cua"} if task.get("schema_version") == "2.4-free" else {"cdp"})
         provenance = capture_provenance(capture, task, allowed_transports=allowed_transports)
         provenance.update(validate_browser_execution(capture, task, task_dir, args.provider))
         query = str(capture.get("query") or "").strip()

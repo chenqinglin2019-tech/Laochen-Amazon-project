@@ -1294,7 +1294,8 @@ export async function collectTmRenderedResults(page, initial, taskDir, stem, con
   const limit = Math.min(8, Math.max(1, Number(maxPages) || 8));
   for (let index = 1; index <= limit; index++) {
     if (!current.stable || !current.query_bound || current.tmsearch_binding?.total_hits !== total || !current.candidates?.length) break;
-    if (found.size + current.candidates.length > maxCandidates) { stop = "bounded_sample_limit"; break; }
+    // A page already returned by the source is retained in full even when it
+    // crosses the active-acquisition limit; the limit stops the next page.
     const serials = current.candidates.map(row => row.serial_number);
     if (serials.some(serial => found.has(serial)) || new Set(serials).size !== serials.length) { stop = "browser_repeated_page"; break; }
     const screenshotPath = path.join(taskDir, "screenshots", `${stem}-tm-page-${index}.png`);
@@ -1486,8 +1487,8 @@ async function searchSemanticSnapshot(page, provider, options = {}) {
   }
   const challenge = detectChallenge(state.url, state.title, state.bodyText);
   const rateLimited = browserRateLimited(state.bodyText);
-  const binding = tmBinding ? tmBinding.query_bound : !ppubs || Boolean(ppubs.result_set_id && options.historyBinding?.result_set_id === ppubs.result_set_id
-    && options.historyBinding?.query === options.renderedQuery && options.historyBinding?.total_hits === ppubs.total_hits
+  const binding = tmBinding ? tmBinding.query_bound : !ppubs || Boolean(options.historyBinding?.bound !== false && ppubs.result_set_id && options.historyBinding?.result_set_id === ppubs.result_set_id
+    && ppubsQueryTextEqual(options.historyBinding?.query, options.renderedQuery) && options.historyBinding?.total_hits === ppubs.total_hits
     && ppubs.editor_value === options.renderedQuery);
   const noResult = tmBinding ? binding && !tmLoading && tmBinding.total_hits === 0 && !candidates.length : ppubs ? binding && ppubs.total_hits === 0 && /results found/i.test(ppubs.result_text) : explicitNoResult(state.bodyText);
   const queryError = ppubs ? Boolean(ppubs.query_error)
@@ -1551,7 +1552,11 @@ export async function waitForSearchSemanticState(page, provider, timeoutMs, conf
           }
           bindingAttempts.push({ at: nowIso(), observed_result_set_id: snapshot.ppubs.result_set_id,
             result_set_id: options.historyBinding?.result_set_id || snapshot.ppubs.result_set_id,
-            bound: Boolean(options.historyBinding), ...(errorCode ? { error_code: errorCode } : {}) });
+            bound: options.historyBinding?.bound === true,
+            ...(options.historyBinding?.failure_reason ? { failure_reason: options.historyBinding.failure_reason } : {}),
+            ...(options.historyBinding?.query ? { observed_history_query: options.historyBinding.query } : {}),
+            ...(options.historyBinding?.total_hits !== undefined ? { observed_history_total_hits: options.historyBinding.total_hits } : {}),
+            ...(errorCode ? { error_code: errorCode } : {}) });
           snapshot = await searchSemanticSnapshot(page, provider, options);
         }
       }
@@ -1705,10 +1710,21 @@ export async function extractAmazonProduct(page, { strict = false } = {}) {
     for (const row of document.querySelectorAll(
       "#productDetails_detailBullets_sections1 tr, #productDetails_techSpec_section_1 tr, #detailBullets_feature_div li"
     )) {
-      const cells = Array.from(row.querySelectorAll("th,td,span"))
-        .map((cell) => (cell.innerText || cell.textContent || "").trim())
-        .filter(Boolean);
-      if (cells.length >= 2 && !specs[cells[0]]) specs[cells[0]] = cells.slice(1).join(" ");
+      const clean = (value) => String(value || "").replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+        .replace(/\s+/g, " ").trim();
+      // A detail bullet's wrapper spans contain the label and value again.
+      // Read table cells once, or split the rendered bullet at its first colon.
+      const cells = Array.from(row.querySelectorAll(":scope > th, :scope > td"))
+        .map((cell) => clean(cell.innerText || cell.textContent));
+      let key = "", value = "";
+      if (cells.length >= 2) {
+        key = cells[0].replace(/\s*[:：]\s*$/, ""); value = cells.slice(1).filter(Boolean).join(" ");
+      } else if (row.tagName === "LI") {
+        const text = clean(row.innerText || row.textContent);
+        const pair = text.match(/^([^:：]+)[:：]\s*(.+)$/);
+        if (pair) { key = pair[1].trim(); value = pair[2].trim(); }
+      }
+      if (key && value && !Object.hasOwn(specs, key)) specs[key] = value;
     }
     const isVisible = (element) => {
       const box = element.getBoundingClientRect();
@@ -1796,6 +1812,30 @@ export async function collectAmazonGallery(page, expectedAsin, maxViews = 12, { 
     reason: "Gallery images are observed product views; internal structure, hidden faces, and packaging completeness require product evidence review." };
 }
 
+export function confirmedAmazonVariant(task, actualAsin, selected, changeReview = null) {
+  const variant = { label: selected ? "Selected option" : "ASIN", value: selected || actualAsin,
+    confirmed: Boolean(actualAsin && actualAsin === String(task.product?.requested_asin || "").toUpperCase()) };
+  if (task.product_entry_revision !== undefined) {
+    if (task.product_entry_revision !== "dual-entry-v1" || task.request?.entry_type !== "amazon_url") {
+      throw new Error("PRODUCT_ENTRY_CONTRACT_INVALID");
+    }
+    variant.confirmed = /^[A-Z0-9]{10}$/.test(actualAsin);
+    const frozen = task.product_identity;
+    if (frozen?.status === "frozen" && (frozen.binding?.asin !== actualAsin
+        || frozen.binding?.variant?.label !== variant.label || frozen.binding?.variant?.value !== variant.value
+        || frozen.binding?.variant?.confirmed !== true)) {
+      if (!changeReview || !["target_change", "identity_correction"].includes(changeReview.kind)
+          || changeReview.expected_target_sha256 !== frozen.sha256 || changeReview.actual_asin !== actualAsin
+          || JSON.stringify(changeReview.variant) !== JSON.stringify(variant)
+          || !String(changeReview.reason || "").trim()
+          || changeReview.kind === "target_change" && !String(changeReview.user_statement || "").trim()) {
+        throw new Error("PRODUCT_FROZEN_TARGET_MISMATCH");
+      }
+    }
+  }
+  return variant;
+}
+
 async function captureAmazon(args, config) {
   const taskDir = path.resolve(String(args.task_dir || ""));
   const task = await readJson(path.join(taskDir, "task.json"));
@@ -1804,7 +1844,17 @@ async function captureAmazon(args, config) {
   if (task.checkpoints?.credential_preflight?.status !== "success") {
     throw new Error("Credential preflight must pass before opening Amazon");
   }
-  const requestedUrl = String(task.request?.url || "");
+  if (task.product_entry_revision !== undefined && (task.product_entry_revision !== "dual-entry-v1" || task.request?.entry_type !== "amazon_url")) throw new Error("PRODUCT_ENTRY_NOT_AMAZON");
+  const changeReview = args.change_review ? await readJson(path.resolve(String(args.change_review))) : null;
+  if (changeReview && (changeReview.expected_target_sha256 !== task.product_identity?.sha256
+      || !["target_change", "identity_correction"].includes(changeReview.kind))) {
+    throw new Error("PRODUCT_TARGET_CHANGE_REVIEW_INVALID");
+  }
+  const requestedUrl = String(changeReview?.new_url || task.request?.url || "");
+  if (new URL(requestedUrl).protocol !== "https:"
+      || new URL(requestedUrl).hostname.replace(/^www\./, "") !== task.request?.amazon_host) {
+    throw new Error("PRODUCT_TARGET_CHANGE_HOST_MISMATCH");
+  }
   const session = await connectSession(config);
   const provenance = sanitizedSession(session.version, session.sessionId);
   let page = session.context.pages().find((item) => item.url().includes(task.request?.amazon_host || ""));
@@ -1837,6 +1887,8 @@ async function captureAmazon(args, config) {
   const product = await extractAmazonProduct(page, { strict: recallIntegrityEnabled(task) });
   const urlAsin = state.url.match(/\/(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})(?:[/?]|$)/i)?.[1]?.toUpperCase() || "";
   const actualAsin = String(product.pageAsin || urlAsin).toUpperCase();
+  const selected = product.selectedVariants.join(" | ").slice(0, 500);
+  const variant = confirmedAmazonVariant(task, actualAsin, selected, changeReview);
   const corePath = path.join(taskDir, "screenshots", `${capturePrefix}product-core.png`);
   const detailsPath = path.join(taskDir, "screenshots", `${capturePrefix}product-details.png`);
   await page.evaluate(() => scrollTo(0, 0));
@@ -1910,7 +1962,6 @@ async function captureAmazon(args, config) {
   const visibleIpClaims = product.bullets.filter((value) =>
     /patent|copyright|licensed|trademark|registered design/i.test(value)
   );
-  const selected = product.selectedVariants.join(" | ").slice(0, 500);
   const capture = {
     ...provenance,
     status: "success",
@@ -1918,11 +1969,7 @@ async function captureAmazon(args, config) {
     final_url: state.url,
     requested_asin: String(task.product?.requested_asin || ""),
     actual_asin: actualAsin,
-    variant: {
-      label: selected ? "Selected option" : "ASIN",
-      value: selected || actualAsin,
-      confirmed: Boolean(actualAsin && actualAsin === String(task.product?.requested_asin || "").toUpperCase()),
-    },
+    variant,
     title: product.title,
     brand: product.brand,
     brand_byline_raw: product.brand_byline_raw,
@@ -1965,7 +2012,30 @@ function automaticQueryError(code) {
   return error;
 }
 
+export async function dismissPpubsRegistrationNotice(page, now = Date.now()) {
+  // Close only the known informational notice before its effective date.
+  // Authentication, consent, rate-limit and unfamiliar dialogs stay untouched.
+  const url = new URL(page.url());
+  if (url.hostname !== "ppubs.uspto.gov" || !/^\/pubwebapp\/?$/.test(url.pathname)) return false;
+  const state = await freshState(page);
+  if (browserRateLimited(state.bodyText)) return false;
+  const notice = page.locator('.registration-notification-overlay[role="dialog"]');
+  if (await notice.count() !== 1 || !await notice.isVisible()) return false;
+  const heading = (await notice.locator('.registration-notification-content > strong').textContent().catch(() => "")).trim();
+  const message = (await notice.locator('.registration-notification-message').innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+  const begins = message.match(/^Beginning ([A-Za-z]+ \d{1,2}, \d{4}), Patent Public Search \(PPUBS\) will require users to sign in with a/);
+  const effective = begins ? Date.parse(begins[1] + " 00:00:00 UTC") : NaN;
+  if (heading !== "Patent Public Search Registration Requirement" || !Number.isFinite(effective)
+      || !Number.isFinite(now) || now >= effective) return false;
+  const close = notice.locator('button.close[data-action="close"][title="Close"]');
+  if (await close.count() !== 1 || !await close.isVisible() || !await close.isEnabled()) return false;
+  await close.click({ timeout: operationTimeout(3000) });
+  await notice.waitFor({ state: "hidden", timeout: operationTimeout(3000) });
+  return true;
+}
+
 async function submitPpubsAdvancedSearch(page, renderedQuery, { strict = false } = {}) {
+  await dismissPpubsRegistrationNotice(page);
   const editor = page.locator("trix-editor.trix[aria-label='Enter query text']");
   const button = page.locator("#search-btn-search");
   await editor.waitFor({ state: "visible", timeout: operationTimeout(15000) }).catch(() => {});
@@ -2233,17 +2303,10 @@ export async function collectPpubsRenderedResults(page, expected, taskDir, stem,
     if (value.result_set_id !== expected.result_set_id || value.editor_value !== expected.rendered_query) throw new Error("query_binding_changed");
     const parsed = parsePpubsGridRows(value.rows);
     if (value.rows.length && parsed.length !== value.rows.length) throw new Error("result_grid_parse_incomplete");
-    const retained = [], retainedRows = [];
-    const available = new Set(candidates.keys());
-    for (let i = 0; i < parsed.length; i++) {
-      if (!available.has(parsed[i].record_number) && available.size >= maxCandidates) continue;
-      available.add(parsed[i].record_number);
-      retained.push(parsed[i]); retainedRows.push(value.rows[i]);
-    }
+    const retained = parsed, retainedRows = value.rows;
     const screenshot = path.join(taskDir, "screenshots", `${stem}-page-${pageEvidence.page_index}-view-${pageEvidence.viewports.length + 1}.png`);
     await safeScreenshot(page, screenshot);
-    pageEvidence.viewports.push({ ...value, rows: retainedRows,
-      ...(retainedRows.length < value.rows.length ? { omitted_visible_row_count: value.rows.length - retainedRows.length } : {}), screenshot_path: screenshot,
+    pageEvidence.viewports.push({ ...value, rows: retainedRows, screenshot_path: screenshot,
       screenshot_sha256: crypto.createHash("sha256").update(await fs.readFile(screenshot)).digest("hex"), observed_at: nowIso() });
     for (const candidate of retained) candidates.set(candidate.record_number, { ...candidates.get(candidate.record_number), ...candidate });
   }
@@ -2359,6 +2422,14 @@ export async function collectPpubsRenderedResults(page, expected, taskDir, stem,
   }
 }
 
+export function ppubsQueryTextEqual(actual, expected) {
+  if (typeof actual !== "string" || typeof expected !== "string") return false;
+  const normalize = value => value.split(/("[^"\\]*(?:\\.[^"\\]*)*")/g).map((part, index) =>
+    (index % 2 ? part : part.replace(/\s+/g, " ").replace(/\s*([()])\s*/g, "$1"))
+      .toLocaleLowerCase("en-US")).join("").trim();
+  return normalize(actual) === normalize(expected);
+}
+
 export async function bindPpubsResultHistory(page, renderedQuery, screenshotPath, { timeoutMs = 12000 } = {}) {
   // Repeating an identical query can reuse its L-number. An L-number change
   // alone is not the query identity; bind the displayed results to the exact
@@ -2370,6 +2441,7 @@ export async function bindPpubsResultHistory(page, renderedQuery, screenshotPath
     // L-number from the rendered DOM until the official viewport is scrolled.
     await page.locator("#searchHistory-content .slick-viewport").evaluateAll(nodes => nodes.forEach(node => { node.scrollTop = 0; }));
     let historyViewports = 0;
+    let lastBinding = null;
     const result = await waitForStableSemanticState(async () => {
       const binding = await page.evaluate(() => {
         const resultSet = (document.querySelector("#searchResults-content .lQuery")?.textContent || "").replace(/[:\s]/g, "");
@@ -2378,27 +2450,75 @@ export async function bindPpubsResultHistory(page, renderedQuery, screenshotPath
           if (label !== resultSet) continue;
           const query = (row.querySelector("[data-field='queryName']")?.textContent || "").trim();
           const count = (row.querySelector("[aria-describedby$='numResults']")?.textContent || "").trim().replaceAll(",", "");
-          return { result_set_id: resultSet, query, total_hits: /^\d+$/.test(count) ? Number(count) : null };
+          return { result_set_id: resultSet, query, total_hits: /^\d+$/.test(count) ? Number(count) : null, history_row_found: true };
         }
-        return null;
+        return { result_set_id: resultSet, query: "", total_hits: null, history_row_found: false };
       });
+      lastBinding = binding;
       // Identical queries can reuse an older L-number rather than insert a
       // new history row. Search only rendered viewports, with a hard bound;
       // never read SlickGrid's hidden backing data or accept an unbound set.
-      if (!binding && historyViewports < 20) {
+      if (!binding.history_row_found && historyViewports < 20) {
         await page.locator("#searchHistory-content .slick-viewport").evaluateAll(nodes => nodes.forEach(node => {
-          node.scrollTop = node.scrollTop + node.clientHeight >= node.scrollHeight - 1 ? 0
-            : node.scrollTop + Math.max(1, Math.floor(node.clientHeight * 0.8));
+          // Do not wrap to the top while diagnosing a newly rendered L-row.
+          // Wrapping can hide an observed row and erase the only useful
+          // failure state before the capture is written.
+          node.scrollTop = Math.min(Math.max(0, node.scrollHeight - node.clientHeight),
+            node.scrollTop + Math.max(1, Math.floor(node.clientHeight * 0.8)));
         }));
         historyViewports++;
       }
-      return { ready: binding?.query === renderedQuery && binding?.total_hits !== null, signature: JSON.stringify(binding), binding };
+      // PPS canonicalizes keyword case in Search History.  Every other query
+      // token remains significant: whitespace is normalized only for display.
+      return { ready: ppubsQueryTextEqual(binding.query, renderedQuery) && binding.total_hits !== null, signature: JSON.stringify(binding), binding };
     }, { timeoutMs: operationTimeout(timeoutMs), pollMs: Math.min(300, timeoutMs / 4), stableSamples: 2 });
-    if (!result.stable) return null;
     await safeScreenshot(page, screenshotPath);
-    return { ...result.binding, screenshot_path: screenshotPath,
+    if (!result.stable) {
+      const observed = lastBinding || { result_set_id: "", query: "", total_hits: null, history_row_found: false };
+      const failure_reason = !observed.history_row_found ? "history_row_not_found"
+        : !ppubsQueryTextEqual(observed.query, renderedQuery) ? "history_query_mismatch"
+        : observed.total_hits === null ? "history_count_unavailable" : "history_binding_unstable";
+      return { ...observed, bound: false, failure_reason, expected_query: renderedQuery,
+        screenshot_path: screenshotPath,
+        screenshot_sha256: crypto.createHash("sha256").update(await fs.readFile(screenshotPath)).digest("hex") };
+    }
+    return { ...result.binding, bound: true, screenshot_path: screenshotPath,
       screenshot_sha256: crypto.createHash("sha256").update(await fs.readFile(screenshotPath)).digest("hex") };
   } finally { await page.locator("#searchResults-tab").click({ timeout: operationTimeout(15000) }); }
+}
+
+export function browserDiscoveryBudget(task, plan, evidence, query) {
+  if (task.discovery_budget_revision !== "discovery-purpose-budget-v1"
+      || query.action_purpose !== "discovery" || query.discovery_role !== "browser_fallback") return null;
+  const rows = new Map();
+  for (const [provider, entries] of Object.entries(plan.queries || {})) for (const row of entries || []) {
+    if (row.action_purpose !== "discovery" || row.discovery_intent_id !== query.discovery_intent_id
+        || row.refinement_round !== query.refinement_round) continue;
+    rows.set(`${provider}|${row.query_id}|${registryPageBindingDigest(row)}`, { provider, row });
+  }
+  let pages = 0;
+  const cards = new Set();
+  const seen = new Set();
+  for (const run of evidence.source_runs || []) {
+    if (!run || seen.has(run.run_id)) continue;
+    const match = rows.get(`${run.provider}|${run.query_id}|${run.plan_entry_sha256}`);
+    if (!match) continue;
+    seen.add(run.run_id);
+    if (["success", "no_result"].includes(run.status)) {
+      const value = run.metadata?.search_coverage?.pages_retrieved ?? 1;
+      if (!Number.isInteger(value) || value < 1 || value > 8) throw new Error("DISCOVERY_PAGE_RECEIPT_INVALID");
+      pages += value;
+    }
+    if (!match.provider.endsWith("browser") || match.row.discovery_role !== "browser_fallback") continue;
+    for (const group of Object.values(evidence.collections || {})) for (const item of Array.isArray(group) ? group : []) {
+      if (item?.source_run_id !== run.run_id) continue;
+      for (const card of item?.payload?.candidates || []) {
+        if (card && typeof card === "object") cards.add(card.source_record_sha256 || registryPageBindingDigest(card));
+      }
+    }
+  }
+  return { remainingPages: Math.max(0, 8 - pages), remainingCandidates: Math.max(0, 50 - cards.size),
+    pagesAcquired: pages, browserCandidatesAcquired: cards.size };
 }
 
 async function runPlannedQuery(args, config) {
@@ -2410,6 +2530,14 @@ async function runPlannedQuery(args, config) {
   const resolved = resolveExactPlanEntry(plan, queryId);
   const { provider, entry: query } = resolved;
   await assertScenarioActionDispatch(taskDir, task, provider, query);
+  const discoveryBudget = task.discovery_budget_revision === "discovery-purpose-budget-v1"
+    && query.action_purpose === "discovery" && query.discovery_role === "browser_fallback"
+    ? browserDiscoveryBudget(task, plan, await readJson(path.join(taskDir, "evidence.json")), query) : null;
+  if (discoveryBudget && (discoveryBudget.remainingPages < 1 || discoveryBudget.remainingCandidates < 1)) {
+    return { status: "access_limited", submission_state: "not_submitted", phase: "validate_budget",
+      error_code: discoveryBudget.remainingPages < 1 ? "DISCOVERY_VERSION_PAGE_LIMIT" : "DISCOVERY_BROWSER_CANDIDATE_LIMIT",
+      detail: "The retained purpose/version discovery budget has been reached." };
+  }
   assertTaskRoute(
     task, provider, String(query.operation || ""),
     String(query.jurisdiction || ""), String(query.right_type || ""),
@@ -2510,17 +2638,20 @@ async function runPlannedQuery(args, config) {
   // evidence must remain immutable because earlier evidence records bind the
   // screenshot hash, rather than being silently overwritten by the retry.
   let collection = null;
-  const sampleLimit = task.retrieval_workflow_revision === "api-first-v1" && query.execution_phase === "discovery_fallback"
-    ? Math.min(50, Number(task.retrieval_policy?.browser_fallback_max_candidates || 50)) : Infinity;
+  const sampleLimit = discoveryBudget ? discoveryBudget.remainingCandidates
+    : task.retrieval_workflow_revision === "api-first-v1" && query.execution_phase === "discovery_fallback"
+      ? Math.min(50, Number(task.retrieval_policy?.browser_fallback_max_candidates || 50)) : Infinity;
+  const discoveryPages = discoveryBudget ? Math.min(Number(config.cdp?.max_recall_pages ?? 8), discoveryBudget.remainingPages)
+    : Number(config.cdp?.max_recall_pages ?? 8);
   if (strictPpubs && !actionError && semantic.stable && semantic.query_bound && semantic.candidates?.length) {
     collection = await collectPpubsRenderedResults(page, { result_set_id: semantic.ppubs.result_set_id, rendered_query: renderedQuery },
-      taskDir, path.basename(screenshotPath, ".png"), { maxPages: config.cdp?.max_recall_pages ?? 8, maxCandidates: sampleLimit });
+      taskDir, path.basename(screenshotPath, ".png"), { maxPages: discoveryPages, maxCandidates: sampleLimit });
     state = await freshState(page);
   }
   const figurativeTm = plannedExecution?.query_compiler_revision === "tm-figurative-fields-v1";
   if (figurativeTm && !actionError && semantic.stable && semantic.query_bound && semantic.candidates?.length) {
     collection = await collectTmRenderedResults(page, semantic, taskDir, path.basename(screenshotPath, ".png"), semanticConfig,
-      { maxPages: config.cdp?.max_recall_pages ?? 8, maxCandidates: sampleLimit });
+      { maxPages: discoveryPages, maxCandidates: sampleLimit });
     state = collection.last_state;
   }
   const retrievalDiagnostics = diagnostics.stop();
@@ -2548,6 +2679,8 @@ async function runPlannedQuery(args, config) {
   } else {
     detail = actionError
       ? `Search completion could not be confirmed after refreshing page state: ${actionError.slice(0, 300)}`
+      : strictPpubs && semantic.ppubs && semantic.query_bound !== true && semantic.history_binding_attempts?.length
+        ? `PPS rendered a result set but its official Search History binding was not validated: ${semantic.history_binding_attempts.at(-1)?.failure_reason || "unknown"}.`
       : semantic.timed_out
         ? "The rendered page did not reach a stable semantic result before timeout."
         : "The rendered page did not expose validated candidates or an explicit zero-result message.";
@@ -2571,7 +2704,7 @@ async function runPlannedQuery(args, config) {
     ...provenance,
     status,
     ...(submitError ? { error_code: submitError.code || "AUTOMATIC_QUERY_FAILED", phase: submitError.phase || "observe_result", submission_state: submitError.submission_state || "uncertain" } :
-      ["access_limited", "failed"].includes(status) ? { error_code: semantic.queryError ? "USPTO_QUERY_REJECTED" : semantic.timed_out ? "BROWSER_SEMANTIC_TIMEOUT" : "BROWSER_RESULT_UNCONFIRMED", phase: "observe_result", submission_state: "submitted" } :
+      ["access_limited", "failed"].includes(status) ? { error_code: semantic.queryError ? "USPTO_QUERY_REJECTED" : strictPpubs && semantic.ppubs && semantic.query_bound !== true && semantic.history_binding_attempts?.length ? "BROWSER_QUERY_BINDING_FAILED" : semantic.timed_out ? "BROWSER_SEMANTIC_TIMEOUT" : "BROWSER_RESULT_UNCONFIRMED", phase: strictPpubs && semantic.ppubs && semantic.query_bound !== true && semantic.history_binding_attempts?.length ? "verify_history_binding" : "observe_result", submission_state: "submitted" } :
         strictPpubs ? { phase: "observe_result", submission_state: "submitted" } : {}),
     query_id: queryId,
     query: String(query.q),
@@ -3017,7 +3150,15 @@ async function verifyPpubsPublishedDocument(args, config, resolved) {
         const obtained = [];
         if (abstract) obtained.push("abstract");
         if (reading.required_facts.includes("representative_figures") && media.media_coverage?.requested_pages_complete) obtained.push("representative_figures");
-        if (reading.required_facts.includes("protection_content") && document.rendered_text && document.rendered_text.length < 200000 && media.media_coverage?.completeness === "complete") obtained.push("protection_content");
+        // Utility-patent claim comparison is a text obligation.  Requiring
+        // every scanned drawing page made a complete text document fail just
+        // because the image viewer delayed a bitmap.  Design verification is
+        // deliberately stricter: its required views remain image-bound.
+        const claimSection = /(?:^|\n)\s*(?:claims?|what is claimed)\b/i.test(document.rendered_text || "");
+        const drawingsComplete = media.media_coverage?.completeness === "complete";
+        const textComplete = document.rendered_text && document.rendered_text.length < 200000 && claimSection;
+        if (reading.required_facts.includes("protection_content") && textComplete
+            && (args.right_type !== "design" || drawingsComplete)) obtained.push("protection_content");
         document.satisfied_facts = obtained;
       }
       const after = await ppubsPublishedDocumentSnapshot(page);
@@ -3429,6 +3570,7 @@ const REGISTRY_RIGHT_TYPES = new Set([
   "copyright", "enforcement",
 ]);
 const REGISTRY_PLAN_META_FIELDS = new Set([
+  "product_scope_revision", "product_dependencies",
   "query_id", "operation", "jurisdiction", "right_type", "required", "required_for",
   "requirement_id", "requirement_ids", "wave", "derived_from", "execute_by_default",
   "execute_when", "fallback_provider", "mode",

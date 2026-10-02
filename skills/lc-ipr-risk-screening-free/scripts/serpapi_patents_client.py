@@ -19,7 +19,7 @@ from common import (
     active_free_policy, authorize_serpapi_free_plan_entry, credential,
     ensure_object, load_json, load_skill_config, provider_execution_error,
     sha256_json,
-    API_FIRST_REVISION,
+    API_FIRST_REVISION, api_first_revision_enabled,
 )
 from provider_utils import ProviderError, authorize_current_scenario_action, file_lock, http_json, quota_summary, record_result
 from free_search_budget import attempt_context, reserve_search
@@ -120,7 +120,7 @@ def consumed_queries(evidence: dict[str, Any]) -> int:
     return sum(
         1 for run in evidence.get("source_runs", [])
         if run.get("provider") in {SERPAPI_PROVIDER, "serpapi_google_lens"}
-        and run.get("operation") in {SERPAPI_OPERATION, "image_search"}
+        and run.get("operation") in {SERPAPI_OPERATION, "image_search", "candidate_detail"}
         and (run.get("quota") or {}).get("network_request_attempted") is True
     )
 
@@ -252,6 +252,8 @@ def search(
         "engine": "google_patents", "api_key": key, "output": "json",
         "q": item["q"], "num": item["num"], "country": item["country"],
     }
+    if item.get("type") == "DESIGN":
+        params["type"] = "DESIGN"
     payload, headers, body = http_json(
         f"{base}/search.json?{urlencode(params)}", timeout=timeout, retries=0,
     )
@@ -282,10 +284,10 @@ def normalize(payload: dict[str, Any], *, retrieval_workflow_revision: str | Non
     candidates: list[dict[str, Any]] = []
     for item in payload.get("organic_results", []):
         if not isinstance(item, dict):
-            if retrieval_workflow_revision == API_FIRST_REVISION:
+            if api_first_revision_enabled(retrieval_workflow_revision):
                 raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'A returned patent discovery card is not an object')
             continue
-        if retrieval_workflow_revision == API_FIRST_REVISION and not any(item.get(k) for k in ('title', 'patent_link', 'link', 'publication_number')):
+        if api_first_revision_enabled(retrieval_workflow_revision) and not any(item.get(k) for k in ('title', 'patent_link', 'link', 'publication_number')):
             raise ProviderError('RESPONSE_SCHEMA_CHANGED', 'failed', 'A returned patent discovery card has no readable identity fields')
         publication = re.sub(
             r"[^A-Za-z0-9]", "", str(item.get("publication_number") or ""),
@@ -313,9 +315,14 @@ def normalize(payload: dict[str, Any], *, retrieval_workflow_revision: str | Non
                 "status": "not_checked", "source": "", "url": "", "checked_at": "",
             },
         })
-        if retrieval_workflow_revision == API_FIRST_REVISION:
+        if api_first_revision_enabled(retrieval_workflow_revision):
             from serper_client import google_patent_fields
             candidates[-1].update(google_patent_fields(item))
+            candidates[-1]['retrieval_workflow_revision'] = retrieval_workflow_revision
+        if retrieval_workflow_revision == 'api-first-v3':
+            candidates[-1].update(source_upstream='google_patents', candidate_nature='patent_search_result',
+                                 source_updated_at=item.get('source_updated_at') or item.get('updated_at') or None,
+                                 field_provenance={name: name for name in ('title', 'snippet', 'assignee', 'inventor', 'filing_date', 'grant_date') if name in item})
     return candidates
 
 
@@ -353,7 +360,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
         if execution_error:
             raise ValueError(f"{execution_error}: {SERPAPI_PROVIDER}/{SERPAPI_OPERATION}")
         plan = ensure_object(load_json(task_dir / "search-plan.json"), "search-plan.json")
-        item = authorize_serpapi_free_plan_entry(task, plan, SERPAPI_OPERATION, query_id)
+        item = authorize_serpapi_free_plan_entry(task, plan, SERPAPI_OPERATION, query_id, task_dir=task_dir)
         authorize_current_scenario_action(task_dir, task, SERPAPI_PROVIDER, item)
         evidence = ensure_object(load_json(task_dir / "evidence.json"), "evidence.json")
         from workflow_v24 import assert_recall_planning_contract, validated_discovery_followup
@@ -433,7 +440,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
                         'total_hits': None, 'retrieved_hits': len(candidates), 'reviewed_hits': None,
                         'truncated': True, 'stop_reason': 'bounded_discovery_total_unknown',
                         'source_updated_at': None, 'schema_valid': True,
-                    }} if task.get('retrieval_workflow_revision') == API_FIRST_REVISION else {}),
+                    }} if api_first_revision_enabled(task.get('retrieval_workflow_revision')) else {}),
                 },
                 raw_body=body, raw_suffix="json", quota=quota, mandatory=False,
                 request_params={

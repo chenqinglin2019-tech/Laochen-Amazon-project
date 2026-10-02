@@ -49,6 +49,9 @@ class ProviderError(RuntimeError):
     source_status: str
     detail: str
     http_status: int = 0
+    response_body: bytes = b""
+    response_headers: dict[str, str] | None = None
+    request_stage: str = ""
 
     def __str__(self) -> str:
         return self.detail
@@ -62,18 +65,18 @@ def classify_http(status: int, body: bytes, headers: dict[str, str] | None = Non
         if key.casefold() in {"x-rejection-reason", "x-rate-limit-reason"}
     ).casefold()
     if status == 402 or "paid plan" in lowered or "upgrade" in lowered:
-        return ProviderError("PAID_PLAN_REQUIRED", "access_limited", "Provider requires a paid plan", status)
+        return ProviderError("PAID_PLAN_REQUIRED", "access_limited", "Provider requires a paid plan", status, body, headers)
     exhausted_credit = any(phrase in lowered for phrase in (
         "insufficient credit", "not enough credit", "no credit remaining",
         "credits exhausted", "credit balance is zero", "zero credit balance",
     ))
     if status == 429 or exhausted_credit or "quota" in rejection_reason or "limit" in rejection_reason:
-        return ProviderError("FREE_QUOTA_EXHAUSTED", "access_limited", "Provider quota or rate limit reached", status)
+        return ProviderError("FREE_QUOTA_EXHAUSTED", "access_limited", "Provider quota or rate limit reached", status, body, headers)
     if status in {401, 403}:
-        return ProviderError("AUTH_FAILED", "access_limited", "Provider authentication or subscription failed", status)
+        return ProviderError("AUTH_FAILED", "access_limited", "Provider authentication or subscription failed", status, body, headers)
     if status >= 500:
-        return ProviderError("PROVIDER_UNAVAILABLE", "failed", f"Provider HTTP {status}", status)
-    return ProviderError("PROVIDER_HTTP_ERROR", "failed", f"Provider HTTP {status}: {detail}", status)
+        return ProviderError("PROVIDER_UNAVAILABLE", "failed", f"Provider HTTP {status}", status, body, headers)
+    return ProviderError("PROVIDER_HTTP_ERROR", "failed", f"Provider HTTP {status}: {detail}", status, body, headers)
 
 
 MAX_HTTP_RESPONSE_BYTES = 32 * 1024 * 1024
@@ -207,6 +210,35 @@ def enforce_task_limit(task_dir: Path, provider: str, operation: str, maximum: i
         if run.get("provider") == provider and run.get("operation") == operation
         and run.get("status") in {"success", "no_result", "access_limited", "failed"}
     )
+    if provider == "epo_ops" and operation == "candidate_detail":
+        task = load_json(task_dir / "task.json")
+        trace_path = task_dir / "epo-data-http-attempts.json"
+        if task.get("retrieval_workflow_revision") == "api-first-v3" and trace_path.is_file():
+            try:
+                trace = load_json(trace_path)
+            except (OSError, ValueError) as exc:
+                raise ProviderError("EPO_TASK_HTTP_LEDGER_INVALID", "failed", "OPS task HTTP reservations are unreadable") from exc
+            attempts = trace.get("attempts") if isinstance(trace, dict) else None
+            if (not isinstance(trace, dict) or trace.get("task_id") != task.get("task_id") or not isinstance(attempts, list)
+                    or any(not isinstance(item, dict) or not isinstance(item.get("request_id"), str)
+                           or not item["request_id"] or not isinstance(item.get("query_id"), str)
+                           or not item["query_id"] for item in attempts)
+                    or len({item["request_id"] for item in attempts}) != len(attempts)):
+                raise ProviderError("EPO_TASK_HTTP_LEDGER_INVALID", "failed", "OPS task HTTP reservations are invalid")
+            known = {item["request_id"]: item for item in attempts}
+            count = len(attempts)
+            for run in evidence.get("source_runs", []):
+                if run.get("provider") != provider or run.get("operation") != operation:
+                    continue
+                metadata = run.get("metadata") if isinstance(run.get("metadata"), dict) else {}
+                receipt = metadata.get("response_receipt") if isinstance(metadata.get("response_receipt"), dict) else {}
+                refs = receipt.get("ops_http_trace_ids", [])
+                if (isinstance(refs, list) and refs and all(isinstance(ref, str) and ref in known
+                        and known[ref].get("query_id") == run.get("query_id") for ref in refs)):
+                    continue
+                if run.get("submission_state") == "not_submitted":
+                    continue
+                count += 1
     if count >= maximum:
         raise ProviderError("FREE_QUOTA_EXHAUSTED", "access_limited", f"Per-task free query cap reached for {provider}/{operation}: {maximum}")
 
@@ -264,6 +296,13 @@ TEXT_HASH_ALGORITHM = "sha256-canonical-json-utf8"
 _RETAINED_KEY_VALUE_RE = re.compile(
     _KEY_VALUE_RE.pattern.replace("(?P<value>", r"(?P<value>\[redacted\] |", 1), _KEY_VALUE_RE.flags,
 )
+# XML must keep markup boundaries even when an embedded URL contains spaces
+# and falls through to free-form credential redaction. Legacy text is frozen.
+_XML_KEY_VALUE_RE = re.compile(
+    _RETAINED_KEY_VALUE_RE.pattern.replace(r"\r\n]", r"\r\n<>]"), _RETAINED_KEY_VALUE_RE.flags)
+_XML_HEADER_LINE_RE = re.compile(_HEADER_LINE_RE.pattern.replace(r"[^\r\n]*", r"[^\r\n<>]*"), _HEADER_LINE_RE.flags)
+_XML_CLI_VALUE_RE = re.compile(_CLI_VALUE_RE.pattern.replace(r"[^\s,;]+", r"[^\s,;<>]+"), _CLI_VALUE_RE.flags)
+_XML_AUTH_SCHEME_RE = re.compile(_AUTH_SCHEME_RE.pattern.replace(r"[^\s,;]+", r"[^\s,;<>]+"), _AUTH_SCHEME_RE.flags)
 
 
 def normalized_sensitive_key(value: Any) -> str:
@@ -346,12 +385,13 @@ def _redact_auth_scheme(match: re.Match[str], revision: str | None) -> str:
     return f"{match.group('scheme')} {REDACTED}"
 
 
-def _redact_non_url_text(text: str, revision: str | None = None) -> str:
+def _redact_non_url_text(text: str, revision: str | None = None, *, xml: bool = False) -> str:
     text = _XML_SECRET_ELEMENT_RE.sub(_redact_xml_element, text)
-    text = _HEADER_LINE_RE.sub(_redact_header_line, text)
-    text = _redact_key_values(text, _CLI_VALUE_RE)
-    text = _redact_key_values(text, _RETAINED_KEY_VALUE_RE if revision == TEXT_EVIDENCE_REVISION else _KEY_VALUE_RE)
-    return _AUTH_SCHEME_RE.sub(
+    text = (_XML_HEADER_LINE_RE if xml else _HEADER_LINE_RE).sub(_redact_header_line, text)
+    text = _redact_key_values(text, _XML_CLI_VALUE_RE if xml else _CLI_VALUE_RE)
+    text = _redact_key_values(text, _XML_KEY_VALUE_RE if xml else
+                            _RETAINED_KEY_VALUE_RE if revision == TEXT_EVIDENCE_REVISION else _KEY_VALUE_RE)
+    return (_XML_AUTH_SCHEME_RE if xml else _AUTH_SCHEME_RE).sub(
         lambda match: _redact_auth_scheme(match, revision), text,
     )
 
@@ -479,6 +519,27 @@ def sanitize_for_evidence(value: Any, key: str = "") -> Any:
     return _sanitize_value(value, key)
 
 
+def _redact_xml_url_match(match: re.Match[str]) -> str:
+    """Decode/escape XML URL text only when credentials actually require removal."""
+    from html import unescape
+    from xml.sax.saxutils import escape
+    original = match.group(0)
+    decoded = unescape(original)
+    try:
+        parts = urlsplit(decoded)
+        pairs = parse_qsl(parts.query, keep_blank_values=True)
+        unchanged = (not parts.username and not parts.password and not parts.fragment
+            and _redact_non_url_text(parts.path) == parts.path
+            and all(not is_sensitive_key(key) and redact_sensitive_text(value) == value
+                    for key, value in pairs))
+    except ValueError:
+        unchanged = False
+    if unchanged:
+        return original
+    sanitized = sanitize_evidence_url(decoded)
+    return escape(sanitized or _redact_non_url_text(decoded), {'"': '&quot;', "'": '&apos;'})
+
+
 def sanitize_raw_evidence(raw_body: bytes, suffix: str) -> bytes:
     """Redact text evidence while leaving binary media untouched."""
     if not raw_body:
@@ -508,6 +569,8 @@ def sanitize_raw_evidence(raw_body: bytes, suffix: str) -> bytes:
         character.isprintable() or character in "\r\n\t" for character in decoded
     ):
         return raw_body
+    if normalized_suffix == "xml":
+        return _redact_non_url_text(_URL_RE.sub(_redact_xml_url_match, decoded), xml=True).encode("utf-8")
     return redact_sensitive_text(decoded).encode("utf-8")
 
 
@@ -545,6 +608,10 @@ PLAN_META_KEYS = DECISION_PLAN_META_KEYS | {
     "execute_by_default", "execute_when", "fallback_provider", "fallback_query_id",
     "role", "authoritative_for_final_rating",
     "search_dimension", "search_language", "execution_phase", "publication_scope",
+    "provider_role", "source_upstream",
+    "api_gap_revision", "gap_reason", "judgment_impact", "fallback_basis",
+    "query_image_id", "query_image_sha256", "query_target_sha256",
+    "product_delivery_revision", "product_fact_refs",
 }
 
 
@@ -791,6 +858,8 @@ def coverage_route_policy(
 def require_provider_operation(
     task: dict[str, Any], provider: str, operation: str,
     *, jurisdiction: str = "", right_type: str = "",
+    task_dir: Path | None = None, query_id: str = "", query: str = "",
+    request_params: dict[str, Any] | None = None,
 ) -> bool:
     """Raise before evidence mutation when a task did not configure the route."""
     if str(task.get("schema_version") or "") in {"2.3-free", "2.4-free"} and not task_free_policy_valid(task):
@@ -809,6 +878,23 @@ def require_provider_operation(
     allowed, mandatory = coverage_route_policy(
         task, provider, operation, jurisdiction=jurisdiction, right_type=right_type,
     )
+    if (not allowed and task.get("retrieval_workflow_revision") == "api-first-v3"
+            and provider == "epo_ops" and operation == "candidate_detail" and task_dir is not None):
+        # A gap-only route is not generally available. Its exact current 05B
+        # decision/plan binding must authorize the receipt before mutation.
+        from candidate_followup import request_class
+        configured = any(req.get("jurisdiction") == jurisdiction and req.get("right_type") == right_type
+            and any(route.get("provider") == provider and route.get("operation") == operation
+                    for route in req.get("gap_only_routes", []))
+            for req in task.get("coverage_requirements", []) if isinstance(req, dict))
+        if configured and request_class(provider, operation, request_params or {}) == "targeted":
+            row = authorize_exact_plan_execution(task_dir, task, provider, operation, query_id,
+                jurisdiction=jurisdiction, right_type=right_type, query=query, request_params=request_params)
+            if (row.get("execution_phase") == "needs_info" and row.get("triage_action_id")
+                    and str(row.get("action_purpose") or "").startswith("needs_info:")
+                    and row.get("candidate_id") == row.get("triage_candidate_id")
+                    and row.get("candidate_id")):
+                allowed, mandatory = True, False
     if not allowed:
         if str(task.get("schema_version") or "") in {"2.3-free", "2.4-free"} and (
             "wipo" in provider.casefold() or "patentscope" in provider.casefold()
@@ -920,6 +1006,7 @@ def _record_result(
     query_id: str = "", source_environment: str = "",
     authoritative_for_final_rating: bool | None = None,
     submission_state: str = "", execution_phase: str = "",
+    response_receipt: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     task_path, evidence_path = task_dir / "task.json", task_dir / "evidence.json"
     task = ensure_object(load_json(task_path), "task.json")
@@ -948,7 +1035,7 @@ def _record_result(
     elif provider == SERPAPI_PROVIDER:
         try:
             plan = ensure_object(load_json(task_dir / "search-plan.json"), "search-plan.json")
-            authorize_serpapi_free_plan_entry(task, plan, operation, query_id)
+            authorize_serpapi_free_plan_entry(task, plan, operation, query_id, task_dir=task_dir, evidence=evidence)
         except (OSError, ValueError) as exc:
             code = str(exc).split(":", 1)[0] or "SERPAPI_QUERY_NOT_AUTHORIZED"
             raise ProviderError(
@@ -970,9 +1057,10 @@ def _record_result(
         or (normalized.get("right_type") if isinstance(normalized, dict) else "")
         or ""
     )
-    derived_mandatory = require_provider_operation(
+    derived_mandatory = False if provider == "public_source" else require_provider_operation(
         task, provider, operation,
         jurisdiction=jurisdiction, right_type=requested_right_type,
+        task_dir=task_dir, query_id=query_id, query=query, request_params=request_params,
     )
     if str(task.get("schema_version") or "") in {"2.3-free", "2.4-free"}:
         mandatory = derived_mandatory
@@ -983,6 +1071,8 @@ def _record_result(
     quota = sanitize_for_evidence(quota or {})
     detail = redact_sensitive_text(detail)
     raw_body = sanitize_raw_evidence(raw_body, raw_suffix)
+    from source_result_processing import locate_one_to_one
+    normalized = locate_one_to_one(task, provider, evidence_type, raw_body, raw_suffix, normalized)
     logical_query_id = (
         query_id
         or planned_query_id(task_dir, provider, operation, query, safe_request)
@@ -1057,11 +1147,27 @@ def _record_result(
         run["authoritative_for_final_rating"] = authoritative_for_final_rating is True
     if isinstance(normalized, dict) and isinstance(normalized.get("search_metadata"), dict):
         run.setdefault("metadata", {})["search_coverage"] = normalized["search_metadata"]
+    if response_receipt:
+        # A receipt proves only that this endpoint returned a response.  It is
+        # deliberately kept separate from retrieval coverage and is redacted
+        # before it enters the evidence ledger.
+        run.setdefault("metadata", {})["response_receipt"] = sanitize_for_evidence(response_receipt)
     if plan_metadata:
         run.setdefault("metadata", {}).update({key: plan_metadata[key] for key in (
             "search_dimension", "search_language", "execution_phase", "publication_scope",
         ) if key in plan_metadata})
         run["metadata"].update({key: plan_metadata[key] for key in DECISION_PLAN_META_KEYS if key in plan_metadata})
+    from source_result_processing import make_index
+    result_index = make_index(task, provider=provider, evidence_type=evidence_type,
+        status=status, submission_state=run.get("submission_state", ""),
+        raw_body=raw_body, raw_suffix=raw_suffix, normalized=normalized,
+        coverage=run.get("metadata", {}).get("search_coverage"), payload_digest=digest)
+    if result_index is not None:
+        run["result_processing"] = result_index
+    from candidate_acquisition import make_receipt as candidate_acquisition_receipt
+    acquisition = candidate_acquisition_receipt(task, evidence, run, plan_metadata, normalized)
+    if acquisition is not None:
+        run["candidate_acquisition"] = acquisition
     upsert_source_run(evidence, run)
     if status in {"success", "no_result", "not_applicable"}:
         clear_gaps(task, provider, logical_query_id)
@@ -1079,21 +1185,58 @@ def _record_result(
         "enforcement": "enforcement", "official_verification": "official_verifications",
         "blacklist": "blacklist", "product": "product",
         "asset_provenance": "asset_provenance",
+        "public_source": "sources",
     }.get(evidence_type)
-    if collection_name and normalized not in (None, [], {}):
+    # A bounded discovery response with no candidates is still evidence: its
+    # retained raw receipt is what an Agent must review before deciding whether
+    # a narrower/alternate search is needed.  Previously an empty normalized
+    # payload produced a source run but no evidence id, while the discovery
+    # review contract required an evidence id; that made every genuine empty
+    # result impossible to close without re-submitting it.
+    record_empty_discovery_receipt = (
+        status == "no_result" and bool(raw_paths)
+        and provider in {*SERPER_PROVIDERS, SERPAPI_PROVIDER, SIGNA_PROVIDER,
+                         "serpapi_google_lens", "epo_ops", "uspto_patent_browser"}
+    )
+    if collection_name and (normalized not in (None, [], {}) or record_empty_discovery_receipt):
+        entry_payload = normalized
+        if record_empty_discovery_receipt and normalized in (None, [], {}):
+            entry_payload = {"candidates": [], "status": "no_result",
+                             "raw_paths": raw_paths, "payload_digest": digest}
         entry = {
             "evidence_id": stable_id("EV", logical_query_id, digest), "source_run_id": run_id,
             "query_id": logical_query_id,
             "provider": provider, "operation": operation, "query": safe_query,
-            "jurisdiction": jurisdiction.upper(), "collected_at": now_iso(), "payload": normalized,
+            "jurisdiction": jurisdiction.upper(), "collected_at": now_iso(), "payload": entry_payload,
             "right_type": right_type,
             "requirement_ids": list(dict.fromkeys(requirement_ids)),
         }
         if plan_metadata:
             entry["plan_entry_sha256"] = run["plan_entry_sha256"]
+        if evidence_type == "public_source":
+            entry.update({key: value for key, value in normalized.items() if key in {
+                "kind", "source_url", "source_document", "path", "sha256", "bytes", "title", "checked_at", "reasoning",
+                "publication_number", "publication_relations"}})
         collection = evidence.setdefault("collections", {}).setdefault(collection_name, [])
         collection[:] = [item for item in collection if item.get("evidence_id") != entry["evidence_id"]]
+        from trusted_api import annotate_entry, enabled as api_trust_enabled
+        if api_trust_enabled(task):
+            from source_operation import operation_acceptance_context
+            entry["operation_acceptance_context"] = operation_acceptance_context(task, provider)
+        annotate_entry(task, entry, run)
         collection.append(entry)
+        if api_trust_enabled(task) and entry.get("trusted_api_record"):
+            from source_operation import record_operation_acceptance
+            try:
+                acceptance = record_operation_acceptance(task_dir, task, evidence, plan_metadata, run, entry)
+            except ValueError as exc:
+                evidence.setdefault("operation_acceptance_failures", []).append({
+                    "source_run_id": run["run_id"], "query_id": query_id,
+                    "reason": str(exc).split(":", 1)[0][:120]})
+            else:
+                known = evidence.setdefault("operation_acceptances", [])
+                if acceptance and not any(item.get("acceptance_key_sha256") == acceptance.get("acceptance_key_sha256") for item in known):
+                    known.append(acceptance)
     task["updated_at"] = now_iso()
     atomic_write_json(task_path, task)
     atomic_write_json(evidence_path, evidence)
@@ -1112,7 +1255,8 @@ def record_error(
     request_params: dict[str, Any] | None = None, query_id: str = "",
     source_environment: str = "",
     authoritative_for_final_rating: bool | None = None,
-    submission_state: str = "", execution_phase: str = "",
+    submission_state: str = "", execution_phase: str = "", raw_body: bytes = b"", raw_suffix: str = "json",
+    response_receipt: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return record_result(
         task_dir, provider=provider, operation=operation, query=query, jurisdiction=jurisdiction,
@@ -1122,4 +1266,5 @@ def record_error(
         source_environment=source_environment,
         authoritative_for_final_rating=authoritative_for_final_rating,
         submission_state=submission_state, execution_phase=execution_phase,
+        raw_body=raw_body, raw_suffix=raw_suffix, response_receipt=response_receipt,
     )

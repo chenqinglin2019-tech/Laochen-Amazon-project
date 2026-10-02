@@ -22,7 +22,8 @@ class PartialEvidenceRatingTests(unittest.TestCase):
         self.enable()
 
     def enable(self):
-        self.values[0]["assessment_revision"] = PARTIAL_EVIDENCE_REVISION
+        # Historical v1 remains frozen for compatibility; v2 is tested below.
+        self.values[0]["assessment_revision"] = "partial-evidence-v1"
         refresh(self.values)
 
     def rows(self, **changes):
@@ -62,6 +63,16 @@ class PartialEvidenceRatingTests(unittest.TestCase):
         self.assertTrue(result["coverage"]["completion_gaps"])
         self.assertIsNone(result["review"]["input_reviews"]["first"]["assessments"][0]["risk"])
         self.assertEqual(self.values, originals)
+
+    def test_v2_keeps_unassessed_scope_ungraded(self):
+        self.values[0]["assessment_revision"] = PARTIAL_EVIDENCE_REVISION
+        self.pending_without_rights_evidence()
+        result = compute_assessment(*self.values)
+        row = result["assessments"][0]
+        self.assertIsNone(result["overall"]["risk"])
+        self.assertEqual(result["overall"]["risk_basis"], "insufficient_evidence")
+        self.assertIsNone(row["risk"])
+        self.assertFalse(row["risk_aggregation_included"])
 
     def test_specific_medium_high_and_very_high_are_not_diluted(self):
         for risk in ("中", "高", "极高"):
@@ -260,7 +271,7 @@ class PartialEvidenceRatingTests(unittest.TestCase):
             with self.subTest(output=output), self.assertRaisesRegex(ValueError, "REQUIRES_NEW_OUTPUT_DIRECTORY"):
                 finalize(self.directory, self.values[0], self.directory / "first-review.json",
                     self.directory / "second-review.json", output_dir=output,
-                    assessment_revision=PARTIAL_EVIDENCE_REVISION)
+                    assessment_revision=self.values[0]["assessment_revision"])
 
 
 if __name__ == "__main__":

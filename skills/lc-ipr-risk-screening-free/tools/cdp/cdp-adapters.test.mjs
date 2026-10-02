@@ -61,6 +61,20 @@ test("PPS published document captures exact pane identity and bounded rendered p
   } finally { await browser.close(); await fs.rm(dir, { recursive: true, force: true }); }
 });
 
+test("Amazon detail bullets extract one label/value without nested-span duplication", async () => {
+  const browser = await chromium.launch({ executablePath: CHROME, headless: true });
+  try {
+    const page = await browser.newPage();
+    await page.setContent(`<div id="detailBullets_feature_div"><ul>
+      <li><span class="a-list-item"><span class="a-text-bold">Manufacturer \u200f : \u200e </span><span>Generic</span></span></li>
+      <li><span class="a-list-item"><span class="a-text-bold">Product Dimensions : </span><span>4.92 x 4.89 x 4.92 inches</span></span></li>
+      <li><span>Incomplete without a delimiter</span></li>
+      </ul></div><table id="productDetails_techSpec_section_1"><tr><th><span>Material</span></th><td><span>ABS</span></td></tr></table>`);
+    const product = await extractAmazonProduct(page);
+    assert.deepEqual(product.specifications, { Manufacturer: "Generic", "Product Dimensions": "4.92 x 4.89 x 4.92 inches", Material: "ABS" });
+  } finally { await browser.close(); }
+});
+
 test("Amazon and USPTO adapters read only rendered fixture state", async () => {
   const browser = await chromium.launch({
     executablePath: CHROME,

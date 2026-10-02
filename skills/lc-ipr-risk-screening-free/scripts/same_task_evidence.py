@@ -310,6 +310,118 @@ def qualified_reading_material(task, plan, evidence, candidates, ledger, provide
         return None
 
 
+def _specialty_document_content(task, evidence, candidates, ledger, provider, row, *, supplement, directory):
+    """Credit an actually read exact original, with no new source receipt."""
+    from specialty_analysis import enabled, _current, _intake, _scope, events
+    from record_candidate_lead import validated_candidate_lead_entries
+    if (directory is None or not enabled(task) or provider != "uspto_patent_browser"
+            or row.get("action_purpose") != "document_content" or row.get("right_type") not in {"patent", "design"}
+            or row.get("jurisdiction") != "US" or row.get("required_facts") != ["protection_content"]
+            or row.get("reading_scope") != {"level": "protection_content"}):
+        return None
+    try:
+        directory = Path(directory).resolve()
+        current = _current(task, evidence, candidates, ledger, supplement, _scope(row))
+        intake = _intake(task, _scope(row))
+        _require(intake and intake["annotation_id"] == current["annotation"]["annotation_id"], "READING_INTAKE_STALE")
+        from candidate_triage_stage import events as triage_events
+        handoff = next((event for event in reversed(triage_events(task)) if event["kind"] == "selected_handoff"
+                        and _scope(event) == _scope(row) and event["annotation_id"] == current["annotation"]["annotation_id"]), {})
+        _require(handoff.get("event_id") == intake["selected_handoff_event_id"], "READING_HANDOFF_STALE")
+        history = [event for event in events(task) if _scope(event) == _scope(row)
+                   and event.get("intake_event_id") == intake["event_id"]]
+        fact = next((event for event in reversed(history) if event["kind"] == "fact"
+                     and event["fact_kind"] == "protection"), {})
+        _require(fact.get("outcome") == "supported", "READING_SUPPORTED_PROTECTION_REQUIRED")
+        usable = {event["event_id"]: event for event in history}
+        for change in (event for event in history if event["kind"] == "change" and event["substantive"]):
+            review = next((event for event in reversed(history) if event["kind"] == "change_review"
+                           and event["change_event_id"] == change["event_id"]), {})
+            if review.get("outcome") != "continues":
+                for ref in change["affected_event_ids"]:
+                    usable.pop(ref, None)
+        _require(fact["event_id"] in usable, "READING_PROTECTION_SUSPENDED")
+        number = row.get("record_number") or row.get("q")
+        candidate = next((item for item in candidates.get("patents", []) if item.get("candidate_id") == row["candidate_id"]), {})
+        _require(number == candidate.get("publication_number") and row.get("q", number) == number,
+                 "READING_PUBLICATION_SCOPE_MISMATCH")
+        originals = [lead for lead in validated_candidate_lead_entries(task, evidence, directory)
+                     if lead["lead"]["publication_number"] == number and lead["right_type"] == row["right_type"]
+                     and lead["lead"]["review"]["content_verification"] == "agent_read_original"]
+        inventory = None
+        if row["right_type"] == "design":
+            from decision_workflow import evidence_index
+            from common import sha256_file, path_within
+            inventory = next((event for event in reversed(history) if event["kind"] == "inventory"), {})
+            _require(inventory.get("event_id") in usable and inventory.get("units")
+                     and inventory.get("reading_locations") and inventory.get("completeness_reasoning")
+                     and all(unit.get("kind") == "design" and unit.get("necessary_views")
+                             and len(unit["necessary_views"]) == len(set(unit["necessary_views"]))
+                             for unit in inventory["units"]), "READING_DESIGN_INVENTORY_REQUIRED")
+            identity = next((event for event in reversed(history) if event["kind"] == "fact"
+                             and event["fact_kind"] == "identity"), {})
+            _require(identity.get("outcome") == "supported" and identity.get("event_id") in usable,
+                     "READING_DESIGN_IDENTITY_REQUIRED")
+            indexed = evidence_index(evidence, supplement)
+            for ref in sorted(set(fact["evidence_refs"]) & set(identity.get("evidence_refs", []))):
+                source = indexed.get(ref, {})
+                path = Path(source.get("path") or "")
+                from urllib.parse import urlsplit
+                url = urlsplit(str(source.get("source_url") or ""))
+                host = str(url.hostname or "").lower()
+                retained_run = next((run for run in evidence.get("source_runs", [])
+                    if run.get("run_id") == source.get("source_run_id") and run.get("provider") == "public_source"
+                    and run.get("operation") == "retained_document" and run.get("status") == "success"
+                    and run.get("query") == source.get("source_url")), None)
+                if (source.get("provider") != "public_source" or source.get("kind") != "design_document"
+                        or source.get("publication_number") != number or source.get("jurisdiction") != "US"
+                        or source.get("right_type") != "design" or path.suffix.lower() != ".pdf"
+                        or not path.is_file() or not path_within(path, directory)
+                        or sha256_file(path) != source.get("sha256") or path.stat().st_size != source.get("bytes")
+                        or retained_run is None or url.scheme != "https" or not host.endswith(".uspto.gov")):
+                    continue
+                from pdf_page_evidence import pdf_page_count
+                pdf_page_count(path, source["sha256"])
+                originals.append({"evidence_id": ref, "registered_original": True,
+                    "source_registration": {"evidence_id": ref, "entry_sha256": sha256_json(source)},
+                    "document": {key: source.get(key) for key in ("path", "sha256", "bytes", "source_url")},
+                    "collected_at": source["collected_at"]})
+        for material_id in fact["material_event_ids"]:
+            material = usable.get(material_id, {})
+            if (material.get("kind") != "material" or material.get("source_form") != "original_document"
+                    or material.get("status") != "sufficient_for_listed_purposes"
+                    or "protection" not in material.get("purposes", [])
+                    or "protection" not in material.get("supported_facts", [])
+                    or not material.get("reading_locations") or not fact.get("reading_locations")
+                    or material.get("document_version") != fact["document_version"]
+                    or not set(fact["evidence_refs"]) <= set(material.get("evidence_refs", []))):
+                continue
+            for lead in originals:
+                registration = lead["source_registration"]
+                if registration["evidence_id"] not in fact["evidence_refs"]:
+                    continue
+                if inventory and (material_id not in inventory.get("material_event_ids", [])
+                        or inventory.get("document_version") != material.get("document_version")
+                        or registration["evidence_id"] not in inventory.get("evidence_refs", [])):
+                    continue
+                return {"authority_scope": "published_document_only", "source_task_id": task["task_id"],
+                    "source_checked_at": lead["collected_at"], "evidence_refs": deepcopy(fact["evidence_refs"]),
+                    "source_document": deepcopy(lead["document"]),
+                    "source_evidence_sha256": {registration["evidence_id"]: registration["entry_sha256"]},
+                    **({"source_registered_document_evidence_id": lead["evidence_id"]} if lead.get("registered_original")
+                       else {"source_lead_evidence_id": lead["evidence_id"], "source_lead_sha256": sha256_json(lead)}),
+                    "specialty_reading_proof": {"intake_event_id": intake["event_id"], "intake_sha256": sha256_json(intake),
+                        "fact_event_id": fact["event_id"], "fact_sha256": sha256_json(fact),
+                        "material_event_id": material_id, "material_sha256": sha256_json(material),
+                        **({"inventory_event_id": inventory["event_id"], "inventory_sha256": sha256_json(inventory),
+                            "necessary_views": {unit["unit_id"]: deepcopy(unit["necessary_views"]) for unit in inventory["units"]}}
+                           if inventory else {})},
+                    "satisfied_facts": ["protection_content"]}
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return None
+    return None
+
+
 def qualified_fact_reuse(task, plan, evidence, candidates, ledger, provider, row, *,
                          supplement=None, evidence_root=None, task_dir=None):
     from workflow_v24 import scenario_dispatch_block, scenario_workflow_enabled, correction_enabled, reading_contract_valid
@@ -320,7 +432,13 @@ def qualified_fact_reuse(task, plan, evidence, candidates, ledger, provider, row
     if not scenario_workflow_enabled(task) or not minimal_official and row.get("action_purpose") not in {"official_verification", "document_content"}:
         return None
     try:
-        if scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence, supplement=supplement):
+        root = historical_evidence_root(task, supplement, evidence_root)
+        specialty_original = None
+        if not scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence,
+                                       supplement=supplement, for_dispatch=False):
+            specialty_original = _specialty_document_content(task, evidence, candidates, ledger, provider, row,
+                supplement=supplement, directory=task_dir or root)
+        if specialty_original is None and scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence, supplement=supplement):
             return None
         matches = [(name, value) for name in ("patents", "trademarks") for value in candidates.get(name, [])
                    if value.get("candidate_id") == row.get("candidate_id")]
@@ -331,14 +449,23 @@ def qualified_fact_reuse(task, plan, evidence, candidates, ledger, provider, row
         _require(decision.get("current") is True and decision.get("decision") == ("needs_info" if minimal_official else "selected"), "SAME_TASK_TARGET_NOT_SELECTED")
         _require(candidate.get("jurisdiction") == row["jurisdiction"] and candidate.get("right_type") == row["right_type"],
                  "SAME_TASK_CANDIDATE_SCOPE_MISMATCH")
-        root = historical_evidence_root(task, supplement, evidence_root)
         if isinstance(supplement, dict):
             ids = [item.get("evidence_id") for item in supplement.get("evidence", []) if isinstance(item, dict)]
             _require(len(ids) == len(set(ids)), "SAME_TASK_SUPPLEMENT_DUPLICATE_EVIDENCE_ID")
         _require(_snapshot_value("same_task_production", (task, plan), lambda: _production([task, plan])),
                  "SAME_TASK_NON_PRODUCTION")
-        result = (_official(task, plan, evidence, candidate, provider, row, task_dir=task_dir, root=root)
-                  if row["action_purpose"] == "official_verification" or minimal_official else _document(candidate, row, supplement, root))
+        if specialty_original is not None:
+            result = specialty_original
+        elif row["action_purpose"] == "official_verification" or minimal_official:
+            result = _official(task, plan, evidence, candidate, provider, row, task_dir=task_dir, root=root)
+        elif provider == "uspto_patent_browser" and row["action_purpose"] == "document_content":
+            # Prefer a previously accepted exact PPS original over a new
+            # browser operation. A later partial image retry cannot erase it.
+            result = _pps_text(task, plan, evidence, candidate, row, task_dir=task_dir, root=root)
+            if result is None:
+                result = _document(candidate, row, supplement, root)
+        else:
+            result = _document(candidate, row, supplement, root)
         if result is None:
             return None
         return {**result, "complete": True, "dispatch": "fact_reused", "status": "fact_reused",

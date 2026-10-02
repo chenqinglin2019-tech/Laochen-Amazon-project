@@ -1,6 +1,7 @@
 """Offline verification cannot inherit account credentials or read user files."""
 
 import os
+import json
 from pathlib import Path
 import subprocess
 import tempfile
@@ -14,6 +15,32 @@ import verify_skill
 
 
 class OfflineVerificationTests(unittest.TestCase):
+    def test_unsupported_runtime_stops_before_test_commands(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(
+            verify_skill.sys, "argv", ["verify_skill.py", "--mode", "fast", "--output-dir", temporary]
+        ), patch.object(verify_skill.sys, "version_info", (3, 8, 10)), patch(
+            "runtime_compat.dependency_info", return_value={"available": False, "version": None}
+        ), patch.object(verify_skill.subprocess, "run") as run:
+            self.assertEqual(verify_skill.main(), 1)
+            run.assert_not_called()
+            manifest = json.loads((Path(temporary) / "verification.json").read_text())
+            self.assertEqual(manifest["status"], "incomplete")
+            self.assertEqual(manifest["checks"][0]["issues"], ["PYTHON_VERSION_UNSUPPORTED", "PYPDF_MISSING", "TOML_PARSER_MISSING"])
+
+    def test_runtime_requires_the_existing_pinned_dependency(self):
+        with patch.object(verify_skill.sys, "version_info", (3, 9, 6)), patch(
+            "runtime_compat.dependency_info", return_value={"available": True, "version": "6.9.0"}
+        ):
+            self.assertEqual(verify_skill.verification_runtime()["issues"], ["PYPDF_VERSION_MISMATCH"])
+
+    def test_unittest_failures_and_errors_are_preserved_in_manifest_counts(self):
+        with tempfile.TemporaryDirectory() as temporary, patch.object(
+            verify_skill.subprocess, "run", return_value=subprocess.CompletedProcess(
+                ["synthetic"], 1, "Ran 1527 tests in 1s\nFAILED (failures=9, errors=23)\n", "")
+        ):
+            result = verify_skill.run_check("fixture", ["synthetic"], Path(temporary))
+            self.assertEqual(result["counts"], {"tests": 1527, "failures": 9, "errors": 23})
+
     def test_environment_keeps_runtime_controls_and_removes_all_credential_names(self):
         supplied = {name: "synthetic-credential" for name in ENV_CREDENTIALS.values()}
         supplied.update(PATH="synthetic-path", LC_IPR_TEST_MODE="1", SERPAPI_BASE_URL="http://127.0.0.1:9")

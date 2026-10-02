@@ -103,10 +103,18 @@ class _BatchInputs:
         else:
             supplement_path = self.task_dir / "supplemental-evidence.json"
             supplement = self.read("supplemental-evidence.json") if supplement_path.is_file() else None
+        import product_scope as ps
+        if ps.enabled(task):
+            ps.verify(task,evidence,self.task_dir)
+            from product_entry import evidence_errors
+            issues=evidence_errors(task,evidence,self.task_dir)
+            if issues: raise ValueError('; '.join(issues))
         with decision_snapshot(task, evidence, candidates, plan, ledger, supplement,
                                memo_state=self.memo_state if correction_enabled(task) else None):
             cancelled = scenario_dispatch_block(task, plan, provider, row, candidates, ledger, evidence, supplement=supplement)
             if cancelled:
+                from product_scope import TEMPORARY
+                if cancelled.get("reason") in TEMPORARY: return cancelled,None,None
                 from workflow_v24 import TEMPORARY_DISPATCH_CODES
                 if cancelled.get("reason") in TEMPORARY_DISPATCH_CODES:
                     self.reading_material = scenario_reading_material(task, plan, evidence, candidates, ledger, provider, row,
@@ -142,13 +150,17 @@ def recorder_command(provider: str, entry: dict, task_dir: Path, capture: Path) 
     return [sys.executable, str(ROOT / "scripts" / script), "--task-dir", str(task_dir), "--capture", str(capture), *extra]
 
 
-def run_process(command: list[str], timeout: int = 180) -> dict:
+def run_process(command: list[str], timeout: int = 180, *, deadline=None, environment=None) -> dict:
     try:
         # The CDP CLI calls the same Python authority before opening a source.
         # Inherit this verified interpreter, not an unrelated system python3
         # whose installed PDF/runtime dependencies may differ.
-        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=timeout, check=False,
-                                env={**os.environ, "LC_IPR_PYTHON": sys.executable, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
+        env = {**(environment or os.environ), 'LC_IPR_PYTHON': sys.executable, 'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8'}
+        if deadline is None:
+            result = subprocess.run(command, capture_output=True, text=True, encoding='utf-8', timeout=timeout, check=False, env=env)
+        else:
+            from execution_budget import run_bounded
+            result = run_bounded(command, deadline=deadline, timeout=timeout, text=True, encoding='utf-8', env=env)
     except subprocess.TimeoutExpired:
         return {"status": "access_limited", "error_code": "BROWSER_EXECUTION_TIMEOUT",
                 "detail": "The automatic browser operation exceeded its bounded timeout."}
@@ -241,6 +253,21 @@ def completed_capture(task_dir: Path, task: dict, provider: str, entry: dict, pr
 
 def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                  query_ids_filter: list[str] | None = None, runner=run_process, phase: str = "") -> dict[str, Any]:
+    from execution_budget import execution_budget, remaining, child_environment
+    with execution_budget(task_dir, 'sources', inherit=True) as deadline:
+        def bounded_runner(command, timeout=180):
+            duration = remaining(deadline, timeout)
+            if deadline is not None and runner is run_process:
+                return run_process(command, duration, deadline=deadline,
+                    environment=child_environment(task_dir, deadline))
+            return runner(command, timeout=duration)
+        return _execute_plan(task_dir, wave, query_id_filter=query_id_filter,
+            query_ids_filter=query_ids_filter, runner=bounded_runner if deadline is not None else runner,
+            phase=phase, execution_deadline=deadline)
+
+
+def _execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = '',
+                  query_ids_filter=None, runner=run_process, phase='', execution_deadline=None):
     run_started = time.monotonic()
     if query_ids_filter is not None and (query_id_filter or not isinstance(query_ids_filter, (list, tuple))
             or not query_ids_filter or any(not isinstance(q, str) or not q for q in query_ids_filter)
@@ -300,7 +327,7 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
     cdp_budget = min(165, max(1, float(config.get("cdp", {}).get("operation_timeout_ms", 165000)) / 1000))
     capability_cache, access_wait = {}, set()
     implementation_digest = browser_implementation_digest(task)
-    static_errors = {"INTERNAL_ROUTE_CONTRACT_ERROR", "AUTOMATION_NOT_VALIDATED", "AUTOMATIC_QUERY_FIELD_UNSUPPORTED", "AUTOMATIC_QUERY_FILTER_UNSUPPORTED", "AUTOMATIC_QUERY_LANGUAGE_UNSUPPORTED", "BROWSER_QUERY_SEMANTICS_UNSUPPORTED", "UNSUPPORTED_QUERY_SEMANTICS", "USPTO_QUERY_REJECTED", "CURRENT_STATUS_ROUTE_UNAVAILABLE"}
+    static_errors = {"INTERNAL_ROUTE_CONTRACT_ERROR", "AUTOMATION_NOT_VALIDATED", "AUTOMATIC_QUERY_FIELD_UNSUPPORTED", "AUTOMATIC_QUERY_FILTER_UNSUPPORTED", "AUTOMATIC_QUERY_LANGUAGE_UNSUPPORTED", "BROWSER_QUERY_SEMANTICS_UNSUPPORTED", "BROWSER_QUERY_BINDING_FAILED", "UNSUPPORTED_QUERY_SEMANTICS", "USPTO_QUERY_REJECTED", "CURRENT_STATUS_ROUTE_UNAVAILABLE"}
     batch = _BatchInputs(task_dir)
     batch_ids = set()
     report["selected_query_ids"] = sorted(selected_ids)
@@ -319,6 +346,14 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
             if selected_ids and query_id not in selected_ids:
                 continue
             batch_ids.add(query_id)
+            if execution_deadline is not None and time.time() >= execution_deadline:
+                rows[query_id] = {**rows.get(query_id, {}), 'query_id': query_id, 'provider': provider,
+                    'status': 'incomplete', 'dispatch': 'budget_stopped',
+                    'error_code': 'EXECUTION_TIME_BUDGET_EXHAUSTED', 'submission_state': 'not_submitted',
+                    'source_query_performed': False, 'plan_entry_sha256': canonical_digest(entry)}
+                report.update(queries=list(rows.values()), updated_at=now_iso())
+                atomic_write_json(status_path, report)
+                continue
             preflight_started = time.monotonic()
             cancellation, reused_fact, historical = batch.disposition(provider, entry)
             preflight_ms = round((time.monotonic() - preflight_started) * 1000)
@@ -327,7 +362,7 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                 temporary = correction_enabled(task) and cancellation.get("reason") in TEMPORARY_DISPATCH_CODES
                 rows[query_id] = {"query_id": query_id, "provider": provider, "jurisdiction": entry["jurisdiction"],
                                   "right_type": entry["right_type"], "operation": entry["operation"],
-                                  "plan_entry_sha256": canonical_digest(entry), "status": "awaiting_review" if temporary else "cancelled", "dispatch": "deferred" if temporary else "cancelled",
+                                  "plan_entry_sha256": canonical_digest(entry), "status": "awaiting_user" if cancellation.get("reason")=="PRODUCT_SCOPE_WAITING" else "awaiting_review" if temporary else "cancelled", "dispatch": "deferred" if temporary else "cancelled",
                                   "submission_state": "not_submitted", "reason": cancellation["reason"],
                                   "detail": cancellation["reason"], "finished_at": now_iso()}
                 continue
@@ -482,6 +517,12 @@ def execute_plan(task_dir: Path, wave: int = 0, *, query_id_filter: str = "",
                         recovery = record_action_recovery(task_dir, provider, entry, implementation_sha256=implementation_digest)
                         if recovery:
                             row["recovery_id"] = recovery["recovery_id"]
+                        if execution_deadline is not None:
+                            row['submission_state'] = 'unknown'
+                            row['dispatch'] = 'executing'
+                            rows[query_id] = row
+                            report.update(queries=list(rows.values()), updated_at=now_iso())
+                            atomic_write_json(status_path, report)
                         result = runner([node, str(CDP), "run-planned-query", "--task-dir", str(task_dir), "--query-id", query_id, "--acceptance-probe",
                             *(["--check-existing-rate-limit"] if provider in rate_wait else []),
                             "--deadline-epoch-ms", str(round((time.time() + min(cdp_budget, remaining(180) - 10)) * 1000))], remaining(180))

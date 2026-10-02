@@ -22,11 +22,31 @@ def function_ast_sha256(source: str, name: str) -> str:
                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name]
     if len(definitions) != 1:
         raise ValueError("AUTH_FROZEN_FUNCTION_MISSING_OR_DUPLICATED")
+    # The frozen hashes use Python 3.12's AST shape. Python 3.9 has no
+    # type_params field: add its empty value, never discard a real field or
+    # normalize executable nodes. Generic syntax remains a parse error on 3.9.
+    for node in ast.walk(definitions[0]):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and not hasattr(node, "type_params"):
+            node._fields = (*node._fields, "type_params")
+            node.type_params = []
     canonical = ast.dump(definitions[0], annotate_fields=True, include_attributes=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class AuthBinaryContractTests(unittest.TestCase):
+    def test_empty_legacy_ast_fields_match_modern_shape_without_hiding_semantic_edits(self):
+        source = "def frozen(value):\n    return value + 1\n"
+        expected = function_ast_sha256(source, "frozen")
+        legacy = ast.parse(source)
+        node = legacy.body[0]
+        node._fields = tuple(name for name in node._fields if name != "type_params")
+        if hasattr(node, "type_params"):
+            del node.type_params
+        from unittest.mock import patch
+        with patch.object(ast, "parse", return_value=legacy):
+            self.assertEqual(function_ast_sha256(source, "frozen"), expected)
+        self.assertNotEqual(function_ast_sha256(source.replace("+ 1", "+ 2"), "frozen"), expected)
+
     def test_wrapper_and_backend_functions_match_explicit_code_freeze(self):
         freeze = BASELINE["source_freeze"]
         for name, expected in freeze["file_sha256"].items():
