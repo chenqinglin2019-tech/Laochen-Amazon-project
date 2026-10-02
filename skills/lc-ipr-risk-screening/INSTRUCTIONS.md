@@ -54,11 +54,14 @@ ASIN/链接路径会通过云端商品详情优先取得可信 Amazon 主图，�
 
 此命令保留原始字段，只绑定 Agent 的检索判断并更新事实摘要。必须在 ASIN 核对和 `init-task` **之前**运行，不得手工改事实、摘要或已有任务。明确没有字标则记录空标识及图文依据，不为凑查询而造一个品牌；其它筛查继续。图片看不清或身份冲突时先核实，不把未知冒充没有。
 
-`inspect-input` 在 ASIN 路径返回 `seller_lookup.provider=laochen_backend` 与 `action=product_detail`。`collect-product` 使用 `config.json` + `LAOCHEN_BACKEND_TOKEN` 自动调用云端商品详情并冻结事实；不要在本机安装、配置或调用任何上游数据工具。**仅 ASIN 路径**再按契约把语义核对写入 `<task-dir>/input-metadata/product-corroboration.json`，绑定上一步输出的新摘要，然后完成：
+`inspect-input` 在 ASIN 路径返回 `seller_lookup.provider=laochen_backend` 与 `action=product_detail`。`collect-product` 使用 `config.json` + `LAOCHEN_BACKEND_TOKEN` 自动调用云端商品详情并冻结事实；不要在本机安装、配置或调用任何上游数据工具。**仅 ASIN 路径**再按 `references/input-routing.md` 和 `references/contracts/product-corroboration-input.schema.json`，把语义核对写入 `<task-dir>/input-metadata/product-corroboration-input.json`，绑定上一步输出的新事实摘要。省略 `digest` 或设为空字符串，由 CLI 生成正式记录，禁止自行计算摘要：
 
 ```bash
+<IPR_CLI> record-product-corroboration --task-dir <task-dir> --input <task-dir>/input-metadata/product-corroboration-input.json
 <IPR_CLI> validate-product-corroboration --task-dir <task-dir>
 ```
+
+已记录待确认结论、随后得到补充证据时，按 `references/input-routing.md` 使用 `--previous-digest` 显式修订；不手工覆盖旧记录。仅未初始化、无后续计划且事实未变的任务允许修订。
 
 人工资料完整时禁止调用 SellerSprite。商品字段、图片角色、来源、版权/许可链和 SHA-256 必须按契约冻结；不能用一句标题和一张图代替完整采集。
 
@@ -110,6 +113,8 @@ Agent 应在 `prepare-us-screen` 返回 `status=ready` 后直接继续：
 
 <IPR_CLI> import-us-screen-evidence --task-dir <task-dir>
 ```
+
+同一任务只运行一个 `us-screen` 进程。工具返回仍在运行的会话 ID 时，继续等待该会话，不得另起命令或手工请求云端查询进度。CLI 持有任务锁并默认每 10 秒轮询；`TASK_LOCKED` 表示应检查并等待已有执行，不能删除锁或在活跃进程上运行锁恢复命令。Ctrl+C / SIGTERM 会保留状态并释放锁；强制终止后，只有同机进程已确认退出且锁达到最短时长才允许恢复，详见 `references/us-workflow.md`。本地图上传请求失败后停止后续付费查询。读取结果时同时检查 `operation_errors`，不要把 `US_SCREEN_PARTIAL` 当作全部检索成功；同一任务后续继续使用新版 CLI。
 
 `us-screen` 完成且证据导入后，再准备并执行公开网页正式计划：
 

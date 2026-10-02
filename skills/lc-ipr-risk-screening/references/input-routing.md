@@ -92,9 +92,28 @@ CLI 固定排除 `Generic`，其余标识只校验和记录你的图文判断。
 
 这里核对是否为同一商品，不要求原始 `facts.brand` 与检索判断逐字相等。品牌栏是占位、但图文支持另一个实际标识时，在核对理由中说明即可；只有真实商品身份矛盾才记 `conflict`。
 
+按 `contracts/product-corroboration-input.schema.json` 写入 `<task-dir>/input-metadata/product-corroboration-input.json`。必填 `schema_version`、`task_id`、当前 `product_facts_digest`、`reviewer`、`reviewed_at`、`checks`、`decision`、`rationale`；省略 `digest` 或设为 `""`。不要对 JSON 自行排序、拼串或计算 SHA-256。
+
+三个检查名称分别为 `identifier_binding`、`text_internal_consistency`、`main_image_consistency`。`evidence_refs` 必须分别包含 `/asin` 和 `/marketplace`，`/facts/title`、`/facts/brand` 和 `/facts/category`，以及 `/facts/title` 和冻结主图的实际相对路径。每项都写真实图文依据；`reviewed_at` 不得早于事实冻结时间。
+
 ```bash
+<IPR_CLI> record-product-corroboration --task-dir <task-dir> --input <task-dir>/input-metadata/product-corroboration-input.json
 <IPR_CLI> validate-product-corroboration --task-dir <task-dir>
 ```
+
+CLI 使用既有算法生成 `input-metadata/product-corroboration.json`，不替 Agent 作语义判断。命令成功表示记录有效；只有 `decision=accepted` 才能初始化正式任务。
+
+未初始化且无后续计划的任务，重复提交相同内容复用原记录。已有记录内容完全一致、仅 `digest` 不正确时，CLI 先在同目录保存带原文件 SHA-256 的 `product-corroboration.original-<sha256>.json` 备份，再修复摘要；原始文件仍可追溯。恢复仅摘要错误的旧任务时，复制原记录的全部核对字段到上述输入文件，仅省略 `digest`，再运行记录命令。不得改判断、证据引用、时间或事实绑定来绕过错误。普通记录命令拒绝覆盖不同内容；事实绑定过期、已有正式任务或发现计划时拒绝写入。已冻结任务继续使用原记录和只读校验命令。
+
+
+用户补充确认后，若商品事实未变且任务尚未初始化、也无发现计划，可显式修订核对结论：先用 `validate-product-corroboration` 取得当前记录的 `digest`，按新证据更新输入文件的检查、理由和审阅时间（不早于旧审阅时间，仍省略 `digest`），执行：
+
+```bash
+<IPR_CLI> record-product-corroboration --task-dir <task-dir> --input <task-dir>/input-metadata/product-corroboration-input.json --previous-digest <当前核对记录的digest>
+<IPR_CLI> validate-product-corroboration --task-dir <task-dir>
+```
+
+`--previous-digest` 是核对记录内的摘要，不是文件 SHA-256，也不是商品事实摘要。CLI 先验证新旧记录绑定同一份当前事实，再将旧文件逐字节归档到 `input-metadata/corroboration-revisions/<旧摘要>.json`，归档成功才替换当前记录。旧摘要过期、旧记录无效或备份冲突时停止，不得直接覆盖。中断后保留相同输入和 `--previous-digest` 重试；相同修订复用结果，不重复归档。若任务已初始化，用只读校验命令确认现状，不再重跑修订。新结论仍是 `needs_user_action` / `rejected` 时继续阻断初始化；真正改变商品资料时不能用本修订入口替换冻结事实。
 
 ## 图片采集（输入层冻结，检索层负责公网传输）
 
