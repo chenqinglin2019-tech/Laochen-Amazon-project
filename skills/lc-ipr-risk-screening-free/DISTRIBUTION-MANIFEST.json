@@ -17,14 +17,14 @@
     },
     {
       "path": "INSTRUCTIONS.md",
-      "bytes": 5063,
-      "sha256": "58213891369929cf27cfa9764ec080a497c03b594a04721e31b091097c25b664",
+      "bytes": 5479,
+      "sha256": "575f2c3e250e2a79dfd6e85f24d91de850e09f22a7708d10c19a7c8ad87c1855",
       "mode": "0644"
     },
     {
       "path": "SKILL.md",
-      "bytes": 28974,
-      "sha256": "1d86cae7d3e345884589cd3eafc2f074a6e44348786b9943d0fd8bfe9bb3f9c8",
+      "bytes": 29321,
+      "sha256": "5d51c25dbb17e4384c7f2b557bcefb87c14807f97b1efb5639d59731c563838d",
       "mode": "0644"
     },
     {
@@ -222,8 +222,8 @@
     },
     {
       "path": "references/installation.md",
-      "bytes": 7715,
-      "sha256": "81bb3c16ba609e51e0c87aa39f21c8b7a8efd094a2c8278c93721ff471b8e80c",
+      "bytes": 9855,
+      "sha256": "360dd6fbd4ff9fc50c613d31d8fe6b0eeaed710a3d25a606bc48d168b58471f5",
       "mode": "0644"
     },
     {
@@ -300,8 +300,8 @@
     },
     {
       "path": "references/providers.md",
-      "bytes": 29143,
-      "sha256": "66b62f9991388c2a9b34876f4cbbb2e197867de3940533cbaffd4eaddaa72b30",
+      "bytes": 29447,
+      "sha256": "3169351ab3a9be34dffa2da9486bc7906b695f4610787876a81319944cf6197f",
       "mode": "0644"
     },
     {
@@ -1592,8 +1592,8 @@
     },
     {
       "path": "scripts/test_configure_auth.py",
-      "bytes": 4371,
-      "sha256": "304dcb86bf05f603d43da1c6a8a225b438b93b4ee651fec1fa5c12200298fbb9",
+      "bytes": 5176,
+      "sha256": "6ad0a9fdb84a6885ed4edeafccd1e015e2dcddf83de82c411564833962977ad7",
       "mode": "0644"
     },
     {

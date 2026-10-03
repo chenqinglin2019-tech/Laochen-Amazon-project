@@ -29,6 +29,24 @@ class BackendError(Exception):
         self.code = code
 
 
+def cli_failure(completed, secrets):
+    """Classify only fixed CLI prefixes; never publish raw logs or HTTP bodies."""
+    diagnostic = redact(completed.stderr, secrets)
+    status = re.match(r"ERROR: 后端返回 HTTP ([1-5][0-9]{2}):", diagnostic)
+    if status:
+        code = int(status.group(1))
+        if code in (401, 403):
+            return BackendError("backend_auth_error", "Backend returned HTTP %d; check token and account permissions. No automatic retry was made." % code)
+        if code == 429:
+            return BackendError("backend_rate_limited", "Backend returned HTTP 429; respect rate limits. No automatic retry was made.")
+        return BackendError("backend_http_error", "Backend returned HTTP %d; response body is withheld. Check backend and request state before retrying." % code)
+    if diagnostic.startswith("ERROR: 后端不可达 ("):
+        return BackendError("backend_network_error", "Backend connection failed; check host network permissions, DNS, TLS and proxy. Token validity is unconfirmed. Check request state before retrying.")
+    if diagnostic.startswith("ERROR: 解析响应失败:"):
+        return BackendError("response_invalid", "CLI could not parse the backend response as JSON; raw logs are withheld to protect credentials.")
+    return BackendError("cli_failed", "CLI exited unsuccessfully; cause is unconfirmed. Inspect its exit code and redacted response. Check request state before retrying.")
+
+
 def _reject_constant(value):
     raise ValueError("Non-finite JSON number")
 
@@ -235,7 +253,7 @@ def run_cli(command, *, site, asins=None, keywords_file=None, listing_file=None,
                 completed = subprocess.run(arguments, env=environment, shell=False, capture_output=True,
                                            text=True, encoding="utf-8", errors="replace", timeout=timeout, check=False)
             except subprocess.TimeoutExpired:
-                raise BackendError("cli_timeout", "CLI timed out; no automatic retry was made. Check task state before retrying.") from None
+                raise BackendError("cli_timeout", "CLI timed out; check host network permissions and backend/task state. No automatic retry was made; submission may be unknown.") from None
             except OSError:
                 raise BackendError("cli_unavailable", "CLI could not be executed; check its path, platform and permissions.") from None
             result["exit_code"] = completed.returncode
@@ -246,6 +264,8 @@ def run_cli(command, *, site, asins=None, keywords_file=None, listing_file=None,
                 if not isinstance(response, dict):
                     raise ValueError("Expected a JSON object")
             except (OSError, ValueError, TypeError):
+                if completed.returncode != 0:
+                    raise cli_failure(completed, secrets) from None
                 raise BackendError("response_invalid", "CLI did not provide the required JSON object; raw logs are withheld to protect credentials.") from None
             result["response"] = redact(response, secrets)
         if output_path is not None:
@@ -255,7 +275,7 @@ def run_cli(command, *, site, asins=None, keywords_file=None, listing_file=None,
                 _write_json(Path(str(output_path) + EXPAND_META_SUFFIX),
                             {"asins": _asin_key(asins), "site": site, "fetched_at_epoch": time.time()})
         if completed.returncode != 0:
-            raise BackendError("cli_failed", "CLI exited unsuccessfully; inspect its exit code and redacted response.")
+            raise cli_failure(completed, secrets)
         if command == "validate":
             failed = response.get("ok") is not True or response.get("errors") != []
         else:

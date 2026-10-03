@@ -13,3 +13,5 @@
 修改脚本后运行 `python3 -m unittest discover -s tests`。语义判断不能伪装成确定性程序保证。
 
 用户明确提供本 Skill 的鉴权 token 时，用 scripts/configure_credentials.py 从标准输入接收并保存，随后使用 backend_cli.py；凭据禁止回显或进入版本库。
+
+后端请求前与失败后遵循 INSTRUCTIONS.md 的“联网权限与恢复”；区分连接、HTTP 鉴权与 JSON 格式错误，不以搜索/MCP 可用推断 CLI 可联网，不盲目重提未知请求。

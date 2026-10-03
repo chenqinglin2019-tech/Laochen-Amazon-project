@@ -22,6 +22,8 @@ description: 输入目标站点、竞品 ASIN 和真实产品资料，生成兼�
 
 统一经 `scripts/backend_cli.py` 调用 tools/bin 中的 CLI：自动从本 Skill 的 config.json 读取 `backend_url/backend_token`，注入子进程环境变量 `LAOCHEN_BACKEND_URL/LAOCHEN_BACKEND_TOKEN` 并脱敏输出。无需手工 export，不要另写带凭据的命令。缺 token 时停在请求前，不阻止本地整理。
 
+后端请求前按 [联网权限与恢复](INSTRUCTIONS.md#联网权限与恢复) 检查当前宿主网络权限；确有阻断时走宿主授权入口。连接失败不判定为 token 无效或成功零结果；权限恢复后仍先核对请求状态，再有界续跑。
+
 ## 对话自动填写鉴权 token
 
 发布目录直接提供 backend_url 为 https://mcp.yixunkuajing.com、backend_token 留空的 config.json，不使用 config.example.json。用户在对话中明确提供本 Skill 的鉴权 token 后，在任何后端请求前自动调用 scripts/configure_credentials.py，将标准输入 JSON 的 backend_token 写入本 Skill 的 config.json；保留 backend_url 和其他字段。无需用户手工编辑文件或 export 环境变量。缺 token 时一次说明缺少鉴权 token，收到后填写并继续原流程。
