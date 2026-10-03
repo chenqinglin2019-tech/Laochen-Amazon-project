@@ -58,12 +58,22 @@ class CredentialAuthChainTests(unittest.TestCase):
                                    capture_output=True, env=env, timeout=10)
             self.assertEqual(saved.returncode, 0, saved.stderr)
             self.assertNotIn(token, saved.stdout + saved.stderr)
+            before = (root / 'config.json').read_bytes()
+            blocked = subprocess.run(['/usr/bin/sandbox-exec', '-p', '(version 1)(allow default)(deny network*)',
+                                     sys.executable, str(root / 'scripts/auth_gate.py')],
+                                     capture_output=True, text=True, env=env, timeout=30)
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertEqual(state['requests'], [])
+            self.assertIn('云端鉴权未通过，本轮不继续执行。', blocked.stderr)
+            self.assertEqual(len(blocked.stderr.strip().splitlines()), 2)
+            self.assertFalse((root / 'cache/auth-pass.json').exists())
             policy = ('(version 1)(allow default)(deny network*)'
                       '(allow network-outbound (remote ip "localhost:%d"))' % server.server_port)
             command = ['/usr/bin/sandbox-exec', '-p', policy, sys.executable, str(root / 'scripts/auth_gate.py')]
             success = subprocess.run(command, capture_output=True, text=True, env=env, timeout=15)
             self.assertEqual(success.returncode, 0, success.stderr)
             self.assertEqual(json.loads(success.stdout), {'ok': True, 'message': 'auth_passed'})
+            self.assertEqual((root / 'config.json').read_bytes(), before)
             self.assertEqual(state['requests'][0][1]['api_key'], token)
             self.assertEqual(state['requests'][0][0], '/auth/skill-check' if is_ipr else '/public/account')
             if not is_ipr:
@@ -71,7 +81,7 @@ class CredentialAuthChainTests(unittest.TestCase):
             state['accepted'] = False
             denied = subprocess.run(command, capture_output=True, text=True, env=env, timeout=15)
             self.assertNotEqual(denied.returncode, 0)
-            self.assertNotIn(token, success.stdout + success.stderr + denied.stdout + denied.stderr)
+            self.assertNotIn(token, blocked.stdout + blocked.stderr + success.stdout + success.stderr + denied.stdout + denied.stderr)
 
 
 if __name__ == '__main__':

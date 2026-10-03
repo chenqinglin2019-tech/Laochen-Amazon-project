@@ -25,6 +25,8 @@
 
 ### 请求与重试安全
 
+首次调用已授权来源前及连接受限后，先按 [联网权限与恢复](installation.md#联网权限与恢复) 核对宿主网络权限；获准联网不重置来源额度、attempt_id、提交状态或下面的重试限制。浏览器／MCP 可访问来源不证明 API 子进程可联网。
+
 - 公共 HTTP 每次跳转保持同一 scheme/host/port，拒绝跨源及 HTTPS 降级；EPS/INPI 的自有传输保留更严格的禁止跳转。公共响应有 32 MiB 上限，单次重试最多 3 次，429 不重试；计量请求保持 retries=0。`LC_IPR_OPERATION_DEADLINE_EPOCH` 限制同一操作的剩余时间，重试不另起完整计时。
 - SerpApi 与 Signa 在每次计量请求前，用本机跨进程账本原子预留一份免费搜索额度；SerpApi Patents/Lens 共用余额。账本只保存凭据指纹、计划/尝试指纹与计数，不保存 key。范围是本机同一凭据；其他设备及同账号的另一把 key 无法由此观察，服务端账户检查和拒绝仍优先。
 - 默认 `attempt_id=initial`，相同 task/query/plan hash/attempt 不重复占额。响应丢失、原文哈希损坏、动态证据过期或已记录的条件变化需要新请求时，使用新的 `--attempt-id ID --retry-reason '具体原因'`；Agent 先持久记录这次修复或重试身份。新 attempt 重新预留额度，旧超时/崩溃的未知消耗不退款；任务次数上限和实时 Free-plan 校验仍生效，不因换 ID 放宽。
