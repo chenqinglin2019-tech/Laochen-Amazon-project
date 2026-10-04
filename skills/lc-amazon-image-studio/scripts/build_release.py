@@ -39,8 +39,20 @@ def sha256(path: Path) -> str:
 
 
 def collect(with_tests: bool, platform: str):
-    manifest = json.loads((ROOT / "references/auth-binaries.json").read_text(encoding="utf-8"))["sha256"]
-    wanted = set(manifest) if platform == "all" else set(PLATFORM_BINARIES[platform])
+    document = json.loads((ROOT / "references/auth-binaries.json").read_text(encoding="utf-8"))
+    if document.get("schema") != "LC-AUTH-BINARIES/1.0":
+        raise SystemExit("Invalid auth binary manifest; refusing to package")
+    manifest = document["sha256"]
+    wanted = (set(name for names in PLATFORM_BINARIES.values() for name in names)
+              if platform == "all" else set(PLATFORM_BINARIES[platform]))
+    # Validate the complete selection first. rglob alone silently skipped missing
+    # binaries and could create a release unusable on a recipient's platform.
+    for name in sorted(wanted):
+        path = ROOT / "tools/bin" / name
+        if path.is_symlink() or not path.is_file():
+            raise SystemExit(f"Missing auth binary: {name}; refusing to package")
+        if sha256(path) != manifest.get(name):
+            raise SystemExit(f"Auth binary hash mismatch: {name}; refusing to package")
     files, skipped = [], []
     for path in sorted(ROOT.rglob("*")):
         if not path.is_file() or path.is_symlink():
@@ -57,8 +69,6 @@ def collect(with_tests: bool, platform: str):
             if path.name not in wanted:
                 skipped.append(relative)
                 continue
-            if sha256(path) != manifest.get(path.name):
-                raise SystemExit(f"Auth binary hash mismatch: {path.name}; refusing to package")
         files.append((path, relative))
     return files, skipped
 
@@ -70,12 +80,14 @@ def build(out_dir: Path, with_tests: bool, platform: str, name: str) -> dict:
     with zipfile.ZipFile(target, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
         for path, relative in files:
             info = zipfile.ZipInfo(f"{NAME}/{relative}", date_time=(2026, 9, 30, 0, 0, 0))
+            info.create_system = 3  # Preserve Unix modes even when built on Windows.
             mode = 0o755 if relative.startswith("tools/bin/") else 0o644
             info.external_attr = (0o100000 | mode) << 16
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, path.read_bytes())
         config = {"backend_url": "https://mcp.yixunkuajing.com", "backend_token": ""}
         info = zipfile.ZipInfo(f"{NAME}/config.json", date_time=(2026, 9, 30, 0, 0, 0))
+        info.create_system = 3
         info.external_attr = (0o100000 | 0o600) << 16
         info.compress_type = zipfile.ZIP_DEFLATED
         archive.writestr(info, json.dumps(config, indent=2) + "\n")

@@ -49,6 +49,13 @@ class CredentialAuthChainTests(unittest.TestCase):
             name = ('lc-ipr-auth-check-' if is_ipr else 'lc-auth-check-') + 'darwin-' + (
                 'arm64' if platform.machine() == 'arm64' else 'amd64')
             shutil.copy2(ROOT / 'tools/bin' / name, root / 'tools/bin' / name)
+            # Simulate extractors that drop POSIX modes and downloaded Mac
+            # archives that inherit quarantine. Only this temporary copy changes.
+            native = root / 'tools/bin' / name
+            native.chmod(0o600)
+            subprocess.run(['/usr/bin/xattr', '-w', 'com.apple.quarantine',
+                            '0081;00000000;SyntheticAuthDistributionTest;', str(native)],
+                           check=True, capture_output=True, timeout=10)
             (root / 'config.json').write_text(json.dumps({'backend_url': 'http://127.0.0.1:%d' % server.server_port,
                                                         'backend_token': ''}))
             env = {'HOME': temporary, 'TMPDIR': temporary, 'PATH': '/usr/bin:/bin',
@@ -67,6 +74,11 @@ class CredentialAuthChainTests(unittest.TestCase):
             self.assertIn('云端鉴权未通过，本轮不继续执行。', blocked.stderr)
             self.assertEqual(len(blocked.stderr.strip().splitlines()), 2)
             self.assertFalse((root / 'cache/auth-pass.json').exists())
+            self.assertIn('连接或服务不可用', blocked.stderr)
+            self.assertEqual(native.stat().st_mode & 0o111, 0o111)
+            attributes = subprocess.run(['/usr/bin/xattr', str(native)], check=True,
+                                        capture_output=True, text=True, timeout=10)
+            self.assertNotIn('com.apple.quarantine', attributes.stdout.splitlines())
             policy = ('(version 1)(allow default)(deny network*)'
                       '(allow network-outbound (remote ip "localhost:%d"))' % server.server_port)
             command = ['/usr/bin/sandbox-exec', '-p', policy, sys.executable, str(root / 'scripts/auth_gate.py')]

@@ -16,7 +16,8 @@ Public repository for Laochen Amazon workflow skills.
 - `skills/lc-amazon-image-studio/` - Create Amazon Listing and A+ image sets
   from verified product assets, with user reference template intake, local
   typography, product-consistency QA, and cross-platform runtime setup (V7).
-  Last updated: 2026-10-01 (UTC+8).
+  Last updated: 2026-10-04 (UTC+8).
+  [Download the credential-free ZIP](skills/lc-amazon-image-studio-v7.zip).
 - `skills/lc-amazon-data-crawl/` - Crawl Amazon keyword searches, storefronts,
   ranking categories, and image-similar competitors with local CDP browser
   control. Last updated: 2026-09-02 17:29 (UTC+8).
