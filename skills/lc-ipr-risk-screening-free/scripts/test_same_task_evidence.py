@@ -196,21 +196,30 @@ class SameTaskEvidenceTests(unittest.TestCase):
         from annotate_materiality import apply_materiality_annotations
         from assessment_estimate import finalize, review_digest, validate_assessment
         from report_estimate import build_bundle, validate_run
+        from test_product_scope_review import pending_product_scope_rows
         f = self.f
+        # Exercise the inherited continuous-work-v2 contract without downgrading
+        # the task to accept an empty review. Retained fact reuse is not clearance.
+        self.assertEqual(f.task['execution_policy_revision'], 'continuous-work-v2')
         apply_materiality_annotations(f.ledger, f.task["task_id"], f.candidates, task=f.task, evidence=f.evidence)
         atomic_write_json(f.path / "browser-candidate-journal.json", {})
         f.save()
         digest = review_digest(f.evidence, f.candidates, f.ledger, f.plan, f.task)
+        rows = pending_product_scope_rows(f.task)
+        self.assertEqual(len(rows), 11)
         for label in ("first", "second"):
             atomic_write_json(f.path / (label + ".json"), {"reviewer": label,
                 "review_context": {"session_id": label, "evidence_digest": digest, "first_review_visible": False,
                     "execution": {"agent_id": "offline-fixture-" + label, "run_id": "fixture-run-" + label,
-                                  "input_digest": digest, "assessment_digest": sha256_json([])}},
-                "assessments": [], "coverage_confidence_cap": "低", "coverage_confidence_reasoning": "Synthetic incomplete scopes remain."})
+                                  "input_digest": digest, "assessment_digest": sha256_json(rows)}},
+                "assessments": deepcopy(rows), "coverage_confidence_cap": "低", "coverage_confidence_reasoning": "Synthetic incomplete scopes remain."})
         output = f.path / "stage-output"
         assessment = finalize(f.path, f.task, f.path / "first.json", f.path / "second.json", output_dir=output)
         output_task = load_json(output / "task.json")
         self.assertEqual(assessment["status"], "incomplete")
+        self.assertEqual(len(assessment['assessments']), len(rows))
+        self.assertTrue(all(value['risk'] is None and value['assessment_status'] == 'pending'
+            for value in assessment['assessments']))
         self.assertEqual(validate_assessment(f.path, output_task, assessment), [])
         row = next(r for s in assessment["coverage"]["scopes"] for r in s["queries"] if r["query_id"] == self.target["query_id"])
         self.assertEqual(row["dispatch"], "fact_reused")

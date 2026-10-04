@@ -1388,8 +1388,8 @@
     },
     {
       "path": "scripts/test_api_final_integration.py",
-      "bytes": 18960,
-      "sha256": "9c375fba188e3d947a82155e7a6bc6f4efe1a33a60d16cab0328331b6fb7affe",
+      "bytes": 19622,
+      "sha256": "4b9a4c43d1fd2276c8b9df44ad845317cadfd08a10fcb5eae05a97b5e09f2bac",
       "mode": "0644"
     },
     {
@@ -2018,8 +2018,8 @@
     },
     {
       "path": "scripts/test_product_scope_review.py",
-      "bytes": 8858,
-      "sha256": "bccfcbdac262b3d6dcfde7e8f4294f12f01dbe4aecb831d120fa478a3de6934a",
+      "bytes": 10206,
+      "sha256": "7bbc836dc422e2c6398592016a0c3efb7d669e33c5c3c1a2113c99907b11aaeb",
       "mode": "0644"
     },
     {
@@ -2210,8 +2210,8 @@
     },
     {
       "path": "scripts/test_same_task_evidence.py",
-      "bytes": 17590,
-      "sha256": "e98ab48a4f26172a2664d6d6850d61c9fcb65c5a168edd3d089b91c281826d1b",
+      "bytes": 18231,
+      "sha256": "895d8d609a2ae9937eca01df190c9fae2eec1ade7eb4d6037f36ab1fc8db1f77",
       "mode": "0644"
     },
     {

@@ -3,10 +3,30 @@ from copy import deepcopy
 import json, unittest
 from common import CURRENT_SCHEMA_VERSION, RECALL_INTEGRITY_REVISION, sha256_json
 import assessment_estimate as estimates
-from decision_workflow import default_assessment_scenarios, scenario_right_types
+from decision_workflow import default_assessment_scenarios, scenario_right_types, scenario_sha256
 from record_independent_review import MODULE_BY_RIGHT
 from report_review_host import review_prompt
 import test_module_review as fixtures
+
+
+def pending_product_scope_rows(task):
+    """Explicit unknown overall scopes for synthetic, incomplete investigations."""
+    scenarios = {row['scenario_id']: row for row in task['assessment_scenarios']}
+    return [{**scope, 'scenario_sha256': scenario_sha256(scenarios[scope['scenario_id']]),
+        'candidate_id': None, 'assessment_object': 'product',
+        'module_id': MODULE_BY_RIGHT[scope['right_type']],
+        'title': 'Synthetic unsearched overall scope', 'scope': 'Synthetic overall product scope',
+        'risk': None, 'assessment_status': 'pending',
+        'pending_reasoning': 'The fixture retains specific records, not complete discovery in this scope.',
+        'reasoning': 'No complete overall investigation is represented in the fixture.',
+        'evidence_confidence': '低', 'confidence_reasoning': 'Overall scope evidence is incomplete.',
+        'evidence_refs': [], 'supporting_evidence': [], 'counter_evidence': [],
+        'no_supporting_evidence_reasoning': 'No overall supporting evidence was supplied.',
+        'no_counter_evidence_reasoning': 'No overall exclusion evidence was supplied.',
+        'assumptions': [], 'raise_if': [], 'lower_if': [], 'human_checks': [],
+        'right_state': 'unknown', 'confidence_basis': {}}
+        for scope in estimates.required_product_scopes(task)]
+
 
 class ProductScopeReviewTests(unittest.TestCase):
     def setUp(self):

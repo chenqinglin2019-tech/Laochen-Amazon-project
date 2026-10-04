@@ -11,6 +11,7 @@ from trusted_api import annotate_entry, accepted_verification
 import test_specialty_analysis as specialty_fixture
 from test_assessment_estimate import fixture as review_fixture
 from test_final_review import receipt
+from test_product_scope_review import pending_product_scope_rows
 from candidate_triage_stage import record_selected_handoff
 from assessment_estimate import compute_assessment
 from report_estimate import build_bundle
@@ -169,7 +170,12 @@ class ApiFinalIntegrationTests(unittest.TestCase):
         f.save()
         atomic_write_json(f.path / 'search-plan.json', plan)
         material_input = final_review.inputs(f.evidence, f.candidates, f.ledger, plan, f.task)
-        reviews = [receipt([deepcopy(row)], material_input, slot) for slot in ('first', 'second')]
+        # A candidate judgment cannot substitute for whole-product scope review.
+        # These synthetic records do not establish clearance in the other scopes.
+        overall_rows = pending_product_scope_rows(f.task)
+        self.assertEqual(len(overall_rows), 22)
+        reviews = [receipt(deepcopy([row, *overall_rows]), material_input, slot)
+            for slot in ('first', 'second')]
         for review in reviews:
             review.update(coverage_confidence_cap='中',
                 coverage_confidence_reasoning='This synthetic example verifies one candidate; other scopes remain unsearched')
@@ -177,6 +183,10 @@ class ApiFinalIntegrationTests(unittest.TestCase):
             assessment = compute_assessment(f.task, f.evidence, f.candidates, plan, f.ledger, *reviews,
                 evidence_root=f.path, task_dir=f.path)
             self.assertEqual(assessment['final_review']['status'], 'complete')
+            overall = [value for value in assessment['assessments'] if not value.get('candidate_id')]
+            self.assertEqual(len(overall), len(overall_rows))
+            self.assertTrue(all(value['risk'] is None and value['assessment_status'] == 'pending'
+                for value in overall))
             data, _ = build_bundle(f.path, f.task, f.evidence, assessment, f.candidates,
                 {'task_id': f.task['task_id'], 'entries': []}, plan, output_dir=f.path / 'html')
             network.assert_not_called()
