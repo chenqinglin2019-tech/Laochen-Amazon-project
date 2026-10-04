@@ -74,9 +74,16 @@
 - 替换鉴权二进制：
   1. 把新文件放入 `tools/bin/`，文件名不变。
   2. 计算 SHA-256，同步更新 `references/auth-binaries.json`。
-  3. 用合成配置和 loopback 服务测试（`test_auth_gate`），不访问真实账户。
+  3. 用合成配置和 loopback 服务测试（`test_auth_gate`、`test_configure_auth`），不访问真实账户。
   4. 执行 `build_release.py`，它会复核哈希。
   - 支持范围：Windows 仅 x64；macOS 需 ≥14（Playwright 要求）。
+
+### 接收者鉴权故障排查
+
+- 在 Skill 根目录运行只读安装诊断：macOS/Linux 用 `python3 scripts/diagnose_auth.py --json`；Windows 用 `py -3 scripts\diagnose_auth.py --json`。它仅检查平台、组件哈希、执行权限和 macOS 隔离标记，不读 config.json/token、不联网、不改文件、不写通过记录；`installation_ok` 不能证明账户鉴权成功。
+- 启动失败：入口先校验哈希；Unix 组件已有执行权限时不再 chmod，Windows 不修改 POSIX 模式。macOS 仍只处理已校验组件的 `com.apple.quarantine`，不清理整个目录、不关闭系统安全机制。缺执行权限、隔离标记读取失败、移除失败分别给出两行脱敏原因。目录受限时，把 Skill 正式安装到当前用户可写且宿主允许访问的技能目录。
+- 连接或服务不可用：可能是宿主未授权本地进程访问 backend_url、DNS/TLS/代理问题，或后端故障；此结果不能判断 token 无效。核对实际宿主网络权限和后端状态，权限获批或连接恢复后按 SKILL.md 重跑原入口一次；不新增自动重试、不禁用 TLS、不修改鉴权协议。
+- 支持的组件是 macOS arm64/x64、Windows x64、Linux x64；Windows/Linux arm64 暂无原生组件，不能把平台分支模拟测试视为原生验收。正式扩展架构必须提供可信来源的对应二进制、更新哈希清单并进行原生测试。
 
 ## 字体
 
@@ -101,4 +108,5 @@
 
 - 输出干净的 zip：用固定后台地址生成 token 留空的 config.json（不复制本机 config.json），排除缓存、`__pycache__`/`__MACOSX`、事务目录和 skill 内的用户模板文件；默认不含测试。
 - `--platform` 只带对应平台的鉴权二进制；打包前会核对 `auth-binaries.json`。
+- 打包前检查所选平台的每个组件是否存在、非符号链接且哈希匹配；缺一即拒绝打包。跨平台发布使用 `--platform all`；zip 显式使用 Unix 权限元数据，组件 0755、空凭据 config.json 0600，即使从 Windows 打包也保留该元数据。
 - 发布包：默认名 `lc-amazon-image-studio-v7.zip`。维护包：`--with-tests --name lc-amazon-image-studio-v7-dev`。

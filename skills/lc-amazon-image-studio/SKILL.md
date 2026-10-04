@@ -24,6 +24,7 @@ description: 基于真实产品资料制作 Amazon Listing 与 A+ 套图。用�
 - 入口失败仍原样展示两行安全停止信息并停止业务。service_unavailable／超时既可能是网络权限、DNS/TLS/代理问题，也可能是服务故障，不能据此判定 token 无效；账户拒绝和返回格式异常按原安全原因处理，不公开原始日志或响应正文。
 - 网络权限获批或连接恢复后，可以重新运行原 auth_gate.py 一次；这是恢复后的显式执行，不在脚本内新增自动重试。通过后继续原任务；再次失败则保留安全原因和恢复条件，不循环执行、不绕过通过记录。生成请求的超时／提交未知仍按原派发与瞬时失败规则核对状态，不因鉴权网络恢复而重复生成。
 - 离线、loopback 和合成凭据测试只验证安装与调用链路，不代表接收者公网或真实账户已通过验收。
+- 接收者报启动问题时，可运行只读 `python3 scripts/diagnose_auth.py --json`（Windows：`py -3 scripts\diagnose_auth.py --json`），不读 token、不联网、不改文件。安装诊断通过不代表云端鉴权通过；此命令不能替代原 auth_gate.py。平台范围和排查方法见 [maintenance.md](references/maintenance.md#接收者鉴权故障排查)。
 
 ## 2. 生产命令序列
 
