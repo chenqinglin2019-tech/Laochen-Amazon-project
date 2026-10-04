@@ -14,11 +14,12 @@ description: 基于真实产品资料制作 Amazon Listing 与 A+ 套图。用�
   - macOS/Linux：`python3 scripts/auth_gate.py`
   - Windows：`py -3 scripts\auth_gate.py`（任意 Python ≥3.8，无需 Pillow）
   - 成功后写入 12 小时通过记录，`plan`/`deliver` 会校验它，同一任务内不重复鉴权。失败时原样回复入口输出的两行（“云端鉴权未通过，本轮不继续执行。”＋脱敏原因）并停止。不得打印 config.json 或 token，不直接运行 tools/bin 下的二进制。
-- 官方 `imagegen`：每个会话读一次它的 SKILL.md；它的 `references/prompting.md`、`sample-prompts.md` 只在撰写原创 brief 或返修时按需读取。提示由本地编译器生成并绑定指纹，调用 `image_gen` 时原样使用，不再二次增强；默认用内置 `image_gen`，不自动改用 CLI/API。
+- **生图协作**：整个生图使用 Codex 内置生图能力，并配合当前环境的系统默认 `imagegen` Skill；从宿主技能列表定位并每个会话读一次它的 SKILL.md，撰写原创 brief 或返修时才按需读它的提示参考。提示由本地编译器生成并绑定指纹，生图时原样使用，不再二次增强。
+- **执行入口**：遵循系统 `imagegen` Skill 的内置生图流程，具体工具名称、参数和图片展示方式以当前宿主实际提供的接口为准，不将固定工具名或 JavaScript 方法名作为额外安装依赖。接入方式见 [tool-orchestration.md](references/tool-orchestration.md)，不自动改用 CLI/API。
 
 ### 联网权限与鉴权恢复
 
-- 实际鉴权前读取宿主提供的网络权限；已允许访问配置中的后端时直接运行原 auth_gate.py，不重复申请。网络明确关闭或目标主机受限时，先通过宿主网络权限入口申请实际 backend_url 的主机（默认 mcp.yixunkuajing.com）。网页、搜索、MCP 或 image_gen 可用不证明本地 Python／鉴权组件可联网。
+- 实际鉴权前读取宿主提供的网络权限；已允许访问配置中的后端时直接运行原 auth_gate.py，不重复申请。网络明确关闭或目标主机受限时，先通过宿主网络权限入口申请实际 backend_url 的主机（默认 mcp.yixunkuajing.com）。网页、搜索、MCP 或内置生图可用不证明本地 Python／鉴权组件可联网。
 - 宿主禁止申请或管理员拒绝时，说明受限主机和恢复条件；不得修改全局权限、改代理、关闭 TLS 校验或改鉴权接口。维护和模板管理不因这段规则执行真实鉴权或额外网络探测。
 - 入口失败仍原样展示两行安全停止信息并停止业务。service_unavailable／超时既可能是网络权限、DNS/TLS/代理问题，也可能是服务故障，不能据此判定 token 无效；账户拒绝和返回格式异常按原安全原因处理，不公开原始日志或响应正文。
 - 网络权限获批或连接恢复后，可以重新运行原 auth_gate.py 一次；这是恢复后的显式执行，不在脚本内新增自动重试。通过后继续原任务；再次失败则保留安全原因和恢复条件，不循环执行、不绕过通过记录。生成请求的超时／提交未知仍按原派发与瞬时失败规则核对状态，不因鉴权网络恢复而重复生成。
@@ -36,7 +37,7 @@ description: 基于真实产品资料制作 Amazon Listing 与 A+ 套图。用�
    - 然后 `P scripts/lc_template_select.py recommend --manifest M --apply`；只有用户指定套系时才改 `design_template_set_id`。
 5. **来源审阅**：`source-review-prepare --manifest M` → 看 `review/source/sheet.jpg` → 按包内说明填写 → `source-review-submit --manifest M --packet review/source/packet.json`，一次完成绑定。
 6. **规划**：`plan --manifest M` 一次列出全部问题和 `next_actions`，按列表集中修完再 plan；输入没变就不重复 plan。查看进度用只读的 `status`。
-7. **生成**：按 [tool-orchestration.md](references/tool-orchestration.md) 用适配器派发。锚点图入库后先看 raw，只核对商品身份、结构、材质和清晰度，然后 `anchor-approve --manifest M --job J --notes "..."`，兄弟图随即放行（最终完整审核照常进行）。
+7. **生成**：配合系统默认 `imagegen` Skill 使用 Codex 内置生图能力，按 [tool-orchestration.md](references/tool-orchestration.md) 接入队列或逐图派发。锚点图入库后先看 raw，只核对商品身份、结构、材质和清晰度，然后 `anchor-approve --manifest M --job J --notes "..."`，兄弟图随即放行（最终完整审核照常进行）。
 8. **审核**：`review-prepare --manifest M --jobs ...`，第一次调用就带 annotations → 默认只看 `review/sheets/<job>.jpg` 这一张总图，需要时再看原尺寸 → 填写 `review/packets/<job>.todo.json` → `review-submit --manifest M --packet <todo>`。
 9. **交付**：`deliver --manifest M`（总览过期时会自动刷新），核对 `image_count`，然后回复 `output_dir`。缓存清理由用户另行要求时再执行 `compact`。
 
