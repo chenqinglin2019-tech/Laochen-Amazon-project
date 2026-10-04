@@ -138,7 +138,7 @@ def probe_configured_adapter(provider: str) -> dict[str, Any]:
     return {"ready": True, "adapter_status": status, "access_tier": cfg.get("access_tier", "")}
 
 
-def probe_signa_safe(offices: list[str]) -> dict[str, Any]:
+def probe_signa_safe(offices: list[str], *, task=None) -> dict[str, Any]:
     """Run only Signa's non-search account, billing, usage, and office checks."""
     try:
         from signa_client import probe as actual_probe
@@ -146,11 +146,12 @@ def probe_signa_safe(offices: list[str]) -> dict[str, Any]:
         raise ProviderError(
             "PROVIDER_UNAVAILABLE", "failed", "Signa client/probe is unavailable",
         ) from exc
-    info = actual_probe(offices)
+    from source_policy import enabled
+    info = actual_probe(offices, task=task) if enabled(task) else actual_probe(offices)
     if not isinstance(info, dict) or info.get("ready") is not True:
         raise ProviderError(
             "COVERAGE_UNVERIFIED", "access_limited",
-            "Signa safe preflight did not confirm a zero-payment discovery account",
+            "Signa safe preflight did not confirm usable discovery account capacity",
         )
     return info
 
@@ -239,7 +240,7 @@ def phase_credentials(task_dir: Path) -> str:
     if signa_free_enabled(task) and signa_offices:
         checks.append((
             "signa", ",".join(jurisdictions),
-            lambda: probe_signa_safe(signa_offices), False,
+            lambda: probe_signa_safe(signa_offices, task=task), False,
         ))
     results = {
         provider: record_probe(task_dir, provider, jurisdiction, call, mandatory=mandatory)

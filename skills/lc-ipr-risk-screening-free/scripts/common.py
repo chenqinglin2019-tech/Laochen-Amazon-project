@@ -582,7 +582,7 @@ def is_v24(task_or_schema: dict[str, Any] | str) -> bool:
 
 
 def active_free_policy() -> dict[str, Any]:
-    """Return the immutable zero-cash-cost execution policy for new tasks."""
+    """Return the immutable zero-cash-cost policy retained for historical tasks."""
     return {
         "mode": "official_free_only",
         "allow_registration": True,
@@ -637,7 +637,9 @@ def task_free_policy_valid(task: dict[str, Any]) -> bool:
     revision = str(task.get("free_policy_revision") or "")
     policy = task.get("free_policy")
     if is_v24(task):
-        return revision == AUTOMATION_POLICY_REVISION and policy == active_free_policy()
+        from source_policy import REVISION as ACCOUNT_REVISION, account_policy
+        return ((revision == AUTOMATION_POLICY_REVISION and policy == active_free_policy())
+                or (revision == ACCOUNT_REVISION and policy == account_policy()))
     if revision == FREE_POLICY_REVISION:
         return policy == active_free_policy()
     if revision == LEGACY_DEFAULT_DISCOVERY_REVISION:
@@ -671,9 +673,9 @@ def uses_optional_commercial_discovery(task: dict[str, Any]) -> bool:
     return (
         is_active_schema(task)
         and str(task.get("free_policy_revision") or "") in (
-            {AUTOMATION_POLICY_REVISION} if is_v24(task) else {FREE_POLICY_REVISION}
+            {AUTOMATION_POLICY_REVISION, "existing-account-capacity-v1"} if is_v24(task) else {FREE_POLICY_REVISION}
         )
-        and task.get("free_policy") == active_free_policy()
+        and task_free_policy_valid(task)
     )
 
 
@@ -713,12 +715,12 @@ def serper_free_enhancement(enabled: bool = False, retrieval_workflow_revision: 
     }
 
 
-def signa_free_enhancement(enabled: bool = False) -> dict[str, Any]:
+def signa_free_enhancement(enabled: bool = False, *, maximum: int = SIGNA_FREE_MAX_QUERIES_PER_TASK) -> dict[str, Any]:
     """Return the explicit bounded Signa trademark-discovery contract."""
     return {
         "enabled": enabled is True,
         "role": SIGNA_FREE_ROLE,
-        "max_queries_per_task": SIGNA_FREE_MAX_QUERIES_PER_TASK,
+        "max_queries_per_task": maximum,
         "authoritative_for_final_rating": False,
     }
 
@@ -825,7 +827,9 @@ def signa_free_enhancement_error(task: dict[str, Any]) -> str:
         or value.get("authoritative_for_final_rating") is not False
         or isinstance(maximum, bool)
         or not isinstance(maximum, int)
-        or maximum != SIGNA_FREE_MAX_QUERIES_PER_TASK
+        or (not 1 <= maximum <= SIGNA_FREE_MAX_QUERIES_PER_TASK)
+        or (task.get("source_settings_revision") != "frozen-source-settings-v1"
+            and maximum != SIGNA_FREE_MAX_QUERIES_PER_TASK)
     ):
         return "SIGNA_FREE_ENHANCEMENT_INVALID"
     return ""
@@ -1558,7 +1562,7 @@ def default_discovery_plan_error(
         not isinstance(execution_policy, dict)
         or execution_policy.get("commercial_freemium_allowlist") != expected_allowlist
         or execution_policy.get("commercial_providers_enabled") is not bool(expected_allowlist)
-        or execution_policy.get("paid_execution_enabled") is not False
+        or execution_policy.get("paid_execution_enabled") is not (task.get("free_policy", {}).get("allow_paid") is True)
     ):
         return "COMMERCIAL_DISCOVERY_EXECUTION_POLICY_INVALID"
     return ""

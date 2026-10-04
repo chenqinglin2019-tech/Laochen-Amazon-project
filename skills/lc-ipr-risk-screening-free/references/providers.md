@@ -1,16 +1,16 @@
-# 2.4 免费来源与接口契约
+# 2.4 来源与接口契约
 
 新任务默认使用 `api-first-v3` 与 `final-double-review-v1`，以[API 直接采信与一次最终双审](api-direct-final-review.md)为优先契约。已采信 API 字段不生成官方网页重复核验；过程保留事实分析，取消 09C 阶段双审前置。下文旧修订仅约束保留该版本的历史任务。
 
-新 `workflow-correction-v1` 的三态提交、按需原文成功、本批次/全任务状态和同快照发布复用见[纠错契约](workflow-correction.md)；原免费、访问、时效和来源真实性约束不变。
+新 `workflow-correction-v1` 的三态提交、按需原文成功、本批次/全任务状态和同快照发布复用见[纠错契约](workflow-correction.md)；访问、时效和来源真实性约束不变；新任务费用边界按来源账户策略执行。
 
-本文适用于新任务 `2.4-free`、`free_policy_revision=automation-first-v1`。来源的实际能力、检索覆盖与法律结论分别判断；“官方”“免费”“账号存在”“接口有响应”均不等于某模块已经查清。
+新任务使用 `free_policy_revision=existing-account-capacity-v1`，具体费用与冻结配置见[来源账户策略](source-policy.md)；下文旧免费账户门禁仅适用于 `automation-first-v1` 等历史任务。来源的实际能力、检索覆盖与法律结论分别判断；“官方”“免费”“账号存在”“接口有响应”均不等于某模块已经查清。
 
-当前新任务的 necessary-work-v2 对范围轮转、规划预留释放、无 API 首查替代及来源证据报告采用[统一增量规则](workflow-correction.md#有界取证交付necessary-work-v2)。下文的旧发布限制不覆盖该增量；来源授权、消费账本、禁止路线与原始回执真实性仍完整适用。
+当前新任务的 necessary-work-v3 对范围轮转、规划预留释放、无 API 首查替代及来源证据报告采用[统一增量规则](workflow-correction.md#有界取证交付necessary-work-v2)。下文的旧发布限制不覆盖该增量；来源授权、消费账本、禁止路线与原始回执真实性仍完整适用。
 
 ## 执行与成本边界
 
-- 数据源支出上限固定 `0 USD`。只执行官方免费服务或已明确选中的商业免费额度；不购买、升级、充值、自动续费、使用付费积分或超额额度。
+- 新任务允许使用明确启用来源的现有免费或付费套餐及积分，不承诺零费用；不购买、升级、充值、主动续费或启用超额。历史免费任务继续执行固定 `0 USD` 与禁止付费积分的原规则。
 - EPO OPS、EUIPO Production、JPO API、INPI API 的账号是可选能力，缺少任一账号只影响相应路线，不阻止商品采集和其他来源继续执行。
 - Serper、Signa、SerpApi 默认关闭，只能在创建任务时分别用 `--enable-serper-free`、`--enable-signa-free`、`--enable-serpapi-free` 选择；仅配置 Key 不会启用。已选但不可用的发现增强记非阻断缺口。
 - 历史 v1/v2 商业发现行保持原 discovery-only 合同。v3 按准确记录与字段采信 API，详情可承担 comparison 或 verification 义务；是否成功、是否已读、字段是否完整分别记录。可选来源失败不降低其他已支持事实的置信度。
@@ -28,7 +28,7 @@
 首次调用已授权来源前及连接受限后，先按 [联网权限与恢复](installation.md#联网权限与恢复) 核对宿主网络权限；获准联网不重置来源额度、attempt_id、提交状态或下面的重试限制。浏览器／MCP 可访问来源不证明 API 子进程可联网。
 
 - 公共 HTTP 每次跳转保持同一 scheme/host/port，拒绝跨源及 HTTPS 降级；EPS/INPI 的自有传输保留更严格的禁止跳转。公共响应有 32 MiB 上限，单次重试最多 3 次，429 不重试；计量请求保持 retries=0。`LC_IPR_OPERATION_DEADLINE_EPOCH` 限制同一操作的剩余时间，重试不另起完整计时。
-- SerpApi 与 Signa 在每次计量请求前，用本机跨进程账本原子预留一份免费搜索额度；SerpApi Patents/Lens 共用余额。账本只保存凭据指纹、计划/尝试指纹与计数，不保存 key。范围是本机同一凭据；其他设备及同账号的另一把 key 无法由此观察，服务端账户检查和拒绝仍优先。
+- SerpApi 与 Signa 在每次计量请求前，用本机跨进程账本原子预留一份账户搜索额度；SerpApi Patents/Lens 共用余额。账本只保存凭据指纹、计划/尝试指纹与计数，不保存 key。范围是本机同一凭据；其他设备及同账号的另一把 key 无法由此观察，服务端账户检查和拒绝仍优先。
 - 默认 `attempt_id=initial`，相同 task/query/plan hash/attempt 不重复占额。响应丢失、原文哈希损坏、动态证据过期或已记录的条件变化需要新请求时，使用新的 `--attempt-id ID --retry-reason '具体原因'`；Agent 先持久记录这次修复或重试身份。新 attempt 重新预留额度，旧超时/崩溃的未知消耗不退款；任务次数上限和实时 Free-plan 校验仍生效，不因换 ID 放宽。
 - 远端余额升高不能直接冲销本地预留。SerpApi 仅在真实账号响应给出更晚的续期日期、旧日期已到且新日期尚未到时切换周期；没有可信周期的来源（当前 Signa）不自行推算月初回补。相关本地额度停止应明确说明需要核查周期事实，不能删账本绕过。
 - `LC_IPR_TEST_MODE=1` 下 SerpApi 必须显式 loopback HTTP 地址并使用固定 dummy key；不读取真实本地 key。`LC_IPR_OFFLINE_TESTS=1` 下父子进程只使用临时虚拟凭据，均不得读取真实 `config.json/.env`，各 HTTP 入口禁止非 loopback 实际请求，不改变生产配置/来源标记测试。单元模拟不代表线上执行能力。
@@ -45,9 +45,9 @@
 
 先处理身份、主体和核心结构，再补缺失维度；宽泛查询按有证据的用途/分类拆分，原截断与未处理候选保留，不以命中一件专利终止必要召回。PDF/已登记页图/TSDR合格事实复用，不重复下载或为显示用途重查。双审可并行读取同一冻结快照，主审等两方完成；证据实质变化重开受影响项。fast/release仅在Skill修改时执行，商品排查仍运行鉴权、输入/证据/报告验证。阶段计时分别记录调度、网站、合并、评估、渲染与验证，不将来源时间字段或离线提速外推整轮速度。
 
-`references/runtime-config.json` 中的 `performance.max_api_concurrency` 默认 3，调度器限定 1–3，单来源 lane 内仍串行；共享 SerpApi/Serper 及 EUIPO 路线分别共用 lane。`dynamic_evidence_max_age_hours` 默认 48，必须为正的有限数；动态查询/状态证据超过该时长不直接复用，原始文件与 hash 也必须完整。EPS 静态已公开文献按文件完整性复用，不能把其当成新状态查询。
+`references/runtime-config.json` 中的 `performance.max_api_concurrency` 默认 3，调度器限定 1–3，单来源 lane 内仍串行；共享 SerpApi/Serper 及 EUIPO 路线分别共用 lane。`dynamic_evidence_max_age_hours` 默认 48，必须为正的有限数；新任务创建时冻结到 `task.retrieval_policy`，调度、复用和事实采信共同读取，不随全局配置变化；动态查询/状态证据超过该时长不直接复用，原始文件与 hash 也必须完整。EPS 静态已公开文献按文件完整性复用，不能把其当成新状态查询。
 
-`performance.api_operation_timeout_seconds` 默认 180，API 调度器限制为 1–180 秒；`cdp.operation_timeout_ms` 默认 165000，浏览器计划调度中的有效操作预算限制为 1–165 秒，单条总预算 180 秒。降低这些值可能增加超时缺口，提高配置不能突破调度上限、免费额度或计划次数。来源 CLI 保持独立子进程；本次没有增加跨任务缓存或常驻 Token 复用。
+`performance.api_operation_timeout_seconds` 默认 180，API 调度器限制为 1–180 秒；`cdp.operation_timeout_ms` 默认 165000，浏览器计划调度中的有效操作预算限制为 1–165 秒，单条总预算 180 秒。降低这些值可能增加超时缺口，提高配置不能突破调度上限、账户容量或计划次数。来源 CLI 保持独立子进程；本次没有增加跨任务缓存或常驻 Token 复用。
 
 ## 官方 API
 
@@ -103,7 +103,7 @@
 
 JPO 号码核验成功不能填补 J-PlatPat 关键词、图像召回缺口；在当前“人工仅登录或验证”的边界内，没有通过自动化条款及路线验收的网页不启用人工业务回退。缺媒体或状态字段的候选仍为不完整。
 
-## 可选商业免费发现
+## 可选商业发现
 
 ### Serper
 
@@ -113,13 +113,13 @@ JPO 号码核验成功不能填补 J-PlatPat 关键词、图像召回缺口；�
 
 **以下固定停止仅描述无 API-first 标记的历史 2.4 任务。** 只有 Key 或本地 `allow_paid=false` 无法证实账号仍有免费额度、没有付费 credits 且没有自动充值；本版本尚未实现和验收官方账户页自动取证。因此在网络请求前记录 `FREE_ACCOUNT_UNVERIFIED`，保留精确的 SerpApi fallback。2.3 历史执行规则维持原契约。
 
-当前更稳妥的免费发现接入是 SerpApi，因为其 Account API 能在计量请求前核实套餐、余额和付费积分。Serper 客户端既有发现与解析代码保留，未来须先由 Agent 从官方账户页自动核实免费权益并建立跨任务账本；人工仅协助登录，不抄余额、不提交任意 JSON 充当证明。v3 的摘要、图片和完整记录按实际字段分别使用；未截断且身份、地域、时效匹配的有效记录直接支持对应判断。
+Serper 的官方账户证明校验与跨任务账本已实现，线上可用性仍以真实验收为准。历史免费任务须核实免费权益，人工仅协助登录，不抄余额、不提交任意 JSON 充当证明。新任务启用 Serper 时冻结现有余额使用授权，不要求先证明免费属性；余额与实际费用未知时如实记录。v3 的摘要、图片和完整记录按实际字段分别使用；未截断且身份、地域、时效匹配的有效记录直接支持对应判断。
 
 ### SerpApi Google Patents 与 Google Lens
 
-当前 Free 计划每月 250 次、每小时 50 次。每次计量搜索前调用免计量 Account API，必须同时确认 Free/Free Plan、月费 0、账户 active、额外积分 0、免费余量正数；缺字段、付费套餐和额度耗尽在搜索前停止。[定价](https://serpapi.com/pricing)、[Account API](https://serpapi.com/account-api)
+每次计量搜索前调用 Account API，确认账户 active、套餐与非负容量字段明确且可用容量大于零。新任务可用现有付费套餐及额外积分；历史免费任务仍要求 Free/Free Plan、月费 0、额外积分 0、免费余量正数。缺字段、非活跃账户和容量耗尽在搜索前停止。[定价](https://serpapi.com/pricing)、[Account API](https://serpapi.com/account-api)
 
-- 两引擎共享同一账号、任务锁、硬停止记录和**每任务合计三次**预算，不能各算三次。存在产品图时默认最多两条专利＋一条 Lens。
+- 两引擎共享同一账号、任务锁、硬停止记录和新 API-first 任务**每任务合计十次**预算，专利搜索、详情与 Lens 共享，按任务冻结值执行。合计三次及两条专利＋一条 Lens 仅属于历史无 API-first 标记任务。
 - 专利计划使用 `q/num/country/right_type`；已绑定且正常完成的 Serper 同查询使该 SerpApi fallback 跳过。[Google Patents API](https://serpapi.com/google-patents-api)
 - 新规划在相同预算内保留身份发现与产品特征查询；未有上述召回不足决定时，正常完成的主源仍按原备用规则跳过。源成功不等于相关性充分，不得把跳过备用报告为第二个来源已搜索。
 - Lens 来源为 `serpapi_google_lens/image_search`；计划使用 `q/image_url/type/hl/country/right_type=copyright`。只接收已在 `task.images` 记录并具有摘要的公开 Amazon 媒体 URL；禁止上传本地图片或自动公开产品资料。[Google Lens API](https://serpapi.com/google-lens-api)
@@ -128,9 +128,9 @@ JPO 号码核验成功不能填补 J-PlatPat 关键词、图像召回缺口；�
 
 ### Signa
 
-默认关闭；每任务最多三次、每次最多 25 条，仅文字商标 `exact/phonetic/fuzzy/prefix`。搜索前使用 account/plan/usage/credits/offices 等安全检查确认免费边界，禁止 known-mark 搜索探测；有待结算消费、付费积分、无法确认的自动充值或超额信号即停。
+默认关闭；每任务最多三次，搜索、准确记录详情和标样媒体共享该上限，可配置调低。搜索使用 `exact/phonetic/fuzzy/prefix`，每次最多 25 条；v3 支持公开图形／组合／三维类型筛选、详情与标样获取，不代表图片相似搜索。请求前检查 account/plan/usage/credits/offices；新任务可用现有付费容量，历史免费任务保留原零费用门禁。字段异常、容量耗尽或超额信号仍停止，禁止 known-mark 搜索探测。
 
-以实时 `/v1/offices` 为准合并目标法域，EU 使用 EM，不假定 DE/IT/ES/JP 全覆盖；现有适配器仍排除 WO。图像/Beta/合作账号接口没有实现为普通账号能力。免费额度公开口径可能变化，以当前免费账户契约为准，不写死营销数字。[服务说明](https://signa.so/compare)、[配额参考](https://docs.signa.so/api-reference/rate-limits)、[OpenAPI](https://api.signa.so/v1/openapi.json)
+以实时 `/v1/offices` 为准合并目标法域，EU 使用 EM，不假定 DE/IT/ES/JP 全覆盖；现有适配器仍排除 WO。图像/Beta/合作账号接口没有实现为普通账号能力。额度公开口径可能变化，以当前账户返回及版本化账户契约为准，不写死营销数字。[服务说明](https://signa.so/compare)、[配额参考](https://docs.signa.so/api-reference/rate-limits)、[OpenAPI](https://api.signa.so/v1/openapi.json)
 
 ## 浏览器路线、验收与失败
 
@@ -146,7 +146,7 @@ JPO 号码核验成功不能填补 J-PlatPat 关键词、图像召回缺口；�
 
 `2.3-free` 的来源选择、预算、规则和计划哈希保持冻结，不能用本文 2.4 路由静默重建或迁移；历史 default-discovery/optional-discovery 语义仍按持久化策略读取。`2.1/2.2` 只读证据与重建报告。新客户端要求 2.4，不能注入历史计划。
 
-OEPM 免费 Web Services、Google BigQuery Sandbox 公共专利数据、UKIPO 未来开放接口、CourtListener/RECAP 免费案件发现均保留为候选能力；未有本版本可执行客户端和真实验收者不得加入“已自动可用”清单。付费 DPMAconnectPlus、收费 Lens.org API、无可用免费注册入口的服务不作为可执行回退；没有免费合格替代时保存已完成结果和具体缺口，不生成自动付费升级动作。
+OEPM 免费 Web Services、Google BigQuery Sandbox 公共专利数据、UKIPO 未来开放接口、CourtListener/RECAP 免费案件发现均保留为候选能力；未有本版本可执行客户端和真实验收者不得加入“已自动可用”清单。DPMAconnectPlus、Lens.org API 等未实现、未验收或未获当前任务授权的服务不能直接作为可执行回退；没有合格替代时保存已完成结果和具体缺口，不生成自动购买或升级动作。
 # 本地阶段计时
 
 `runtime-timings.jsonl` 是快照之外的辅助计时，不是取证日期或业务完成证明。新专项任务的合并、分流、评估定稿、报告构建和验证入口以 monotonic 时钟记录 `cli_main_inclusive` 耗时；报告构建包含该入口原有验证与渲染，不称纯 HTML 渲染时间。浏览器/API 的单动作、初始化及调度耗时复用已有字段，不重复统计。历史任务无新修订标记且无显式输出目录时不写计时；日志写入失败不得改变业务返回值或异常。

@@ -31,7 +31,7 @@ def _lens_wire(row):
     return _physical_request_identity("serpapi_google_lens", row)
 
 
-def _retained_lens_response(evidence, row, task_dir):
+def _retained_lens_response(evidence, row, task_dir, task=None):
     """Same checks as runtime reuse; this read does not create an execution."""
     if task_dir is None or _lens_wire(row) is None:
         return False
@@ -46,7 +46,8 @@ def _retained_lens_response(evidence, row, task_dir):
             continue
         wire = _lens_wire({**(run.get("request_params") or {}),
             "operation": run.get("operation"), "jurisdiction": run.get("jurisdiction")})
-        if wire != _lens_wire(row) or not source_fresh(run, 48):
+        from source_policy import dynamic_max_age_hours
+        if wire != _lens_wire(row) or not source_fresh(run, dynamic_max_age_hours(task or {})):
             continue
         try:
             if source_files_complete(Path(task_dir), evidence, run):
@@ -71,7 +72,7 @@ def planned_lens_reuse(task, evidence, queries, row, *, task_dir, plan=None):
         runs = [run for run in evidence.get('source_runs', [])
             if run.get('provider') == 'serpapi_google_lens'
             and run.get('query_id') == source.get('query_id')]
-        if runs and not _retained_lens_response(evidence, row, task_dir):
+        if runs and not _retained_lens_response(evidence, row, task_dir, task):
             continue
         # Pending plans share one execution; retained material must still pass
         # freshness and raw-card integrity. Each logical purpose keeps its own
@@ -116,7 +117,7 @@ def _physical_planned(task, evidence, queries, providers, *, plan=None, task_dir
                         physical_response_source(Path(task_dir), evidence, run) is not None for run in runs):
                     continue
                 if not runs:
-                    if _retained_lens_response(evidence, row, task_dir):
+                    if _retained_lens_response(evidence, row, task_dir, task):
                         continue
                     wire = _lens_wire(row)
                     if wire is not None:

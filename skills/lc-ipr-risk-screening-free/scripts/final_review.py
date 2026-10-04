@@ -60,8 +60,17 @@ unfingerprinted paths remain dependencies. Source/retrieval dates stay bound.
     return value
 
 
+def _task_inputs(task):
+    values = {key: task[key] for key in TASK_FIELDS if key in task}
+    if task.get("source_settings_revision") is not None:
+        values["source_settings_revision"] = task["source_settings_revision"]
+        for key in ("free_policy_revision", "free_policy", "retrieval_policy"):
+            values[key] = task.get(key)
+    return values
+
+
 def inputs(evidence, candidates, ledger, plan, task, supplement=None):
-    material = semantic({"revision": REVISION, "task": {key: task[key] for key in TASK_FIELDS if key in task},
+    material = semantic({"revision": REVISION, "task": _task_inputs(task),
         "evidence": evidence, "candidates": candidates, "ledger": ledger,
         "plan": plan, "supplement": supplement})
     # Queue order is presentation metadata. Normalize only request lists, never
@@ -80,7 +89,7 @@ def digest(evidence, candidates, ledger, plan, task, supplement=None):
 def freeze_time_binding(task, evidence, at=None):
     return {"assessment_at": at or now_iso(),
         "evidence_semantic_sha256": sha256_json(semantic(evidence)),
-        "task_semantic_sha256": sha256_json(semantic({key: task[key] for key in TASK_FIELDS if key in task}))}
+        "task_semantic_sha256": sha256_json(semantic(_task_inputs(task)))}
 
 
 def evaluation_at(task, evidence=None):

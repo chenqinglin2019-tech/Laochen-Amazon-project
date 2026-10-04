@@ -1,6 +1,6 @@
 # API 优先检索契约
 
-新任务采用 `retrieval_workflow_revision=api-first-v3`、`review_policy_revision=final-double-review-v1` 与 `completion_policy_revision=necessary-work-v3`，先按 [API 直接采信与最终双审](api-direct-final-review.md) 执行。已满足的 API 事实不再要求官方网页复核；美国外观保留 SerpApi DESIGN 路线，图像和维权查询按实际权利路由。下文 v2 的来源发现、预算和历史补搜合同在不冲突处继续适用，标记为 v2 的官方核验与双审前置只适用于历史任务；两者冲突时以本节及 [API 直接采信与最终双审](api-direct-final-review.md) 的 v3 规则为准。鉴权和来源消费授权保持原规则。
+新任务采用 `retrieval_workflow_revision=api-first-v3`、`review_policy_revision=final-double-review-v1` 与 `completion_policy_revision=necessary-work-v3`，先按 [API 直接采信与最终双审](api-direct-final-review.md) 执行。已满足的 API 事实不再要求官方网页复核；美国外观保留 SerpApi DESIGN 路线，图像和维权查询按实际权利路由。下文 v2 的来源发现、预算和历史补搜合同在不冲突处继续适用，标记为 v2 的官方核验与双审前置只适用于历史任务；两者冲突时以本节及 [API 直接采信与最终双审](api-direct-final-review.md) 的 v3 规则为准。业务鉴权保持原规则；新任务来源消费采用[来源账户策略](source-policy.md)。
 
 ## 执行与分工
 
@@ -10,7 +10,7 @@
 
 `next_work.py` 是唯一工作入口。`run_api_plan.py --phase discovery` 运行初始及已获审阅依据的发现；`--phase verification` 运行候选核验、必要补证和原文读取。`run_browser_plan.py --phase verification` 只核验准确记录；`--phase fallback` 只执行已经绑定依据的有限补搜。指定 query ID 或直接客户端也必须经过同一情景分流门禁。历史任务保留原 wave 参数与语义。
 
-API 可用性按来源、国家、权利、操作和当前账号能力判断。优先复用现有 Serper Patents/Search/Images、SerpApi Patents/Lens、Signa、OPS、INPI 和 EUIPO API；JPO 用于其支持的已知号，EPS 用于 EP 原文。来源未配置、免费资格不明、生产审批欠缺及响应契约未实测分别记录，其他工作继续。浏览器不绕过已有受限网页路线。
+API 可用性按来源、国家、权利、操作和当前账号能力判断。优先复用现有 Serper Patents/Search/Images、SerpApi Patents/Lens、Signa、OPS、INPI 和 EUIPO API；JPO 用于其支持的已知号，EPS 用于 EP 原文。来源未配置、账户容量不可确认、生产审批欠缺及响应契约未实测分别记录，其他工作继续。浏览器不绕过已有受限网页路线。
 
 ## 发现、分流与有限补搜
 
@@ -54,15 +54,17 @@ v2 的未知提交先检查原始回执。未审阅时保留 `submission_unknown
 
 v2 每次从当前能力重算旧计划缺口。`API_DISCOVERY_REPLAN_REQUIRED` 表示已恢复路线或能力尚待核验：先完成对应来源检查，再运行 `--expand`；已有无父首查提示 `API_DISCOVERY_CAPABILITY_SNAPSHOT_CHANGED` 时使用上述 `plan_repair`。仅真实不可用来源或已审有限发现能形成保留限制，不能把旧 gap 标签、缺失能力快照或尚未读/未审结果当成终止证据。
 
-## 免费额度
+## 调用预算与账户容量
 
-`references/runtime-config.json` 的 `api_first` 是新默认值唯一配置源，创建时冻结到 task.retrieval_policy。Serper 合计 30 次、三类操作动态共享；SerpApi 合计 10 次、Patents/Lens共享；Signa 3 次。旧任务仍按旧 10/3 等上限核验。次数不是积分单位；请求前同时核对任务次数和实际免费积分边界。
+`references/runtime-config.json` 的 `api_first` 是新默认值唯一配置源，创建时冻结到 task.retrieval_policy。Serper 合计 30 次、三类操作动态共享；SerpApi 合计 10 次、Patents/Lens共享；Signa 3 次。旧任务仍按旧 10/3 等上限核验。次数不是积分单位；新任务允许现有付费容量，不自动购买、充值、升级或启用超额，历史任务仍核对免费边界。Signa 搜索、详情、媒体共同服从冻结预算。
 
-Serper 使用官方账户页面只读取证。证明须由当前账户实际可见的 Key 和账户信息导出指纹，保留脱敏正文及哈希；不能用本地 Key 指纹冒充页面取证。明确免费余额、付费余额、充值状态和支持操作的计费单位必须一致，证明最长有效 30 分钟。未知字段、过期、账户不匹配或缺 Key 均在计量前停止。本机缺 Key 时只可声明离线验收，不能声称已接通。
+以下账户免费属性证明适用于历史免费任务；新任务启用 Serper 即冻结现有余额使用授权，不因未证明免费属性而停止。
+
+Serper 历史免费任务使用官方账户页面只读取证。证明须由当前账户实际可见的 Key 和账户信息导出指纹，保留脱敏正文及哈希；不能用本地 Key 指纹冒充页面取证。明确免费余额、付费余额、充值状态和支持操作的计费单位必须一致，证明最长有效 30 分钟。未知字段、过期、账户不匹配或缺 Key 均在计量前停止。本机缺 Key 时只可声明离线验收，不能声称已接通。
 
 用户明确授权使用 Serper 现有余额、且不要求核实其免费属性时，创建任务可追加 `--use-serper-existing-balance`。这项授权与账户 Key 分离，保留授权时间、任务次数上限及禁止购买/充值的范围；不能由 Key 已配置自动推定。该分支不登录查余额，也不宣称余额已核实免费：回执标记 `user_authorized_existing_balance`、`balance_verified=false`，积分余额未知，响应实际报告的积分另行记录；继续执行跨任务原子请求预留和配额错误即停。
 
-SerpApi 沿用免费 Account API。跨任务额度复用原子预留账本，未知消费不自动退还，跨机器余额以服务端为准。来源耗尽或限流停止同源后续动作，继续其他已授权路线；不购买、充值或启用超额。
+SerpApi 沿用 Account API，新任务接受现有付费套餐及额外积分，历史任务保持免费套餐门禁。跨任务额度复用原子预留账本，未知消费不自动退还，跨机器余额以服务端为准。来源耗尽或限流停止同源后续动作，继续其他已授权路线；不购买、充值或启用超额。
 
 ## 与现有报告的关系
 

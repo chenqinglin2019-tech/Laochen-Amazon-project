@@ -42,8 +42,8 @@ def parse_amazon_url(raw_url: str) -> tuple[str, str, str]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Create one free-tier IPR task from an Amazon URL or reviewed user materials.")
-    parser.epilog = "New tasks use API-first retrieval, independent final review, and known-findings-risk-v1 operating grades with separate query progress. Historical tasks retain their original policy."
+    parser = argparse.ArgumentParser(description="Create one IPR task from an Amazon URL or reviewed user materials.")
+    parser.epilog = "New tasks use API-first retrieval, independent final review, and known-findings-risk-v1 operating grades with separate query progress. New enabled sources may consume existing free or paid account capacity; no purchases or recharge. Historical tasks retain their original policy."
     entry = parser.add_mutually_exclusive_group(required=True)
     entry.add_argument("--url")
     entry.add_argument("--product-input", type=Path, help="Reviewed product-input-v2 JSON (v1 compatibility accepted); country must be explicit")
@@ -77,7 +77,7 @@ def main() -> None:
     parser.add_argument(
         "--enable-serpapi-free", action="store_true",
         help=(
-            "Optionally add bounded SerpApi Free-plan Google Patents discovery; requires "
+            "Optionally add bounded SerpApi Google Patents discovery; requires "
             "SERPAPI_API_KEY. Source selection follows country, right and required information."
         ),
     )
@@ -278,10 +278,21 @@ def main() -> None:
         task["review_conflict_revision"] = "structured-conflicts-v1"
         retrieval = config["api_first"]
         task["retrieval_policy"] = dict(retrieval)
+        from source_policy import REVISION as ACCOUNT_REVISION, CONFIG_REVISION, account_policy, dynamic_max_age_hours
+        if config.get("source_access_policy") != account_policy():
+            raise ValueError("SOURCE_ACCESS_POLICY_INVALID")
+        task["free_policy_revision"] = ACCOUNT_REVISION
+        task["free_policy"] = account_policy()
+        task["source_settings_revision"] = CONFIG_REVISION
+        task["retrieval_policy"]["dynamic_evidence_max_age_hours"] = dynamic_max_age_hours({}, config)
+        signa_maximum = retrieval.get("signa_max_requests")
+        if type(signa_maximum) is not int or not 1 <= signa_maximum <= 3:
+            raise ValueError("SIGNA_FREE_ENHANCEMENT_INVALID")
+        task["signa_free_enhancement"]["max_queries_per_task"] = signa_maximum
         task["serper_free_enhancement"]["max_queries_per_task"] = retrieval["serper_max_requests"]
         task["serpapi_free_enhancement"]["max_queries_per_task"] = retrieval["serpapi_max_requests"]
         task["serpapi_free_enhancement"]["fallback_only_when_serper_enabled"] = False
-        if args.use_serper_existing_balance:
+        if args.use_serper_existing_balance or args.enable_serper_free:
             task["serper_existing_balance_authorization"] = {
                 "authorized": True, "source": "explicit_user_instruction", "authorized_at": created,
                 "max_requests": retrieval["serper_max_requests"], "allow_recharge": False, "allow_new_purchase": False,
@@ -296,11 +307,12 @@ def main() -> None:
         )
         task["execution_policy"] = {
             "mode": "automation_first", "human_actions": ["login", "captcha", "mfa", "consent", "qr"],
-            "manual_business_work": False, "cost_ceiling_usd": 0,
+            "manual_business_work": False, "cost_ceiling_usd": None,
+            "allow_new_purchase": False, "allow_recharge": False, "allow_upgrade": False,
         }
         task["query_terms"] = []
         task["checkpoints"]["optional_discovery_selection"]["detail"] = (
-            "Available selected free APIs perform bounded discovery before agent triage and targeted verification. "
+            "Available selected APIs perform bounded discovery before agent triage and targeted verification. "
             "Missing capabilities remain explicit; browser discovery requires a reviewed bounded fallback."
         )
     if current:

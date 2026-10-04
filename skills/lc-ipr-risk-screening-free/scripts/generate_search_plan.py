@@ -1049,7 +1049,7 @@ def main() -> None:
                     ("serpapi", serpapi_enabled),
                 ) if enabled
             ],
-            "paid_execution_enabled": False,
+            "paid_execution_enabled": task.get("free_policy", {}).get("allow_paid") is True,
         },
     }
     try:

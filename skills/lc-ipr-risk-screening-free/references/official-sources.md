@@ -30,7 +30,7 @@ EPO OPS、通过免费账户门禁的 SerpApi 可提高公开专利发现；无 
 ## EU 层与 EP 文献
 
 - [EPO OPS](https://ops.epo.org/)：注册免费、结构化发现与同族/分类补充；访问获批不确定时用其他合格发现源继续，不能阻塞全任务。
-- [EPO Publication Server](https://www.epo.org/en/searching-for-patents/data/web-services/publication-server)：免注册下载 EP 文献；当前代码已真实验证 XML 单案提取，缺原始图像或现行地域效力时仍保留缺口。
+- [EPO Publication Server](https://www.epo.org/en/searching-for-patents/data/web-services/publication-server)：免注册下载 EP 文献；当前已实现 XML 单案提取，但旧线上正例只剩历史摘要，原响应、哈希和回执缺失，验收状态为 historical_summary_pending_evidence，缺原始图像或现行地域效力时仍保留缺口。
 - [EPO Federated Register](https://www.epo.org/en/searching-for-patents/legal/register/documentation/federated-register)：了解普通 EP 国家登记与路由；其网页当前不作为可自动执行且已验收的替代。
 - [EUIPO API Portal](https://dev.euipo.europa.eu/product)：Production 1.1.0 的 EU 文字商标、外观搜索及详情；免费但需审核，Sandbox 只用于测试。
 - [EUIPO eSearch](https://euipo.europa.eu/eSearch/)、[TMview](https://www.tmdn.org/tmview/)、[DesignView](https://www.tmdn.org/tmdsview-web/)：有跨库及图像/分类发现价值，但当前受限网页不进入无人值守查询，也不安排人工业务回退。聚合数据不是目标国法律状态登记簿。
@@ -55,7 +55,7 @@ EUIPO Trademark Search API 不支持 Vienna 分类召回。文字商标查询不
 
 [DPMAregister](https://register.dpma.de/DPMAregister/Uebersicht)、[DPMA 检索服务说明](https://www.dpma.de/english/search/)及 DEPATISnet 分别提供登记和专利文献能力。德国专利、实用新型、商标、外观保持不同权利类型；EU 层另行覆盖。
 
-本版本未有已验收的德国自动单案核验路线。DPMAconnectPlus 收取接入费用，不符合零支出边界，不能作为自动回退。[DPMAconnectPlus](https://www.dpma.de/english/search/data_supply_services/dpmaconnect/index.html)
+本版本未有已验收的德国自动单案核验路线。DPMAconnectPlus 收取接入费用，但本版本尚无其可执行客户端与真实验收，不能直接作为自动回退；若后续接入，须单独实现并取得来源授权。[DPMAconnectPlus](https://www.dpma.de/english/search/data_supply_services/dpmaconnect/index.html)
 
 ### 意大利 IT
 
@@ -87,7 +87,7 @@ PATENTSCOPE、Global Brand Database、Global Design Database 各自服务和条�
 
 EPO/INPI 等合法渠道的 WO 文献可以作为线索，不因文献国别 WO 而删除；仍须找到相关国家权利及效力。现有 Signa office WO 继续由其冻结免费发现契约排除，不代表产品已经查清所有国际指定权利。
 
-SerpApi 与 Signa 经账户门禁后可使用免费额度发现。Serper 新任务使用依据见 [API 优先契约](api-first.md)；无新标记历史 2.4 固定在计量请求前停止；不能把注册赠额推定为任意现有 Key 均可零费用执行，细节见 providers.md。两个 Google 检索代理不算两个独立数据库；增加语言、结构、分类、权利人、图片维度才可能扩大召回。发现层内容不能伪称官方登记或证明权利现行有效。新策略可将真实线索作为带假设、低置信度的预判依据；不把线索转换为已核实事实。无策略字段的历史任务仍按旧正式评级门禁执行。
+新任务的 SerpApi 与 Signa 经账户门禁后可使用现有免费或付费容量；历史任务保留原免费门禁。Serper 新任务使用依据见 [API 优先契约](api-first.md)；无新标记历史 2.4 固定在计量请求前停止；不能把注册赠额推定为任意现有 Key 均可零费用执行，细节见 providers.md。两个 Google 检索代理不算两个独立数据库；增加语言、结构、分类、权利人、图片维度才可能扩大召回。发现层内容不能伪称官方登记或证明权利现行有效。新策略可将真实线索作为带假设、低置信度的预判依据；不把线索转换为已核实事实。无策略字段的历史任务仍按旧正式评级门禁执行。
 
 ## 后续替代路线与验收门槛
 

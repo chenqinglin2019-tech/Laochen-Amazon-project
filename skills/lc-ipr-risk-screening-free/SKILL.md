@@ -1,13 +1,13 @@
 ---
 name: lc-ipr-risk-screening-free
-description: 使用免费或免费额度数据源，对单个 Amazon 商品或用户提供的产品资料在美国、英国、法国、德国、意大利、西班牙和日本的专利、外观、商标及版权风险进行证据排查，分国家输出五级风险预判、三级置信度、推论依据、核查事项和离线报告。
+description: 使用官方来源及用户已启用的数据源账户容量（免费或付费），对单个 Amazon 商品或用户提供的产品资料在美国、英国、法国、德国、意大利、西班牙和日本的专利、外观、商标及版权风险进行证据排查，分国家输出五级风险预判、三级置信度、推论依据、核查事项和离线报告。
 ---
 
-# 免费知识产权风险排查
+# 知识产权风险排查
 
-新任务使用 `2.4-free`、`api-first-v3`、`final-double-review-v1`、`discovery-purpose-budget-v1`、`discovery-semantics-v1`、`source-operation-v2`、`necessary-work-v3`、`known-findings-risk-v1`、`operator-report-v1`、`product_structure_policy=use_provided_else_unavailable_v1`、`module-double-review-v1`、`scenario-triage-v1`、`identity-discovery-v1`、`workflow-correction-v1`、`continuous-work-v2` 与 `asset-scope-v1`，以及 `failure-limits-v1` 与 `structured-conflicts-v1`（见 [提速与有据限制](references/workflow-efficiency.md)）。先固定销售情景和产品身份，再全量轻分流，仅深入核验入选候选。有效 API 字段直接支持判断，不强制通过 USPTO 等官方网页重复核验。仅最终冻结后独立双审一次；具体规则先读 [API 直接采信与最终双审](references/api-direct-final-review.md)。总体与各范围的运营筛查等级按已查明具体当前风险计算；没有完成复核的适用判断时显示风险待定，并给出暂缓上架建议；已有适用低风险依据时仍保留未完成事项。未完成动作、缺资料和失败进入真实进度、限制和上架建议，不机械改变已有依据的等级；候选未知／待判断事实不改成已核实或已排除。历史任务保留原策略。
+新任务来源采用 `existing-account-capacity-v1` 与 `frozen-source-settings-v1`（见[来源账户策略](references/source-policy.md)）；不再要求免费余额或零费用，允许消耗已启用来源的现有免费／付费套餐及积分，不自动购买、充值、升级或启用超额。`2.4-free` 是保留的兼容标识。新任务使用 `2.4-free`、`api-first-v3`、`final-double-review-v1`、`discovery-purpose-budget-v1`、`discovery-semantics-v1`、`source-operation-v2`、`necessary-work-v3`、`known-findings-risk-v1`、`operator-report-v1`、`product_structure_policy=use_provided_else_unavailable_v1`、`module-double-review-v1`、`scenario-triage-v1`、`identity-discovery-v1`、`workflow-correction-v1`、`continuous-work-v2` 与 `asset-scope-v1`，以及 `failure-limits-v1` 与 `structured-conflicts-v1`（见 [提速与有据限制](references/workflow-efficiency.md)）。先固定销售情景和产品身份，再全量轻分流，仅深入核验入选候选。有效 API 字段直接支持判断，不强制通过 USPTO 等官方网页重复核验。仅最终冻结后独立双审一次；具体规则先读 [API 直接采信与最终双审](references/api-direct-final-review.md)。总体与各范围的运营筛查等级按已查明具体当前风险计算；没有完成复核的适用判断时显示风险待定，并给出暂缓上架建议；已有适用低风险依据时仍保留未完成事项。未完成动作、缺资料和失败进入真实进度、限制和上架建议，不机械改变已有依据的等级；候选未知／待判断事实不改成已核实或已排除。历史任务保留原策略。
 
-实际商品排查的第一条业务命令必须按 [INSTRUCTIONS.md](INSTRUCTIONS.md) 执行云端鉴权。创建任务后的 credentials 预检保留第二次鉴权。鉴权、零支出、凭据位置和失败行为属于冻结协议，本次工作流优化不修改它们。开发、审计、离线测试和恢复 Skill 文件不执行真实鉴权。
+实际商品排查的第一条业务命令必须按 [INSTRUCTIONS.md](INSTRUCTIONS.md) 执行云端鉴权。创建任务后的 credentials 预检保留第二次鉴权。鉴权、凭据位置和鉴权失败行为属于冻结协议，不修改；数据源费用规则按新来源账户策略执行。开发、审计、离线测试和恢复 Skill 文件不执行真实鉴权。
 
 首次鉴权及获准来源调用前按 [联网权限与恢复](references/installation.md#联网权限与恢复) 检查宿主网络权限。确有阻断时走宿主授权入口，鉴权失败仍停止业务并展示原安全原因；恢复后重跑原入口。来源提交未知须先核对回执，网络恢复不重置额度或提交次数。
 
@@ -58,7 +58,7 @@ description: 使用免费或免费额度数据源，对单个 Amazon 商品或�
 
 1. 鉴权后创建任务，记录 `input_role`、产品身份、国家和情景。仅有竞品链接时默认拟售功能、结构、外观一致且使用自己品牌的同款商品；参考品牌、摄影和附属包装按默认未纳入。本体装饰、作为目标商品的礼品盒或装饰画按真实关系处理，不普遍追问品牌用途。
 2. 完成 credentials 预检；链接入口执行 Amazon 多视图采集，资料入口用 `product-input-v2` 明确选定查询主图或记录歧义，再执行 `record_user_product.py` 留存资料。首次核对后冻结具体目标，两路以 `product-scope-input-v2` 调用 `record_product_scope.py`，记录对象四态、逐项事实性质与版本、主图呈现限制、许可和方向依赖。仅针对已核查仍存在的实质矛盾询问具体对象，再用 `record_product_analysis.py` 登记可追溯术语；页面声明或模糊 OCR 可作待核实线索，不能直接写成已证实结构。原始线索须映射到术语或给出排除理由。
-3. 生成初始计划后，先按[09A 唯一计划项与进度](references/review-progress-stage-a.md)登记执行前工作项，再按[方向与语义审阅](references/discovery-semantics.md)记录方向清单与每条发现查询的提交前审阅，再执行 API／网页计划；实际返回后记录第二次语义审阅，并按[来源操作验收](references/source-operations.md)检查实际字段、分页及操作能力。图像路线只取绑定的目标主图，提交前复核图片、目标版本、来源能力及接收方/用途许可；用户文件目前不自动外传，路线不足记局部缺口，其他工作继续。来源故障继续其他来源；首源成功但无相关候选时，审阅真实结果后才按规则启用已授权免费替代。
+3. 生成初始计划后，先按[09A 唯一计划项与进度](references/review-progress-stage-a.md)登记执行前工作项，再按[方向与语义审阅](references/discovery-semantics.md)记录方向清单与每条发现查询的提交前审阅，再执行 API／网页计划；实际返回后记录第二次语义审阅，并按[来源操作验收](references/source-operations.md)检查实际字段、分页及操作能力。图像路线只取绑定的目标主图，提交前复核图片、目标版本、来源能力及接收方/用途许可；用户文件目前不自动外传，路线不足记局部缺口，其他工作继续。来源故障继续其他来源；首源成功但无相关候选时，审阅真实结果后才按规则启用已授权替代。
 4. 合并候选，先按[原始结果与处理进度](references/source-result-processing.md)核对每个真实回执的已得位置、解析与去向；失败回执的可读材料仍需处理，缺口不能写成零条或完成。再按[候选身份与纠正](references/candidate-identity.md)保留残缺身份线索、原始号码、同申请／同族／地域关系和旧引用；清单成员只是线索，不继承父记录来源或结论。归并、拆分与字段取舍须追加引用原来源行的审阅事件，实质受影响判断重审，纯重复发现只补来源。按[执行计数与增量交接](references/candidate-accounting-handoff.md)分开核对执行时消耗和当前候选，逐候选、情景及国家交接已审材料；局部交接不关闭其他结果缺口。通过范围记录中的 `candidate_links` 关联具体对象；按[候选分流范围](references/candidate-triage-scope.md)先处理未纳入／待确认，再对已纳入部分作有证据的三路决定。国别或类型未知的候选保留定位待办；具体关联可以先入选，但身份未定位不得派生专项出网动作。仅新版公开视觉销售线索可依候选分流范围规则追加有界身份调查凭据，转入带明确未知事实及恢复条件的 evidence 受限交付；实际补图或未审材料继续处理。可在一次输入中向 `annotate_materiality.py` 提交 `decisions[]` 和对应 `discovery_reviews[]`，记录器先验证整批，再一次落盘。已有准确案号通过 `record_candidate_lead.py` 接入，不伪造搜索命中。
 5. `generate_search_plan.py --expand` 仅追加有依据的权利人、分类、分页和最小补证动作。对 `needs_info` 按[候选补证闭环](references/candidate-followup.md)先审已存材料、分类实际请求，再绑定发现或混合用途并逐次审阅结果；按[候选阶段闭环](references/candidate-triage-stage.md)先处理已得未审材料、及时交接入选、定向重开并单独判断模块完成。定向读取不借“核验”名义寻找未知对象。新任务按[发现目的与版本预算](references/discovery-purpose-budget.md)记录同一目的最多初始加两次审阅后调整；同版本跨来源合计最多实际获取八页、尝试两条路线，浏览器补搜最多主动取得五十个去重候选。已返回超额卡片全部保留；边界不是必跑量或覆盖证明。不要轮换营销长句或用固定 Top N 丢候选。
 6. 绑定素材清单后执行图形标样、版权及商业外观公开调查。共享的创作、来源、首次发布和功能事实可用一次 `record_asset_provenance.py` 调用绑定多个兼容 `--query-id`；各国地域、期限和法律适用仍分别判断。
@@ -106,7 +106,7 @@ python scripts/publish_report.py --task-dir /absolute/run --first-review /absolu
 python scripts/completion_check.py --task-dir /absolute/run --first-review /absolute/new-review/1/review.json --second-review /absolute/new-review/2/review.json --adjudication /absolute/run/adjudication.json --output-dir /absolute/new-entry
 ```
 
-Serper、Signa、SerpApi 只有在创建任务时显式启用或已有任务授权时使用，来源总支出始终为 `0 USD`。Lens 物理响应只在同一提供方、同一国家、相同实际请求参数和有效期内复用；不同权利范围仍分别分流和评级，复用记录不增加独立来源数量。
+Serper、Signa、SerpApi 只有在创建任务时显式启用或已有任务授权时使用，可使用现有免费或付费账户容量，不承诺来源费用为零；不自动购买、充值、升级或启用超额。Lens 物理响应只在同一提供方、同一国家、相同实际请求参数和有效期内复用；不同权利范围仍分别分流和评级，复用记录不增加独立来源数量。
 
 业务完成要求全部必要义务满足、最终范围双审及主审有效；本轮有界调查结束可交付带具体限制的报告，未查清事实与恢复条件保留。文件构建通过不等于交付成功：统一事务按 10E 核实际入口及应交文件，再由完成检查判定。最终答复风险只来自当前适用且已验证的 `report-data.json`。主页面展示本次主情景、九类结果、已查／发现／未完成和来源日期；完整候选及逐要素比较在 `operator-appendix.html`，代码、JSON、内部编号与技术签名在 `technical-audit.html`，不拼入运营正文。
 

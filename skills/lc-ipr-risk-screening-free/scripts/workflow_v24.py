@@ -2577,7 +2577,7 @@ def generate_plan(task_dir: Path, *, expand: bool = False) -> dict[str, Any]:
         "expansion_queue": expansion_queue,
         "term_counts": {"discovered": len(selected_terms), "scheduled_routes": sum(r["state"] == "scheduled" for r in expansion_queue),
                         "deferred_routes": sum(r["state"] == "deferred" for r in expansion_queue)},
-        "execution_policy": {"browser_execution": "agent_with_access_verification_only", "paid_execution_enabled": False,
+        "execution_policy": {"browser_execution": "agent_with_access_verification_only", "paid_execution_enabled": task.get("free_policy", {}).get("allow_paid") is True,
                              "commercial_providers_enabled": any((serper_free_enabled(task), serpapi_free_enabled(task), signa_free_enabled(task))),
                              "commercial_freemium_allowlist": [n for n,f in (("serper", serper_free_enabled), ("signa", signa_free_enabled), ("serpapi", serpapi_free_enabled)) if f(task)]},
         "expansion": {"attempted": expand or bool(previous and previous.get("expansion", {}).get("attempted")),

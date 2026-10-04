@@ -2704,6 +2704,30 @@
       "kind": "text",
       "required": true,
       "mode": "0644"
+    },
+    {
+      "path": "scripts/source_policy.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_source_policy.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "references/source-policy.md",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "tools/cdp/source-policy.test.mjs",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
     }
   ]
 }

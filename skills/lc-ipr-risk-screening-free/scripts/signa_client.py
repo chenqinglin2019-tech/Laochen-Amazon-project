@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute one exact, task-opted-in, zero-payment Signa discovery entry."""
+"""Execute one exact, task-opted-in, account-capacity Signa discovery entry."""
 
 from __future__ import annotations
 
@@ -43,6 +43,7 @@ from provider_utils import (
     sanitize_for_evidence,
 )
 from free_search_budget import attempt_context, reserve_search
+from source_policy import enabled as account_capacity_enabled, signa_limit
 
 
 OFFICIAL_BASE_URL = "https://api.signa.so"
@@ -155,7 +156,7 @@ def _resolved_base(config: dict[str, Any]) -> str:
     return candidate
 
 
-def settings() -> tuple[dict[str, Any], str, str]:
+def settings(task: dict | None = None) -> tuple[dict[str, Any], str, str]:
     config = load_skill_config()
     cfg = config.get("providers", {}).get(SIGNA_PROVIDER, {})
     limits = config.get("limits", {})
@@ -166,7 +167,9 @@ def settings() -> tuple[dict[str, Any], str, str]:
         or cfg.get("commercial_freemium") is not True
         or cfg.get("default_enabled") is not False
         or cfg.get("network_enabled_when_opted_in") is not True
-        or cfg.get("supported_operations") != [SIGNA_OPERATION]
+        or (cfg.get("v3_supported_operations") != [SIGNA_OPERATION, "candidate_detail", "trademark_media"]
+            if task and task.get("source_settings_revision") == "frozen-source-settings-v1"
+            else cfg.get("supported_operations") != [SIGNA_OPERATION])
         or cfg.get("role") != "discovery_only"
         or cfg.get("authoritative_for_final_rating") is not False
         or cfg.get("free_plan_only") is not True
@@ -186,7 +189,7 @@ def settings() -> tuple[dict[str, Any], str, str]:
         raise ProviderError(
             "SIGNA_FREE_POLICY_INVALID",
             "access_limited",
-            "Signa configuration violates the explicit task opt-in, bounded zero-payment discovery contract",
+            "Signa configuration violates the explicit task opt-in, bounded account-capacity discovery contract",
         )
     base = _resolved_base(config)
     key = (
@@ -243,7 +246,7 @@ def _usage_state(
     return result
 
 
-def _credit_state(payload: dict[str, Any]) -> dict[str, int]:
+def _credit_state(payload: dict[str, Any], *, task: dict | None = None) -> dict[str, int]:
     grants = payload.get("grants")
     if not isinstance(grants, dict):
         raise ProviderError(
@@ -265,24 +268,24 @@ def _credit_state(payload: dict[str, Any]) -> dict[str, int]:
             "failed",
             "Signa credit counters are missing or invalid",
         )
-    if any(value != 0 for value in fields.values()):
+    if any(value < 0 for value in fields.values()) or (not account_capacity_enabled(task) and any(value != 0 for value in fields.values())):
         raise ProviderError(
             "SIGNA_BILLING_STATE_UNSAFE",
             "access_limited",
-            "Signa credit, reservation, pending-spend, or grant balance is non-zero",
+            "Signa credit counters violate the task account policy",
         )
-    return {name: 0 for name in fields}
+    return fields
 
 
-def _identity_state(payload: dict[str, Any]) -> dict[str, Any]:
+def _identity_state(payload: dict[str, Any], *, task: dict | None = None) -> dict[str, Any]:
     plan = _normalized_plan(payload.get("plan"))
-    if plan not in ALLOWED_PLANS:
+    if not isinstance(payload.get("plan"), str) or not plan or (not account_capacity_enabled(task) and plan not in ALLOWED_PLANS):
         raise ProviderError(
             "PAID_PLAN_REQUIRED",
             "access_limited",
-            "Signa account is not on an accepted zero-payment beta/free plan",
+            "Signa plan is missing or incompatible with the task account policy",
         )
-    if payload.get("billing_preview") is not False:
+    if not account_capacity_enabled(task) and payload.get("billing_preview") is not False:
         raise ProviderError(
             "SIGNA_BILLING_STATE_UNSAFE",
             "access_limited",
@@ -298,7 +301,7 @@ def _identity_state(payload: dict[str, Any]) -> dict[str, Any]:
             "access_limited",
             "Signa key must have trademarks:read and billing:read scopes",
         )
-    return {"plan": plan, "required_scopes_present": True, "billing_preview": False}
+    return {"plan": plan, "required_scopes_present": True, "billing_preview": payload.get("billing_preview")}
 
 
 def _target_offices(request_payload: dict[str, Any]) -> list[str]:
@@ -388,7 +391,7 @@ def _office_state(
 
 def _precheck(
     config: dict[str, Any], base: str, key: str, request_payload: dict[str, Any],
-    *, attempt_state: dict[str, bool] | None = None,
+    *, attempt_state: dict[str, bool] | None = None, task: dict | None = None,
 ) -> dict[str, Any]:
     if not key:
         raise ProviderError("AUTH_FAILED", "access_limited", "SIGNA_API_KEY is missing")
@@ -399,9 +402,9 @@ def _precheck(
     usage, _ = _get_json(base, key, "/v1/organization/usage", timeout)
     credits, _ = _get_json(base, key, "/v1/organization/credits", timeout)
     offices, _ = _get_json(base, key, "/v1/offices", timeout)
-    identity_state = _identity_state(identity)
+    identity_state = _identity_state(identity, task=task)
     usage_state = _usage_state(usage)
-    credit_state = _credit_state(credits)
+    credit_state = _credit_state(credits, task=task)
     targets = _target_offices(request_payload)
     office_state = _office_state(
         offices,
@@ -411,39 +414,41 @@ def _precheck(
     return {
         "plan": identity_state["plan"],
         "billing_safe": True,
+        **({"billing_preview": identity_state.get("billing_preview"), "account_capacity_policy": True, "free_balance_verified": False, "cost_verified": False} if account_capacity_enabled(task) else {}),
         "usage": usage_state,
         "credits": credit_state,
         "offices": office_state,
     }
 
 
-def _postcheck(config: dict[str, Any], base: str, key: str) -> dict[str, Any]:
+def _postcheck(config: dict[str, Any], base: str, key: str, *, task: dict | None = None) -> dict[str, Any]:
     timeout = int(config.get("http", {}).get("timeout_seconds", 30))
     usage, _ = _get_json(base, key, "/v1/organization/usage", timeout)
     credits, _ = _get_json(base, key, "/v1/organization/credits", timeout)
     return {
         "billing_safe": True,
         "usage": _usage_state(usage, allow_exhausted=True),
-        "credits": _credit_state(credits),
+        "credits": _credit_state(credits, task=task),
     }
 
 
-def probe(offices: list[str]) -> dict[str, Any]:
-    """Verify an opted-in bounded-free Signa account and offices without searching."""
-    config, base, key = settings()
-    state = _precheck(config, base, key, {"filters": {"offices": offices}})
+def probe(offices: list[str], *, task: dict | None = None) -> dict[str, Any]:
+    """Verify an opted-in Signa account with bounded capacity and offices without searching."""
+    config, base, key = settings(task) if account_capacity_enabled(task) else settings()
+    state = _precheck(config, base, key, {"filters": {"offices": offices}}, task=task)
     usage = state["usage"]
     return {
         "ready": True,
         "status": "success",
         "environment": (
             "test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1"
-            else "commercial_freemium_beta_free"
+            else "commercial_account_capacity" if account_capacity_enabled(task) else "commercial_freemium_beta_free"
         ),
         "authoritative_for_final_rating": False,
         "quota": {
             "network_request_attempted": True,
             "search_request_attempted": False,
+            **({"account_capacity_policy": True, "free_balance_verified": False, "cost_verified": False} if account_capacity_enabled(task) else {}),
             "plan": state["plan"],
             "used": usage["used"],
             "limit": usage["limit"],
@@ -983,21 +988,21 @@ def _execute_known_record(task_dir: Path, query_id: str, task: dict, item: dict,
     options = {"provider": SIGNA_PROVIDER, "operation": operation, "query": str(item.get("q") or ""),
                "jurisdiction": item["jurisdiction"], "evidence_type": "trademark", "query_id": query_id,
                "request_params": params, "mandatory": False, "authoritative_for_final_rating": False,
-               "source_environment": "test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1" else "commercial_freemium_beta_free"}
+               "source_environment": "test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1" else "commercial_account_capacity" if account_capacity_enabled(task) else "commercial_freemium_beta_free"}
     try:
         if query_was_attempted(evidence, query_id, attempt_id):
             raise ProviderError(QUERY_ALREADY_ATTEMPTED_CODE, "access_limited", "This exact Signa action has already attempted its request")
-        if consumed_queries(evidence) >= SIGNA_FREE_MAX_QUERIES_PER_TASK:
+        if consumed_queries(evidence) >= signa_limit(task):
             raise ProviderError(LOCAL_LIMIT_CODE, "access_limited", "Shared Signa task request limit is exhausted")
         stop = persisted_stop_reason(evidence)
         if stop and attempt_id == "initial":
-            raise ProviderError("SIGNA_PERSISTED_STOP", "access_limited", "A Signa zero-payment stop is recorded: " + stop)
-        config, base, key = settings()
+            raise ProviderError("SIGNA_PERSISTED_STOP", "access_limited", "A Signa account-capacity stop is recorded: " + stop)
+        config, base, key = settings(task) if account_capacity_enabled(task) else settings()
         office = "EM" if item["jurisdiction"] == "EU" else item["jurisdiction"]
-        precheck = _precheck(config, base, key, {"filters": {"offices": [office]}})
+        precheck = _precheck(config, base, key, {"filters": {"offices": [office]}}, task=task)
         precheck["local_reservation"] = reserve_search("signa", key, base, remaining=precheck["usage"]["remaining"],
             task_dir=task_dir, query_id=query_id, plan_entry_sha256=sha256_json(item), **attempt,
-            max_queries_per_task=SIGNA_FREE_MAX_QUERIES_PER_TASK)
+            max_queries_per_task=signa_limit(task))
         timeout = int(config.get("http", {}).get("timeout_seconds", 30))
         path = "/v1/trademarks/" + item["provider_record_id"]
         attempted = True
@@ -1010,10 +1015,10 @@ def _execute_known_record(task_dir: Path, query_id: str, task: dict, item: dict,
             normalized, suffix = _media_result(body, headers, item, base)
             normalized["media"][0]["path"] = str(raw_path(task_dir, SIGNA_PROVIDER, query_id, normalized["media"][0]["sha256"], suffix))
         try:
-            postcheck = _postcheck(config, base, key)
+            postcheck = _postcheck(config, base, key, task=task)
         except ProviderError as exc:
             quota.update(_quota_record(headers, network_attempted=True, precheck=precheck, billing_safe=False))
-            raise ProviderError("SIGNA_POSTCHECK_UNVERIFIED", "access_limited", "Signa returned data but its post-request zero-payment state could not be proved: " + exc.code) from None
+            raise ProviderError("SIGNA_POSTCHECK_UNVERIFIED", "access_limited", "Signa returned data but its post-request account-capacity state could not be proved: " + exc.code) from None
         quota.update(_quota_record(headers, network_attempted=True, precheck=precheck, postcheck=postcheck, billing_safe=True))
         if quota.get("quota_headers_valid") is not True:
             raise ProviderError("SIGNA_QUOTA_STATE_UNVERIFIED", "access_limited", "Signa quota headers are malformed")
@@ -1030,6 +1035,8 @@ def _quota_record(
     postcheck: dict[str, Any] | None = None, billing_safe: bool | None = None,
 ) -> dict[str, Any]:
     result = quota_summary(headers or {}, {})
+    if precheck and precheck.get("account_capacity_policy"):
+        result.update(account_capacity_policy=True, free_balance_verified=False, cost_verified=False)
     result["network_request_attempted"] = network_attempted
     result["search_request_attempted"] = network_attempted
     lowered_headers = {
@@ -1127,7 +1134,7 @@ def _record_failure(
         },
         source_environment=(
             "test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1"
-            else "commercial_freemium_beta_free"
+            else "commercial_account_capacity" if account_capacity_enabled(load_json(task_dir / "task.json")) else "commercial_freemium_beta_free"
         ),
         authoritative_for_final_rating=False,
     )
@@ -1158,14 +1165,14 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
                 network_attempted=False,
                 search_attempted=False,
             )
-        if used >= SIGNA_FREE_MAX_QUERIES_PER_TASK:
+        if used >= signa_limit(task):
             return _record_failure(
                 task_dir,
                 item,
                 ProviderError(
                     LOCAL_LIMIT_CODE,
                     "access_limited",
-                    f"Local Signa query cap reached: {used}/{SIGNA_FREE_MAX_QUERIES_PER_TASK}; no network request sent",
+                    f"Local Signa query cap reached: {used}/{signa_limit(task)}; no network request sent",
                 ),
                 network_attempted=False,
             )
@@ -1176,24 +1183,24 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
                 ProviderError(
                     "SIGNA_PERSISTED_STOP",
                     "access_limited",
-                    f"Signa zero-payment stop is already recorded ({stop}); no network request sent",
+                    f"Signa account-capacity stop is already recorded ({stop}); no network request sent",
                 ),
                 network_attempted=False,
             )
 
         precheck_attempt = {"network_request_attempted": False}
         try:
-            config, base, key = settings()
+            config, base, key = settings(task) if account_capacity_enabled(task) else settings()
             max_results = config["limits"]["signa_results_per_query"]
             request_payload = _request_from_plan(item, max_results, task=task)
             precheck = _precheck(
-                config, base, key, request_payload, attempt_state=precheck_attempt,
+                config, base, key, request_payload, attempt_state=precheck_attempt, task=task,
             )
             precheck["local_reservation"] = reserve_search(
                 "signa", key, base, remaining=precheck["usage"]["remaining"],
                 task_dir=task_dir, query_id=query_id,
                 plan_entry_sha256=sha256_json(item), **attempt,
-                max_queries_per_task=SIGNA_FREE_MAX_QUERIES_PER_TASK,
+                max_queries_per_task=signa_limit(task),
             )
         except ProviderError as exc:
             return _record_failure(
@@ -1227,13 +1234,13 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
                     exc.http_status,
                 )
             try:
-                failed_postcheck = _postcheck(config, base, key)
+                failed_postcheck = _postcheck(config, base, key, task=task)
             except ProviderError as post_exc:
                 original_code = exc.code
                 exc = ProviderError(
                     "SIGNA_POSTCHECK_UNVERIFIED",
                     "access_limited",
-                    "Signa search failed and its post-search zero-payment state "
+                    "Signa search failed and its post-search account-capacity state "
                     f"could not be proved ({original_code}; {post_exc.code})",
                 )
                 quota = _quota_record(
@@ -1260,12 +1267,12 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
             )
 
         try:
-            postcheck = _postcheck(config, base, key)
+            postcheck = _postcheck(config, base, key, task=task)
         except ProviderError as exc:
             error = ProviderError(
                 "SIGNA_POSTCHECK_UNVERIFIED",
                 "access_limited",
-                f"Signa returned discovery data but post-search zero-payment state could not be proved: {exc.code}",
+                f"Signa returned discovery data but post-search account-capacity state could not be proved: {exc.code}",
             )
             return _record_failure(
                 task_dir,
@@ -1378,7 +1385,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
             query_id=query_id,
             source_environment=(
                 "test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1"
-                else "commercial_freemium_beta_free"
+                else "commercial_account_capacity" if account_capacity_enabled(task) else "commercial_freemium_beta_free"
             ),
             authoritative_for_final_rating=False,
         )

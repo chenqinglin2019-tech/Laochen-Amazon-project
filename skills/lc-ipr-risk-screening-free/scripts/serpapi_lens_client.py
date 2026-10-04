@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Free-plan-only Google Lens discovery using already-public product images.
+"""Opt-in Google Lens discovery using already-public product images.
 
 https://serpapi.com/google-lens-api . No image upload endpoint is used.
 Shares the Account API guard, per-task lock, stop signals, and total search
@@ -17,6 +17,7 @@ from common import (ensure_object, load_json, sha256_json, api_first_enabled,
                     discovery_plan_scope_valid, serpapi_free_enhancement_error, API_FIRST_REVISION, api_first_revision_enabled)
 from provider_utils import ProviderError, http_json, record_result, sanitize_for_evidence
 from free_search_budget import attempt_context, reserve_search
+from source_policy import enabled as account_capacity_enabled
 from provider_plan_v24 import load_action
 from serpapi_patents_client import budget_lock, consumed_queries, free_account_snapshot, persisted_quota_block_reason, settings
 
@@ -95,7 +96,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id='initial', retry_reason
     with budget_lock(task_dir):
         task, item, params = load_action(task_dir, PROVIDER, query_id, {OPERATION})
         options = dict(provider=PROVIDER, operation=OPERATION, query=item.get('q', ''), jurisdiction=item.get('jurisdiction', ''), evidence_type='copyright', request_params=params, query_id=query_id, mandatory=False,
-            source_environment='test_fixture' if os.environ.get('LC_IPR_TEST_MODE') == '1' else 'commercial_freemium_free_plan', authoritative_for_final_rating=False)
+            source_environment='test_fixture' if os.environ.get('LC_IPR_TEST_MODE') == '1' else 'commercial_account_capacity' if account_capacity_enabled(task) else 'commercial_freemium_free_plan', authoritative_for_final_rating=False)
         attempted = False; account = dict(attempt); body = b''
         try:
             selection = task.get('serpapi_free_enhancement') or {}
@@ -109,7 +110,8 @@ def execute(task_dir: Path, query_id: str, *, attempt_id='initial', retry_reason
             evidence = ensure_object(load_json(task_dir / 'evidence.json'), 'evidence.json')
             from runtime_v24 import _reuse_physical_response
             from common import load_skill_config
-            maximum_age = load_skill_config().get('performance', {}).get('dynamic_evidence_max_age_hours', 48)
+            from source_policy import dynamic_max_age_hours
+            maximum_age = dynamic_max_age_hours(task, load_skill_config())
             try:
                 maximum_age = float(maximum_age)
             except (TypeError, ValueError):
@@ -129,8 +131,8 @@ def execute(task_dir: Path, query_id: str, *, attempt_id='initial', retry_reason
             if not key:
                 raise ProviderError('AUTH_FAILED', 'access_limited', 'SERPAPI_API_KEY is missing')
             timeout = int(config.get('http', {}).get('timeout_seconds', 30))
-            account.update(free_account_snapshot(base, key, timeout))
-            account.update(reserve_search('serpapi', key, base, remaining=account['plan_searches_left'], task_dir=task_dir,
+            account.update(free_account_snapshot(base, key, timeout, **({"task": task} if account_capacity_enabled(task) else {})))
+            account.update(reserve_search('serpapi', key, base, remaining=account.get('searches_available', account['plan_searches_left']), task_dir=task_dir,
                 query_id=query_id, renewal_date=account.get('plan_renewal_date', ''), plan_entry_sha256=sha256_json(item), max_queries_per_task=maximum, **attempt))
             attempted = True
             payload, _, body = search(base, key, timeout, image_url, item)
