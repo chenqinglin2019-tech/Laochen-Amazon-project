@@ -99,7 +99,7 @@
 | `QUALITY_REPAIR_LIMIT_REACHED`（终态） | 有新证据或用户同意后 `transition --job J --status pending --reason "..."` |
 | 瞬时失败预算用尽（failed） | 用户确认后 `transition --job J --status pending --reset-transient --reason "..."` |
 | `generating` 超 30 分钟 | 下次 plan 自动记超时并释放槽位 |
-| `transition` 返回 `dispatch_refused` / 退出码 2 | 不调用 image_gen；按 errors 处理后再 plan |
+| `transition` 返回 `dispatch_refused` / 退出码 2 | 不派发生图；按 errors 处理后再 plan |
 | `layout_repair_needed` | 只本地修复该图的布局（框、配方、颜色），不重生底图 |
 | `export_repair_needed`（`FINAL_GLYPH_CONTRAST`） | allowed_adjustments 内调颜色/位置/局部背景，本地重排（92 失败自动试 95） |
 | `generation_repair_needed` | `plan` 派生 prompt_edit 后按适配器重新派发（受每图 1 次质量修复限制） |
