@@ -8,6 +8,7 @@ import math
 import threading
 from datetime import datetime, timezone
 from execution_lock import execution_lock
+from source_policy import cost_ceiling, dynamic_max_age_hours, enabled as account_capacity_enabled
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from copy import deepcopy
@@ -50,7 +51,7 @@ def capabilities(task: dict, config: dict) -> list[dict]:
         elif provider in {"epo_publication_server", "asset_provenance"}:
             state, reason, executable = "automatic", "free_public_document_or_agent_evidence", True
         elif provider in API_CLIENTS:
-            state, reason, executable = ("unvalidated", "first_real_query_checks_free_account_and_contract", True) if present else ("unavailable", "optional_credentials_missing", False)
+            state, reason, executable = ("unvalidated", "first_real_query_checks_account_capacity_and_contract" if account_capacity_enabled(task) else "first_real_query_checks_free_account_and_contract", True) if present else ("unavailable", "optional_credentials_missing", False)
             from common import api_first_revision_enabled
             if provider.startswith("serper_") and present and not api_first_revision_enabled(task.get("retrieval_workflow_revision")):
                 state, reason, executable = "unvalidated", "free_entitlement_unvalidated", False
@@ -60,7 +61,7 @@ def capabilities(task: dict, config: dict) -> list[dict]:
             state, reason, executable = "unvalidated", "browser_adapter_requires_real_route_acceptance", False
         results.append({"provider": provider, "state": state, "reason": reason, "executable": executable,
                         "credentials_present": present if provider in CREDENTIALS else None,
-                        "checked_at": now_iso(), "cost_ceiling_usd": 0,
+                        "checked_at": now_iso(), "cost_ceiling_usd": cost_ceiling(task),
                         "human_actions": ["login", "captcha", "mfa", "consent", "qr"], "manual_business_work": False})
     from source_operation import enabled as operation_review_enabled
     if operation_review_enabled(task):
@@ -193,7 +194,7 @@ def preflight_credentials(task_dir: Path) -> str:
     task["checkpoints"]["credential_preflight"] = {"status": "success", "at": now_iso(), "source_capabilities": "source-capabilities.json", "note": "Optional provider accounts are capabilities, not startup prerequisites"}
     from product_entry import enabled as entry_enabled
     user_entry = entry_enabled(task) and task["request"]["entry_type"] == "user_materials"
-    add_history(task, "awaiting_browser", "Licence checked; retain supplied product materials" if user_entry else "Licence checked; agent may collect product and use available free routes")
+    add_history(task, "awaiting_browser", "Licence checked; retain supplied product materials" if user_entry else "Licence checked; agent may collect product and use authorized available routes")
     atomic_write_json(task_dir / "task.json", task)
     return "awaiting_browser"
 
@@ -279,7 +280,7 @@ def source_files_complete(task_dir: Path, evidence: dict, run: dict) -> bool:
 
 
 def source_fresh(run: dict, max_age_hours: float = 48) -> bool:
-    # Only immutable publication documents may outlive a task's 48-hour recall window.
+    # Only immutable publication documents may outlive a task's dynamic recall window.
     if run.get("provider") == "epo_publication_server" and run.get("operation") == "document_retrieval":
         return True
     try:
@@ -571,7 +572,7 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
     prior_results = previous_execution.get('results', []) if previous_execution.get('task_id') == task['task_id'] else []
     config = load_skill_config()
     caps = {r["provider"]: r for r in capabilities(task, config)}
-    max_age_hours = float(config.get("performance", {}).get("dynamic_evidence_max_age_hours", 48))
+    max_age_hours = dynamic_max_age_hours(task, config)
     if not math.isfinite(max_age_hours) or max_age_hours <= 0:
         raise ValueError("dynamic_evidence_max_age_hours must be finite and positive")
     rows = [(p, r) for p, values in plan.get("queries", {}).items() for r in values]
@@ -596,7 +597,7 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
     started_at, started = now_iso(), time.monotonic()
     write_lock = threading.Lock()
     output = {"schema_version": "2.4-free", "task_id": task["task_id"], "started_at": started_at,
-              "status": "running", "workers": workers, "cost_ceiling_usd": 0, "results": results,
+              "status": "running", "workers": workers, "cost_ceiling_usd": cost_ceiling(task), "results": results,
               "agent_browser_queue": browser_queue}
     if correction_enabled(task):
         output["selected_query_ids"] = sorted(selected_ids)
@@ -767,6 +768,8 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
                         command += ["--attempt-id", attempt_id, "--retry-reason", reason]
                     with write_lock:
                         recovery = record_action_recovery(task_dir, provider, row)
+                    if recovery and provider in {"serpapi_google_patents", "serpapi_google_lens", "signa"} and "--attempt-id" not in command:
+                        command += ["--attempt-id", recovery["recovery_id"], "--retry-reason", recovery["reason"]]
                     if execution_deadline is not None:
                         with write_lock:
                             output.setdefault('pending_submissions', {})[row['query_id']] = {

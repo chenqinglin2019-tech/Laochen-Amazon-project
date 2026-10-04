@@ -26,6 +26,12 @@ class ScenarioPlanningTests(unittest.TestCase):
         subprocess.run([sys.executable, str(Path(__file__).with_name("create_task.py")), "--url", "https://www.amazon.com/dp/B012345678",
                         "--jurisdictions", "US", "--output-dir", str(self.path)], capture_output=True, check=True)
         self.task = load_json(self.path / "task.json")
+        # Freeze historical source rules; current create_task uses existing account capacity.
+        from common import active_free_policy, AUTOMATION_POLICY_REVISION
+        self.task["free_policy"] = active_free_policy()
+        self.task["free_policy_revision"] = AUTOMATION_POLICY_REVISION
+        self.task.pop("source_settings_revision", None)
+        self.task.pop("serper_existing_balance_authorization", None)
         self.task.pop("product_entry_revision", None)  # Historical fixture supplies facts without the new entry recorder.
         self.task.pop("product_scope_required", None)  # Historical contract.
         self.task.pop("triage_scope_revision", None)  # Historical scenario fixture predates 05A relation records.

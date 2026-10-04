@@ -2,7 +2,7 @@
 """Retrieve one selected Google Patents record through SerpApi Details.
 
 This is a bounded content reader, not an official status route.  It shares the
-existing SerpApi account, free-plan reservation ledger and task request cap.
+existing SerpApi account, account-capacity reservation ledger and task request cap.
 """
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ from urllib.parse import urlencode, urlparse
 from common import (SERPAPI_DETAILS_OPERATION, SERPAPI_PROVIDER, ensure_object,
                     load_json, provider_execution_error, sha256_json, atomic_write_bytes, path_within, sha256_file)
 from free_search_budget import attempt_context, reserve_search
+from source_policy import enabled as account_capacity_enabled, dynamic_max_age_hours
 from provider_utils import (ProviderError, authorize_exact_plan_execution, http_json, http_request,
                             record_result, sanitize_for_evidence, MAX_HTTP_RESPONSE_BYTES)
 from serpapi_patents_client import (budget_lock, consumed_queries, free_account_snapshot,
@@ -214,24 +215,60 @@ def retain_figures(task_dir: Path, result: dict, item: dict, evidence: dict, con
     return result
 
 
-def execute(task_dir: Path, query_id: str) -> dict:
+def authorize_detail_retry(task_dir, task, item, evidence, attempt_id, retry_reason):
+    if attempt_id == "initial":
+        return
+    from recovery_stage_b import recovery_state
+    state = recovery_state(task, evidence, SERPAPI_PROVIDER, item)
+    if state and state.get("state") == "ready":
+        return  # Exact original receipt and the bounded failure/repair review are current.
+    if not state or state.get("state") != "result_available":
+        raise ProviderError("API_RETRY_REVIEW_REQUIRED", "access_limited", "Review the original receipt and recovery conditions before retrying")
+    # Scheduler claims may restore missing/changed raw evidence or an expired response.
+    path = task_dir / "api-retry-claims.json"
+    claims = load_json(path) if path.is_file() else {}
+    claim = claims.get("attempts", {}).get(attempt_id, {})
+    identity = {"provider": SERPAPI_PROVIDER, "query_id": item["query_id"],
+                "plan_entry_sha256": sha256_json(item),
+                "prior_source_run_id": claim.get("prior_source_run_id"), "retry_reason": retry_reason}
+    previous = [run for run in evidence.get("source_runs", [])
+                if run.get("provider") == SERPAPI_PROVIDER and run.get("query_id") == item["query_id"]
+                and run.get("plan_entry_sha256") == sha256_json(item)]
+    from recovery_stage_b import effective_submission
+    if (claims.get("task_id") != task.get("task_id")
+            or attempt_id != "repair-" + sha256_json(identity)[:24]
+            or any(claim.get(key) != value for key, value in identity.items())
+            or not previous or previous[-1].get("run_id") != identity["prior_source_run_id"]
+            or any(effective_submission(evidence, run) == "unknown" for run in previous)):
+        raise ProviderError("API_RETRY_REVIEW_REQUIRED", "access_limited", "No current exact receipt-repair claim is bound to this retry")
+    from runtime_v24 import source_files_complete, source_fresh
+    prior = previous[-1]
+    justified = (retry_reason == "retained_evidence_missing_or_changed" and not source_files_complete(task_dir, evidence, prior)
+                 or retry_reason == "dynamic_evidence_expired" and source_files_complete(task_dir, evidence, prior)
+                 and not source_fresh(prior, dynamic_max_age_hours(task)))
+    if not justified:
+        raise ProviderError("API_RETRY_REVIEW_REQUIRED", "access_limited", "The claimed receipt-repair condition no longer applies")
+
+
+def execute(task_dir: Path, query_id: str, *, attempt_id="initial", retry_reason="") -> dict:
     task_dir = task_dir.resolve()
     with budget_lock(task_dir):
         task, item = _item(task_dir, query_id)
         evidence = ensure_object(load_json(task_dir / "evidence.json"), "evidence.json")
+        attempt = attempt_context(attempt_id, retry_reason)
+        authorize_detail_retry(task_dir, task, item, evidence, attempt_id, retry_reason)
         maximum = int(task["serpapi_free_enhancement"]["max_queries_per_task"])
         if consumed_queries(evidence) >= maximum:
             raise ProviderError("SERPAPI_TASK_QUERY_LIMIT_REACHED", "access_limited", "Shared SerpApi task limit is exhausted")
         stop = persisted_quota_block_reason(evidence)
-        if stop:
+        if stop and attempt_id == "initial":
             raise ProviderError("FREE_QUOTA_EXHAUSTED", "access_limited", "A prior SerpApi quota stop is recorded: " + stop)
         config, base, key = settings()
         if not key:
             raise ProviderError("AUTH_FAILED", "access_limited", "SERPAPI_API_KEY is missing")
         timeout = int(config.get("http", {}).get("timeout_seconds", 30))
-        attempt = attempt_context("initial", "")
-        account = {**attempt, **free_account_snapshot(base, key, timeout)}
-        account.update(reserve_search("serpapi", key, base, remaining=account["plan_searches_left"], task_dir=task_dir,
+        account = {**attempt, **free_account_snapshot(base, key, timeout, **({"task": task} if account_capacity_enabled(task) else {}))}
+        account.update(reserve_search("serpapi", key, base, remaining=account.get("searches_available", account["plan_searches_left"]), task_dir=task_dir,
                                       query_id=query_id, renewal_date=account.get("plan_renewal_date", ""),
                                       plan_entry_sha256=sha256_json(item), max_queries_per_task=maximum, **attempt))
         params = {"engine": "google_patents_details", "api_key": key, "output": "json", "patent_id": item["patent_id"]}
@@ -250,22 +287,24 @@ def execute(task_dir: Path, query_id: str) -> dict:
                                  query=item["q"], jurisdiction=str(item.get("jurisdiction") or ""), evidence_type="patent",
                                  status="success", normalized=normalized, raw_body=body, raw_suffix="json", query_id=query_id,
                                  request_params=request_params,
-                                 quota={**account, "network_request_attempted": True}, source_environment=("test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1" else "commercial_freemium_free_plan"), authoritative_for_final_rating=False)
+                                 quota={**account, "network_request_attempted": True}, source_environment=("test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1" else "commercial_account_capacity" if account_capacity_enabled(task) else "commercial_freemium_free_plan"), authoritative_for_final_rating=False)
         except ProviderError as exc:
             return record_result(task_dir, provider=SERPAPI_PROVIDER, operation=SERPAPI_DETAILS_OPERATION,
                                  query=str(item.get("q") or ""), jurisdiction=str(item.get("jurisdiction") or ""), evidence_type="patent",
                                  status=exc.source_status, normalized=None, raw_body=body or None, raw_suffix="json", error_code=exc.code,
                                  detail=exc.detail, query_id=query_id, request_params=request_params,
-                                 quota={**account, "network_request_attempted": attempted}, source_environment=("test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1" else "commercial_freemium_free_plan"), authoritative_for_final_rating=False)
+                                 quota={**account, "network_request_attempted": attempted}, source_environment=("test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1" else "commercial_account_capacity" if account_capacity_enabled(task) else "commercial_freemium_free_plan"), authoritative_for_final_rating=False)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--task-dir", type=Path, required=True)
     parser.add_argument("--query-id", required=True)
+    parser.add_argument("--attempt-id", default="initial")
+    parser.add_argument("--retry-reason", default="")
     args = parser.parse_args()
     try:
-        run = execute(args.task_dir, args.query_id)
+        run = execute(args.task_dir, args.query_id, attempt_id=args.attempt_id, retry_reason=args.retry_reason)
         print(json.dumps({key: run.get(key) for key in ("status", "error_code", "query_id")}, ensure_ascii=False))
     except (ProviderError, OSError, ValueError, KeyError) as exc:
         raise SystemExit(str(exc)) from None

@@ -46,6 +46,11 @@ class BrowserExecutionTests(unittest.TestCase):
             return result.stdout
         command(skill / "scripts/create_task.py", "--url", "https://www.amazon.com/dp/B000000001", "--jurisdictions", "US", "--output-dir", root)
         task = load_json(root / "task.json")
+        from common import active_free_policy, AUTOMATION_POLICY_REVISION
+        task["free_policy"] = active_free_policy()
+        task["free_policy_revision"] = AUTOMATION_POLICY_REVISION
+        task.pop("source_settings_revision", None)
+        task.pop("serper_existing_balance_authorization", None)
         task.pop("product_entry_revision", None)  # Frozen pre-entry compatibility fixture.
         task.pop("product_scope_required", None)  # Historical contract.
         task.pop("assessment_revision", None)  # This test pins the historical rating contract.

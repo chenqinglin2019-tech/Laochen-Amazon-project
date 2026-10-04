@@ -242,6 +242,10 @@ class ApiPlanAndExecutionTests(unittest.TestCase):
                         '--output-dir', str(self.root), '--enable-serper-free', '--enable-serpapi-free'],
                        env=offline_environment(), capture_output=True, check=True)
         self.task = common.load_json(self.root / 'task.json')
+        self.task['free_policy'] = common.active_free_policy()
+        self.task['free_policy_revision'] = common.AUTOMATION_POLICY_REVISION
+        self.task.pop('source_settings_revision', None)
+        self.task.pop('serper_existing_balance_authorization', None)
         # This is a frozen v2 authorization fixture; don't inherit the new
         # create_task v3 coverage contract while keeping a v2 hand-built row.
         self.task['retrieval_workflow_revision'] = common.API_FIRST_REVISION

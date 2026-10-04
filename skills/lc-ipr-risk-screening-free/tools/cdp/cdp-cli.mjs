@@ -52,6 +52,11 @@ export const ACTIVE_FREE_POLICY = Object.freeze({
 });
 export const FREE_POLICY_REVISION = "optional-discovery-v1";
 export const AUTOMATION_POLICY_REVISION = "automation-first-v1";
+export const ACCOUNT_CAPACITY_POLICY_REVISION = "existing-account-capacity-v1";
+export const ACCOUNT_CAPACITY_POLICY = Object.freeze({
+  ...ACTIVE_FREE_POLICY, mode: "existing_account_capacity", allow_paid: true,
+  allow_new_purchase: false, allow_recharge: false, allow_upgrade: false,
+});
 export const RECALL_INTEGRITY_REVISION = "recall-integrity-v1";
 const recallIntegrityEnabled = (task) => task?.screening_revision === RECALL_INTEGRITY_REVISION;
 const LEGACY_DEFAULT_DISCOVERY_REVISION = "default-discovery-v1";
@@ -120,7 +125,8 @@ export function assertActiveTaskPayload(task) {
     throw new Error("LEGACY_TASK_READ_ONLY: CDP network execution requires task schema 2.3-free or 2.4-free");
   }
   const policyValid = task.schema_version === "2.4-free"
-    ? task.free_policy_revision === AUTOMATION_POLICY_REVISION && samePolicy(task.free_policy, ACTIVE_FREE_POLICY)
+    ? ((task.free_policy_revision === AUTOMATION_POLICY_REVISION && samePolicy(task.free_policy, ACTIVE_FREE_POLICY))
+      || (task.free_policy_revision === ACCOUNT_CAPACITY_POLICY_REVISION && samePolicy(task.free_policy, ACCOUNT_CAPACITY_POLICY)))
     : recognizedFreePolicy(task.free_policy, String(task.free_policy_revision || ""));
   if (!policyValid) {
     throw new Error("FREE_POLICY_INVALID: task must use its immutable recognized free policy");

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Execute one exact opt-in SerpApi Free-plan Google Patents query."""
+"""Execute one exact opt-in SerpApi Google Patents query."""
 
 from __future__ import annotations
 
@@ -23,6 +23,7 @@ from common import (
 )
 from provider_utils import ProviderError, authorize_current_scenario_action, file_lock, http_json, quota_summary, record_result
 from free_search_budget import attempt_context, reserve_search
+from source_policy import enabled as account_capacity_enabled, dynamic_max_age_hours
 
 
 OFFICIAL_BASE_URL = "https://serpapi.com"
@@ -83,7 +84,7 @@ def settings() -> tuple[dict[str, Any], str, str]:
     ):
         raise ProviderError(
             "SERPAPI_FREE_POLICY_INVALID", "access_limited",
-            "SerpApi configuration violates the explicit opt-in Free-plan-only contract",
+            "SerpApi configuration violates the historical baseline or explicit opt-in provider contract",
         )
     base = _resolved_base(config)
     key = TEST_CREDENTIAL if os.environ.get("LC_IPR_TEST_MODE") == "1" else credential(config, "serpapi_api_key")
@@ -139,7 +140,7 @@ def persisted_quota_block_reason(evidence: dict[str, Any]) -> str:
     return ""
 
 
-def free_account_snapshot(base: str, key: str, timeout: int) -> dict[str, Any]:
+def free_account_snapshot(base: str, key: str, timeout: int, *, task: dict | None = None) -> dict[str, Any]:
     """Use the unmetered Account API and retain only non-sensitive quota fields."""
     payload, _, _ = http_json(
         f"{base}/account.json?{urlencode({'api_key': key})}",
@@ -155,13 +156,14 @@ def free_account_snapshot(base: str, key: str, timeout: int) -> dict[str, Any]:
     plan_left = _number(payload.get("plan_searches_left"))
     extra_credits = _number(payload.get("extra_credits"))
     account_status = str(payload.get("account_status") or "").strip()
-    if not plan_name or price is None:
+    if not isinstance(payload.get("plan_name"), str) or not plan_name or price is None or not math.isfinite(float(price)):
         raise ProviderError(
             "RESPONSE_SCHEMA_CHANGED", "failed",
             "SerpApi Account API did not expose an unambiguous plan name and monthly price",
         )
+    capacity = account_capacity_enabled(task)
     normalized_plan_name = " ".join(plan_name.casefold().split())
-    if normalized_plan_name not in FREE_PLAN_NAMES or price != Decimal("0"):
+    if not capacity and (normalized_plan_name not in FREE_PLAN_NAMES or price != Decimal("0")):
         raise ProviderError(
             "PAID_PLAN_REQUIRED", "access_limited",
             "SerpApi execution is restricted to an allowlisted $0 Free plan",
@@ -171,7 +173,7 @@ def free_account_snapshot(base: str, key: str, timeout: int) -> dict[str, Any]:
             "RESPONSE_SCHEMA_CHANGED", "failed",
             "SerpApi Account API did not expose an unambiguous extra_credits balance",
         )
-    if extra_credits != 0:
+    if not capacity and extra_credits != 0:
         raise ProviderError(
             "PAID_QUOTA_USAGE_DETECTED", "access_limited",
             "SerpApi extra credits are present; this skill will not spend them",
@@ -181,10 +183,13 @@ def free_account_snapshot(base: str, key: str, timeout: int) -> dict[str, Any]:
             "RESPONSE_SCHEMA_CHANGED", "failed",
             "SerpApi Account API did not expose plan_searches_left",
         )
-    if plan_left <= 0:
+    if price < 0 or plan_left < 0 or extra_credits < 0:
+        raise ProviderError("RESPONSE_SCHEMA_CHANGED", "failed", "Account capacity counters must be nonnegative")
+    available = plan_left + extra_credits if capacity else plan_left
+    if available <= 0:
         raise ProviderError(
             "FREE_QUOTA_EXHAUSTED", "access_limited",
-            "SerpApi Free-plan monthly searches are exhausted",
+            "SerpApi available account searches are exhausted",
         )
     if not account_status:
         raise ProviderError(
@@ -195,7 +200,9 @@ def free_account_snapshot(base: str, key: str, timeout: int) -> dict[str, Any]:
         raise ProviderError("AUTH_FAILED", "access_limited", "SerpApi account is not active")
     return {
         "plan_name": plan_name,
-        "plan_monthly_price": 0,
+        "plan_monthly_price": float(price) if capacity else 0,
+        **({"searches_available": available, "account_capacity_policy": True,
+             "free_balance_verified": False, "cost_verified": False} if capacity else {}),
         "searches_per_month": _number(payload.get("searches_per_month")),
         "plan_searches_left": plan_left,
         "this_month_usage": _number(payload.get("this_month_usage")),
@@ -222,7 +229,7 @@ def fallback_satisfied(evidence: dict[str, Any], item: dict[str, Any], *,
         if len(matching) != 1:
             return False
         try:
-            maximum_age = float(load_skill_config().get("performance", {}).get("dynamic_evidence_max_age_hours", 48))
+            maximum_age = dynamic_max_age_hours(task, load_skill_config())
             if not math.isfinite(maximum_age) or maximum_age <= 0:
                 raise ValueError("invalid freshness window")
         except (TypeError, ValueError):
@@ -345,7 +352,7 @@ def _record_failure(
         quota={**(quota or {}), "network_request_attempted": network_attempted},
         source_environment=(
             "test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1"
-            else "commercial_freemium_free_plan"
+            else "commercial_account_capacity" if account_capacity_enabled(load_json(task_dir / "task.json")) else "commercial_freemium_free_plan"
         ),
         authoritative_for_final_rating=False,
     )
@@ -366,7 +373,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
         from workflow_v24 import assert_recall_planning_contract, validated_discovery_followup
         if task.get("recall_planning_revision") is not None:
             assert_recall_planning_contract(task, plan)
-        maximum_age = float(load_skill_config().get("performance", {}).get("dynamic_evidence_max_age_hours", 48))
+        maximum_age = dynamic_max_age_hours(task, load_skill_config())
         followup = validated_discovery_followup(task_dir, task, plan, evidence, item, maximum_age)
         if fallback_satisfied(evidence, item, task_dir=task_dir, task=task, plan=plan):
             return {
@@ -416,9 +423,9 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
             if not key:
                 raise ProviderError("AUTH_FAILED", "access_limited", "SERPAPI_API_KEY is missing")
             timeout = int(config.get("http", {}).get("timeout_seconds", 30))
-            account.update(free_account_snapshot(base, key, timeout))
+            account.update(free_account_snapshot(base, key, timeout, **({"task": task} if account_capacity_enabled(task) else {})))
             account.update(reserve_search(
-                "serpapi", key, base, remaining=account["plan_searches_left"],
+                "serpapi", key, base, remaining=account.get("searches_available", account["plan_searches_left"]),
                 task_dir=task_dir, query_id=query_id,
                 renewal_date=account.get("plan_renewal_date", ""),
                 plan_entry_sha256=sha256_json(item), **attempt,
@@ -450,7 +457,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
                 query_id=query_id,
                 source_environment=(
                     "test_fixture" if os.environ.get("LC_IPR_TEST_MODE") == "1"
-                    else "commercial_freemium_free_plan"
+                    else "commercial_account_capacity" if account_capacity_enabled(task) else "commercial_freemium_free_plan"
                 ),
                 authoritative_for_final_rating=False,
             )

@@ -29,7 +29,7 @@ python scripts/auth_gate.py
 
 分发包根目录已附带列出 12 个字段、值全部留空的 `.env`，接收者直接在等号后填写自己的凭据。Mac Finder 按 `⌘ + Shift + .` 显示该隐藏文件。用 `setup_skill.py --init` 仅补建缺失的空 `config.json` 和 `.env`；已有文件不覆盖、不搬迁、不自动更换权限。macOS/Unix 的新私密文件使用 `0600`；Windows 使用当前用户目录权限，不将 POSIX 位检查冒充 Windows ACL 校验。`.env` 作为 UTF-8 文本解析，支持 BOM、CRLF，不执行 shell、不展开变量或修改进程环境。
 
-接收者填写自己的后台 Token 和获准使用的第三方凭据。Key 已配置不代表来源获得授权、生产审批通过或仍有免费额度；创建任务时仍按来源规则明确选择。Serper 可以由接收者明确授权使用现有余额，不继承发送者的授权、余额证明或额度账本。EUIPO 本轮暂停，不自动测试或启用。
+接收者填写自己的后台 Token 和获准使用的第三方凭据。Key 已配置不代表来源获得授权、生产审批通过或有可用账户容量；创建任务时仍按来源规则明确选择。新任务使用[来源账户策略](references/source-policy.md)，不再要求免费余额或零费用；Serper 启用时冻结现有余额使用授权，不继承发送者的授权、余额证明或额度账本。EUIPO 本轮暂停，不自动测试或启用。
 
 禁止把完整 Token、Key、用户名、密码或 Cookie 写入命令行、任务、日志、报告或回复。发送者的 `config.json`、`config.local.json`、`.env` 不进入分发包；包内空 `config.json` 和 `.env` 由 scripts/credential_defaults.py 的固定空字段在暂存目录生成，不能复制发送者现用文件。配置值不得用来生成公开调试信息。
 

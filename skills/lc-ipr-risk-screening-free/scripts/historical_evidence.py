@@ -163,8 +163,9 @@ def _dates(value):
     return result
 
 
-def _original_date(run, entries):
-    limit = float(load_skill_config().get("performance", {}).get("dynamic_evidence_max_age_hours", 48))
+def _original_date(run, entries, task=None):
+    from source_policy import dynamic_max_age_hours
+    limit = dynamic_max_age_hours(task or {}, load_skill_config())
     _require(math.isfinite(limit) and limit > 0, "HISTORICAL_FRESHNESS_CONFIG_INVALID")
     immutable = run.get("provider") == "epo_publication_server" and run.get("operation") == "document_retrieval"
     values = [run.get("finished_at"), *_dates(entries)]
@@ -285,7 +286,7 @@ def _validate_item(task, provider, row, candidates, item, evidence_root):
     _require(isinstance(ids, list) and ids and all(_text(value) for value in ids) and len(ids) == len(set(ids))
              and set(ids) == {entry["evidence_id"] for entry in entries}, "HISTORICAL_EVIDENCE_IDS_INCOMPLETE_OR_MISMATCH")
     _declared_files(entries, task_path.parent)
-    original_date = _original_date(run, entries)
+    original_date = _original_date(run, entries, task)
     _require(item.get("source_checked_at") == original_date, "HISTORICAL_SOURCE_DATE_MISMATCH")
     if provider in BROWSER_PROVIDERS:
         from record_browser_execution import validate_browser_execution

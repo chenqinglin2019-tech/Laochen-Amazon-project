@@ -128,8 +128,9 @@ def evaluation_at(task, evidence=None):
 
 def _fresh(task, entry, at):
     checked, reference = _instant(entry[FORM].get("checked_at")), _instant(at)
-    hours = (task.get("retrieval_policy") or {}).get("dynamic_evidence_max_age_hours", 48)
     try:
+        from source_policy import dynamic_max_age_hours
+        hours = dynamic_max_age_hours(task)
         age = (reference - checked).total_seconds() / 3600 if checked and reference else None
         return age is not None and -0.01 <= age <= float(hours) and float(hours) > 0
     except (ValueError, TypeError):

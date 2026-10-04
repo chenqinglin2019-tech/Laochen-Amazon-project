@@ -320,7 +320,8 @@ class DecisionWorkflowTests(unittest.TestCase):
             self.assertEqual(task["assessment_revision"], "known-findings-risk-v1")
             self.assertEqual(task["presentation_policy_revision"], "operator-report-v1")
             self.assertEqual(task['final_review_execution_revision'], 'module-double-review-v1')
-            self.assertEqual(task["retrieval_policy"], runtime["api_first"])
+            self.assertEqual(task["retrieval_policy"], {**runtime["api_first"],
+                "dynamic_evidence_max_age_hours": runtime["performance"]["dynamic_evidence_max_age_hours"]})
             self.assertEqual(task["serper_free_enhancement"]["max_queries_per_task"], 30)
             self.assertEqual(task["serpapi_free_enhancement"]["max_queries_per_task"], 10)
             self.assertEqual(workflow.validate_decision_workflow(task), [])

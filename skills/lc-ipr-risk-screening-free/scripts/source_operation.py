@@ -26,6 +26,13 @@ def operation_acceptance_context(task, provider):
         'excluded_offices', 'max_requests_per_task', 'free_plan',
     ) if key in policy}
     permission['task_opt_in'] = task.get(provider.split('_')[0] + '_free_enhancement', {})
+    from source_policy import enabled
+    if enabled(task):
+        permission['source_account_policy'] = task['free_policy']
+        permission['source_settings_revision'] = task.get('source_settings_revision')
+        permission['retrieval_policy'] = task.get('retrieval_policy')
+        if provider == 'signa':
+            permission['v3_supported_operations'] = policy.get('v3_supported_operations')
     adapter_names = {'signa': 'signa_client.py', 'serpapi_google_patents': 'serpapi_patents_client.py',
         'serpapi_google_lens': 'serpapi_lens_client.py', 'serper_patents': 'serper_client.py',
         'serper_web': 'serper_client.py', 'serper_images': 'serper_client.py', 'epo_ops': 'epo_ops_client.py',
@@ -179,6 +186,10 @@ def record_operation_acceptance(task_dir, task, evidence, row, run, entry):
         'allow_paid', 'allow_overage', 'allow_automatic_recharge', 'credential_file', 'credential_key',
         'office_map', 'excluded_offices') if key in provider_policy}
     controls['task_opt_in'] = task.get(provider.split('_')[0] + '_free_enhancement', {})
+    from source_policy import enabled
+    if enabled(task):
+        controls['source_account_policy'] = task['free_policy']
+        controls['retrieval_policy'] = task.get('retrieval_policy')
     for key in ('credential_fingerprint_sha256', 'permission_fingerprint_sha256', 'adapter_version'):
         if context.get(key) is not None:
             controls[key] = context[key]
@@ -205,6 +216,10 @@ def _current_acceptance_context(task, provider, operation):
         'allow_paid', 'allow_overage', 'allow_automatic_recharge', 'credential_file', 'credential_key',
         'office_map', 'excluded_offices') if key in policy}
     controls['task_opt_in'] = task.get(provider.split('_')[0] + '_free_enhancement', {})
+    from source_policy import enabled
+    if enabled(task):
+        controls['source_account_policy'] = task['free_policy']
+        controls['retrieval_policy'] = task.get('retrieval_policy')
     for key in ('credential_fingerprint_sha256', 'permission_fingerprint_sha256', 'adapter_version'):
         value = context.get(key)
         if value is not None:

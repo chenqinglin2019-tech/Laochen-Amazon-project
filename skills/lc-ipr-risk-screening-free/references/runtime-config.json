@@ -168,6 +168,11 @@
       },
       "excluded_offices": [
         "WO"
+      ],
+      "v3_supported_operations": [
+        "trademark_search",
+        "candidate_detail",
+        "trademark_media"
       ]
     },
     "rapidapi_uspto_trademark": {
@@ -280,8 +285,9 @@
       "browser_allowed_hosts": [
         "www.j-platpat.inpit.go.jp"
       ],
-      "automation_policy": "user_triggered_single_record_or_query",
-      "bulk_or_periodic_access": false
+      "automation_policy": "unavailable_automatic_business_query",
+      "bulk_or_periodic_access": false,
+      "automation_unavailable_reason": "automation_policy_incompatible"
     },
     "tmview_browser": {
       "capture_transport": "cdp_assisted",
@@ -313,8 +319,9 @@
         "euipo.europa.eu",
         "www.euipo.europa.eu"
       ],
-      "automation_policy": "user_triggered_single_vienna_class_query",
-      "bulk_or_periodic_access": false
+      "automation_policy": "unavailable_automatic_business_query",
+      "bulk_or_periodic_access": false,
+      "automation_unavailable_reason": "automation_policy_incompatible"
     },
     "public_web_browser": {
       "capture_transport": "manual_capture",
@@ -538,7 +545,7 @@
         "xml"
       ],
       "registration_required": false,
-      "adapter_status": "known_positive_xml_live_validated",
+      "adapter_status": "historical_summary_pending_raw_evidence",
       "acceptance_record": "references/provider-live-acceptance-v24.json",
       "authority_scope": "published_document_only",
       "authoritative_for_final_rating": false,
@@ -573,5 +580,28 @@
     "review_reserve_seconds": 600,
     "max_action_rounds": 96,
     "max_no_progress_rounds": 12
+  },
+  "source_access_policy": {
+    "mode": "existing_account_capacity",
+    "allow_registration": true,
+    "allow_commercial_freemium": true,
+    "commercial_freemium_mode": "explicit_opt_in",
+    "commercial_freemium_default_enabled": [],
+    "commercial_freemium_opt_in": [
+      "serper",
+      "signa",
+      "serpapi"
+    ],
+    "commercial_freemium_allowlist": [
+      "serper",
+      "signa",
+      "serpapi"
+    ],
+    "allow_paid": true,
+    "allow_overage": false,
+    "on_quota_exhausted": "stop_and_report",
+    "allow_new_purchase": false,
+    "allow_recharge": false,
+    "allow_upgrade": false
   }
 }

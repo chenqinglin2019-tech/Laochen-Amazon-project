@@ -436,7 +436,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id: str = 'initial', retry
         api_first = api_first_enabled(task)
         authorization = existing_balance_authorization(task) if api_first else None
         authorization_quota = {'balance_authorization': authorization, 'balance_authorization_sha256': sha256_json(authorization),
-                               'balance_verified': False} if authorization else {}
+                               'balance_verified': False, 'cost_verified': False} if authorization else {}
         if task.get("schema_version") == "2.4-free" and not api_first:
             # A local allow_paid=False flag or the presence of a Key does not
             # reveal the account's actual credit type or automatic recharge.

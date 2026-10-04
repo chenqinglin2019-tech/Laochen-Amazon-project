@@ -602,7 +602,7 @@ class JpoApiClient:
                     f"{self.base_url}/{api_right_type}/v1/{endpoint}/{quote(case_number, safe='')}",
                     headers={"Authorization": f"Bearer {token}"},
                     timeout=self.timeout,
-                    retries=1,
+                    retries=0,
                 )
                 break
             except ProviderError as exc:
