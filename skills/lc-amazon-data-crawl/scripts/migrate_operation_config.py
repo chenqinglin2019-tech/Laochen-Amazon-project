@@ -19,6 +19,37 @@ CONFIG_NAMES = (
 )
 
 
+# Traffic/wait keys are decided by operation_mode at runtime
+# (safety_control.apply_operation_policy) and plugin retry/relaunch keys only fed
+# unreachable code.  Keeping them in configs suggested they were tunable, so
+# setup removes them; everything else (business settings) is left untouched.
+POLICY_CONTROLLED_KEYS = (
+    "page_timeout",
+    "plugin_timeout",
+    "page_scroll_max_rounds",
+    "page_scroll_wait_seconds",
+    "page_scroll_stable_rounds",
+    "manual_pause_timeout",
+    "delay_seconds_min",
+    "delay_seconds_max",
+    "batch_pause_pages_min",
+    "batch_pause_pages_max",
+    "batch_pause_seconds_min",
+    "batch_pause_seconds_max",
+    "amazon_page_unavailable_retry_schedule_seconds",
+    "storefront_plugin_stable_seconds",
+    "find_similar_timeout",
+    "lens_results_timeout",
+    "plugin_retry_attempts",
+    "plugin_retry_wait_seconds_min",
+    "plugin_retry_wait_seconds_max",
+    "plugin_relaunch_retry_attempts",
+    "plugin_relaunch_wait_seconds",
+    "plugin_second_relaunch_retry_attempts",
+    "plugin_second_relaunch_wait_seconds",
+)
+
+
 def migrate(path: Path) -> bool:
     if not path.is_file():
         return False
@@ -30,41 +61,15 @@ def migrate(path: Path) -> bool:
     if mode not in ("supervised", "unattended"):
         raise ValueError(f"operation_mode 无效：{path}")
     config["operation_mode"] = mode
-    config.update(
-        delay_seconds_min=20 if mode == "supervised" else 45,
-        delay_seconds_max=30 if mode == "supervised" else 75,
-        batch_pause_pages_min=20 if mode == "supervised" else 10,
-        batch_pause_pages_max=20 if mode == "supervised" else 10,
-        batch_pause_seconds_min=180 if mode == "supervised" else 900,
-        batch_pause_seconds_max=300 if mode == "supervised" else 1200,
-        manual_pause_timeout=900 if mode == "supervised" else 0,
-        page_timeout=90,
-        page_scroll_max_rounds=18,
-        page_scroll_stable_rounds=2,
-        amazon_page_unavailable_retry_schedule_seconds=(
-            [[60, 60]] if mode == "supervised" else [[120, 120], [300, 300]]
-        ),
-    )
-    image = "find_similar_timeout" in config or path.name == "amazon_image_competitors.json"
-    if image:
-        if mode == "supervised":
-            config.update(find_similar_timeout=20, lens_results_timeout=40, plugin_timeout=20, page_scroll_wait_seconds=2.0)
-        else:
-            config.update(find_similar_timeout=12, lens_results_timeout=60, plugin_timeout=180, page_scroll_wait_seconds=1.0)
-    else:
-        config["plugin_timeout"] = 40 if mode == "supervised" else 180
-        if config.get("mode") == "storefront":
-            config["storefront_plugin_stable_seconds"] = 10.0
-        if mode == "supervised":
-            config["page_scroll_wait_seconds"] = 2.0
-        else:
-            config["page_scroll_wait_seconds"] = 1.0
+    for key in POLICY_CONTROLLED_KEYS:
+        config.pop(key, None)
     updated = json.dumps(config, ensure_ascii=False, indent=2) + "\n"
     if json.loads(original) == config:
         return False
     fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     try:
-        os.fchmod(fd, path.stat().st_mode & 0o777)
+        if hasattr(os, "fchmod"):  # absent on Windows before Python 3.13
+            os.fchmod(fd, path.stat().st_mode & 0o777)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(updated)
         os.replace(name, path)
@@ -86,7 +91,7 @@ if __name__ == "__main__":
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if isinstance(value, dict) and "batch_pause_pages_min" in value and any(
+        if isinstance(value, dict) and any(key in value for key in POLICY_CONTROLLED_KEYS) and any(
             key in value for key in ("mode", "find_similar_timeout", "root_categories")
         ):
             migrate(path)

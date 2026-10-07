@@ -4,12 +4,29 @@ set -euo pipefail
 SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TARGET_DIR="${1:-$PWD/lc-amazon-data-crawl-runner}"
 
-bash "$SKILL_DIR/scripts/check_auth.sh"
+# --allow-recent: inside install_for_user.sh the installer already verified
+# auth (LC_AUTH_VERIFIED_AT, <=10 min); run standalone this always checks.
+bash "$SKILL_DIR/scripts/check_auth.sh" --allow-recent
 
 mkdir -p "$TARGET_DIR/scripts" "$TARGET_DIR/config" "$TARGET_DIR/inputs" "$TARGET_DIR/outputs" "$TARGET_DIR/chrome_profiles" "$TARGET_DIR/tools/bin"
 
-cp "$SKILL_DIR"/scripts/*.py "$TARGET_DIR/scripts/"
+for script_file in "$SKILL_DIR"/scripts/*.py; do
+  case "$(basename "$script_file")" in
+    # Skill-maintenance tools: nothing in a runner imports or calls them.
+    migrate_unique_runner.py|package_skill.py) continue ;;
+  esac
+  cp "$script_file" "$TARGET_DIR/scripts/"
+done
 cp "$SKILL_DIR/scripts/check_auth.sh" "$TARGET_DIR/scripts/check_auth.sh"
+# Windows entry points travel with every runner so it works on either OS.
+if [[ -f "$SKILL_DIR/scripts/check_auth.ps1" ]]; then
+  cp "$SKILL_DIR/scripts/check_auth.ps1" "$TARGET_DIR/scripts/check_auth.ps1"
+fi
+for launcher_file in lc-amazon-data-crawl.ps1 lc-amazon-data-crawl.cmd; do
+  if [[ -f "$SKILL_DIR/scripts/runner/$launcher_file" ]]; then
+    cp "$SKILL_DIR/scripts/runner/$launcher_file" "$TARGET_DIR/$launcher_file"
+  fi
+done
 cp "$SKILL_DIR/assets/requirements.txt" "$TARGET_DIR/requirements.txt"
 for config_file in "$SKILL_DIR"/assets/config/*.json; do
   config_name="$(basename "$config_file")"
@@ -88,30 +105,45 @@ cat > "$TARGET_DIR/lc-amazon-data-crawl.sh" <<'EOF'
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# POSIX venvs use bin/python; a venv created by Windows Python uses Scripts/python.exe.
+venv_python() {
+  if [[ ! -x "$1/bin/python" && -f "$1/Scripts/python.exe" ]]; then
+    printf '%s\n' "$1/Scripts/python.exe"
+  else
+    printf '%s\n' "$1/bin/python"
+  fi
+}
+
 VENV_DIR="$ROOT_DIR/.venv"
-if [[ -x "$ROOT_DIR/.venv-scrapling/bin/python" ]]; then
+if [[ -x "$(venv_python "$ROOT_DIR/.venv-scrapling")" ]]; then
   VENV_DIR="$ROOT_DIR/.venv-scrapling"
 fi
-PYTHON_BIN="$VENV_DIR/bin/python"
+PYTHON_BIN="$(venv_python "$VENV_DIR")"
 
 usage() {
   cat <<'USAGE'
 Usage:
   ./lc-amazon-data-crawl.sh install
+  ./lc-amazon-data-crawl.sh install-browser
   ./lc-amazon-data-crawl.sh doctor
   ./lc-amazon-data-crawl.sh amazon-front-dry-run [--config config/amazon_front_keyword_search.json] [--operation-mode supervised|unattended]
   ./lc-amazon-data-crawl.sh amazon-front-run [--config config/amazon_front_storefront.json] [--operation-mode supervised|unattended]
+  ./lc-amazon-data-crawl.sh amazon-front-supervise --config config/<job>.json
+  ./lc-amazon-data-crawl.sh verify-output --job outputs/<job> [--live]
   ./lc-amazon-data-crawl.sh category-rank-dry-run [--config config/category_rank_crawler.json]
   ./lc-amazon-data-crawl.sh category-rank-run [--config config/category_rank_crawler.json] [--operation-mode supervised|unattended]
   ./lc-amazon-data-crawl.sh image-competitor-dry-run [--config config/amazon_image_competitors.json]
   ./lc-amazon-data-crawl.sh image-competitor-run [--config config/amazon_image_competitors.json] [--operation-mode supervised|unattended]
   ./lc-amazon-data-crawl.sh cdp-browser-start --config <config-file>
   ./lc-amazon-data-crawl.sh sellersprite-check --config <config-file>
+  ./lc-amazon-data-crawl.sh safety-status
+  ./lc-amazon-data-crawl.sh safety-clear --confirm-reviewed
 USAGE
 }
 
 require_cloud_auth() {
-  bash "$ROOT_DIR/scripts/check_auth.sh"
+  bash "$ROOT_DIR/scripts/check_auth.sh" "$@"
 }
 
 ensure_installed() {
@@ -128,7 +160,7 @@ install_runner() {
     candidate="$(command -v "$candidate" || true)"
     [[ -n "$candidate" ]] || continue
     version="$($candidate -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-    case "$version" in 3.10|3.11|3.12|3.13|3.14) python3_bin="$candidate"; break ;; esac
+    case "$version" in 3.1[0-9]|3.[2-9][0-9]) python3_bin="$candidate"; break ;; esac
   done
   if [[ -z "$python3_bin" ]]; then
     echo "Scrapling requires Python 3.10 or newer." >&2
@@ -136,17 +168,26 @@ install_runner() {
   fi
   if [[ -x "$PYTHON_BIN" ]] && ! "$PYTHON_BIN" -c 'import sys; raise SystemExit(sys.version_info < (3, 10))'; then
     VENV_DIR="$ROOT_DIR/.venv-scrapling"
-    PYTHON_BIN="$VENV_DIR/bin/python"
+    PYTHON_BIN="$(venv_python "$VENV_DIR")"
   fi
   if [[ ! -x "$PYTHON_BIN" ]]; then
     "$python3_bin" -m venv "$VENV_DIR"
+    PYTHON_BIN="$(venv_python "$VENV_DIR")"
   fi
   "$PYTHON_BIN" -m pip install --upgrade pip
   "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/requirements.txt"
-  # CDP/reuse attaches Playwright to the configured system Chrome. Downloading
-  # a second Playwright-managed Chromium is unnecessary and can make install
-  # fail on restricted or slow CDN connections.
+  # Deliberately no browser download here (it can fail on restricted or slow
+  # CDN connections and is not needed when Chrome for Testing is already
+  # installed): run install-browser once when doctor reports
+  # chrome_for_testing: missing.
   "$PYTHON_BIN" -c "from playwright.sync_api import sync_playwright; print('playwright CDP runtime: ok')"
+}
+
+install_browser() {
+  # Playwright's Chromium honors --load-extension (branded Chrome 137+ does
+  # not) and start_cdp_browser.py's chrome_binary:auto finds it in the
+  # ms-playwright cache on macOS, Linux and Windows.
+  "$PYTHON_BIN" -m playwright install chromium
 }
 
 doctor() {
@@ -247,6 +288,8 @@ auto_start_reuse_browser() {
         ;;
     esac
   done
+  # Never touch the browser while another crawl owns this machine.
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/safety_cli.py" guard
   "$PYTHON_BIN" "$ROOT_DIR/scripts/start_cdp_browser.py" \
     --if-needed \
     --config "$config_path"
@@ -257,11 +300,16 @@ shift || true
 
 case "$COMMAND" in
   install)
-    require_cloud_auth
+    require_cloud_auth --allow-recent
     install_runner "$@"
     ;;
-  doctor)
+  install-browser)
     require_cloud_auth
+    ensure_installed
+    install_browser
+    ;;
+  doctor)
+    require_cloud_auth --allow-recent
     doctor
     ;;
   amazon-front-dry-run)
@@ -274,6 +322,16 @@ case "$COMMAND" in
     ensure_installed
     auto_start_reuse_browser "config/amazon_front_crawler.json" "$@"
     exec "$PYTHON_BIN" "$ROOT_DIR/scripts/run_amazon_front_crawl.py" "$@"
+    ;;
+  amazon-front-supervise)
+    require_cloud_auth
+    ensure_installed
+    exec "$PYTHON_BIN" "$ROOT_DIR/scripts/supervise_amazon_front.py" "$@"
+    ;;
+  verify-output)
+    require_cloud_auth
+    ensure_installed
+    exec "$PYTHON_BIN" "$ROOT_DIR/scripts/verify_front_output.py" "$@"
     ;;
   category-rank-dry-run)
     require_cloud_auth
@@ -307,6 +365,14 @@ case "$COMMAND" in
     ensure_installed
     auto_start_reuse_browser "config/amazon_front_keyword_search.json" "$@"
     exec "$PYTHON_BIN" "$ROOT_DIR/scripts/run_sellersprite_check.py" "$@"
+    ;;
+  safety-status)
+    ensure_installed
+    exec "$PYTHON_BIN" "$ROOT_DIR/scripts/safety_cli.py" status
+    ;;
+  safety-clear)
+    ensure_installed
+    exec "$PYTHON_BIN" "$ROOT_DIR/scripts/safety_cli.py" clear "$@"
     ;;
   help|-h|--help)
     usage

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
@@ -40,7 +40,7 @@ class StorefrontPluginReadinessTests(unittest.TestCase):
 
     def test_snapshot_accepts_rendered_na_and_zero(self) -> None:
         class Driver:
-            def execute_script(self, _script, asins, scroll, _step, labels):
+            def execute_script(self, _script, asins, scroll, _step, labels, _epoch=None):
                 self.assertions = (asins, scroll, labels)
                 return {
                     "at_bottom": True,
@@ -77,7 +77,7 @@ class StorefrontPluginReadinessTests(unittest.TestCase):
         snapshots.extend([ready] * 10)
         driver = SimpleNamespace(current_url="https://www.amazon.com/stores/test", execute_script=lambda *_: True)
         with (
-            patch.object(front, "inspect_sellersprite_readiness", return_value={"status": "ready_candidate"}),
+            patch.object(front, "inspect_sellersprite_block", return_value={"status": "ready_candidate"}),
             patch.object(front, "inspect_storefront_plugin_page", side_effect=snapshots),
             patch.object(front.time, "monotonic", side_effect=clock.monotonic),
             patch.object(front.time, "sleep", side_effect=clock.sleep),
@@ -93,7 +93,7 @@ class StorefrontPluginReadinessTests(unittest.TestCase):
         pending = {"at_bottom": True, "product_count": 2, "complete_count": 1,
                    "pending": {ASIN: "field_missing:毛利率"}, "signature": "partial"}
         with (
-            patch.object(front, "inspect_sellersprite_readiness", return_value={"status": "data_loading"}),
+            patch.object(front, "inspect_sellersprite_block", return_value={"status": "data_loading"}),
             patch.object(front, "inspect_storefront_plugin_page", return_value=pending),
             patch.object(front.time, "monotonic", side_effect=clock.monotonic),
             patch.object(front.time, "sleep", side_effect=clock.sleep),
@@ -107,6 +107,7 @@ class StorefrontPluginReadinessTests(unittest.TestCase):
         clock = FakeClock()
         driver = SimpleNamespace(current_url="https://www.amazon.com/stores/test", execute_script=lambda *_: False)
         with (
+            patch.object(front, "inspect_sellersprite_block", return_value={"status": "ready_candidate"}),
             patch.object(front.time, "monotonic", side_effect=clock.monotonic),
             patch.object(front.time, "sleep", side_effect=clock.sleep),
             patch.object(front, "inspect_storefront_plugin_page", return_value={
@@ -117,11 +118,73 @@ class StorefrontPluginReadinessTests(unittest.TestCase):
             result = front.wait_for_storefront_plugin_page(driver, self.runtime(), 140.0)
         self.assertEqual(result, "timeout")
         self.assertEqual(clock.now, 140.0)
-        inspect.assert_called_once()
+        self.assertGreater(inspect.call_count, 1)
         self.assertEqual(
             front.get_sellersprite_readiness(driver)["pending_asins"],
             {ASIN: "page_not_at_bottom"},
         )
+
+    def test_hidden_pending_page_reactivated_once_without_resetting_budget(self) -> None:
+        for concurrency in (1, 2):
+            with self.subTest(concurrency=concurrency):
+                clock = FakeClock()
+                restore = Mock()
+                driver = SimpleNamespace(current_url="https://www.amazon.com/s", execute_script=lambda *_: {"hidden": False, "focused": True},
+                                         restore_worker_page=restore)
+                runtime = self.runtime()
+                runtime.browser_tab_concurrency = concurrency
+                pending = {"at_bottom": True, "product_count": 1, "complete_count": 0,
+                           "pending": {ASIN: "plugin_box_missing"}, "signature": "pending",
+                           "page_render": {"document_hidden": True}}
+                with (
+                    patch.object(front, "inspect_sellersprite_block", return_value={"status": "data_loading"}),
+                    patch.object(front, "inspect_storefront_plugin_page", return_value=pending),
+                    patch.object(front.time, "monotonic", side_effect=clock.monotonic),
+                    patch.object(front.time, "sleep", side_effect=clock.sleep),
+                ):
+                    result = front.wait_for_storefront_plugin_page(driver, runtime, 140.0)
+                self.assertEqual(result, "timeout")
+                self.assertEqual(clock.now, 140.0)
+                self.assertEqual(restore.call_count, 1 if concurrency == 1 else 0)
+                evidence = front.get_sellersprite_readiness(driver)["page_render"]
+                if concurrency == 1:
+                    self.assertIs(evidence["reactivation_hidden"], False)
+                else:
+                    self.assertNotIn("reactivation_hidden", evidence)
+
+    def test_hidden_page_can_recover_with_original_stability_window(self) -> None:
+        clock = FakeClock()
+        restore = Mock()
+        driver = SimpleNamespace(current_url="https://www.amazon.com/s", execute_script=lambda *_: True,
+                                 restore_worker_page=restore)
+        hidden = {"at_bottom": True, "product_count": 1, "complete_count": 0,
+                  "pending": {ASIN: "loading"}, "signature": "pending",
+                  "page_render": {"document_hidden": True}}
+        ready = {"at_bottom": True, "product_count": 1, "complete_count": 1,
+                 "pending": {}, "signature": "ready", "page_render": {"document_hidden": False}}
+        with (
+            patch.object(front, "inspect_sellersprite_block", return_value={"status": "ready_candidate"}),
+            patch.object(front, "inspect_storefront_plugin_page", side_effect=[hidden] + [ready] * 10),
+            patch.object(front.time, "monotonic", side_effect=clock.monotonic),
+            patch.object(front.time, "sleep", side_effect=clock.sleep),
+        ):
+            self.assertEqual(front.wait_for_storefront_plugin_page(driver, self.runtime(), 140.0), "ok")
+        restore.assert_called_once_with()
+        self.assertEqual(clock.now, 112.0)
+
+    def test_worker_reactivates_owned_page_after_navigation_wait(self) -> None:
+        events = []
+        worker = object.__new__(front.FrontWorker)
+        worker.runtime = self.runtime()
+        worker.stop_event = None
+        driver = SimpleNamespace(restore_worker_page=lambda: events.append("restore"))
+        with (
+            patch.object(worker, "_before_navigation", side_effect=lambda _: events.append("wait")),
+            patch.object(worker, "_ensure_driver", return_value=driver),
+            patch.object(front, "open_amazon_page", side_effect=lambda *_a, **_kw: events.append("open")),
+        ):
+            worker._open_page("https://www.amazon.com/s")
+        self.assertEqual(events, ["wait", "open"])
 
     def test_storefront_timeout_stops_before_extract_and_pagination(self) -> None:
         runtime = SimpleNamespace(

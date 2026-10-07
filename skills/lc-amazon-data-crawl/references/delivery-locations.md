@@ -58,7 +58,9 @@ addresses without a postal-code field in its addressing guidance:
 <https://www.emiratespost.ae/faq>.
 
 If automatic selection cannot be confirmed, the user may complete the current
-visible Amazon prompt during `manual_pause_timeout`. Otherwise the crawler must
+visible Amazon prompt within the manual-action window (supervised 15 minutes;
+unattended exits at once). The crawler re-checks the page every few seconds.
+Otherwise the crawler must
 raise `delivery_location_unconfirmed` and stop before writing page records.
 
 The delivery setting is stored by Amazon in the dedicated browser Profile and

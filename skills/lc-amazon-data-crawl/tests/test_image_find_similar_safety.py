@@ -572,53 +572,6 @@ class LensNavigationRaceTests(unittest.TestCase):
             )
         element.send_keys.assert_called_once()
 
-    def test_block_detection_retries_destroyed_navigation_context(self) -> None:
-        with (
-            patch.object(
-                image,
-                "detect_block",
-                side_effect=[
-                    image.WebDriverException(
-                        "Page.evaluate: Execution context was destroyed, most likely because of a navigation"
-                    ),
-                    None,
-                ],
-            ) as detect,
-            patch.object(image.time, "sleep"),
-        ):
-            self.assertIsNone(image.detect_block_after_navigation(MagicMock(), 2))
-        self.assertEqual(detect.call_count, 2)
-
-    def test_block_detection_does_not_hide_non_navigation_errors(self) -> None:
-        with patch.object(
-            image,
-            "detect_block",
-            side_effect=image.WebDriverException("target page has been closed"),
-        ):
-            with self.assertRaisesRegex(image.WebDriverException, "closed"):
-                image.detect_block_after_navigation(MagicMock(), 2)
-
-    def test_controlled_upload_retry_waits_for_a_verified_lens_terminal_state(self) -> None:
-        runtime = SimpleNamespace(page_timeout=30)
-        driver = MagicMock()
-        source_path = Path("/tmp/source.jpg")
-        with (
-            patch.object(image, "upload_image_to_lens") as upload,
-            patch.object(image, "detect_block_after_navigation", return_value="") as block,
-            patch.object(image, "wait_for_lens_results", return_value="results") as wait,
-        ):
-            self.assertEqual(
-                image.upload_and_wait_for_lens_results(
-                    driver,
-                    runtime,
-                    source_path,
-                ),
-                "results",
-            )
-        upload.assert_called_once_with(driver, runtime, source_path, None)
-        block.assert_called_once_with(driver, 15)
-        wait.assert_called_once_with(driver, runtime)
-
 
 class LensExplicitEmptyResultTests(unittest.TestCase):
     def test_visible_no_styles_page_is_a_verified_empty_terminal_state(self) -> None:

@@ -40,6 +40,9 @@ class DoubaoEmbeddingTests(unittest.TestCase):
         image.EMBEDDING_CACHE.clear()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
+        safety_root = patch("safety_control.default_safety_root", return_value=self.root / "safety")
+        safety_root.start()
+        self.addCleanup(safety_root.stop)
         self.products_file = self.root / "products.csv"
         self.products_file.write_text(
             "ASIN,商品URL,主图URL,本地图片路径,备注\nB012345678,,,,test\n",
@@ -533,8 +536,11 @@ class DoubaoEmbeddingTests(unittest.TestCase):
             patch.object(image, "wait_for_lens_results"),
             patch.object(image, "merge_lens_product_data", return_value=[]),
         ):
-            with self.assertRaisesRegex(image.EmbeddingProviderError, "不写入零竞品"):
+            # Round 1 (D2): a non-fatal source failure is a failed cycle ->
+            # supervised retry_later (exit 20) with current preserved.
+            with self.assertRaisesRegex(image.run_outcome.CrawlStop, "不写入零竞品") as stopped:
                 image.run_image_competitor_crawl(runtime, dry_run=False)
+        self.assertEqual(stopped.exception.exit_code, image.run_outcome.EXIT_RETRY_LATER)
         job_dir = runtime.outputs_root / runtime.job_id
         state = json.loads((job_dir / "state.json").read_text(encoding="utf-8"))
         self.assertIsNotNone(state["current"])

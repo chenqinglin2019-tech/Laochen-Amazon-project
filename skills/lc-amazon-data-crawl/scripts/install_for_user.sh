@@ -63,6 +63,12 @@ finally:
   unset token
 fi
 
+# One cloud-auth call per installation: setup, install and doctor below honor
+# this marker for up to 10 minutes (crawl commands never do).
+bash "$SKILL_DIR/scripts/check_auth.sh"
+LC_AUTH_VERIFIED_AT="$(date +%s)"
+export LC_AUTH_VERIFIED_AT
+
 bash "$SKILL_DIR/scripts/setup_runner.sh" "$TARGET_DIR"
 if [[ "${LC_AMAZON_INSTALL_SETUP_ONLY:-}" != "1" ]]; then
   bash "$TARGET_DIR/lc-amazon-data-crawl.sh" install

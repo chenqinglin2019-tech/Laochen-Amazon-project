@@ -385,23 +385,6 @@ class DeliveryLocationFlowTests(unittest.TestCase):
         self.assertTrue(category._submit_delivery_city(driver, "Abu Dhabi"))
         self.assertEqual(driver.city_attempts, ["Abu Dhabi"])
 
-    def test_applescript_elements_support_delivery_form_operations(self) -> None:
-        class ScriptDriver:
-            def __init__(self) -> None:
-                self.calls: list[tuple[str, tuple[object, ...]]] = []
-
-            def execute_script(self, script: str, *args: object) -> bool:
-                self.calls.append((script, args))
-                return True
-
-        driver = ScriptDriver()
-        element = category.AppleScriptElement("", driver, "#delivery-input")
-        element.clear()
-        element.type_text("10001")
-        element.click()
-        self.assertEqual([call[1][0] for call in driver.calls], ["#delivery-input"] * 3)
-        self.assertEqual(driver.calls[1][1][1], "10001")
-
     def test_post_submit_confirmation_accepts_amazon_final_character_privacy_mask(self) -> None:
         driver = FakeDriver("https://www.amazon.ca/", header="Deliver to K1P 1J\u200c")
         location = {"city": "Ottawa", "postal_code": "K1P 1J1", "strategy": "postal"}

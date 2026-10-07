@@ -287,14 +287,26 @@ class MiniStrictJsonTests(unittest.TestCase):
         self.assertEqual(runtime.provider_metrics["mini_image_tokens"], 90)
         self.assertIs(post.call_args.kwargs["allow_redirects"], False)
 
-    def test_mini_response_rejects_wrappers_extra_root_fields_and_wrong_scalar_types(self) -> None:
+    def test_mini_response_unwraps_transport_wrappers_but_keeps_strict_schema(self) -> None:
+        # Round 1 (item 3): fenced / prose-wrapped JSON is unwrapped with
+        # parse_json_object before being treated as malformed; the schema
+        # itself stays strict.
         rows = [candidate(1)]
         valid_match = mini_match(rows[0], is_same_product=True)
         valid_json = json.dumps({"matches": [valid_match]}, ensure_ascii=False)
-        invalid_responses = {
+        wrapped_responses = {
             "markdown_fence": f"```json\n{valid_json}\n```",
             "leading_prose": f"以下是结果：\n{valid_json}",
             "trailing_prose": f"{valid_json}\n以上为结果。",
+        }
+        for label, response_text in wrapped_responses.items():
+            with self.subTest(label=label):
+                self.assertEqual(
+                    image.parse_mini_match_response(response_text, rows),
+                    [valid_match],
+                )
+        invalid_responses = {
+            "not_json": "这不是 JSON",
             "extra_root_field": json.dumps(
                 {"matches": [valid_match], "note": "unexpected"},
                 ensure_ascii=False,
@@ -395,6 +407,9 @@ class CascadeConfigFingerprintAndOutputTests(unittest.TestCase):
         self.addCleanup(pacing.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
+        safety_root = patch("safety_control.default_safety_root", return_value=self.root / "safety")
+        safety_root.start()
+        self.addCleanup(safety_root.stop)
         self.products = self.root / "products.csv"
         self.products.write_text(
             "ASIN,商品URL,主图URL,本地图片路径,备注\nB012345678,,,,fixture\n",
@@ -1046,7 +1061,6 @@ class CascadeConfigFingerprintAndOutputTests(unittest.TestCase):
 
         with (
             patch.object(image, "start_driver", return_value=driver),
-            patch.object(image, "ensure_lens_supported"),
             patch.object(image, "resolve_source_image", return_value=source_image) as resolve,
             patch.object(image, "run_image_search", return_value="amazon_upload"),
             patch.object(image, "detect_block", return_value=""),

@@ -2,383 +2,212 @@
 name: lc-amazon-data-crawl
 description: 采集 Amazon 关键词搜索、类目榜单、店铺和图片相似竞品数据，并可结合卖家精灵字段与筛选条件导出。
 metadata:
-  last_updated: 2026-09-24
+  last_updated: 2026-10-07
 ---
 
 # 易逊-亚马逊数据采集
 
-Use this skill to create and operate a local Amazon crawler runner. The bundled scripts support:
+Local crawler for public Amazon pages in a visible Chrome (CDP), enriched by the
+user's own SellerSprite (卖家精灵) extension. This file is the operating runbook;
+field-level details live in `references/configuration.md`.
 
-- `keyword_search`: crawl Amazon search results from a keyword file, with sort choices such as Featured, Newest Arrivals, Best Sellers, and price/review sorts.
-- `storefront`: crawl Amazon storefront product lists, usually with `Newest Arrivals` or `Best Sellers`, up to 20 pages per store/sort.
-- `bsr_category`: crawl a single Amazon ranking/listing URL through the unified front crawler.
-- `category-rank`: crawl a ranking category node recursively, including child category nodes.
-- `image-competitor`: crawl Amazon image-search similar products and optionally compare/count competitors.
+| Mode (config template) | What it crawls |
+|---|---|
+| `keyword_search` (`amazon_front_keyword_search.json`) | search results per keyword × sort, `max_pages_per_keyword` pages |
+| `storefront` (`amazon_front_storefront.json`) | seller storefront lists per store × sort, 1–20 pages or explicit `all` to natural end |
+| `bsr_category` (`amazon_front_bsr_category.json`) | a Best Sellers / New Releases URL **and its child categories** (recursive; start page always included; defaults `max_depth: 3`, `max_pages_per_category: 2`) → `dedup_total.xlsx` |
+| `category-rank` (`category_rank_crawler.json`) | recursive category tree from `start_url` (`include_root` decides whether the start node itself is crawled) |
+| `image-competitor` (`amazon_image_competitors.json`) | same-product competitor counts via Find Similar / Amazon Lens + Doubao cascade |
 
-Front and category crawls also collect SellerSprite child-category BSR ranks in
-`subcategory_bsr_ranks` and can optionally filter products by fulfillment and
-the presence of a child-category rank before records are written.
+## Hard rules
 
-## Cloud Auth Gate
+1. **Cloud auth gate first.** Before editing configs, installing, opening Chrome,
+   dry-run or crawling, run `bash "<runner or skill dir>/scripts/check_auth.sh"`
+   (Windows: `powershell -ExecutionPolicy Bypass -File "<dir>\scripts\check_auth.ps1"`). Never run
+   `tools/bin/lc-auth-check-*` directly. On failure stop and say only:
+   `云端鉴权未通过，本轮不继续执行。` (A "启动准备失败" message is a local setup problem,
+   not an invalid token — report it as such.) Runner commands re-check auth themselves.
+2. **Never log in to Amazon.** If Amazon shows a sign-in page the run stops; say exactly:
+   `Amazon 弹出了登录页；本工具不使用也不需要 Amazon 买家账号，本条采集已停止。请稍后重试，不要登录买家账号。`
+   SellerSprite login (in the extension) is separate and may be needed.
+3. **Secrets stay in files.** Cloud token: `config.local.json` (written by the installer).
+   Ark keys: `config/doubao_embedding_vision.json` and `config/doubao_same_product_mini.json`.
+   Never ask the user to paste a key into chat, never print one.
+4. **One crawl per computer.** Never start a second crawl command while one runs
+   (it exits 50 anyway). Never delete files under `~/.lc-amazon-data-crawl/safety/`
+   by hand; use `safety-status` / `safety-clear`.
+5. Do not change timing/traffic values to "speed up": spacing, rests, retries and
+   plugin waits are fixed by `operation_mode` in code and are not config keys.
 
-Before editing task configs, installing dependencies, opening Chrome, running a dry-run, or starting any crawl, the Laochen cloud auth gate must pass. Initial entry of the recipient's own authorization token is the sole bootstrap exception.
+## Install / update
 
-This gate only verifies whether the current user may use this skill. It does not change the crawler logic and does not replace the user's Amazon, Chrome, SellerSprite, Doubao, or local browser setup.
+The installer reads the token from a hidden prompt, so **the user runs it in their own terminal**:
 
-The distributable `config.json` has an empty token:
+- macOS/Linux: `bash /path/to/lc-amazon-data-crawl/scripts/install_for_user.sh`
+- Windows: `powershell -ExecutionPolicy Bypass -File C:\path\to\lc-amazon-data-crawl\scripts\install_for_user.ps1`
 
-```json
-{
-  "backend_url": "https://mcp.yixunkuajing.com",
-  "backend_token": ""
-}
+It creates `lc-amazon-data-crawl-runner` beside the skill, installs Python deps and runs `doctor`.
+If `doctor`/a run reports that Chrome for Testing is missing, run `install-browser` once.
+After updating the skill, refresh an existing runner (keeps configs, inputs, outputs, credentials):
+`bash "$SKILL_DIR/scripts/setup_runner.sh" <runner>` (Windows: `powershell -ExecutionPolicy Bypass -File scripts\setup_runner.ps1 <runner>`).
+
+All commands below run inside the runner (`./lc-amazon-data-crawl.sh …` on macOS/Linux,
+`.\lc-amazon-data-crawl.cmd …` on Windows; same command names):
+
+```
+install | install-browser | doctor
+amazon-front-dry-run / amazon-front-run          --config config/<front config>.json
+amazon-front-supervise                          --config config/<store or keyword config>.json
+verify-output --job outputs/<job_id> [--live]
+category-rank-dry-run / category-rank-run        --config config/category_rank_crawler.json
+image-competitor-dry-run / image-competitor-run  --config config/amazon_image_competitors.json
+sellersprite-check --config <config>     cdp-browser-start --config <config>
+safety-status                            safety-clear --confirm-reviewed
+options for *-run: --operation-mode supervised|unattended, --resume-after-review, --no-resume
 ```
 
-Each recipient stores their own key in ignored `config.local.json`. The
-installer prompts for it without echoing; existing local installations with a
-populated `config.json` remain supported. Never print or reveal the full key.
+## Task workflow
 
-Always verify auth through the shared shell entry point. Resolve `SKILL_DIR`
-to the installed skill directory, then run:
+1. Copy the matching template in `config/` to a new file and give it a **new `job_id`**
+   (a job_id is a checkpoint; reuse it only to resume the same task).
+2. Put the user's input (CSV/XLSX) in `inputs/` and point the config at it.
+   Columns: keywords `keyword`/`关键词`/`search_term`; stores `store_url`(+`store_name`);
+   images `ASIN`, `商品URL`, `主图URL`, `本地图片路径`.
+3. Set only business fields: marketplace/start URL, sorts, page limits, `include_sponsored`,
+   `product_filters`, image `result_mode`/`match_mode`. See `references/configuration.md`.
+4. Run the matching `*-dry-run`. Fix every error before a real run (exit 40 = config error).
+5. If SellerSprite fields are required, run `sellersprite-check` once on a new profile.
+6. Start the real run **in the background with output to a log file** (crawls take minutes to
+   hours), Storefront/keyword default to `nohup ./lc-amazon-data-crawl.sh amazon-front-supervise --config config/x.json > outputs/x.log 2>&1 &`; category runs retain `amazon-front-run`
+   (Windows: `Start-Process` with `-RedirectStandardOutput`). Do not run it as a blocking command
+   that your tool may kill; never start it twice.
+7. Supervise (next section), then check `data_quality`, `scope_completion` and `delivery_ready` in `run_summary.json` before delivery.
+8. Ignoring an Amazon buyer-account login suggestion never changes `sellersprite_required`. Keep it true for enriched data; false is only for an explicitly requested basic-data task.
+9. Record each newly discovered runtime failure immediately in the workspace `运行报错.md`: evidence, affected job, root cause or uncertainty, mitigation and validation status. Append corrections and preserve history.
 
-```bash
-SKILL_DIR="/path/to/lc-amazon-data-crawl"
-bash "$SKILL_DIR/scripts/check_auth.sh"
-```
+## Supervising a run
 
-For an up-to-date generated runner, use
-`bash "/path/to/runner/scripts/check_auth.sh"` instead, so it checks that
-runner's `config.local.json` when present, otherwise `config.json`. Never
-invoke `tools/bin/lc-auth-check-*` directly.
-The shell entry point locates the correct binary independently of the current
-working directory. On macOS it automatically removes that binary's download
-quarantine attribute and verifies removal; it also restores and checks execute
-permission before authentication. Recipients do not need to run separate
-`xattr` or `chmod` commands. A local startup preparation failure stops execution
-with a non-secret diagnostic; do not describe it as an invalid token.
+Check every few minutes, not continuously. Read `outputs/<job_id>/run_heartbeat.json`
+(`pid`, `phase`, `updated_at`, optional `until`, `detail`) and the log tail.
 
-If auth fails, if `backend_token` is missing, or if the auth binary is unavailable, stop immediately. Do not inspect inputs, edit configs, run `install`, open Chrome, run dry-run, or start crawling. Use only this safe message:
+Storefront and keyword long tasks use `amazon-front-supervise`; `amazon-front-run`
+remains one attempt. The supervisor continues retryable exits automatically at
+`resume_at`, validates this attempt's heartbeat/commits, and stops on auth failure,
+risk pause or human action. No repeated chat message “继续” is needed. Run only one
+supervisor; it holds a separate machine lock and the child holds the crawl lock.
+`supervisor.json` records the supervisor's final reason and `exit_code`, plus the
+last child's separate `child_exit_code`; it is
+authoritative for recovery/manual-action stops. `run_summary.json` describes the
+last collection attempt and must not be treated as a later supervisor result.
 
-```text
-云端鉴权未通过，本轮不继续执行。
-```
+SellerSprite collection uses the dedicated foreground: actual spacing/rest ends
+before checking cancellation/lock, activating the exact browser PID and its owned
+tab, confirming visibility, then navigating/clicking. On macOS, lock pauses access
+until unlock, up to the manual wait limit (including system sleep); unknown inspection or activation failure
+requires human action. Hidden/no-frame evidence alone never proves a crash.
+On macOS the supervisor holds a temporary `caffeinate -di -w <supervisor_pid>`
+power assertion for required SellerSprite collection, preventing idle display/system
+sleep. It releases on exit, keeps system settings unchanged, and never unlocks a
+locked computer or changes manual-lock handling.
 
-If auth passes, continue the normal local crawler workflow. `scripts/setup_runner.sh` enforces this gate before creating a runner, and the generated runner enforces the same gate before every runner command.
+Ordinary CDP calls have a process-external 10 s watchdog; navigation and plugin
+loading retain their own budgets. Screenshots have 3 s and diagnostics 10 s. If
+calls stop returning, the supervisor stops the child before recovery, rebuilds
+exports from immutable commits and probes an owned local blank page. A healthy
+browser gets a new worker tab; two browser-level CDP failures allow restarting only
+the exact executable/profile/PID/creation-time identity. Recovery itself runs in a
+bounded subprocess. The profile, committed data, cooldowns and risk pauses remain.
+Two browser restarts without a successful commit stop automatic recovery. Local
+lock/window/browser failures without a completed page attempt do not increment
+item skip counts. A real page failure retains the existing skip thresholds.
 
-## First Step
+Storefront and keyword results support both traditional Next links and a main-list
+**Show more results** button. Each successful click is another logical page/batch;
+only new ASINs enter its commit. On restart, replay earlier clicks under normal
+traffic limits, then exclude all already visited ASINs. A disappearing control can
+end the source; a busy/disabled button or a click without confirmed new ASINs is a
+retryable failure, never proof of completeness. Keep an already identified control
+when its busy/disabled label changes to “Loading…”. Page limits count batches too.
 
-For a first-time installation, use the one-step installer. It prompts for the
-recipient's own authorization token, verifies it, creates a runner beside the
-Skill, installs Python dependencies, and runs doctor:
+Use `verify-output --job outputs/<job_id> --live` for a committed snapshot while
+running; after the supervisor exits run it without `--live` to compare commits,
+JSONL and Excel, including duplicate/extra rows and source evidence. Only `passed`
+confirms extraction consistency; missing evidence is `not_evaluated`. Delivery also
+requires the existing quality and scope report. Do not change historical outputs.
 
-```bash
-bash /path/to/lc-amazon-data-crawl/scripts/install_for_user.sh
-```
+- `phase` `waiting` (rest/cooldown with a future `until`: 3–5, 10–12, 15–20 min), `retry_wait`,
+  `plugin_wait` or `manual_wait` are planned waits. Do **not** report them as a stall or restart anything.
+- Healthy otherwise: `updated_at` changed within the last 5 minutes.
+- A normal interrupt during front-mode collection keeps committed pages, exports
+  them before exit, and leaves the unfinished page in its checkpoint. Verify the
+  final heartbeat and export result before resuming; interrupting early setup does
+  not certify an export.
+- Stalled: the pid is gone without `phase: exited`, or no update for > 5 minutes outside a wait.
+  Then read the log tail and `state.json`, tell the user what the page is doing, and only then
+  stop/restart.
+- Manual actions (CAPTCHA by day, delivery address, SellerSprite login): tell the user which
+  visible Chrome page needs attention. The crawler re-checks the page by itself every few seconds;
+  if the user says it is done and it has not continued, create the file `outputs/<job_id>/CONTINUE`.
 
-If the current workspace already has a runner, update it from this Skill.
-After installing an updated Skill, also run setup against the existing runner
-before using it, so its launcher and shared auth entry point are refreshed:
+## When a run ends: exit code → next step
 
-```bash
-SKILL_DIR="/path/to/lc-amazon-data-crawl"
-bash "$SKILL_DIR/scripts/setup_runner.sh" ./lc-amazon-data-crawl-runner
-```
+`outputs/<job_id>/run_summary.json` always holds `status`, `message`, `next_action`, `resume_at`
+and `skipped_items`. Front modes also hold `data_quality`, `scope_completion`, and `delivery_ready`. Explicit source N/A is valid; missing, invalid, unloaded and unconfirmed zeros are disclosed. Exit 0 alone does not certify completeness. Follow `next_action`:
 
-Then use the generated runner folder for all task-specific config edits and executions.
-For a first public-page smoke run without SellerSprite or a vision API key, use
-`config/amazon_front_public_quickstart.json` with the bundled example keyword
-input. Replace the example input before collecting real task data.
-When updating, pass the existing runner's path as the setup target. Setup
-preserves its `config.json`, `config.local.json`, task configs, inputs, and outputs.
+| Exit | status | Do this |
+|---|---|---|
+| 0 | completed | The queue ended. Deliver as complete only when `delivery_ready=true`; otherwise disclose and resolve quality/range gaps. |
+| 10 | completed_with_skips | Disclose `skipped_items`, their recorded reasons and unfinished scope; do not claim full delivery. The same job_id will not retry them; to try again later, run a new job with only those inputs. |
+| 20 | retry_later | Temporary failure, checkpoint saved. If `resume_at` is set (network/platform outage), wait until then; otherwise re-run the same command. Items that keep failing are skipped automatically, so this cannot loop. |
+| 21 | risk_pause | Amazon/SellerSprite risk signal. Do not re-run before `resume_at`. Afterwards ask the user to confirm the browser shows normal pages, then run once with `--resume-after-review`. Any pending item can serve as the review probe; the pause clears only when that page loads cleanly. |
+| 30 | needs_human | Tell the user the concrete action in `next_action` (CAPTCHA, delivery address, SellerSprite login, close/relaunch the dedicated Chrome, install-browser). Re-run after they confirm. |
+| 40 | config_error | Fix config/input, dry-run again. |
+| 50 | lock_held | Another crawl is running on this computer. Wait; do not start another. |
+| 2 | error | Report the message; do not retry blindly. Auth failures exit 2/3/4 from `check_auth`. |
 
-Setup creates `config/doubao_embedding_vision.json` and
-`config/doubao_same_product_mini.json` from empty public examples, protects
-both with mode `0600` where supported, and adds both to the runner
-`.gitignore`. It never overwrites either file on later setup runs. Before an
-image-competitor cascade run, the user must bind their own Volcengine Ark API
-key in both local files. Never ask the user to paste the key into chat.
+`safety-status` shows any active risk pause, its `not_before`, and whether a crawl is running.
+`safety-clear --confirm-reviewed` removes an **expired** pause after the user confirmed the
+browser is fine (it never shortens an active one).
 
-## Runner Commands
+## Operation modes (fixed in code)
 
-Run these from the generated runner folder:
+- `supervised` (default): 20–30 s between navigations; rest 3–5 min after every 20, 10–12 min after
+  every 100; one retry after 60 s for a temporary page failure; plugin data waits 40 s (once
+  extended to 80 s on progress; storefront 40 s total); manual actions wait up to 15 min.
+- `unattended`: 45–75 s spacing; 15–20 min rest after every 10; retries after 2 and 5 min, then the
+  item is deferred to the end of the queue; plugin waits up to 180 s; anything needing a human
+  saves the checkpoint and exits (CAPTCHA at night always stops).
+- Risk signals (403/429, CAPTCHA, "too many requests", access denied, SellerSprite quota/rate/
+  account messages) pause **all** crawls on this computer: a first rate limit for ≥30 min then one
+  automatic probe; repeats, denial and account restriction for 24 h with manual review.
+- An item (page/category/image source) that fails in two different runs for an item-specific
+  reason (not found, broken page, unusable image) is skipped and recorded instead of blocking the
+  job. Outage-type failures (network, timeouts, 5xx, plugin data not loading) do not count that way;
+  see `references/configuration.md` "Amazon Page Availability And Retry".
 
-```bash
-./lc-amazon-data-crawl.sh install
-./lc-amazon-data-crawl.sh doctor
-./lc-amazon-data-crawl.sh amazon-front-dry-run --config config/amazon_front_keyword_search.json
-./lc-amazon-data-crawl.sh amazon-front-run --config config/amazon_front_keyword_search.json
-./lc-amazon-data-crawl.sh amazon-front-run --config config/amazon_front_storefront.json
-./lc-amazon-data-crawl.sh category-rank-run --config config/category_rank_crawler.json
-./lc-amazon-data-crawl.sh category-rank-run --config config/category_rank_crawler.json --resume-after-review
-./lc-amazon-data-crawl.sh image-competitor-dry-run --config config/amazon_image_competitors.json
-./lc-amazon-data-crawl.sh image-competitor-run --config config/amazon_image_competitors.json
-./lc-amazon-data-crawl.sh cdp-browser-start --config config/amazon_front_keyword_search.json
-./lc-amazon-data-crawl.sh sellersprite-check --config config/amazon_front_keyword_search.json
-```
+## Outputs (`outputs/<job_id>/`)
 
-Always run the matching `*-dry-run` command before a real run after editing config or input files.
+- Front modes: `records.jsonl`, `dedup_total.xlsx`, `quality_report.json`.
+- Verification stops: `block_evidence.jsonl` with visible-node evidence. Hidden DOM and buyer-account suggestions are not challenges. `CONTINUE` rechecks the page.
+- category-rank: `records.jsonl`, `total_<job_id>_merged.xlsx`.
+- image-competitor: `*_相似竞品数量.xlsx` (count mode) or the detail workbook; cascade columns are
+  explained in `references/configuration.md#cascade-matching-semantics`.
+- Supervisor/verification: `supervisor.json`, `supervisor_events.jsonl`, `runtime_watchdog.json`, `verification_live.json`, `verification_final.json`.
+- Always: `state.json` (checkpoint), `run_summary.json`, `run_heartbeat.json`, optional `failures.jsonl`.
+- Storefront rows whose SellerSprite card did not finish loading (≤5 % of a page) are kept with
+  blank plugin fields and `插件字段未加载` in the plugin status column.
 
-## Configuration Rules
+## References
 
-Read `references/configuration.md` when creating or editing configs and
-`references/delivery-locations.md` before changing delivery behavior. The key
-operational rules are:
-
-- Replace example input files under `inputs/` with the user's real Excel/CSV files, or point config paths to the real files.
-- Keep `delivery_location_enabled: true`,
-  `delivery_locations_file: "config/amazon_delivery_locations.json"`, and
-  `delivery_location_timeout: 20` in crawler configs. Before extraction, the
-  crawler confirms the marketplace-specific delivery city/postal code. If
-  automatic and manual confirmation both fail, it stops without writing that
-  page.
-- Delivery selection updates Amazon cookies in the dedicated Chrome Profile
-  and can change price, stock, shipping promises, and search results. A new
-  browser driver or exact Amazon domain must confirm the address again.
-- For keyword search sorting, set `keyword_sort_orders` to any of: `Featured`, `Price: Low to High`, `Price: High to Low`, `Avg. Customer Review`, `Newest Arrivals`, `Best Sellers`.
-- For storefront crawling, set `store_sort_orders` with the same labels and set `store_page_limit` from 1 to 20.
-- Default to `browser_backend: "cdp"` and `browser_mode: "reuse"` with
-  `chrome_binary: "auto"` and a dedicated `chrome_user_data_dir`. Real run and
-  readiness commands automatically start a persistent Chrome for Testing when
-  the configured CDP endpoint is not already running.
-- `./lc-amazon-data-crawl.sh install` installs the Python dependencies and
-  verifies the Playwright CDP client. It does not download a separate
-  Playwright-managed Chromium; `CDP + reuse` attaches to the configured system
-  Chrome/Chrome for Testing profile.
-- The five production modes are fail-closed on `browser_backend: "cdp"`.
-  Selenium and AppleScript backend values are rejected because they cannot
-  provide the required verifiable tab-ownership guarantees.
-- Never ask the user to sign in to an Amazon buyer account. Crawl only public
-  Amazon pages while signed out. If Amazon opens a sign-in page, stop without
-  waiting for the user to log in. SellerSprite extension login is separate and
-  may still be required when SellerSprite enrichment is enabled. Use this exact
-  response for an Amazon sign-in wall: `Amazon 弹出了登录页；本工具不使用也不需要
-  Amazon 买家账号，本条采集已停止。请稍后重试，不要登录买家账号。`
-- If using SellerSprite enrichment, set `extension_path: "auto"` to scan normal
-  Chrome Profiles for the newest installed SellerSprite version and load it
-  into the dedicated CDP Profile. This loads extension code only; it never
-  copies credentials, cookies, or other Profile data.
-- Automatic extension loading requires Chrome for Testing or Chromium. Official
-  branded Chrome 137+ ignores `--load-extension`; on those versions either use
-  Chrome for Testing or load the unpacked extension once from
-  `chrome://extensions`.
-- With `browser_mode: "reuse"`, the runner connects to a separate crawl tab and
-  does not close the user-owned browser. `cdp-browser-start` remains available
-  when the browser should be prepared before a check or crawl command.
-- `browser_tab_concurrency` is fixed at `1` for SellerSprite-enabled front and
-  category collection. Higher values fail validation so one computer uses only
-  one crawler-owned visible tab at a time.
-- `page_extraction_engine` defaults to `browser`. Set it to `scrapling` only
-  when `field_selectors` contains custom card selectors: the runner then parses
-  the already-rendered card HTML locally with Scrapling, with browser parsing
-  as a per-field fallback. It never changes CDP, browser profile, SellerSprite
-  login, cloud auth, or any API configuration. The runner uses Python 3.10+
-  in `.venv-scrapling` when the old `.venv` is too old for Scrapling.
-- Every crawler worker uses a crawler-owned working tab. Only result tabs and
-  popups whose ownership can be proven are closed; pre-existing or otherwise
-  unknown user tabs are always preserved. Owned result tabs are cleaned up
-  after each product, on retry or long-wait entry, and on exceptions or
-  interruption. See `references/configuration.md` for the ownership contract.
-- A fixed local extension folder remains supported in `extension_path`; leave
-  it empty only when the dedicated Profile already has the extension.
-- Keep `activate_plugin: false` by default. SellerSprite content scripts inject
-  automatically; avoiding broad activation clicks prevents accidental Amazon
-  navigation.
-- Keep `page_scroll_before_extract: true` so each visible Amazon page is scrolled downward before extraction; this triggers lazy-loaded product cards and SellerSprite-injected fields before records are written.
-- Storefront pages use a 40-second per-page SellerSprite budget starting with plugin scrolling. Every non-sponsored Amazon ASIN selected for extraction must have a visible SellerSprite card without a loading spinner; parent/child 30-day sales, FBA fee, and gross margin must each render a value, including `N/A` or `0`. All cards and fields must remain unchanged for 10 seconds before extraction. A timeout stops with the current page checkpoint intact and writes no records for that page.
-- `operation_mode` defaults to `supervised`; `--operation-mode supervised|unattended`
-  overrides it for this run. Change modes by saving the checkpoint and restarting.
-  Existing runner configs are migrated by `setup_runner.sh` without replacing
-  business settings, credentials, inputs or outputs.
-- In supervised mode storefront SellerSprite work retains a 40-second total
-  budget including scrolling and 10-second stability. Other lists wait 40 seconds,
-  extending once to 80 only for new cards or required fields in the final 10 seconds.
-  Find Similar waits 20 seconds, Lens 40 seconds (at most 60 with real progress),
-  and the image plugin gate 20 seconds. In unattended mode required plugin fields
-  wait up to 180 seconds on the same page; no automatic refresh is added.
-- Amazon 403/429, CAPTCHA/robot/abnormal-traffic/access-denied pages and
-  explicit SellerSprite rate-limit, account-restriction, quota or verification
-  messages create a shared local risk pause. It persists across job IDs and
-  restarts. After the stored wait time and manual review, use
-  `--resume-after-review` to try one pending page; a fresh risk signal pauses
-  again.
-- A single persistent counter covers crawler-owned navigations and refreshes,
-  including failed attempts and image-result visits. Supervised spacing is
-  20–30 seconds; the next visit after attempts 20/40/60/80 rests 3–5 minutes,
-  and after attempt 100 (then 200, etc.) rests 10–12 minutes instead. Unattended
-  spacing is 45–75 seconds with a 15–20-minute rest after each 10 attempts.
-  Rest and spacing share one latest deadline; a finished task does not rest.
-  Supervised temporary failures retry once after 60 seconds; unattended failures
-  retry twice after 2 and 5 minutes, then defer the item. A rate limit cools
-  at least 30 minutes before one original-item probe; recurrence within 24 hours,
-  denial and account restriction require a 24-hour manual review. CAPTCHA needs
-  human handling by day and stops immediately by night. Operational status is
-  written to `run_heartbeat.json` and `run_summary.json`, separate from exports.
-- Run `sellersprite-check` when preparing a profile or diagnosing plugin data.
-  It opens the first real target page and writes no crawl records.
-- When `sellersprite_required` is true, do not write page records until at
-  least the configured number of ASINs contains real SellerSprite-only fields
-  and the data remains stable for the configured number of checks.
-- `subcategory_bsr_ranks` is a structured list such as
-  `[{"rank": 130, "category_name": "Fruit Bowls"}]`. A single BSR row is kept
-  as a child category; when multiple rows exist, the first broad parent row is
-  excluded and all subsequent child-category rows are retained.
-- `product_filters` defaults to no filtering. It supports mutually exclusive
-  fulfillment allow/deny lists through `allowed_fulfillment_methods` and
-  `excluded_fulfillment_methods`, plus `allow_missing_fulfillment` and
-  `require_subcategory_rank`; active conditions are combined with AND. Use
-  `excluded_fulfillment_methods: ["FBA"]` with a required child rank when every
-  confirmed non-FBA, missing, or unknown method should be retained.
-- Fulfillment evidence is parsed only from an explicit fulfillment label,
-  mapped table column, or configured selector. SellerSprite text such as
-  `配送:FBM卖家:1` is normalized to `FBM` while the captured raw evidence remains
-  in JSONL. Within those explicit fulfillment contexts, a value beginning with
-  `FBA`, `FBM`, or `AMZ` uses that canonical method regardless of its suffix;
-  unrelated card fields such as a standalone `FBA费用` do not count as
-  fulfillment.
-- Changing the output schema, fulfillment parsing semantics, or
-  `product_filters` is incompatible with an old job that already contains
-  records or completed pages. Use a new `job_id` instead of mixing old and new
-  records.
-- One process owns a `job_id` at a time. Atomic page shards drive JSONL
-  materialization and crash recovery; a second process using the same job is
-  rejected instead of racing the state writer.
-- Atomic page shards are the source of truth. Aggregate JSONL is rebuilt every
-  10 committed pages or 60 seconds and on exit; `quality_report.json` records
-  complete, missing and rendered-zero-unconfirmed fields without changing the
-  Excel columns.
-- For same-product quantity matching, recommend `match_mode: "cascade"`.
-  `doubao-embedding-vision-251215` performs a low-cost visual prescreen; only
-  sources with at most 10 prescreen matches are reviewed by
-  `doubao-seed-2-0-mini-260428`. The final business count comes only from the
-  Mini review, never directly from embedding similarity.
-- Cascade currently requires `result_mode: "count_only"`; use the legacy modes
-  for detailed competitor rows.
-- Keep Ark API keys only in `config/doubao_embedding_vision.json` and
-  `config/doubao_same_product_mini.json`, referenced by
-  `doubao_embedding_config_file` and `doubao_mini_config_file`. Never put a key
-  in a crawl config, log, state, archive, or message.
-- Treat those as two independent local provider interfaces. A user of a shared
-  Skill fills only their own `api_key` in each file; setup creates both with
-  mode `0600`, preserves existing values, and release packages contain empty
-  examples only. Dedicated Doubao endpoints must be HTTPS and never follow
-  redirects.
-- Cascade processes Lens candidates in page order. Zero prescreen matches means
-  `verified_zero` with final count `0`. One to ten matches enter Mini review in
-  batches of six. On the 11th prescreen match, stop additional embedding calls,
-  skip Mini, mark `prescreen_excluded`, and leave `same_product_count` blank.
-  The final Excel also adds `mini复核确认同款数量`: it shows a numeric count only
-  for `verified` Mini-reviewed results, stays blank for `verified_zero`, and
-  shows `Embedding判断同款数量大于10` for `prescreen_excluded`.
-- For an image source with an Amazon product page titled `Page Not Found`, try
-  the canonical `/dp/ASIN` page when the input used another URL. If that page
-  is also unavailable, record `source_unavailable`, leave the same-product
-  count blank, and continue with the next source. Do not treat generic dog
-  pages, blank pages, or 5xx responses as permanent product removal.
-- Mini judges the primary product and ignores color, accessory quantity, sale
-  quantity, bundle count, composition, and background when the product's core
-  function and structure are the same. Different category, core function, or
-  core structure is not the same product.
-- Bind resumable cascade jobs to the input-file digest and normalized source
-  order. Commit each completed source to an atomic `source_results/` shard and
-  materialize aggregate JSONL from those shards, so a crash cannot duplicate a
-  paid model call or attach an old row's count to a different ASIN.
-- Front and category templates use one 60-second retry for a non-risk temporary
-  Amazon transport failure. A second failure preserves the page checkpoint and
-  stops; risk signals bypass this retry and use the shared safety pause. See
-  `references/configuration.md` before changing the schedule.
-- Run `doctor` to see only whether each Doubao credential is `missing`,
-  `unconfigured`, or `ready`. Run image-competitor dry-run before opening
-  Chrome; missing, invalid, or empty required credential configuration must
-  fail there.
-- `match_mode` accepts `cascade`, `embedding`, and `chat`. The latter two remain
-  backward-compatible modes; legacy `openai_*` fields remain a deprecated
-  compatibility path for their existing provider behavior.
-- Do not claim 90% same-product precision without validation data. Calibrate
-  the embedding threshold on a category-stratified set of at least 300 labeled
-  image pairs, keep a frozen evaluation split, and report measured Mini
-  precision from that frozen split.
-- Do not use legacy third-party browser-container workflows; this skill uses
-  normal visible Chrome crawling through `CDP + reuse` only.
-
-## Long-Running Crawl Supervision
-
-For real runs, monitor terminal output and the `outputs/<job_id>/state.json` file:
-
-- If no new records, state updates, or browser actions happen for more than 3 minutes, report the current reason to the user.
-- If Amazon CAPTCHA/robot verification or SellerSprite needs manual action,
-  tell the user exactly which browser window/page is waiting. An Amazon
-  sign-in page is terminal instead: stop without asking the user to log in.
-- A non-risk temporary page failure waits 60 seconds and retries once. Amazon
-  403/429, CAPTCHA/robot, abnormal-traffic and access-denied signals, along
-  with explicit SellerSprite quota/rate/account signals, stop traffic and save
-  the cross-job risk pause instead. Explicit empty-result pages are valid;
-  ambiguous blank pages are not recorded as zero.
-- A retry cooldown pauses new navigation to the same Amazon domain across
-  workers. Long waits emit terminal and state heartbeats at intervals of no
-  more than 30 seconds; already-loaded pages may finish local extraction and
-  atomic commit.
-- If delivery auto-selection fails in supervised mode, tell the user to set the
-  requested location in the current visible Amazon page. After the 15-minute
-  `manual_pause_timeout`, treat an unconfirmed location as
-  `delivery_location_unconfirmed` and stop before extraction. Unattended mode
-  saves the checkpoint and exits immediately.
-- Before writing storefront records, the crawler reaches the page bottom and verifies every selected ASIN's plugin card and field loading state. A visible `N/A` is complete; an empty field or active spinner is not.
-- CDP reachability, plugin injection, plugin login prompts and actual enriched
-  fields are separate readiness checks. A plugin node or empty table alone is
-  never treated as ready.
-- Storefront SellerSprite timeouts do not refresh or relaunch the browser; the unfinished page remains pending for a later run.
-
-## Output Expectations
-
-Outputs are written under `outputs/<job_id>/`.
-
-- Unified front crawler writes `records.jsonl`, `state.json`, optional `failures.jsonl`, and `dedup_total.xlsx`.
-- Category-rank crawler writes `records.jsonl`, `state.json`, optional `failures.jsonl`, and `total_<job_id>_merged.xlsx`.
-- Image competitor crawler writes mode-specific JSONL files and an Excel result
-  ending in `_相似竞品数量.xlsx` or a detailed competitor workbook. Cascade
-  count output includes `prescreen_visual_match_count`, `processing_status`,
-  `same_product_count`, `same_product_confidence`, and `match_reason`;
-  `prescreen_excluded` rows intentionally have a blank final count. The final
-  review workbook permanently removes `最佳页码`、`最佳排名`、`加载状态`、`备注` and
-  `mini复核确认同款数量`, and adds a duplicate, clickable `商品URL` immediately
-  before `相似竞品数量` for manual review.
-  `same_product_confidence` is the minimum confidence among Mini-accepted
-  products and remains blank when the final count is zero. The JSONL also
-  records non-secret provider call/token metrics for paid-pilot cost review.
-
-## Historical Fulfillment Repair
-
-Completed jobs are not rewritten when fulfillment parsing semantics change.
-Use the conservative sidecar repair tool when the historical JSONL retained
-auditable raw values such as `FBM卖家` or `FBA卖家`:
-
-```bash
-.venv/bin/python scripts/repair_fulfillment_outputs.py \
-  outputs/<old-job-id> \
-  --output-dir outputs/<old-job-id>-repaired \
-  --expected-record-count <count> \
-  --expected-unique-asin-count <count>
-```
-
-The destination must not exist and must be outside the source job. The tool
-does not modify source state, page shards, JSONL, or workbooks. It promotes raw
-fulfillment values beginning with `FBA`, `FBM`, or `AMZ`, reports all remaining
-unknown raw evidence without inferring it, and produces full plus ranked
-non-FBA comparison workbooks in the new directory.
+- `references/configuration.md` — every config field, product filters, fulfillment parsing,
+  delivery location, SellerSprite readiness, cascade semantics, browser/tab ownership, checkpoints.
+- `references/delivery-locations.md` — fixed postal codes per marketplace.
+- Historical fulfillment repair (old jobs): `.venv/bin/python scripts/repair_fulfillment_outputs.py` —
+  see configuration.md "Historical fulfillment sidecar repair".
 
 ## Maintenance
 
-When updating this skill, update the bundled scripts in `scripts/`, templates in `assets/config/`, and this `SKILL.md` together. Validate with:
-
-```bash
-python3 /path/to/skill-creator/scripts/quick_validate.py /path/to/lc-amazon-data-crawl
-```
-
-Public packages must include `config.json` with an empty `backend_token`, and
-may include the empty
-`assets/config/doubao_embedding_vision.example.json` and
-`assets/config/doubao_same_product_mini.example.json`, but must never include
-populated local credential files, browser Profiles, cookies, or crawl outputs.
-Do not publish `config.local.json`. Keep the existing local Skill's configured
-token outside the public package.
-Preserve existing archives when creating a new dated package.
+Update `scripts/`, `assets/config/` and this file together; run `python3 -m unittest discover -s tests` for offline regression. Run browser tests separately with `LC_RUN_BROWSER_TESTS=1`. A stability release also needs a new isolated job with ≥100 verified pages/batches and `save_page_evidence:true`, covering short and long rests; launching it alone is not acceptance. Confirm cached country/BSR evidence reaches records and final Excel, including recycled cards.
+Build distributable zips only with `python3 scripts/package_skill.py` (excludes caches, local
+credentials, outputs and profiles, and refuses a populated `config.json` token). Never publish
+`config.local.json`, populated Doubao files, browser profiles, cookies or crawl outputs.

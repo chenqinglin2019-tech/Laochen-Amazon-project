@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from migrate_operation_config import migrate
-from safety_control import LocalSafetyController, RiskSignal, SafetyPausedError, apply_operation_policy, parse_retry_after, record_operational_outcome
+from safety_control import LocalSafetyController, RiskSignal, SafetyPausedError, apply_operation_policy, classify_amazon_risk, parse_retry_after, record_operational_outcome
 
 
 class OperationPolicyTests(unittest.TestCase):
@@ -62,26 +62,55 @@ class OperationPolicyTests(unittest.TestCase):
             self.assertEqual(second["kind"], "manual_review")
             self.assertGreaterEqual(dt.datetime.fromisoformat(second["not_before"]), now[0] + dt.timedelta(hours=24))
 
-    def test_failed_rate_probe_becomes_manual_24_hour_pause(self) -> None:
+    def test_unsent_rate_probe_keeps_pause_without_escalation(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             now = [dt.datetime(2026, 9, 24)]
             controller = LocalSafetyController(Path(temp), clock=lambda: now[0])
             controller.set_work_key("original")
             with self.assertRaises(SafetyPausedError):
                 controller.trip(RiskSignal("amazon", "http_429", "限流"))
+            before = json.loads(controller.pause_path.read_text())
             now[0] += dt.timedelta(minutes=30)
             restarted = LocalSafetyController(Path(temp), clock=lambda: now[0])
             restarted.begin()
             self.assertTrue(restarted.rate_probe_active)
-            restarted.set_work_key("original")
             restarted.fail_review()
             self.assertFalse(restarted.rate_probe_active)
             pause = json.loads(restarted.pause_path.read_text())
-            self.assertEqual(pause["reason"], "rate_probe_failed")
-            self.assertEqual(pause["kind"], "manual_review")
-            self.assertEqual(pause["not_before"], (now[0] + dt.timedelta(hours=24)).isoformat())
-            with self.assertRaises(SafetyPausedError):
-                restarted.begin()
+            self.assertEqual(pause["reason"], "http_429")
+            self.assertEqual(pause["kind"], "rate_probe")
+            self.assertEqual(pause["not_before"], before["not_before"])
+            again = LocalSafetyController(Path(temp), clock=lambda: now[0])
+            again.begin()
+            self.assertTrue(again.rate_probe_active)
+
+    def test_risk_markers_ignore_long_listing_bodies_but_not_titles(self) -> None:
+        listing = "Access Denied Sign, Authorized Personnel Only " + "Product card text " * 300
+        self.assertIsNone(classify_amazon_risk(http_status=200, title="Amazon.com : door signs", body_text=listing))
+        self.assertIsNone(classify_amazon_risk(http_status=200, title="Amazon.com", body_text="Captcha Puzzle Book " * 300))
+        short = classify_amazon_risk(http_status=200, title="Amazon.com", body_text="Too Many Requests. Please retry later.")
+        self.assertEqual(short.reason, "rate_limited")
+        long_body = "x " * 3000
+        self.assertIsNone(classify_amazon_risk(http_status=200, title="Amazon.com : access denied sign", body_text=long_body))
+        self.assertIsNone(classify_amazon_risk(http_status=200, title="Amazon.com : captcha t shirt", body_text=long_body))
+        self.assertEqual(classify_amazon_risk(http_status=200, title="Robot Check", body_text=long_body).reason, "captcha_or_robot_check")
+        soft = classify_amazon_risk(http_status=200, title="Amazon.com", body_text="Click the button below to continue shopping")
+        self.assertEqual(soft.reason, "captcha_or_robot_check")
+        self.assertEqual(classify_amazon_risk(http_status=429).reason, "http_429")
+
+    def test_lock_conflict_names_the_holder(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            first = LocalSafetyController(Path(temp))
+            first.job_label = "job-a"
+            first.acquire()
+            try:
+                second = LocalSafetyController(Path(temp))
+                with self.assertRaises(SafetyPausedError) as raised:
+                    second.acquire()
+                self.assertEqual(raised.exception.kind, "lock_held")
+                self.assertIn("job-a", str(raised.exception))
+            finally:
+                first.release()
 
     def test_migration_preserves_business_values_and_is_idempotent(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -93,7 +122,8 @@ class OperationPolicyTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), first)
             value = json.loads(first)
             self.assertEqual((value["job_id"], value["inputs_file"]), ("keep", "private.csv"))
-            self.assertEqual((value["operation_mode"], value["plugin_timeout"]), ("supervised", 40))
+            self.assertEqual(value["operation_mode"], "supervised")
+            self.assertNotIn("plugin_timeout", value)
 
     def test_failure_window_survives_checkpoint_restart(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
