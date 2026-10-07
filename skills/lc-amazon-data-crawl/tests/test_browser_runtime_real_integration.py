@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import os
 import http.server
 import subprocess
 import sys
@@ -103,6 +104,7 @@ def fixture_role(page: object) -> str:
 
 @unittest.skipUnless(find_system_chrome(), "system Google Chrome is unavailable")
 @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, "Playwright is unavailable")
+@unittest.skipUnless(os.environ.get("LC_RUN_BROWSER_TESTS") == "1", "browser tests require LC_RUN_BROWSER_TESTS=1")
 class RealChromeOwnershipIntegrationTests(unittest.TestCase):
     def setUp(self) -> None:
         _ACTIVE_CDP_OWNER_IDS.clear()

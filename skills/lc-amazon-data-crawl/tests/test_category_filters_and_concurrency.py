@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import copy
-import queue
 import sys
 import tempfile
 import threading
@@ -650,13 +649,20 @@ class ConfigAndPersistenceTests(unittest.TestCase):
             SKILL_ROOT / "unused.json",
             False,
         )
+        changed_root = category.build_runtime_config(
+            dict(base, include_root=True),
+            SKILL_ROOT / "unused.json",
+            False,
+        )
         changed_selectors = category.build_runtime_config(
             dict(base, field_selectors={"subcategory_bsr_ranks": [".custom-bsr"]}),
             SKILL_ROOT / "unused.json",
             False,
         )
         self.assertNotEqual(first.crawl_plan_fingerprint, changed_url.crawl_plan_fingerprint)
-        self.assertNotEqual(first.crawl_plan_fingerprint, changed_depth.crawl_plan_fingerprint)
+        # Round 1: caps are checked separately (tightening allowed mid-job).
+        self.assertEqual(first.crawl_plan_fingerprint, changed_depth.crawl_plan_fingerprint)
+        self.assertNotEqual(first.crawl_plan_fingerprint, changed_root.crawl_plan_fingerprint)
         self.assertNotEqual(first.crawl_plan_fingerprint, changed_selectors.crawl_plan_fingerprint)
 
     def test_resume_rejects_changed_crawl_plan_after_progress(self) -> None:
@@ -732,7 +738,7 @@ class ConfigAndPersistenceTests(unittest.TestCase):
             second.release()
 
 
-class ConcurrentCategoryStateTests(unittest.TestCase):
+class CategoryCheckpointRecoveryTests(unittest.TestCase):
     def state_data(self, nodes: list[dict]) -> dict:
         return {
             "state_version": 2,
@@ -752,7 +758,7 @@ class ConcurrentCategoryStateTests(unittest.TestCase):
             "crawl_plan_fingerprint": "plan-v1",
         }
 
-    def test_legacy_current_and_stale_inflight_are_recovered(self) -> None:
+    def test_stale_inflight_category_is_recovered_for_sequential_resume(self) -> None:
         nodes = [
             {"url": "https://www.amazon.com/a", "name": "A", "path": ["A"]},
             {"url": "https://www.amazon.com/b", "name": "B", "path": ["B"]},
@@ -768,9 +774,12 @@ class ConcurrentCategoryStateTests(unittest.TestCase):
             state.data["in_flight_categories"] = {
                 category.category_key(nodes[1]): {"node": nodes[1]}
             }
-            state.prepare_concurrent_resume()
-            self.assertEqual(state.data["queue"], nodes)
-            self.assertIsNone(state.data["current"])
+            state.flush = lambda: None
+            state.recover_stale_in_flight()
+            # Sequential resume: the crashed in-flight category goes back to the
+            # head of the queue and the current page is kept as is.
+            self.assertEqual(state.data["queue"], [nodes[1], nodes[2]])
+            self.assertEqual(state.data["current"], {"node": nodes[0], "page_number": 2})
             self.assertEqual(state.data["in_flight_categories"], {})
 
     def test_page_shard_recovers_crash_and_materializes_page_asin_once(self) -> None:
@@ -809,302 +818,11 @@ class ConcurrentCategoryStateTests(unittest.TestCase):
             self.assertEqual(resumed.data["records_count"], 1)
             self.assertEqual(category.read_jsonl(records_path), [{"asin": "B000000001"}])
 
-    def test_independent_categories_run_concurrently_and_main_commits(self) -> None:
-        nodes = [
-            {"url": "https://www.amazon.com/a", "name": "A", "path": ["A"]},
-            {"url": "https://www.amazon.com/b", "name": "B", "path": ["B"]},
-        ]
-        runtime = SimpleNamespace(
-            browser_tab_concurrency=2,
-            max_categories=None,
-            delivery_location_enabled=False,
-            delivery_location_fingerprint="delivery-v1",
-            record_contract_fingerprint="contract-v1",
-            crawl_plan_fingerprint="plan-v1",
-            delay_seconds_min=0,
-            delay_seconds_max=0,
-            batch_pause_pages_min=0,
-            batch_pause_pages_max=0,
-            batch_pause_seconds_min=0,
-            batch_pause_seconds_max=0,
-        )
-        barrier = threading.Barrier(2)
-        thread_ids: set[int] = set()
-        pause_thread_ids: set[int] = set()
-        main_thread_id = threading.get_ident()
-
-        def fake_worker(
-            _runtime,
-            claim_key,
-            node,
-            _completed,
-            _debug,
-            _events,
-            _stop,
-            _throttle,
-            _locks,
-        ):
-            thread_ids.add(threading.get_ident())
-            barrier.wait(timeout=2)
-            return category.CategoryCrawlBatch(
-                node=node,
-                pages=[
-                    category.CategoryPageBatch(
-                        key=f"{claim_key}|page:1",
-                        page_number=1,
-                        page_url=node["url"],
-                        plugin_status="ok",
-                        extracted_count=1,
-                        records=[{"asin": node["name"]}],
-                        rejection_counts={},
-                    )
-                ],
-            )
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            state = category.StateStore(root / "state.json", runtime)
-            state.data = self.state_data(nodes)
-            state.flush()
-            with (
-                patch.object(category, "crawl_category_source", side_effect=fake_worker),
-                patch.object(
-                    category.BatchPauseScheduler,
-                    "after_completed_page",
-                    side_effect=lambda: pause_thread_ids.add(threading.get_ident()),
-                ),
-            ):
-                category.run_crawl_concurrent(
-                    runtime,
-                    state,
-                    root / "records.jsonl",
-                    root / "failures.jsonl",
-                    root / "debug",
-                )
-            self.assertEqual(len(thread_ids), 2)
-            self.assertEqual(pause_thread_ids, {main_thread_id})
-            self.assertEqual(
-                {row["asin"] for row in category.read_jsonl(root / "records.jsonl")},
-                {"A", "B"},
-            )
-            self.assertEqual(state.data["in_flight_categories"], {})
-            self.assertEqual(state.data["processed_categories_count"], 2)
-
-    def test_terminal_retry_exhaustion_is_requeued_without_legacy_quick_retry(self) -> None:
-        node = {"url": "https://www.amazon.com/a", "name": "A", "path": ["A"]}
-        runtime = SimpleNamespace(
-            browser_tab_concurrency=2,
-            max_categories=None,
-            delivery_location_enabled=False,
-            delivery_location_fingerprint="delivery-v1",
-            record_contract_fingerprint="contract-v1",
-            crawl_plan_fingerprint="plan-v1",
-            delay_seconds_min=0,
-            delay_seconds_max=0,
-            batch_pause_pages_min=0,
-            batch_pause_pages_max=0,
-            batch_pause_seconds_min=0,
-            batch_pause_seconds_max=0,
-        )
-        attempts = []
-
-        def fake_worker(_runtime, _claim, current, *_args):
-            attempts.append(dict(current))
-            return category.CategoryCrawlBatch(
-                node=current,
-                failures=[
-                    {
-                        "reason": "amazon_page_unavailable_retry_exhausted",
-                        "recovery_failure_key": "page-a|stage:category_page_work|cycle:1",
-                    }
-                ],
-                terminal_error_type="amazon_page_unavailable_retry_exhausted",
-                terminal_error_message="manual resume required",
-            )
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            state = category.StateStore(root / "state.json", runtime)
-            state.data = self.state_data([node])
-            state.flush()
-            with patch.object(category, "crawl_category_source", side_effect=fake_worker):
-                with self.assertRaises(category.UserFacingError):
-                    category.run_crawl_concurrent(
-                        runtime,
-                        state,
-                        root / "records.jsonl",
-                        root / "failures.jsonl",
-                        root / "debug",
-                    )
-            failures = category.read_jsonl(root / "failures.jsonl")
-        self.assertEqual(len(attempts), 1)
-        self.assertNotIn("worker_retry_count", state.data["queue"][0])
-        self.assertEqual(state.data["processed_categories_count"], 0)
-        self.assertEqual(len(failures), 1)
-
-    def test_successful_worker_has_no_legacy_retry_metadata(self) -> None:
-        node = {"url": "https://www.amazon.com/a", "name": "A", "path": ["A"]}
-        runtime = SimpleNamespace(
-            browser_tab_concurrency=2,
-            max_categories=None,
-            delivery_location_enabled=False,
-            delivery_location_fingerprint="delivery-v1",
-            record_contract_fingerprint="contract-v1",
-            crawl_plan_fingerprint="plan-v1",
-            delay_seconds_min=0,
-            delay_seconds_max=0,
-            batch_pause_pages_min=0,
-            batch_pause_pages_max=0,
-            batch_pause_seconds_min=0,
-            batch_pause_seconds_max=0,
-        )
-        attempts = []
-
-        def fake_worker(_runtime, _claim, current, *_args):
-            attempts.append(dict(current))
-            return category.CategoryCrawlBatch(node=current)
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            state = category.StateStore(root / "state.json", runtime)
-            state.data = self.state_data([node])
-            state.flush()
-            with patch.object(category, "crawl_category_source", side_effect=fake_worker):
-                category.run_crawl_concurrent(
-                    runtime,
-                    state,
-                    root / "records.jsonl",
-                    root / "failures.jsonl",
-                    root / "debug",
-                )
-        self.assertEqual(len(attempts), 1)
-        self.assertNotIn("worker_retry_count", attempts[0])
-        self.assertEqual(state.data["processed_categories_count"], 1)
-        self.assertEqual(state.data["completed_sources"], state.data["done_categories"])
-
-    def test_peer_cancelled_by_terminal_worker_is_requeued_not_completed(self) -> None:
-        nodes = [
-            {"url": "https://www.amazon.com/fatal", "name": "fatal", "path": ["fatal"]},
-            {"url": "https://www.amazon.com/peer", "name": "peer", "path": ["peer"]},
-        ]
-        runtime = SimpleNamespace(
-            browser_tab_concurrency=2,
-            max_categories=None,
-            delivery_location_enabled=False,
-            delivery_location_fingerprint="delivery-v1",
-            record_contract_fingerprint="contract-v1",
-            crawl_plan_fingerprint="plan-v1",
-            delay_seconds_min=0,
-            delay_seconds_max=0,
-            batch_pause_pages_min=0,
-            batch_pause_pages_max=0,
-            batch_pause_seconds_min=0,
-            batch_pause_seconds_max=0,
-        )
-        barrier = threading.Barrier(2)
-
-        def fake_worker(
-            _runtime,
-            _claim,
-            node,
-            _completed,
-            _debug,
-            _events,
-            stop_event,
-            _navigation,
-            _delivery,
-        ):
-            barrier.wait(timeout=2)
-            if node["name"] == "fatal":
-                stop_event.set()
-                return category.CategoryCrawlBatch(
-                    node=node,
-                    terminal_error_type="fatal",
-                    terminal_error_message="fatal worker",
-                )
-            stop_event.wait(1)
-            raise category.ConcurrentWorkerCancelled("peer cancelled")
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            state = category.StateStore(root / "state.json", runtime)
-            state.data = self.state_data(nodes)
-            state.flush()
-            with patch.object(category, "crawl_category_source", side_effect=fake_worker):
-                with self.assertRaises(category.UserFacingError):
-                    category.run_crawl_concurrent(
-                        runtime,
-                        state,
-                        root / "records.jsonl",
-                        root / "failures.jsonl",
-                        root / "debug",
-                    )
-
-        self.assertEqual(state.data["done_categories"], [])
-        self.assertEqual(state.data["processed_categories_count"], 0)
-        self.assertEqual(
-            {node["name"] for node in state.data["queue"]},
-            {"fatal", "peer"},
-        )
-
-    def test_delivery_preflight_confirms_each_domain_serially_once(self) -> None:
-        runtime = SimpleNamespace(
-            browser_tab_concurrency=2,
-            delivery_location_enabled=True,
-        )
-        state = SimpleNamespace(
-            data={
-                "queue": [
-                    {"url": "https://www.amazon.com/a"},
-                    {"url": "https://www.amazon.com/b"},
-                ]
-            },
-            mark_manual_pause=lambda *_args: None,
-            clear_manual_pause=lambda: None,
-        )
-
-        class FakeDriver:
-            def quit(self):
-                return None
-
-        opened = []
-        with (
-            patch.object(category, "start_driver", return_value=FakeDriver()),
-            patch.object(
-                category,
-                "open_amazon_page",
-                side_effect=lambda _driver, url, *_args, **_kwargs: opened.append(url),
-            ),
-        ):
-            category.preflight_category_delivery(runtime, state)
-        self.assertEqual(opened, ["https://www.amazon.com/a"])
-
-    def test_navigation_throttle_staggers_workers_globally(self) -> None:
-        throttle = category.NavigationThrottle(0.03, 0.03)
-        barrier = threading.Barrier(2)
-        timestamps = []
-
-        def navigate() -> None:
-            barrier.wait(timeout=1)
-            throttle.wait()
-            timestamps.append(category.time.monotonic())
-
-        threads = [threading.Thread(target=navigate) for _index in range(2)]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=1)
-        self.assertEqual(len(timestamps), 2)
-        self.assertGreaterEqual(sorted(timestamps)[1] - sorted(timestamps)[0], 0.02)
-
 
 class ManualPromptCoordinationTests(unittest.TestCase):
     def test_final_plugin_prompt_emits_pause_and_resume_callbacks(self) -> None:
         runtime = SimpleNamespace(
             sellersprite_required=True,
-            plugin_retry_attempts=0,
-            plugin_relaunch_retry_attempts=0,
-            plugin_second_relaunch_retry_attempts=0,
         )
         driver = SimpleNamespace(current_url="https://www.amazon.com/s?k=test")
         events = []

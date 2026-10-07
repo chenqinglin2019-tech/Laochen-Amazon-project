@@ -1,6 +1,8 @@
 requests>=2.31.0
 charset-normalizer>=3.0.0
 selenium>=4.20.0
+# Already present in current Selenium runners; declare the local recovery API directly.
+websocket-client>=1.9.2,<2
 playwright>=1.60.0,<2
 openpyxl>=3.1.0
 # Used only for local parsing of browser-rendered card fragments.  It never

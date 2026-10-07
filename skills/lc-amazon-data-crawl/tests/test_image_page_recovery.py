@@ -203,6 +203,9 @@ class ImageWorkflowRecoveryTests(unittest.TestCase):
         self.addCleanup(pacing.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
+        safety_root = patch("safety_control.default_safety_root", return_value=self.root / "safety")
+        safety_root.start()
+        self.addCleanup(safety_root.stop)
         self.products = self.root / "products.csv"
         self.products.write_text(
             "ASIN,主图URL\nB012345678,https://example.invalid/source.jpg\n",
@@ -276,8 +279,11 @@ class ImageWorkflowRecoveryTests(unittest.TestCase):
             image,
             "merge_lens_product_data",
             return_value=[],
-        ), self.assertRaisesRegex(image.UserFacingError, "manual_resume_required"):
+        ), self.assertRaises(image.run_outcome.CrawlStop) as stopped:
             image.run_image_competitor_crawl(runtime, dry_run=False)
+        # Round 1 (D2): an exhausted page-retry cycle is a failed cycle ->
+        # supervised stop with retry_later (exit 20), current kept.
+        self.assertEqual(stopped.exception.exit_code, image.run_outcome.EXIT_RETRY_LATER)
 
         job_dir = runtime.outputs_root / runtime.job_id
         state_path = job_dir / "state.json"
@@ -365,9 +371,10 @@ class ImageWorkflowRecoveryTests(unittest.TestCase):
             patch.object(image, "wait_for_amazon_products", side_effect=image.TimeoutException()),
             patch.object(image, "sleep_between_pages"),
             patch.object(image, "write_workbook"),
-            self.assertRaisesRegex(image.UserFacingError, "manual_resume_required"),
+            self.assertRaises(image.run_outcome.CrawlStop) as stopped,
         ):
             image.run_image_competitor_crawl(runtime, dry_run=False)
+        self.assertEqual(stopped.exception.exit_code, image.run_outcome.EXIT_RETRY_LATER)
 
         job_dir = runtime.outputs_root / runtime.job_id
         state_path = job_dir / "state.json"

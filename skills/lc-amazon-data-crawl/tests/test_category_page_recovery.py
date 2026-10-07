@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import queue
 import sys
 import tempfile
-import threading
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +14,46 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 import amazon_category_rank_crawler as category
+
+
+def load_with_recovery(
+    driver,
+    page_url,
+    runtime,
+    work_key,
+    *,
+    retry_callbacks,
+    stage="category_page",
+    on_manual_pause=None,
+    on_manual_resume=None,
+    stop_event=None,
+    before_navigation=None,
+    delivery_lock=None,
+    domain_cooldowns=None,
+):
+    """One category page through the live recovery wrapper used by run_crawl."""
+
+    return category.run_category_page_work_with_recovery(
+        runtime,
+        page_url,
+        work_key,
+        retry_callbacks=retry_callbacks,
+        driver_provider=lambda: driver,
+        operation=lambda _attempt: category.load_category_page_attempt(
+            driver,
+            page_url,
+            runtime,
+            on_manual_pause=on_manual_pause,
+            on_manual_resume=on_manual_resume,
+            stop_event=stop_event,
+            before_navigation=before_navigation,
+            delivery_lock=delivery_lock,
+            domain_cooldowns=domain_cooldowns,
+        ),
+        stop_event=stop_event,
+        domain_cooldowns=domain_cooldowns,
+        stage=stage,
+    )
 from amazon_page_recovery import (
     AmazonPageRetryExhausted,
     DEFAULT_RETRY_SCHEDULE_SECONDS,
@@ -186,7 +224,7 @@ class CategoryRecoveryIntegrationTests(unittest.TestCase):
             "wait_for_amazon_products",
             side_effect=category.TimeoutException("timeout"),
         ):
-            return category.load_category_page_with_recovery(
+            return load_with_recovery(
                 driver,
                 self.page_url,
                 configured_runtime,
@@ -268,7 +306,7 @@ class CategoryRecoveryIntegrationTests(unittest.TestCase):
             [{"title": "Amazon", "body": "There are no products in this category."}]
         )
         with patch.object(category, "wait_for_amazon_products") as wait_for_products:
-            assessment = category.load_category_page_with_recovery(
+            assessment = load_with_recovery(
                 driver,
                 self.page_url,
                 runtime(clock),
@@ -416,7 +454,7 @@ class CategoryRetryPersistenceTests(unittest.TestCase):
             "wait_for_amazon_products",
             side_effect=category.TimeoutException("timeout"),
         ):
-            return category.load_category_page_with_recovery(
+            return load_with_recovery(
                 driver,
                 self.page_url,
                 configured_runtime,
@@ -581,54 +619,6 @@ class CategoryRetryPersistenceTests(unittest.TestCase):
             self.assertEqual(assessment.status, PageHealthStatus.HEALTHY)
             self.assertEqual(clock.waits, [30.0] * 2)
             self.assertNotIn("amazon_page_retry", state.data)
-
-    def test_concurrent_worker_events_ack_atomic_state_before_return(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            state = self.make_state(Path(temp_dir))
-            events: "queue.Queue[dict]" = queue.Queue()
-            stop_event = threading.Event()
-            callbacks = category.worker_retry_callbacks(
-                events,
-                stop_event,
-                "retry-entry",
-            )
-            sample = {
-                "status": "waiting",
-                "domain": "www.amazon.com",
-                "work_key": "page-1",
-                "stage": "category_page",
-                "cycle": 1,
-                "attempts_completed": 1,
-                "next_attempt": 2,
-                "selected_wait_seconds": 180,
-                "next_retry_at": 1180,
-                "url": self.page_url,
-                "error": "dog",
-            }
-            finished = threading.Event()
-
-            def writer() -> None:
-                callbacks.write_state(sample)
-                finished.set()
-
-            thread = threading.Thread(target=writer)
-            thread.start()
-            self.assertFalse(finished.wait(0.05))
-            category._drain_worker_events(events, state)
-            thread.join(timeout=1)
-            self.assertTrue(finished.is_set())
-            self.assertEqual(
-                state.load_amazon_page_retry("retry-entry")["next_retry_at"],
-                1180,
-            )
-
-            loaded = []
-            loader = threading.Thread(target=lambda: loaded.append(callbacks.load_state()))
-            loader.start()
-            category._drain_worker_events(events, state)
-            loader.join(timeout=1)
-            self.assertEqual(loaded[0]["work_key"], "page-1")
-
 
 if __name__ == "__main__":
     unittest.main()

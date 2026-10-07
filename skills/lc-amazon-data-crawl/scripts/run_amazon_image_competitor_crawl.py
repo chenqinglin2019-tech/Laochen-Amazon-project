@@ -22,8 +22,12 @@ DEFAULT_CONFIG = ROOT_DIR / "config" / "amazon_image_competitors.json"
 CRAWLER = ROOT_DIR / "scripts" / "amazon_image_competitor_crawler.py"
 VENV_PYTHONS = (
     ROOT_DIR / ".venv-scrapling" / "bin" / "python",
+    ROOT_DIR / ".venv-scrapling" / "Scripts" / "python.exe",
     ROOT_DIR / ".venv" / "bin" / "python",
+    ROOT_DIR / ".venv" / "Scripts" / "python.exe",
 )
+# Matches run_outcome.EXIT_CONFIG_ERROR; the launcher itself only validates the config path/JSON.
+EXIT_CONFIG_ERROR = 40
 
 
 class LauncherError(RuntimeError):
@@ -79,9 +83,29 @@ def main() -> int:
         config_path = ROOT_DIR / config_path
     load_json(config_path)
     command = build_command(config_path, args.dry_run, args.no_resume, args.operation_mode or "", args.resume_after_review)
-    print(f"配置文件：{config_path}")
-    completed = subprocess.run(command, cwd=str(ROOT_DIR))
-    return int(completed.returncode)
+    print(f"配置文件：{config_path}", flush=True)
+    return run_child(command)
+
+
+def child_exit_code(returncode: int) -> int:
+    """Pass the crawler's exit code through unchanged (0/10/20/21/30/40/50/2).
+
+    A POSIX child killed by a signal reports -N; map it to the shell
+    convention 128+N instead of an arbitrary wrapped value.
+    """
+    code = int(returncode)
+    return 128 - code if code < 0 else code
+
+
+def run_child(command: List[str]) -> int:
+    process = subprocess.Popen(command, cwd=str(ROOT_DIR))
+    while True:
+        try:
+            return child_exit_code(process.wait())
+        except KeyboardInterrupt:
+            # The crawler received the same Ctrl+C; let it save state and
+            # report its own exit code instead of orphaning it.
+            continue
 
 
 if __name__ == "__main__":
@@ -89,4 +113,4 @@ if __name__ == "__main__":
         raise SystemExit(main())
     except LauncherError as exc:
         print(f"启动失败：{exc}", file=sys.stderr)
-        raise SystemExit(2)
+        raise SystemExit(EXIT_CONFIG_ERROR)

@@ -20,7 +20,8 @@ Public repository for Laochen Amazon workflow skills.
   [Download the credential-free ZIP](skills/lc-amazon-image-studio-v7.zip).
 - `skills/lc-amazon-data-crawl/` - Crawl Amazon keyword searches, storefronts,
   ranking categories, and image-similar competitors with local CDP browser
-  control. Last updated: 2026-09-02 17:29 (UTC+8).
+  control, including Show more result batches, supervised recovery and output
+  verification. Last updated: 2026-10-07 (UTC+8).
 - `skills/lc_amazon_competitor_promotion/` - Analyze competitor promotion,
   pricing, ads, reviews, seasonality, Woot signals, and optional offsite traces.
 - `skills/lc_amazon_market_opportunity/` - Continue from market research into

@@ -278,7 +278,7 @@ class RunnerPackagingTests(unittest.TestCase):
             migrated = json.loads(task_config.read_text(encoding="utf-8"))
             self.assertEqual(migrated["custom"], "user")
             self.assertEqual(migrated["operation_mode"], "supervised")
-            self.assertEqual(migrated["batch_pause_seconds_min"], 180)
+            self.assertNotIn("batch_pause_seconds_min", migrated)
             before_third_setup = task_config.read_bytes()
             self.run_setup(skill, runner)
             self.assertEqual(task_config.read_bytes(), before_third_setup)

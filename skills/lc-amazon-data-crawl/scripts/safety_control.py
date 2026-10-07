@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 from urllib.parse import urlsplit, urlunsplit
 
+from run_outcome import current_run_id, replace_with_retry, write_heartbeat
+
 try:  # POSIX process lock
     import fcntl as _fcntl
 except ImportError:  # pragma: no cover - Windows
@@ -33,6 +35,14 @@ except ImportError:  # pragma: no cover - POSIX
 
 SAFETY_SCHEMA_VERSION = 1
 DEFAULT_RISK_COOLDOWN_SECONDS = 24 * 60 * 60
+LOCK_SENTINEL_OFFSET = 1 << 30
+# Upper bounds for persisted throttle deadlines, so a clock/timezone change or
+# a corrupted record can never turn into hours of silent waiting.
+MAX_PERSISTED_WAIT_SECONDS = {
+    "rest_until": 25 * 60,
+    "next_allowed_at": 2 * 60,
+    "captcha_cooldown_until": 15 * 60,
+}
 OPERATION_MODES = ("supervised", "unattended")
 
 
@@ -103,7 +113,7 @@ def policy_description(runtime: Any) -> str:
         f"{runtime.batch_pause_seconds_min / 60:g}–{runtime.batch_pause_seconds_max / 60:g} 分钟"
         + ("，每 100 次改为 10–12 分钟" if runtime.operation_mode == "supervised" else "")
         + f"；普通故障等待 {retry}；页面 {runtime.page_timeout} 秒；插件 {runtime.plugin_timeout} 秒；"
-        f"预滚动每轮 {runtime.page_scroll_wait_seconds:g} 秒、最多 {runtime.page_scroll_max_rounds} 轮；"
+        f"预滚动自适应（底部检查每次≤{runtime.page_scroll_wait_seconds:g} 秒）；"
         + (f"人工等待最多 {runtime.manual_pause_timeout} 秒" if runtime.operation_mode == "supervised"
          else "需人工介入时立即保存断点退出")
     )
@@ -115,7 +125,20 @@ def policy_description(runtime: Any) -> str:
 
 
 class SafetyPausedError(RuntimeError):
-    """Raised before a crawler-owned action would add new remote traffic."""
+    """Raised before a crawler-owned action would add new remote traffic.
+
+    ``kind`` is ``risk_pause``, ``review_not_due`` or ``lock_held`` and maps to
+    the run_outcome exit codes.
+    """
+
+    def __init__(self, message: str, *, kind: str = "risk_pause", resume_at: str = "") -> None:
+        super().__init__(message)
+        self.kind = kind
+        self.resume_at = resume_at
+
+
+class SafetyWaitCancelled(RuntimeError):
+    """A cancelled wait must not consume an action or its saved rest."""
 
 
 @dataclass(frozen=True)
@@ -156,6 +179,34 @@ def _redacted_page_url(value: Any) -> str:
     return raw.split("?", 1)[0].split("#", 1)[0][:500]
 
 
+RISK_BODY_MAX_CHARS = 4000
+# Titles Amazon uses for block pages themselves (search/product titles contain
+# the user's keyword or product name and must never trip a pause).
+AMAZON_BLOCK_TITLES = {
+    "robot check": ("captcha_or_robot_check", "Amazon 要求机器人验证。"),
+    "sorry! something went wrong!": ("captcha_or_robot_check", "Amazon 要求验证。"),
+    "error: the request could not be satisfied": ("access_denied", "Amazon 拒绝访问当前页面。"),
+    "access denied": ("access_denied", "Amazon 拒绝访问当前页面。"),
+    "429 too many requests": ("rate_limited", "Amazon 提示请求过于频繁。"),
+}
+AMAZON_RISK_MARKERS = (
+    ("captcha", "captcha_or_robot_check", "Amazon 要求验证码或机器人验证。"),
+    ("robot check", "captcha_or_robot_check", "Amazon 要求机器人验证。"),
+    ("sorry, we just need to make sure", "captcha_or_robot_check", "Amazon 要求验证。"),
+    ("click the button below to continue shopping", "captcha_or_robot_check", "Amazon 要求确认后继续。"),
+    ("automated access", "automated_access", "Amazon 拒绝自动化访问。"),
+    ("unusual traffic", "unusual_traffic", "Amazon 检测到异常流量。"),
+    ("异常流量", "unusual_traffic", "Amazon 检测到异常流量。"),
+    ("too many requests", "rate_limited", "Amazon 提示请求过于频繁。"),
+    ("request was blocked", "rate_limited", "Amazon 阻止了当前请求。"),
+    ("request has been blocked", "rate_limited", "Amazon 阻止了当前请求。"),
+    ("请求被阻止", "rate_limited", "Amazon 阻止了当前请求。"),
+    ("access denied", "access_denied", "Amazon 拒绝访问当前页面。"),
+    ("you don't have permission to access", "access_denied", "Amazon 拒绝访问当前页面。"),
+    ("拒绝访问", "access_denied", "Amazon 拒绝访问当前页面。"),
+)
+
+
 def classify_amazon_risk(
     *,
     http_status: Optional[int],
@@ -174,16 +225,19 @@ def classify_amazon_risk(
         return RiskSignal("amazon", "http_429", "Amazon 返回 429 限流响应。", retry_after_seconds=parse_retry_after(retry_after))
     if http_status == 403:
         return RiskSignal("amazon", "http_403", "Amazon 拒绝访问当前页面。")
-    text = _normalized_text(f"{title} {body_text}")
-    markers = (
-        ("captcha", "captcha_or_robot_check", "Amazon 要求验证码或机器人验证。"),
-        ("robot check", "captcha_or_robot_check", "Amazon 要求机器人验证。"),
-        ("automated access", "automated_access", "Amazon 拒绝自动化访问。"),
-        ("unusual traffic", "unusual_traffic", "Amazon 检测到异常流量。"),
-        ("access denied", "access_denied", "Amazon 拒绝访问当前页面。"),
-        ("sorry, we just need to make sure", "captcha_or_robot_check", "Amazon 要求验证。"),
-    )
-    for marker, reason, message in markers:
+    # Amazon block/CAPTCHA pages are tiny.  On a full listing or product page
+    # the title and body carry the user's keyword and product names ("Access
+    # Denied Sign", "Captcha Puzzle Book"), so text markers count only on short
+    # pages; long pages trip only on an exact block-page title.
+    title_text = _normalized_text(title)
+    body = _normalized_text(body_text)
+    exact = AMAZON_BLOCK_TITLES.get(title_text.strip(" .:"))
+    if exact:
+        return RiskSignal("amazon", exact[0], exact[1])
+    if len(body) > RISK_BODY_MAX_CHARS:
+        return None
+    text = f"{title_text} {body}"
+    for marker, reason, message in AMAZON_RISK_MARKERS:
         if marker in text:
             return RiskSignal("amazon", reason, message)
     return None
@@ -241,6 +295,8 @@ def write_run_summary(job_dir: Path, mode: str, safety: "LocalSafetyController")
         "has_current": bool(state.get("current") or state.get("in_flight")),
         "recent_failures": list(state.get("operation_recent_outcomes") or []).count(False),
         "consecutive_failures": int(state.get("operation_consecutive_failures") or 0),
+        "skipped_count": len(state.get("skipped_items") or []),
+        "safety_pause_file": str(safety.pause_path),
     }
     job_dir.mkdir(parents=True, exist_ok=True)
     target = job_dir / "run_summary.json"
@@ -249,7 +305,7 @@ def write_run_summary(job_dir: Path, mode: str, safety: "LocalSafetyController")
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(summary, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
-        os.replace(name, target)
+        replace_with_retry(name, target)
     finally:
         try:
             os.unlink(name)
@@ -258,7 +314,15 @@ def write_run_summary(job_dir: Path, mode: str, safety: "LocalSafetyController")
 
 
 def record_operational_outcome(state: Any, success: bool) -> bool:
-    """Persist unattended failure-window accounting in the existing checkpoint."""
+    """Failure-window accounting for the current process only.
+
+    Counters used to survive restarts, so after three failures every later run
+    stopped on its first deferred item and never reached healthy work.
+    """
+    if state.data.get("operation_run_id") != current_run_id():
+        state.data["operation_run_id"] = current_run_id()
+        state.data["operation_recent_outcomes"] = []
+        state.data["operation_consecutive_failures"] = 0
     outcomes = (list(state.data.get("operation_recent_outcomes") or []) + [bool(success)])[-20:]
     consecutive = 0 if success else int(state.data.get("operation_consecutive_failures") or 0) + 1
     state.data["operation_recent_outcomes"] = outcomes
@@ -288,6 +352,10 @@ class LocalSafetyController:
         self._clock = clock
         self._lock_handle: Optional[Any] = None
         self._review_mode = False
+        self._probe_sent = False
+        self._probe_verified = False
+        self._probe_key = ""
+        self.job_label = ""
         self._action_lock = threading.Lock()
         self.mode = operation_mode(mode)
         self._batch_pause_pages_min = int(batch_pause_pages_min)
@@ -333,7 +401,7 @@ class LocalSafetyController:
                 handle.write("\n")
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(temp_path, self.pause_path)
+            replace_with_retry(str(temp_path), self.pause_path)
         finally:
             try:
                 temp_path.unlink()
@@ -348,7 +416,7 @@ class LocalSafetyController:
                 json.dump(value, handle, ensure_ascii=False, sort_keys=True)
                 handle.flush()
                 os.fsync(handle.fileno())
-            os.replace(name, self.traffic_path)
+            replace_with_retry(name, self.traffic_path)
         finally:
             try:
                 os.unlink(name)
@@ -358,15 +426,20 @@ class LocalSafetyController:
     def set_work_key(self, key: str) -> None:
         self.work_key = str(key or "")
 
-    def _wait_until(self, deadline: dt.datetime, reason: str) -> None:
+    def heartbeat(self, phase: str, *, until: str = "", detail: str = "") -> None:
+        write_heartbeat(self.status_path, phase, until=until, detail=detail)
+
+    def _wait_until(self, deadline: dt.datetime, reason: str, stop_event=None) -> None:
         remaining = max((deadline - self._now()).total_seconds(), 0.0)
         while remaining > 0:
             print(f"{reason}；剩余约 {remaining:.0f} 秒。", flush=True)
-            if self.status_path is not None:
-                self.status_path.parent.mkdir(parents=True, exist_ok=True)
-                self.status_path.write_text(json.dumps({"updated_at": self._now().isoformat(), "reason": reason, "until": deadline.isoformat()}, ensure_ascii=False) + "\n", encoding="utf-8")
+            self.heartbeat("waiting", until=deadline.isoformat(), detail=reason)
             chunk = min(remaining, 30.0)
-            time.sleep(chunk)
+            if stop_event is not None:
+                if stop_event.wait(chunk):
+                    raise SafetyWaitCancelled("采集节流等待已取消。")
+            else:
+                time.sleep(chunk)
             remaining = min(max((deadline - self._now()).total_seconds(), 0.0), remaining - chunk)
 
     def acquire(self) -> None:
@@ -378,34 +451,84 @@ class LocalSafetyController:
             if _fcntl is not None:
                 _fcntl.flock(handle.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
             elif _msvcrt is not None:  # pragma: no cover - Windows
-                handle.seek(0, os.SEEK_END)
-                if handle.tell() == 0:
-                    handle.write(" ")
-                    handle.flush()
-                handle.seek(0)
+                # Lock a sentinel byte far beyond the JSON so other processes
+                # (guard, safety-status) can still read the holder record.
+                handle.seek(LOCK_SENTINEL_OFFSET)
                 _msvcrt.locking(handle.fileno(), _msvcrt.LK_NBLCK, 1)
             else:  # pragma: no cover
                 raise SafetyPausedError("当前系统不支持本机采集进程锁。")
         except (BlockingIOError, OSError) as exc:
             handle.close()
-            raise SafetyPausedError("本机已有 Amazon 数据采集任务运行；为保护账号，本次未启动。") from exc
+            holder = self.lock_holder()
+            raise SafetyPausedError(
+                "本机已有 Amazon 数据采集任务运行"
+                + (f"（进程 {holder.get('pid')}，开始于 {holder.get('acquired_at')}，任务 {holder.get('job') or '未知'}）" if holder else "")
+                + "；为保护账号，本次未启动。不要重复启动，等待该进程结束。",
+                kind="lock_held",
+            ) from exc
         handle.seek(0)
         handle.truncate()
-        handle.write(json.dumps({"pid": os.getpid(), "acquired_at": self._now().isoformat()}))
+        handle.write(json.dumps({"pid": os.getpid(), "acquired_at": self._now().isoformat(), "job": self.job_label}, ensure_ascii=False))
         handle.flush()
         os.fsync(handle.fileno())
         self._lock_handle = handle
+
+    def lock_holder(self) -> Dict[str, Any]:
+        try:
+            value = json.loads(self.lock_path.read_text(encoding="utf-8").strip() or "{}")
+        except (OSError, ValueError, TypeError):
+            return {}
+        return dict(value) if isinstance(value, dict) else {}
 
     def release(self) -> None:
         handle, self._lock_handle = self._lock_handle, None
         if handle is None:
             return
         try:
+            # Clear the holder record while still holding the lock, so a stale
+            # pid can never be mistaken for a running crawl later.
+            try:
+                handle.seek(0)
+                handle.truncate()
+                handle.flush()
+            except OSError:
+                pass
             if _fcntl is not None:
                 _fcntl.flock(handle.fileno(), _fcntl.LOCK_UN)
             elif _msvcrt is not None:  # pragma: no cover - Windows
-                handle.seek(0)
+                handle.seek(LOCK_SENTINEL_OFFSET)
                 _msvcrt.locking(handle.fileno(), _msvcrt.LK_UNLCK, 1)
+        finally:
+            handle.close()
+
+    def lock_is_held(self) -> bool:
+        """Probe the crawler lock itself (another process holds it)."""
+        if self._lock_handle is not None:
+            return True
+        if not self.lock_path.exists():
+            return False
+        try:
+            handle = self.lock_path.open("a+", encoding="utf-8")
+        except OSError:
+            return False
+        try:
+            if _fcntl is not None:
+                try:
+                    _fcntl.flock(handle.fileno(), _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+                except (BlockingIOError, OSError):
+                    return True
+                _fcntl.flock(handle.fileno(), _fcntl.LOCK_UN)
+                return False
+            if _msvcrt is not None:  # pragma: no cover - Windows
+                handle.seek(LOCK_SENTINEL_OFFSET)
+                try:
+                    _msvcrt.locking(handle.fileno(), _msvcrt.LK_NBLCK, 1)
+                except OSError:
+                    return True
+                handle.seek(LOCK_SENTINEL_OFFSET)
+                _msvcrt.locking(handle.fileno(), _msvcrt.LK_UNLCK, 1)
+                return False
+            return False
         finally:
             handle.close()
 
@@ -416,36 +539,79 @@ class LocalSafetyController:
         not_before = self._parse_iso(pause.get("not_before"))
         now = self._now()
         automatic_probe = pause.get("kind") == "rate_probe" and not_before is not None and now >= not_before
+        resume_at = not_before.isoformat(sep=" ") if not_before else ""
         if not resume_after_review and not automatic_probe:
-            raise SafetyPausedError(self._pause_message(pause))
+            raise SafetyPausedError(self._pause_message(pause), kind="risk_pause", resume_at=resume_at)
         if not_before is not None and now < not_before:
             raise SafetyPausedError(
-                f"风险暂停尚未到期，最早可在 {not_before.isoformat(sep=' ')} 后人工复核恢复。"
+                f"风险暂停尚未到期，最早可在 {resume_at} 后人工复核恢复。",
+                kind="review_not_due",
+                resume_at=resume_at,
             )
         pause["review_requested_at"] = now.isoformat()
         pause["review_attempt_pending"] = True
         self._write_pause(pause)
         self._review_mode = True
+        self._probe_sent = False
+        self._probe_verified = False
+
+    def note_risk_checked(self) -> None:
+        """Crawlers call this after a loaded page passed the Amazon risk check."""
+        if self._review_mode and self._probe_sent:
+            self._probe_verified = True
+
+    @property
+    def review_probe_pending(self) -> bool:
+        """A review/rate probe is running and has not yet passed the risk check."""
+        return bool(self._review_mode and not self._probe_verified)
 
     @property
     def rate_probe_active(self) -> bool:
         pause = self._load_pause()
         return bool(self._review_mode and pause and pause.get("kind") == "rate_probe")
 
-    def before_remote_action(self, action: str) -> None:
+    def before_remote_action(self, action: str, stop_event=None) -> None:
+        if stop_event is not None and stop_event.is_set():
+            raise SafetyWaitCancelled("采集操作已取消。")
         pause = self._load_pause()
         if pause is not None and not (
             self._review_mode and bool(pause.get("review_attempt_pending"))
         ):
-            raise SafetyPausedError(self._pause_message(pause, action=action))
-        if pause is not None and pause.get("work_key") and self.work_key != pause.get("work_key"):
-            raise SafetyPausedError("风险复核只允许原待处理页面；当前工作项不匹配。")
+            raise SafetyPausedError(self._pause_message(pause, action=action), kind="risk_pause")
+        if pause is not None and not self._probe_sent:
+            # Any pending item may probe: binding the probe to one work key
+            # deadlocked when that item was finished, skipped or in another job.
+            self._probe_sent = True
+            self._probe_key = self.work_key
+        elif pause is not None and self._probe_verified and pause.get("platform") != "sellersprite":
+            # The probe page passed the Amazon risk check: the review passed.
+            self.complete_review_success()
+        elif pause is not None and self._probe_verified and self.work_key == self._probe_key:
+            # SellerSprite pause: the probe item may finish its own page work;
+            # the pause clears when that page commits (complete_review_success).
+            pass
+        elif pause is not None:
+            # One probe per run.  The probe never reached a risk verdict
+            # (navigation error, timeout, plugin stall), so the pause stays and
+            # no further traffic is sent in this run.
+            raise SafetyPausedError(
+                "复核页面没有成功加载到可判断的状态，风险暂停保持不变，本次运行停止。"
+                "稍后再按 --resume-after-review 复核一次。",
+                kind="risk_pause",
+                resume_at=str(pause.get("not_before") or "").replace("T", " "),
+            )
+        self.heartbeat("navigating", detail=action)
 
         with self._action_lock:
             state = self._load_traffic()
             count = int(state.get("actions_count") or 0)
             due = count > 0 and count % self._batch_pause_pages_min == 0
-            if due and int(state.get("rested_after") or 0) < count:
+            existing_rest = self._parse_iso(state.get("rest_until"))
+            if due and int(state.get("rest_for") or 0) == count and existing_rest is not None:
+                # Interrupted during this rest: keep the persisted deadline.
+                # Re-drawing it made every restart wait a full rest again.
+                pass
+            elif due and int(state.get("rested_after") or 0) < count:
                 long_rest = self.mode == "supervised" and count % 100 == 0
                 low, high = ((600.0, 720.0) if long_rest else
                              (self._batch_pause_seconds_min, self._batch_pause_seconds_max))
@@ -455,10 +621,21 @@ class LocalSafetyController:
                 state["rest_until"] = max(new_deadline, old_deadline).isoformat() if old_deadline else new_deadline.isoformat()
                 state["rest_for"] = count
                 self._write_traffic(state)
-            deadlines = [self._parse_iso(state.get(key)) for key in ("rest_until", "next_allowed_at", "captcha_cooldown_until")]
-            deadline = max((item for item in deadlines if item is not None), default=None)
+            now = self._now()
+            deadlines = [
+                min(parsed, now + dt.timedelta(seconds=MAX_PERSISTED_WAIT_SECONDS[key]))
+                for key in ("rest_until", "next_allowed_at", "captcha_cooldown_until")
+                for parsed in (self._parse_iso(state.get(key)),)
+                if parsed is not None
+            ]
+            deadline = max(deadlines, default=None)
             if deadline and self._now() < deadline:
-                self._wait_until(deadline, "采集节流等待")
+                if stop_event is None:
+                    self._wait_until(deadline, "采集节流等待")
+                else:
+                    self._wait_until(deadline, "采集节流等待", stop_event)
+            if stop_event is not None and stop_event.is_set():
+                raise SafetyWaitCancelled("采集操作已取消。")
             if int(state.get("rest_for") or 0) == count:
                 state["rested_after"] = count
                 state.pop("rest_until", None)
@@ -488,6 +665,7 @@ class LocalSafetyController:
         if previous_deadline is not None:
             not_before = max(not_before, previous_deadline)
         self._review_mode = False
+        self._probe_sent = False
         self._write_pause(
             {
                 "schema_version": SAFETY_SCHEMA_VERSION,
@@ -499,6 +677,7 @@ class LocalSafetyController:
                 "not_before": not_before.isoformat(),
                 "page_url": _redacted_page_url(page_url),
                 "work_key": self.work_key,
+                "job": self.job_label,
                 "kind": "rate_probe" if rate and not repeat else "manual_review",
                 "rate_detected_at": (old_rate_at or now).isoformat() if rate else "",
                 "review_required": not (rate and not repeat),
@@ -506,7 +685,9 @@ class LocalSafetyController:
         )
         raise SafetyPausedError(
             f"已触发 {signal.platform} 风险暂停：{signal.message} 已保存断点，"
-            f"最早 {not_before.isoformat(sep=' ')} 后复核原待处理项。"
+            f"最早 {not_before.isoformat(sep=' ')} 后复核。",
+            kind="risk_pause",
+            resume_at=not_before.isoformat(sep=" "),
         )
 
     def captcha_cleared(self, *, page_url: str = "") -> None:
@@ -531,22 +712,26 @@ class LocalSafetyController:
             except FileNotFoundError:
                 pass
         self._review_mode = False
+        self._probe_sent = False
+        self._probe_verified = False
 
     def fail_review(self) -> None:
-        """A failed first rate probe must not silently become another free probe."""
+        """Close an unfinished review at process exit without escalating it.
+
+        A new risk signal during the probe already rewrote the pause in
+        ``trip``.  Reaching here otherwise means the probe was never sent
+        (config error, lock, other item) or ended without a risk verdict, so the
+        pause stays exactly as it was and one later run may probe again.  The
+        old behaviour escalated to a 24 h manual review without any request.
+        """
         if not self._review_mode:
             return
         pause = self._load_pause()
-        if pause is not None and pause.get("kind") == "rate_probe":
-            old_deadline = self._parse_iso(pause.get("not_before"))
-            new_deadline = self._now() + dt.timedelta(hours=24)
-            pause["not_before"] = max(old_deadline, new_deadline).isoformat() if old_deadline else new_deadline.isoformat()
-            pause["kind"] = "manual_review"
-            pause["reason"] = "rate_probe_failed"
-            pause["review_required"] = True
+        if pause is not None:
             pause["review_attempt_pending"] = False
             self._write_pause(pause)
         self._review_mode = False
+        self._probe_sent = False
 
     @staticmethod
     def _pause_message(pause: Dict[str, Any], *, action: str = "") -> str:
@@ -554,7 +739,9 @@ class LocalSafetyController:
         return (
             f"{prefix}检测到未解除的风险暂停：{pause.get('platform') or 'unknown'}/"
             f"{pause.get('reason') or 'unknown'}。{pause.get('message') or ''} "
-            "请完成平台侧处理，等待暂停期结束后，以 --resume-after-review 人工复核。"
+            f"最早 {str(pause.get('not_before') or '').replace('T', ' ')} 后，请用户确认浏览器页面正常，"
+            "再加 --resume-after-review 运行（任何待处理项都可作为复核）。"
+            "查看状态：./lc-amazon-data-crawl.sh safety-status"
         ).strip()
 
     def __enter__(self) -> "LocalSafetyController":

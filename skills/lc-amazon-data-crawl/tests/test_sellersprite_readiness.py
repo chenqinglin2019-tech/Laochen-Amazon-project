@@ -152,11 +152,14 @@ class BrowserBackendTests(unittest.TestCase):
         with (
             patch.object(category, "launch_debug_chrome", return_value=False),
             patch.object(category, "CdpWebDriver", return_value=sentinel) as cdp_driver,
-            patch.object(category.webdriver, "Chrome") as chrome_driver,
+            patch("selenium.webdriver.Chrome") as chrome_driver,
         ):
             self.assertIs(category.start_driver(runtime), sentinel)
         cdp_driver.assert_called_once()
         chrome_driver.assert_not_called()
+        legacy = SimpleNamespace(**{**vars(runtime), "browser_backend": "selenium"})
+        with self.assertRaises(category.UserFacingError):
+            category.start_driver(legacy)
 
     def test_owned_cdp_browser_uses_browser_close_command(self) -> None:
         driver = CdpWebDriver.__new__(CdpWebDriver)
@@ -267,8 +270,12 @@ class ConfigCompatibilityTests(unittest.TestCase):
         setup_text = (SKILL_ROOT / "scripts" / "setup_runner.sh").read_text(
             encoding="utf-8"
         )
-        self.assertNotIn("-m playwright install chromium", setup_text)
-        self.assertIn("from playwright.sync_api import sync_playwright", setup_text)
+        install_body = setup_text.split("install_runner() {", 1)[1].split("\n}\n", 1)[0]
+        # `install` never downloads a browser; the separate install-browser does.
+        self.assertNotIn("-m playwright install chromium", install_body)
+        self.assertIn("from playwright.sync_api import sync_playwright", install_body)
+        browser_body = setup_text.split("install_browser() {", 1)[1].split("\n}\n", 1)[0]
+        self.assertIn("-m playwright install chromium", browser_body)
         self.assertIn("auto_start_reuse_browser", setup_text)
 
     def test_count_only_image_mode_does_not_require_sellersprite(self) -> None:

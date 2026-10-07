@@ -1,7 +1,16 @@
+# This working Skill can contain its owner's authorization token.
+config.json
 config.local.json
-lc-amazon-data-crawl-runner/
-.venv/
-.venv-scrapling/
 __pycache__/
 *.py[cod]
 .DS_Store
+lc-amazon-data-crawl-runner/
+chrome_profiles/
+outputs/
+config/doubao_embedding_vision.json
+config/doubao_same_product_mini.json
+.env
+.env.*
+!.env.example
+*.log
+*.zip

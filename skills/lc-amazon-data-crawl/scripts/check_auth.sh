@@ -3,6 +3,20 @@ set -euo pipefail
 
 # Invoke with bash so a downloaded script does not need execute permission.
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# --allow-recent is passed ONLY by setup_runner.sh and the launcher's
+# install/doctor commands: inside one installation (install_for_user.sh), a
+# successful check exported as LC_AUTH_VERIFIED_AT (epoch seconds) is reused
+# for at most 10 minutes. Crawl commands never pass it and always re-check.
+if [[ "${1:-}" == "--allow-recent" ]]; then
+  verified_at="${LC_AUTH_VERIFIED_AT:-}"
+  if [[ "$verified_at" =~ ^[0-9]{1,12}$ ]]; then
+    auth_age=$(( $(date +%s) - 10#$verified_at ))
+    if (( auth_age >= 0 && auth_age <= 600 )); then
+      exit 0
+    fi
+  fi
+fi
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
 ext=""

@@ -3,8 +3,14 @@
 Amazon image-search competitor crawler.
 
 The crawler reads a product list, resolves each row to a main image, searches
-Amazon Lens in a visible Chrome session, filters the visual-search candidates
-with a vision model, then writes SellerSprite-enriched competitor rows.
+Amazon Lens (or SellerSprite Find Similar) in a visible Chrome session, filters
+the visual-search candidates with Doubao embeddings plus a Doubao Mini
+same-product review, then writes a per-source same-product count workbook
+(count_only) or competitor rows (legacy detail mode).
+
+Paid provider results are persisted per source under
+``outputs/<job_id>/source_progress/`` as soon as each call returns, so a
+restart never pays twice for completed embedding / Mini work.
 
 It does not solve CAPTCHA or bypass verification. If Amazon or SellerSprite
 verification appears, it saves state and waits for manual handling.
@@ -14,6 +20,9 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
+import csv
+import functools
 from copy import copy as copy_style
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
@@ -23,7 +32,9 @@ import math
 import mimetypes
 import os
 import re
+import shutil
 import sys
+import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -49,7 +60,10 @@ except ImportError:  # pragma: no cover
     load_workbook = None
 
 from amazon_category_rank_crawler import (
+    DEFAULT_CHROME_USER_DATA_DIR,
+    resolve_crawler_extension_path,
     BatchPauseScheduler,
+    configure_manual_waits,
     DeliveryLocationUnconfirmedError,
     JobRunLock,
     REQUESTED_DATA_FIELDS,
@@ -114,7 +128,8 @@ from amazon_page_recovery import (
     classify_page_snapshot,
     retry_schedule_from_config,
 )
-from safety_control import LocalSafetyController, SafetyPausedError, apply_operation_policy, classify_amazon_risk, classify_sellersprite_risk, operation_mode, policy_description, record_operational_outcome, write_run_summary
+from safety_control import LocalSafetyController, SafetyPausedError, apply_operation_policy, classify_amazon_risk, classify_sellersprite_risk, operation_mode, parse_retry_after, policy_description, record_operational_outcome, write_run_summary
+import run_outcome
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -329,6 +344,9 @@ class EmbeddingProviderError(UserFacingError):
     of persisting a misleading zero-competitor result.
     """
 
+    # failures.jsonl reason and the D2 item/environment classification input.
+    failure_reason = "embedding_provider_error"
+
 
 class FatalEmbeddingProviderError(EmbeddingProviderError):
     """A provider credential, model, or endpoint error that must stop the task."""
@@ -338,8 +356,396 @@ class MiniProviderError(EmbeddingProviderError):
     """A recoverable source-level Doubao Mini verification failure."""
 
 
+class MiniMalformedResponseError(MiniProviderError):
+    """Mini twice answered this exact input without the strict JSON contract.
+
+    At temperature 0 the same input gives the same answer, so this is a
+    property of the source (item failure), not a provider outage.
+    """
+
+    failure_reason = "mini_malformed_response"
+
+
+class CandidatesUnscorableError(EmbeddingProviderError):
+    """All or most Lens candidates could not be embedded (P1-6).
+
+    Usually a Lens DOM change or an image-URL regression.  The count would be
+    a guess, so the source is a failed cycle with no count written; it is never
+    reported as ``verified_zero``.
+    """
+
+    failure_reason = "all_candidates_unscorable"
+
+
 class FatalMiniProviderError(FatalEmbeddingProviderError):
     """A Mini credential, model, or endpoint error that must stop the task."""
+
+
+class EmbeddingInputRejected(EmbeddingProviderError):
+    """The provider rejected one specific image input (HTTP 400/413/415/422).
+
+    This is a property of the image, not of the provider: the candidate is
+    excluded from the prescreen instead of failing the whole source.
+    """
+
+
+class SourceTimeBudgetExceeded(RuntimeError):
+    """The per-source wall-clock budget was spent; the source is a failed cycle."""
+
+    reason = "source_time_budget_exceeded"
+
+
+class SourceImageDownloadError(RuntimeError):
+    """The source main image could not be downloaded or is not an image."""
+
+
+# Paid-call checkpoint (L11): one directory per source, one atomic file per
+# completed provider result.
+SOURCE_PROGRESS_DIRNAME = "source_progress"
+SOURCE_PROGRESS_SCHEMA = "image-source-progress-v1"
+# Per-source wall-clock budget (W4).  Safety throttle/rest waits and manual
+# verification waits are excluded; page waits, retry waits and navigation are
+# included.  Paid provider evaluation is not cut by the budget (it is
+# checkpointed and has its own failure handling).
+SOURCE_TIME_BUDGET_SECONDS = {"supervised": 8 * 60.0, "unattended": 15 * 60.0}
+# Element waits on a page that has already loaded (W4).
+ELEMENT_WAIT_SECONDS = 30
+FIND_SIMILAR_CONTROL_WAIT_SECONDS = 5.0
+FIND_SIMILAR_RUN_DISABLE_AFTER = 3
+# Mini: a malformed temperature-0 answer is resent at most once (2 sends).
+MINI_MALFORMED_MAX_SENDS = 2
+RATE_LIMIT_MIN_BACKOFF_SECONDS = 10.0
+RATE_LIMIT_MAX_BACKOFF_SECONDS = 300.0
+PROVIDER_PROGRESS_EVERY_CALLS = 10
+PROVIDER_PROGRESS_EVERY_SECONDS = 30.0
+# Exact <title> of Amazon's English "dog" 404 page.  Localized titles are not
+# added until the exact marketplace strings are verified (see report).
+PAGE_NOT_FOUND_TITLES = frozenset({"page not found"})
+QUARANTINE_REASON = "quarantined_after_repeated_failures"
+# P1-6: when more than this share of the Lens candidates cannot be embedded the
+# source fails its cycle instead of reporting a (possibly fake) count.
+UNSCORABLE_FAIL_RATIO = 0.5
+# Find Similar falls back to the Lens upload only for these page states; other
+# transient states (5xx, navigation errors) go to the stage's retry controller.
+FIND_SIMILAR_FALLBACK_REASONS = frozenset({"expected_content_missing", "blank_page"})
+WORKBOOK_LOCKED_NEXT_ACTION = (
+    "结果表格写入失败（通常是表格正在 Excel/WPS 中打开）。请关闭表格后重新运行同一命令；"
+    "已完成的结果都已保存，不会重新抓取或重复调用模型。"
+)
+PROVIDER_CONFIG_NEXT_ACTION = (
+    "检查 config/doubao_*.json 的 api_key/模型权限（模型是否已开通、端点是否正确），"
+    "修改后先运行 dry-run，再重新运行同一命令。"
+)
+VERIFICATION_NEXT_ACTION = (
+    "请用户在浏览器中完成 Amazon 验证码 / 登录或卖家精灵验证，"
+    "确认页面正常后重新运行同一命令。"
+)
+DELIVERY_NEXT_ACTION = (
+    "请用户在浏览器中确认 Amazon 配送地址（邮编）与 config/amazon_delivery_locations.json 一致，"
+    "然后重新运行同一命令。"
+)
+BROWSER_SETUP_NEXT_ACTION = (
+    "检查 CDP 浏览器是否已按 SKILL 启动（debugger_address、Chrome 配置目录、扩展），"
+    "处理后重新运行同一命令。"
+)
+
+
+def _atomic_write_json_file(path: Path, payload: Any) -> None:
+    ensure_dir(path.parent)
+    fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, separators=(",", ":"))
+            handle.flush()
+            os.fsync(handle.fileno())
+        # Tolerates a short Windows sharing violation (AV scan, concurrent reader).
+        run_outcome.replace_with_retry(name, path)
+    finally:
+        try:
+            os.unlink(name)
+        except FileNotFoundError:
+            pass
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(str(value).encode("utf-8", errors="ignore")).hexdigest()
+
+
+class SourceProgressStore:
+    """Per-source persistence of paid provider results (L11).
+
+    Every completed embedding vector, unembeddable-candidate note, Mini batch
+    verdict and the collected Lens candidate list is written atomically to its
+    own small file as soon as it is known.  The directory is bound to the
+    source identity and to the provider / crawl-plan fingerprints; a mismatch
+    discards it so a stale result can never be reused.
+    """
+
+    def __init__(self, directory: Path, identity: Mapping[str, Any]) -> None:
+        self.directory = Path(directory)
+        self.identity = {str(key): str(value) for key, value in identity.items()}
+        meta = self._read(self.directory / "meta.json")
+        if (
+            not isinstance(meta, dict)
+            or meta.get("schema") != SOURCE_PROGRESS_SCHEMA
+            or meta.get("identity") != self.identity
+        ):
+            if self.directory.exists():
+                shutil.rmtree(self.directory, ignore_errors=True)
+            _atomic_write_json_file(
+                self.directory / "meta.json",
+                {
+                    "schema": SOURCE_PROGRESS_SCHEMA,
+                    "identity": self.identity,
+                    "created_at": now_iso(),
+                },
+            )
+
+    @staticmethod
+    def _read(path: Path) -> Optional[Any]:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, UnicodeError):
+            return None
+
+    def _path(self, kind: str, key: str) -> Path:
+        safe_kind = re.sub(r"[^a-z0-9_-]+", "-", kind.lower())
+        safe_key = re.sub(r"[^A-Za-z0-9_-]+", "-", key)[:80]
+        return self.directory / f"{safe_kind}-{safe_key}.json"
+
+    def get(self, kind: str, key: str) -> Optional[Dict[str, Any]]:
+        value = self._read(self._path(kind, key))
+        return value if isinstance(value, dict) else None
+
+    def put(self, kind: str, key: str, value: Mapping[str, Any]) -> None:
+        payload = dict(value)
+        payload["saved_at"] = now_iso()
+        _atomic_write_json_file(self._path(kind, key), payload)
+
+    def delete(self, kind: str, key: str) -> None:
+        try:
+            self._path(kind, key).unlink()
+        except FileNotFoundError:
+            pass
+
+    def discard(self) -> None:
+        shutil.rmtree(self.directory, ignore_errors=True)
+
+
+def source_progress_dir(job_dir: Path, current: Mapping[str, Any]) -> Path:
+    try:
+        input_row = int(current.get("input_row") or 0)
+    except (TypeError, ValueError):
+        input_row = 0
+    source_id = normalize_space(str(current.get("source_id") or ""))
+    return job_dir / SOURCE_PROGRESS_DIRNAME / f"{input_row:08d}-{_sha256_text(source_id)[:16]}"
+
+
+def source_progress_store(runtime: Any) -> Optional[SourceProgressStore]:
+    store = getattr(runtime, "_source_progress", None)
+    return store if isinstance(store, SourceProgressStore) else None
+
+
+class SourceBudget:
+    """Wall-clock budget for one source, excluding throttle and manual waits."""
+
+    def __init__(self, limit_seconds: float, clock: Callable[[], float] = time.monotonic) -> None:
+        self.limit_seconds = float(limit_seconds)
+        self.clock = clock
+        self.started = float(clock())
+        self.excluded = 0.0
+
+    def exclude(self, seconds: float) -> None:
+        self.excluded += max(float(seconds), 0.0)
+
+    def elapsed(self) -> float:
+        return float(self.clock()) - self.started - self.excluded
+
+    def check(self, where: str, upcoming_wait: float = 0.0) -> None:
+        if self.limit_seconds <= 0:
+            return
+        if self.elapsed() + max(float(upcoming_wait), 0.0) > self.limit_seconds:
+            raise SourceTimeBudgetExceeded(
+                f"单个来源处理超过 {int(self.limit_seconds // 60)} 分钟预算（{where}）；"
+                "本轮按失败处理，断点已保存。"
+            )
+
+
+def check_source_budget(runtime: Any, where: str, upcoming_wait: float = 0.0) -> None:
+    budget = getattr(runtime, "_source_budget", None)
+    if isinstance(budget, SourceBudget):
+        budget.check(where, upcoming_wait)
+
+
+def source_budget_now(runtime: Any) -> float:
+    """Now on the source budget's own clock; excluded waits are timed with it."""
+
+    budget = getattr(runtime, "_source_budget", None)
+    if isinstance(budget, SourceBudget):
+        return float(budget.clock())
+    return time.monotonic()
+
+
+def exclude_from_source_budget(runtime: Any, seconds: float) -> None:
+    budget = getattr(runtime, "_source_budget", None)
+    if isinstance(budget, SourceBudget):
+        budget.exclude(seconds)
+
+
+def counted_remote_action(runtime: Any, label: str) -> None:
+    """Spend one counted safety action; its throttle wait is not budgeted."""
+
+    safety = getattr(runtime, "safety", None)
+    if not isinstance(safety, LocalSafetyController):
+        return
+    check_source_budget(runtime, label)
+    started = source_budget_now(runtime)
+    try:
+        safety.before_remote_action(label)
+    finally:
+        exclude_from_source_budget(runtime, source_budget_now(runtime) - started)
+
+
+@contextlib.contextmanager
+def safety_waits_excluded_from_budget(runtime: Any) -> Any:
+    """Exclude throttle/rest waits of shared helpers from the source budget (P2-6).
+
+    Category helpers (the delivery-address reopen) call
+    ``safety.before_remote_action`` directly instead of
+    :func:`counted_remote_action`; a batch rest due at that moment must not be
+    charged to the current source.
+    """
+
+    safety = getattr(runtime, "safety", None)
+    if not isinstance(safety, LocalSafetyController) or not isinstance(
+        getattr(runtime, "_source_budget", None), SourceBudget
+    ):
+        yield
+        return
+    missing = object()
+    previous = safety.__dict__.get("before_remote_action", missing)
+    inner = safety.before_remote_action
+
+    def budgeted_before_remote_action(action: str) -> None:
+        check_source_budget(runtime, str(action))
+        started = source_budget_now(runtime)
+        try:
+            inner(action)
+        finally:
+            exclude_from_source_budget(runtime, source_budget_now(runtime) - started)
+
+    safety.before_remote_action = budgeted_before_remote_action  # type: ignore[method-assign]
+    try:
+        yield
+    finally:
+        if previous is missing:
+            safety.__dict__.pop("before_remote_action", None)
+        else:
+            safety.before_remote_action = previous  # type: ignore[method-assign]
+
+
+def review_probe_unverified(runtime: Any) -> bool:
+    """A review / rate probe is running and no page has passed the risk check.
+
+    While this holds no extra remote action may be spent on a fallback (a
+    second unverified action stops the run with a risk pause), so fallbacks
+    that navigate again are not taken.
+    """
+
+    safety = getattr(runtime, "safety", None)
+    if not isinstance(safety, LocalSafetyController):
+        return False
+    return getattr(safety, "review_probe_pending", False) is True
+
+
+def page_retry_schedule(runtime: Any) -> tuple[tuple[float, float], ...]:
+    """Per-stage Amazon page retry schedule (P2-1).
+
+    Empty only while the automatic rate probe is active and unverified; once
+    the probe page passed the risk check every later page gets the configured
+    retries again.
+    """
+
+    schedule = tuple(getattr(runtime, "amazon_page_unavailable_retry_schedule_seconds", ()) or ())
+    safety = getattr(runtime, "safety", None)
+    if (
+        isinstance(safety, LocalSafetyController)
+        and getattr(safety, "rate_probe_active", False) is True
+        and getattr(safety, "review_probe_pending", False) is True
+    ):
+        return ()
+    return schedule
+
+
+def runtime_heartbeat(runtime: Any, phase: str, detail: str = "") -> None:
+    safety = getattr(runtime, "safety", None)
+    if isinstance(safety, LocalSafetyController):
+        safety.heartbeat(phase, detail=detail)
+
+
+def provider_sleep(runtime: Any, seconds: float, detail: str) -> None:
+    """Sleep for a provider retry in ≤30 s chunks with a heartbeat each chunk."""
+
+    remaining = max(float(seconds), 0.0)
+    if remaining > 30:
+        print(f"{detail}：等待约 {int(math.ceil(remaining))} 秒后重试。", flush=True)
+    while True:
+        chunk = min(remaining, 30.0)
+        runtime_heartbeat(runtime, "provider_retry_wait", detail)
+        time.sleep(chunk)
+        remaining -= chunk
+        if remaining <= 0:
+            return
+
+
+def provider_retry_wait_seconds(
+    response: Optional[Any],
+    attempt: int,
+    base_backoff: float,
+) -> float:
+    """Backoff before retry ``attempt + 1``; 429 waits ≥10 s and honours Retry-After."""
+
+    base = max(float(base_backoff or 0), 0.0) * (2 ** max(int(attempt), 0))
+    status = 0
+    if response is not None:
+        try:
+            status = int(getattr(response, "status_code", 0) or 0)
+        except (TypeError, ValueError):
+            status = 0
+    if status != 429:
+        return base
+    headers = getattr(response, "headers", None) or {}
+    try:
+        raw_retry_after = str(headers.get("Retry-After") or headers.get("retry-after") or "")
+    except AttributeError:
+        raw_retry_after = ""
+    retry_after = float(parse_retry_after(raw_retry_after)) if raw_retry_after else 0.0
+    growing = RATE_LIMIT_MIN_BACKOFF_SECONDS * (2 ** max(int(attempt), 0))
+    return min(max(growing, retry_after, base), RATE_LIMIT_MAX_BACKOFF_SECONDS)
+
+
+class ProviderProgress:
+    """Progress line + heartbeat during sequential paid calls (W8)."""
+
+    def __init__(self, runtime: Any, label: str, total: int) -> None:
+        self.runtime = runtime
+        self.label = label
+        self.total = int(total)
+        self.last_report = time.monotonic()
+        self.last_index = 0
+
+    def tick(self, index: int) -> None:
+        now = time.monotonic()
+        if (
+            index - self.last_index >= PROVIDER_PROGRESS_EVERY_CALLS
+            or now - self.last_report >= PROVIDER_PROGRESS_EVERY_SECONDS
+            or index == self.total
+        ):
+            detail = f"{self.label} {index}/{self.total}"
+            print(f"{self.label}进度：{index}/{self.total}", flush=True)
+            runtime_heartbeat(self.runtime, "provider_calls", detail)
+            self.last_report = now
+            self.last_index = index
 
 
 @dataclass
@@ -396,13 +802,6 @@ class ImageCompetitorRuntimeConfig:
     activate_plugin: bool
     page_timeout: int
     plugin_timeout: int
-    plugin_retry_attempts: int
-    plugin_retry_wait_seconds: float
-    plugin_retry_wait_seconds_max: float
-    plugin_relaunch_retry_attempts: int
-    plugin_relaunch_wait_seconds: float
-    plugin_second_relaunch_retry_attempts: int
-    plugin_second_relaunch_wait_seconds: float
     manual_pause_timeout: int
     delivery_location_enabled: bool
     delivery_locations_file: Path
@@ -582,9 +981,23 @@ class ImageCompetitorStateStore:
             self.flush()
 
     def restore_deferred(self) -> None:
+        # D2: deferred sources go to the END of the queue so a source that
+        # failed last run never blocks healthy work at the front.
         deferred = list(self.data.pop("deferred_sources", []) or [])
         if deferred:
-            self.data["queue"] = [item["source"] for item in deferred] + list(self.data.get("queue") or [])
+            self.data["queue"] = list(self.data.get("queue") or []) + [
+                item["source"] for item in deferred if isinstance(item, dict) and item.get("source")
+            ]
+            self.flush()
+
+    def deferred_count(self) -> int:
+        return len(self.data.get("deferred_sources") or [])
+
+    def requeue_current_at_end(self) -> None:
+        current = self.data.get("current")
+        if current:
+            self.data.setdefault("queue", []).append(dict(current))
+            self.data["current"] = None
             self.flush()
 
     def finish_current_source(
@@ -768,6 +1181,42 @@ def assess_image_page(
     )
 
 
+def check_image_page_risk(driver: WebDriver, runtime: Any) -> bool:
+    """Trip the shared pause on a high-confidence Amazon/SellerSprite signal.
+
+    Returns True only when the current page carried no risk signal at all.  A
+    supervised CAPTCHA / plugin verification is left to the manual wait (no
+    trip) but is still not a clean page.
+    """
+
+    safety = getattr(runtime, "safety", None)
+    if not isinstance(safety, LocalSafetyController):
+        return False
+    try:
+        visible_body = safe_find_text(driver)
+    except (TypeError, AttributeError, WebDriverException):
+        visible_body = ""
+    try:
+        title = str(getattr(driver, "title", "") or "")
+    except WebDriverException:
+        title = ""
+    signal = classify_amazon_risk(
+        http_status=getattr(driver, "last_http_status", None),
+        title=title,
+        body_text=visible_body,
+        retry_after=str(getattr(driver, "last_retry_after", "") or ""),
+    )
+    if signal is not None and not (
+        signal.reason == "captcha_or_robot_check" and safety.mode == "supervised"
+    ):
+        safety.trip(signal, page_url=safe_driver_current_url(driver))
+    plugin_signal = classify_sellersprite_risk(sellersprite_visible_text(driver))
+    if plugin_signal is not None:
+        if not (plugin_signal.reason == "verification_required" and safety.mode == "supervised"):
+            safety.trip(plugin_signal, page_url=safe_driver_current_url(driver))
+    return signal is None and plugin_signal is None
+
+
 def enforce_image_page_assessment(
     driver: WebDriver,
     runtime: ImageCompetitorRuntimeConfig,
@@ -775,33 +1224,24 @@ def enforce_image_page_assessment(
     assessment: PageHealthAssessment,
 ) -> str:
     safety = getattr(runtime, "safety", None)
+    risk_clear = False
     if isinstance(safety, LocalSafetyController) and assessment.status is not PageHealthStatus.AMAZON_SIGN_IN:
-        try:
-            visible_body = safe_find_text(driver)
-        except (TypeError, AttributeError, WebDriverException):
-            visible_body = ""
-        signal = classify_amazon_risk(
-            http_status=getattr(driver, "last_http_status", None),
-            title=str(getattr(driver, "title", "") or ""),
-            body_text=visible_body,
-            retry_after=str(getattr(driver, "last_retry_after", "") or ""),
-        )
-        if signal is not None and not (
-            signal.reason == "captcha_or_robot_check" and safety.mode == "supervised"
-        ):
-            safety.trip(signal, page_url=safe_driver_current_url(driver))
-        plugin_signal = classify_sellersprite_risk(sellersprite_visible_text(driver))
-        if plugin_signal is not None:
-            if not (plugin_signal.reason == "verification_required" and safety.mode == "supervised"):
-                safety.trip(plugin_signal, page_url=safe_driver_current_url(driver))
-    if assessment.status is PageHealthStatus.HEALTHY:
-        return "healthy"
-    if assessment.status is PageHealthStatus.VERIFIED_EMPTY:
-        return "verified_empty"
+        risk_clear = check_image_page_risk(driver, runtime)
+    if assessment.status in (PageHealthStatus.HEALTHY, PageHealthStatus.VERIFIED_EMPTY):
+        if risk_clear and isinstance(safety, LocalSafetyController):
+            # A loaded page passed the Amazon risk check: a pending review /
+            # rate probe counts as verified (the pause clears on the next action).
+            safety.note_risk_checked()
+        return "healthy" if assessment.status is PageHealthStatus.HEALTHY else "verified_empty"
     if assessment.status is PageHealthStatus.INTERACTIVE_VERIFICATION:
         handle_image_verification(driver, runtime, state, "amazon_robot_check")
         if isinstance(safety, LocalSafetyController):
-            safety.captcha_cleared(page_url=safe_driver_current_url(driver))
+            # The fixed post-CAPTCHA cooldown is a safety wait, not source work (P1-5).
+            cooldown_started = source_budget_now(runtime)
+            try:
+                safety.captcha_cleared(page_url=safe_driver_current_url(driver))
+            finally:
+                exclude_from_source_budget(runtime, source_budget_now(runtime) - cooldown_started)
         return "manual_verification_cleared"
     if assessment.status is PageHealthStatus.AMAZON_SIGN_IN:
         handle_image_verification(driver, runtime, state, "amazon_sign_in")
@@ -812,15 +1252,21 @@ def enforce_image_page_assessment(
     )
 
 
-def image_retry_heartbeat(retry: Mapping[str, Any]) -> None:
+def image_retry_heartbeat(
+    retry: Mapping[str, Any],
+    max_attempts: int = 0,
+    runtime: Any = None,
+) -> None:
     remaining = max(float(retry.get("remaining_wait_seconds") or 0), 0.0)
-    print(
-        "Amazon 页面恢复等待："
+    total = int(max_attempts or retry.get("max_attempts") or 0)
+    detail = (
         f"stage={retry.get('stage', '')}，"
-        f"下一次={retry.get('next_attempt', '')}/5，"
-        f"剩余约 {int(math.ceil(remaining))} 秒。",
-        flush=True,
+        f"下一次={retry.get('next_attempt', '')}/{total if total else '?'}，"
+        f"剩余约 {int(math.ceil(remaining))} 秒"
     )
+    print(f"Amazon 页面恢复等待：{detail}。", flush=True)
+    if runtime is not None:
+        runtime_heartbeat(runtime, "page_retry_wait", detail)
 
 
 def run_image_page_stage_with_recovery(
@@ -832,27 +1278,41 @@ def run_image_page_stage_with_recovery(
     cleanup: Callable[[], None],
     operation: Callable[[Any], Any],
 ) -> Any:
+    schedule = page_retry_schedule(runtime)
+    base_waiter = getattr(runtime, "_amazon_page_retry_waiter", time.sleep)
+
+    def budgeted_waiter(seconds: float) -> Any:
+        # A retry wait that would overrun the per-source budget ends the
+        # cycle now instead of sleeping first (W4).
+        check_source_budget(runtime, f"{stage} 重试等待", seconds)
+        return base_waiter(seconds)
+
     controller = AmazonPageRetryController(
         domain=runtime.marketplace_domain,
         work_key=image_work_key(current),
         stage=stage,
         url=url,
-        schedule=runtime.amazon_page_unavailable_retry_schedule_seconds,
+        schedule=schedule,
         callbacks=RetryCallbacks(
             load_state=state.load_amazon_page_retry,
             write_state=state.write_amazon_page_retry,
             clear_state=state.clear_amazon_page_retry,
             cleanup=cleanup,
-            heartbeat=image_retry_heartbeat,
+            heartbeat=functools.partial(
+                image_retry_heartbeat,
+                max_attempts=len(tuple(schedule or ())) + 1,
+                runtime=runtime,
+            ),
         ),
         clock=getattr(runtime, "_amazon_page_retry_clock", time.time),
         rng=getattr(runtime, "_amazon_page_retry_rng", None),
-        waiter=getattr(runtime, "_amazon_page_retry_waiter", time.sleep),
+        waiter=budgeted_waiter,
         heartbeat_seconds=float(
             getattr(runtime, "_amazon_page_retry_heartbeat_seconds", 30.0)
         ),
     )
     def guarded(attempt: Any) -> Any:
+        check_source_budget(runtime, stage)
         try:
             return operation(attempt)
         except TransientAmazonPageUnavailable:
@@ -907,6 +1367,28 @@ def log_amazon_page_retry_exhausted_once(
         },
     )
     state.log_failure()
+
+
+def item_failure_classification(reason: str, message: str, cause: BaseException) -> tuple[str, str]:
+    """``reason`` / ``detail`` for :func:`run_outcome.note_item_failure` (P1-3).
+
+    The detail carries the underlying error (retry-exhausted pages: the last
+    page reason, e.g. ``http_503`` / ``navigation_error`` vs
+    ``expected_content_missing``) so a shared outage is classified as an
+    environment failure and does not quarantine healthy sources.
+    """
+
+    if reason == CandidatesUnscorableError.failure_reason:
+        # Most candidate images unusable is a Lens page-structure / image-URL
+        # problem, not a property of this source (environment).  The word
+        # "unscorable" is item evidence for run_outcome (one bad image), so
+        # the classifier gets a provider_error reason instead.
+        return "provider_error", "lens_candidate_images_not_embeddable: " + str(message or "")[:300]
+    last_error = getattr(cause, "last_error", None)
+    if isinstance(cause, AmazonPageRetryExhausted) and last_error is not None:
+        last_reason = str(getattr(last_error, "reason", "") or type(last_error).__name__)
+        return reason, f"{last_reason}: {redact_sensitive_text(last_error)[:300]}"
+    return reason, f"{type(cause).__name__}: {str(message or '')[:300]}"
 
 
 def redact_sensitive_text(value: Any, secrets: Sequence[str] = ()) -> str:
@@ -1185,8 +1667,6 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
     if not products_file.exists():
         raise UserFacingError(f"没有找到产品清单：{products_file}")
 
-    extension_path_text = config_text(config, "extension_path")
-    extension_path = resolve_path(extension_path_text) if extension_path_text else Path("")
     browser_backend = config_text(config, "browser_backend", "cdp").lower()
     if browser_backend != "cdp":
         raise UserFacingError(
@@ -1195,8 +1675,8 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
     browser_mode = config_text(config, "browser_mode", "reuse").lower()
     if browser_mode not in {"launch", "attach", "reuse"}:
         raise UserFacingError("以图搜图 browser_mode 只支持 launch、attach 或 reuse。")
-    if browser_mode == "launch" and extension_path_text and not extension_path.exists():
-        raise UserFacingError(f"没有找到卖家精灵扩展目录：{extension_path}")
+    extension_path_text = config_text(config, "extension_path")
+    extension_path = resolve_crawler_extension_path(extension_path_text, browser_mode)
 
     min_delay = config_float(config, "delay_seconds_min", 20)
     max_delay = config_float(config, "delay_seconds_max", 30)
@@ -1210,16 +1690,6 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
     batch_seconds_max = config_float(config, "batch_pause_seconds_max", 300)
     if batch_seconds_max < batch_seconds_min:
         batch_seconds_max = batch_seconds_min
-    plugin_retry_wait_min = config_float(
-        config,
-        "plugin_retry_wait_seconds_min",
-        config_float(config, "plugin_retry_wait_seconds", 10),
-    )
-    plugin_retry_wait_max = config_float(config, "plugin_retry_wait_seconds_max", 20)
-    if plugin_retry_wait_min < 0 or plugin_retry_wait_max < 0:
-        raise UserFacingError("配置项 plugin_retry_wait_seconds_min / plugin_retry_wait_seconds_max 不能小于 0。")
-    if plugin_retry_wait_max < plugin_retry_wait_min:
-        plugin_retry_wait_max = plugin_retry_wait_min
     page_scroll_max_rounds = max(config_int(config, "page_scroll_max_rounds", 18) or 0, 0)
     page_scroll_step_ratio = config_float(config, "page_scroll_step_ratio", 0.85) or 0.85
     if page_scroll_step_ratio <= 0:
@@ -1366,20 +1836,13 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
         browser_backend=browser_backend,
         browser_mode=browser_mode,
         chrome_binary=config_text(config, "chrome_binary"),
-        chrome_user_data_dir=resolve_path(config_text(config, "chrome_user_data_dir", "chrome_profiles/category-rank-sellersprite")),
+        chrome_user_data_dir=resolve_path(config_text(config, "chrome_user_data_dir", DEFAULT_CHROME_USER_DATA_DIR)),
         chrome_profile_directory=config_text(config, "chrome_profile_directory", "Default") or "Default",
         debugger_address=config_text(config, "debugger_address", "127.0.0.1:9222"),
         extension_path=extension_path,
         activate_plugin=config_bool(config, "activate_plugin", True),
         page_timeout=config_int(config, "page_timeout", 90) or 90,
         plugin_timeout=config_int(config, "plugin_timeout", 120) or 120,
-        plugin_retry_attempts=max(config_int(config, "plugin_retry_attempts", 5) or 0, 0),
-        plugin_retry_wait_seconds=plugin_retry_wait_min,
-        plugin_retry_wait_seconds_max=plugin_retry_wait_max,
-        plugin_relaunch_retry_attempts=max(config_int(config, "plugin_relaunch_retry_attempts", 0) or 0, 0),
-        plugin_relaunch_wait_seconds=max(config_float(config, "plugin_relaunch_wait_seconds", 300) or 0, 0),
-        plugin_second_relaunch_retry_attempts=max(config_int(config, "plugin_second_relaunch_retry_attempts", 0) or 0, 0),
-        plugin_second_relaunch_wait_seconds=max(config_float(config, "plugin_second_relaunch_wait_seconds", 600) or 0, 0),
         manual_pause_timeout=config_int(config, "manual_pause_timeout", 900) or 900,
         amazon_page_unavailable_retry_schedule_seconds=amazon_page_retry_schedule,
         **delivery_config,
@@ -1418,10 +1881,36 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
     return runtime
 
 
+def read_product_rows(path: Path) -> List[Dict[str, str]]:
+    """Read the product list; a CSV saved by Excel on Chinese Windows is GBK.
+
+    UTF-8 (with or without BOM) is tried first, then GB18030 (a superset of
+    GBK); anything else is a clear configuration error (P2-12c).
+    """
+
+    if path.suffix.lower() != ".csv":
+        return read_input_rows(path)
+    try:
+        return read_input_rows(path)
+    except UnicodeDecodeError:
+        pass
+    try:
+        with path.open("r", encoding="gb18030", newline="") as handle:
+            reader = csv.DictReader(handle)
+            return [
+                {str(key or "").strip(): normalize_space(str(value or "")) for key, value in row.items()}
+                for row in reader
+            ]
+    except UnicodeDecodeError as exc:
+        raise UserFacingError(
+            f"无法识别输入 CSV 的编码：{path.name}。请在 Excel 中另存为“CSV UTF-8（逗号分隔）”后重试。"
+        ) from exc
+
+
 def load_products(path: Path, marketplace_domain: str, dedupe: bool = True) -> List[Dict[str, Any]]:
     products: List[Dict[str, Any]] = []
     seen = set()
-    rows = read_input_rows(path)
+    rows = read_product_rows(path)
     for index, row in enumerate(rows, start=2):
         source_asin = parse_asin(pick_column(row, INPUT_ALIASES["source_asin"]))
         product_url = pick_column(row, INPUT_ALIASES["product_url"])
@@ -1504,9 +1993,22 @@ def download_image(url: str, target_dir: Path, stem: str, timeout: int = 45) -> 
     if not is_downloadable_image_url(url):
         raise UserFacingError("来源图片 URL 必须是可下载的 HTTP(S) 地址。")
     ensure_dir(target_dir)
-    response = requests.get(url, headers=request_headers(), timeout=timeout)
-    response.raise_for_status()
-    suffix = guess_image_suffix(url, response.headers.get("content-type", ""))
+    try:
+        response = requests.get(url, headers=request_headers(), timeout=timeout)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise SourceImageDownloadError(
+            f"来源主图下载失败：{redact_sensitive_text(exc)[:200]}"
+        ) from exc
+    content_type = str(response.headers.get("content-type", "") or "")
+    mime = content_type.split(";")[0].strip().lower()
+    if mime and not mime.startswith("image/"):
+        raise SourceImageDownloadError(
+            f"来源主图下载结果不是图片（Content-Type: {mime}）。"
+        )
+    if not response.content:
+        raise SourceImageDownloadError("来源主图下载结果为空。")
+    suffix = guess_image_suffix(url, content_type)
     path = target_dir / f"{slugify(stem)}{suffix}"
     path.write_bytes(response.content)
     return path
@@ -1792,9 +2294,7 @@ def open_amazon_page(
     Keeping this small seam also preserves deterministic navigation-race tests
     without delegating rate-limit handling to the legacy verification detector.
     """
-    safety = getattr(_runtime, "safety", None)
-    if isinstance(safety, LocalSafetyController):
-        safety.before_remote_action("导航 Amazon 图片页面")
+    counted_remote_action(_runtime, "导航 Amazon 图片页面")
     navigate = getattr(driver, "get")
     navigate(url)
 
@@ -1847,7 +2347,7 @@ def validate_image_delivery_page(
     expected = image_expected_content_present(driver, page_kind)
     if page_kind == "lens_upload" and not expected:
         try:
-            WebDriverWait(driver, runtime.page_timeout).until(
+            WebDriverWait(driver, min(runtime.page_timeout, ELEMENT_WAIT_SECONDS)).until(
                 lambda current_driver: image_expected_content_present(
                     current_driver, "lens_upload"
                 )
@@ -1873,6 +2373,30 @@ def validate_image_delivery_page(
     )
 
 
+def image_manual_pause_callbacks(
+    runtime: Any,
+    state: Optional[ImageCompetitorStateStore],
+) -> tuple[Optional[Callable[[str, str], None]], Optional[Callable[[], None]]]:
+    """Persist manual pauses and keep their duration out of the source budget."""
+
+    if state is None and not isinstance(getattr(runtime, "_source_budget", None), SourceBudget):
+        return None, None
+    started: List[float] = []
+
+    def on_pause(reason: str, page_url: str) -> None:
+        started.append(source_budget_now(runtime))
+        if state is not None:
+            state.mark_manual_pause(reason, page_url)
+
+    def on_resume() -> None:
+        if started:
+            exclude_from_source_budget(runtime, source_budget_now(runtime) - started.pop())
+        if state is not None:
+            state.clear_manual_pause()
+
+    return on_pause, on_resume
+
+
 def open_image_amazon_page(
     driver: WebDriver,
     url: str,
@@ -1896,7 +2420,14 @@ def open_image_amazon_page(
                 navigation_error=exc,
             )
             enforce_image_page_assessment(driver, runtime, state, assessment)
-            raise AssertionError("导航错误必须进入页面恢复。")
+            # Reached when the error page was a CAPTCHA the user solved (P2-14):
+            # the target page itself never loaded, so it is an ordinary
+            # navigation failure for the stage's retry controller.
+            raise TransientAmazonPageUnavailable(
+                redact_sensitive_text(exc)[:300] or "navigation_error",
+                reason="navigation_error",
+                url=str(url or ""),
+            ) from exc
 
     assessment = assess_image_page(
         driver,
@@ -1915,18 +2446,25 @@ def open_image_amazon_page(
     ):
         enforce_image_page_assessment(driver, runtime, state, assessment)
 
-    on_manual_pause = (
-        (lambda reason, page_url: state.mark_manual_pause(reason, page_url))
-        if state is not None
-        else None
-    )
     if hasattr(runtime, "delivery_location_enabled"):
+        ensure_image_delivery_location(driver, runtime, state, url, page_kind)
+
+
+def ensure_image_delivery_location(
+    driver: WebDriver,
+    runtime: Any,
+    state: Optional[ImageCompetitorStateStore],
+    original_url: str,
+    page_kind: str,
+) -> None:
+    on_manual_pause, on_manual_resume = image_manual_pause_callbacks(runtime, state)
+    with safety_waits_excluded_from_budget(runtime):
         ensure_amazon_delivery_location(
             driver,
             runtime,
-            original_url=url,
+            original_url=original_url,
             on_manual_pause=on_manual_pause,
-            on_manual_resume=state.clear_manual_pause if state is not None else None,
+            on_manual_resume=on_manual_resume,
             page_health_validator=lambda: validate_image_delivery_page(
                 driver,
                 runtime,
@@ -1954,7 +2492,13 @@ def handle_image_verification(
         raise VerificationUnconfirmedError(verification_unconfirmed_message(reason))
     if state is not None:
         state.mark_manual_pause(reason, str(getattr(driver, "current_url", "") or ""))
-    if wait_for_manual_clear(driver, reason, runtime.manual_pause_timeout):
+    manual_started = source_budget_now(runtime)
+    try:
+        cleared = wait_for_manual_clear(driver, reason, runtime.manual_pause_timeout)
+    finally:
+        # Time the user spends solving a CAPTCHA is not charged to the source.
+        exclude_from_source_budget(runtime, source_budget_now(runtime) - manual_started)
+    if cleared:
         if state is not None:
             state.clear_manual_pause()
         return
@@ -1974,6 +2518,31 @@ def handle_image_sellersprite_block(
     )
 
 
+def page_not_found_title(driver: WebDriver) -> bool:
+    try:
+        raw_title = getattr(driver, "title", "")
+    except WebDriverException:
+        return False
+    title = " ".join(raw_title.split()).casefold() if isinstance(raw_title, str) else ""
+    return title in PAGE_NOT_FOUND_TITLES
+
+
+def canonical_source_product_url(
+    runtime: Any,
+    current: Mapping[str, Any],
+    product_url: str,
+) -> str:
+    """The canonical /dp/ASIN URL to re-check before declaring a source dead."""
+
+    source_asin = normalize_space(str(current.get("source_asin") or "")).upper()
+    if not source_asin:
+        return ""
+    canonical_url = product_url_for_asin(runtime.marketplace_domain, source_asin)
+    if parse_asin(product_url) != source_asin or product_url == canonical_url:
+        return ""
+    return canonical_url
+
+
 def load_source_product_main_image(
     driver: WebDriver,
     runtime: ImageCompetitorRuntimeConfig,
@@ -1983,7 +2552,7 @@ def load_source_product_main_image(
     try:
         open_image_amazon_page(driver, product_url, runtime, state)
     except TransientAmazonPageUnavailable as exc:
-        if exc.reason == "amazon_dog_error" and str(getattr(driver, "title", "") or "").strip().casefold() == "page not found":
+        if exc.reason == "amazon_dog_error" and page_not_found_title(driver):
             raise SourceProductUnavailable(product_url) from exc
         raise
 
@@ -1994,7 +2563,7 @@ def load_source_product_main_image(
             expected_content_present=False,
         )
         if assessment.reason == "amazon_dog_error":
-            if str(getattr(current_driver, "title", "") or "").strip().casefold() == "page not found":
+            if page_not_found_title(current_driver):
                 raise SourceProductUnavailable(product_url)
             raise TransientAmazonPageUnavailable.from_assessment(
                 assessment,
@@ -2004,7 +2573,8 @@ def load_source_product_main_image(
 
     while True:
         try:
-            WebDriverWait(driver, runtime.page_timeout).until(main_image_ready)
+            # The page has already loaded: wait for the element, not a page load.
+            WebDriverWait(driver, min(runtime.page_timeout, ELEMENT_WAIT_SECONDS)).until(main_image_ready)
             break
         except TimeoutException:
             assessment = assess_image_page(
@@ -2065,16 +2635,13 @@ def resolve_source_image(
         try:
             image_url = load_source_product_main_image(driver, runtime, product_url, state)
         except (TransientAmazonPageUnavailable, SourceProductUnavailable) as exc:
-            source_asin = normalize_space(str(current.get("source_asin") or "")).upper()
-            canonical_url = product_url_for_asin(runtime.marketplace_domain, source_asin)
+            canonical_url = canonical_source_product_url(runtime, current, product_url)
             if (
                 not (
                     isinstance(exc, SourceProductUnavailable)
                     or exc.reason == "amazon_dog_error"
                 )
-                or not source_asin
-                or parse_asin(product_url) != source_asin
-                or product_url == canonical_url
+                or not canonical_url
             ):
                 raise
             current["source_image_page_url"] = canonical_url
@@ -2088,50 +2655,6 @@ def resolve_source_image(
     image_path = download_image(image_url, image_dir, str(current.get("source_id") or "source"))
     current["source_image"] = image_url
     return image_path
-
-
-def ensure_lens_supported(
-    driver: WebDriver,
-    runtime: ImageCompetitorRuntimeConfig,
-    state: ImageCompetitorStateStore,
-    failures_path: Path,
-    debug_dir: Path,
-) -> None:
-    open_image_amazon_page(driver, runtime.lens_url, runtime, state)
-    block_reason = detect_block(driver)
-    if block_reason:
-        try:
-            handle_image_verification(driver, runtime, state, block_reason)
-        except VerificationUnconfirmedError:
-            if runtime.save_debug_snapshots:
-                save_debug_snapshot(driver, debug_dir, f"lens_{block_reason}")
-            raise
-
-    def has_file_input(d: WebDriver) -> bool:
-        try:
-            return bool(d.execute_script("return !!document.querySelector('input[type=file]');"))
-        except (JavascriptException, WebDriverException):
-            return False
-
-    try:
-        WebDriverWait(driver, min(runtime.page_timeout, 45)).until(has_file_input)
-    except TimeoutException as exc:
-        if runtime.save_debug_snapshots:
-            save_debug_snapshot(driver, debug_dir, f"lens_unsupported_{runtime.marketplace_domain}")
-        append_jsonl(
-            failures_path,
-            {
-                "time": now_iso(),
-                "source_id": "",
-                "source_asin": "",
-                "page_url": driver.current_url,
-                "reason": "lens_unsupported",
-                "message": f"{runtime.marketplace_domain} 当前页面未检测到 Amazon 以图搜图上传入口。",
-            },
-        )
-        raise UserFacingError(
-            f"{runtime.marketplace_domain} 当前未检测到 Amazon 以图搜图上传入口，无法执行后续任务。"
-        ) from exc
 
 
 def upload_image_to_lens(
@@ -2165,7 +2688,11 @@ return true;
 
     while True:
         try:
-            ok = bool(WebDriverWait(driver, runtime.page_timeout).until(reveal_file_input))
+            ok = bool(
+                WebDriverWait(driver, min(runtime.page_timeout, ELEMENT_WAIT_SECONDS)).until(
+                    reveal_file_input
+                )
+            )
             break
         except TimeoutException:
             assessment = assess_image_page(
@@ -2208,9 +2735,7 @@ return true;
     )
     try:
         input_el = driver.find_element(By.CSS_SELECTOR, "input[type=file]")
-        safety = getattr(runtime, "safety", None)
-        if isinstance(safety, LocalSafetyController):
-            safety.before_remote_action("上传图片触发 Lens 结果")
+        counted_remote_action(runtime, "上传图片触发 Lens 结果")
         input_el.send_keys(str(image_path.resolve()))
     except WebDriverException as exc:
         # Setting the file starts a client-side navigation immediately. A
@@ -2237,6 +2762,124 @@ return true;
         raise
 
 
+FIND_SIMILAR_CONTROL_SCRIPT = r"""
+const norm = (text) => (text || '').replace(/\s+/g, ' ').trim();
+const visible = (el) => {
+  const r = el.getBoundingClientRect();
+  const style = getComputedStyle(el);
+  return r.width > 0 && r.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+};
+const sellerspriteRoot = document.querySelector('#seller-sprite-extension-find-similar-listing');
+if (!sellerspriteRoot) return false;
+return [...sellerspriteRoot.querySelectorAll('.find-similar,button,a,p,span')]
+  .some(el => visible(el) && /^(找相似|Find Similar)$/i.test(
+    norm(el.innerText || el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || '')
+  ));
+"""
+
+
+def find_similar_control_present(
+    driver: WebDriver,
+    timeout_seconds: Optional[float] = None,
+) -> bool:
+    """Poll (≤5 s, no counted action) for the SellerSprite Find Similar button."""
+
+    wait = FIND_SIMILAR_CONTROL_WAIT_SECONDS if timeout_seconds is None else timeout_seconds
+    deadline = time.monotonic() + max(float(wait), 0.0)
+    while True:
+        try:
+            if driver.execute_script(FIND_SIMILAR_CONTROL_SCRIPT) is True:
+                return True
+        except (JavascriptException, WebDriverException) as exc:
+            if not is_transient_navigation_error(exc):
+                return False
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.5)
+
+
+def open_find_similar_product_page(
+    driver: WebDriver,
+    runtime: ImageCompetitorRuntimeConfig,
+    current: Dict[str, Any],
+    product_url: str,
+    state: Optional[ImageCompetitorStateStore] = None,
+) -> bool:
+    """Load the source product page for Find Similar (L12).
+
+    * Page Not Found takes the same canonical /dp/ASIN re-check as the
+      ``source_product`` stage and raises :class:`SourceProductUnavailable`
+      (-> ``source_unavailable``, blank count, no paid calls).
+    * The loaded page always goes through the image risk/health gate first,
+      also when the main image never appears (a CloudFront 403 trips the
+      safety pause here, before any further navigation).
+    * Only a page without the expected content (``expected_content_missing`` /
+      ``blank_page``) returns False, so the caller falls back to the Lens
+      upload; and never while a review probe is unverified.  Every other
+      transient state (5xx, navigation error ...) is raised to the stage's
+      retry controller.
+    """
+
+    source_asin = normalize_space(str(current.get("source_asin") or "")).upper()
+    canonical_url = canonical_source_product_url(runtime, current, product_url)
+    urls = [product_url] + ([canonical_url] if canonical_url else [])
+    for index, url in enumerate(urls):
+        has_fallback = index + 1 < len(urls)
+        current_url = normalize_space(safe_driver_current_url(driver))
+        already_open = index == 0 and bool(source_asin) and source_asin in current_url.upper()
+        try:
+            if not already_open:
+                open_image_amazon_page(driver, url, runtime, state)
+            while True:
+                try:
+                    WebDriverWait(driver, min(runtime.page_timeout, ELEMENT_WAIT_SECONDS)).until(
+                        lambda d: bool(extract_main_image_url(d))
+                    )
+                    break
+                except TimeoutException:
+                    if page_not_found_title(driver):
+                        raise TransientAmazonPageUnavailable(
+                            "page not found", reason="amazon_dog_error", url=url
+                        )
+                    outcome = enforce_image_page_assessment(
+                        driver,
+                        runtime,
+                        state,
+                        assess_image_page(driver, "product", expected_content_present=False),
+                    )
+                    if outcome == "manual_verification_cleared":
+                        continue
+                    raise TransientAmazonPageUnavailable(
+                        "find_similar_main_image_missing",
+                        reason="expected_content_missing",
+                        url=safe_driver_current_url(driver),
+                    )
+            # Same gate as the source_product stage: risk check on the loaded
+            # page (a pending review probe is verified here).
+            enforce_image_page_assessment(
+                driver,
+                runtime,
+                state,
+                assess_image_page(driver, "product", expected_content_present=True),
+            )
+            return True
+        except TransientAmazonPageUnavailable as exc:
+            if exc.reason == "amazon_dog_error" and page_not_found_title(driver):
+                if has_fallback:
+                    continue
+                raise SourceProductUnavailable(url) from exc
+            if find_similar_fallback_allowed(runtime, exc.reason):
+                return False
+            raise
+    return False
+
+
+def find_similar_fallback_allowed(runtime: Any, reason: str) -> bool:
+    """May a failed Find Similar step fall back to the Lens upload?"""
+
+    return str(reason or "") in FIND_SIMILAR_FALLBACK_REASONS and not review_probe_unverified(runtime)
+
+
 def trigger_sellersprite_find_similar(
     driver: WebDriver,
     runtime: ImageCompetitorRuntimeConfig,
@@ -2256,10 +2899,8 @@ def trigger_sellersprite_find_similar(
     if not product_url:
         return False
     try:
-        current_url = normalize_space(str(getattr(driver, "current_url", "") or ""))
-        if not (source_asin and source_asin.upper() in current_url.upper()):
-            open_image_amazon_page(driver, product_url, runtime, state)
-        WebDriverWait(driver, min(runtime.page_timeout, 45)).until(lambda d: bool(extract_main_image_url(d)))
+        if not open_find_similar_product_page(driver, runtime, current, product_url, state):
+            return False
         script = r"""
 const norm = (text) => (text || '').replace(/\s+/g, ' ').trim();
 const fireMouse = (el, type) => el && el.dispatchEvent(new MouseEvent(type, {bubbles: true, cancelable: true, view: window}));
@@ -2274,13 +2915,16 @@ return true;
 """
         driver.execute_script(script)
         time.sleep(1.5)
+        # W3: only spend a counted safety action when the extension control is
+        # actually there; a missing/logged-out extension goes straight to Lens.
+        if not find_similar_control_present(driver):
+            print("未检测到卖家精灵“找相似”按钮；本来源改用 Lens 上传。", flush=True)
+            return False
         before_handle_order = list(driver.window_handles)
         before_handles = crawler_action_window_baseline(driver)
         before_url = normalize_space(str(getattr(driver, "current_url", "") or ""))
         action_token = begin_crawler_page_action(driver, "sellersprite_find_similar")
-        safety = getattr(runtime, "safety", None)
-        if isinstance(safety, LocalSafetyController):
-            safety.before_remote_action("卖家精灵找相似结果")
+        counted_remote_action(runtime, "卖家精灵找相似结果")
         clicked = bool(
             driver.execute_script(
                 r"""
@@ -2324,33 +2968,72 @@ return true;
         end_crawler_page_action(driver, action_token)
         action_token = ""
         current_result_url = safe_driver_current_url(driver)
-        on_manual_pause = (
-            (lambda reason, page_url: state.mark_manual_pause(reason, page_url))
-            if state is not None
-            else None
-        )
-        on_manual_resume = state.clear_manual_pause if state is not None else None
-        ensure_amazon_delivery_location(
-            driver,
-            runtime,
-            original_url=current_result_url,
-            on_manual_pause=on_manual_pause,
-            on_manual_resume=on_manual_resume,
-            page_health_validator=lambda: validate_image_delivery_page(
-                driver,
-                runtime,
-                state,
-                "lens_results",
-            ),
-        )
+        ensure_image_delivery_location(driver, runtime, state, current_result_url, "lens_results")
         return True
-    except (JavascriptException, TimeoutException, WebDriverException):
-        claim_crawler_action_pages(driver, action_token, marketplace_domain)
-        end_crawler_page_action(driver, action_token)
-        if before_handles:
-            claim_new_crawler_window_handles(driver, before_handles)
-        close_claimed_crawler_windows(driver, claimed_before, before_handle_order)
+    except (JavascriptException, TimeoutException, WebDriverException) as exc:
+        try:
+            if action_token or before_handles:
+                # The click was sent: risk-check the page it led to before the
+                # tab is closed, so a block page trips the pause instead of
+                # being followed by another (Lens) navigation (P1-1 C).
+                check_image_page_risk(driver, runtime)
+        finally:
+            claim_crawler_action_pages(driver, action_token, marketplace_domain)
+            end_crawler_page_action(driver, action_token)
+            if before_handles:
+                claim_new_crawler_window_handles(driver, before_handles)
+            close_claimed_crawler_windows(driver, claimed_before, before_handle_order)
+        if review_probe_unverified(runtime):
+            # The Find Similar click was the review probe and nothing verified
+            # it: no fallback navigation; the stage retry decides.
+            raise TransientAmazonPageUnavailable(
+                "find_similar_result_unverified",
+                reason="expected_content_missing",
+                url=safe_driver_current_url(driver),
+            ) from exc
         return False
+
+
+def find_similar_source_available(current: Mapping[str, Any]) -> bool:
+    """A row with only an image (no ASIN / product URL) has no product page.
+
+    Such rows go straight to the Lens upload and are not Find Similar failures
+    (they must not disable Find Similar for the rest of the run, P2-5).
+    """
+
+    return bool(
+        normalize_space(str(current.get("source_product_url") or ""))
+        or normalize_space(str(current.get("source_asin") or ""))
+    )
+
+
+def find_similar_allowed(runtime: Any, current: Mapping[str, Any]) -> bool:
+    if current.get("find_similar_failed"):
+        return False
+    return int(getattr(runtime, "_find_similar_consecutive_failures", 0) or 0) < FIND_SIMILAR_RUN_DISABLE_AFTER
+
+
+def note_find_similar_outcome(
+    runtime: Any,
+    current: Dict[str, Any],
+    succeeded: bool,
+    state: Optional[ImageCompetitorStateStore] = None,
+) -> None:
+    """Sticky per-source and per-run Find Similar fallback (W4)."""
+
+    if succeeded:
+        setattr(runtime, "_find_similar_consecutive_failures", 0)
+        return
+    current["find_similar_failed"] = True
+    if state is not None:
+        state.set_current(current)
+    failures = int(getattr(runtime, "_find_similar_consecutive_failures", 0) or 0) + 1
+    setattr(runtime, "_find_similar_consecutive_failures", failures)
+    if failures == FIND_SIMILAR_RUN_DISABLE_AFTER:
+        print(
+            f"卖家精灵找相似已连续失败 {failures} 次；本次运行剩余来源直接使用 Lens 上传。",
+            flush=True,
+        )
 
 
 def is_lens_result_url(url: str, marketplace_domain: str = "") -> bool:
@@ -2425,9 +3108,18 @@ def run_image_search(
     source_image_path: Path,
     state: Optional[ImageCompetitorStateStore] = None,
 ) -> str:
-    if runtime.search_strategy in {"sellersprite_find_similar_first", "find_similar_first"}:
+    if (
+        str(getattr(runtime, "search_strategy", "") or "") in {
+            "sellersprite_find_similar_first",
+            "find_similar_first",
+        }
+        and find_similar_source_available(current)
+        and find_similar_allowed(runtime, current)
+    ):
         if trigger_sellersprite_find_similar(driver, runtime, current, state):
+            note_find_similar_outcome(runtime, current, True, state)
             return "sellersprite_find_similar"
+        note_find_similar_outcome(runtime, current, False, state)
     upload_image_to_lens(driver, runtime, source_image_path, state)
     return "amazon_upload"
 
@@ -2568,34 +3260,6 @@ def wait_for_lens_results_with_health(
             ),
         )
         return "no_results" if outcome == "verified_empty" else status
-
-
-def detect_block_after_navigation(driver: WebDriver, timeout_seconds: float = 15) -> str:
-    """Retry block detection while an upload/click is replacing the page context."""
-    deadline = time.monotonic() + max(0.5, float(timeout_seconds))
-    while True:
-        try:
-            return detect_block(driver)
-        except WebDriverException as exc:
-            if not is_transient_navigation_error(exc) or time.monotonic() >= deadline:
-                raise
-            time.sleep(0.25)
-
-
-def upload_and_wait_for_lens_results(
-    driver: WebDriver,
-    runtime: ImageCompetitorRuntimeConfig,
-    source_image_path: Path,
-    state: Optional[ImageCompetitorStateStore] = None,
-) -> str:
-    upload_image_to_lens(driver, runtime, source_image_path, state)
-    block_reason = detect_block_after_navigation(
-        driver,
-        min(runtime.page_timeout, 15),
-    )
-    if block_reason:
-        handle_image_verification(driver, runtime, state, block_reason)
-    return wait_for_lens_results(driver, runtime)
 
 
 def wait_for_lens_sellersprite_data(
@@ -3236,7 +3900,11 @@ def call_multimodal_embedding(runtime: ImageCompetitorRuntimeConfig, image_ref: 
             )
         except requests.RequestException as exc:
             if attempt + 1 < attempts:
-                time.sleep(runtime.embedding_retry_backoff_seconds * (2**attempt))
+                provider_sleep(
+                    runtime,
+                    provider_retry_wait_seconds(None, attempt, runtime.embedding_retry_backoff_seconds),
+                    "豆包视觉向量请求重试",
+                )
                 continue
             safe_message = redact_sensitive_text(exc, (api_key,))[:300]
             raise EmbeddingProviderError(f"多模态向量模型请求失败：{safe_message}") from exc
@@ -3251,7 +3919,11 @@ def call_multimodal_embedding(runtime: ImageCompetitorRuntimeConfig, image_ref: 
             break
         retryable = status in RETRYABLE_EMBEDDING_STATUS_CODES or 500 <= status < 600
         if retryable and attempt + 1 < attempts:
-            time.sleep(runtime.embedding_retry_backoff_seconds * (2**attempt))
+            provider_sleep(
+                runtime,
+                provider_retry_wait_seconds(response, attempt, runtime.embedding_retry_backoff_seconds),
+                f"豆包视觉向量 HTTP {status} 重试",
+            )
             continue
         if status in {401, 403}:
             raise FatalEmbeddingProviderError(
@@ -3267,7 +3939,7 @@ def call_multimodal_embedding(runtime: ImageCompetitorRuntimeConfig, image_ref: 
                 "请检查模型是否已开通以及端点配置。"
             )
         if status in {400, 413, 415, 422}:
-            raise EmbeddingProviderError(
+            raise EmbeddingInputRejected(
                 f"豆包视觉向量未接受当前图片输入（HTTP {status}）；"
                 "可改用本地转码图片重试。"
             )
@@ -3291,17 +3963,55 @@ def call_multimodal_embedding(runtime: ImageCompetitorRuntimeConfig, image_ref: 
     return extract_embedding_vector(data)
 
 
-def call_multimodal_embedding_cached(runtime: ImageCompetitorRuntimeConfig, image_ref: str) -> List[float]:
+def embedding_cache_key(runtime: Any, image_ref: str) -> str:
+    """Identity of one embedding result: provider endpoint + model + params + image."""
+
     digest = hashlib.sha256(image_ref.encode("utf-8", errors="ignore")).hexdigest()
-    cache_key = (
-        f"{runtime.embedding_provider}|{runtime.embedding_base_url}|"
-        f"{runtime.embedding_api_path}|{runtime.embedding_model}|{digest}"
-    )
+    parts = [
+        str(getattr(runtime, name, "") or "")
+        for name in ("embedding_provider", "embedding_base_url", "embedding_api_path", "embedding_model")
+    ]
+    parts.append(str(getattr(runtime, "embedding_encoding_format", "float") or "float"))
+    return "|".join(parts + [digest])
+
+
+def _valid_vector(value: Any) -> Optional[List[float]]:
+    if not isinstance(value, list) or not value:
+        return None
+    vector: List[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            return None
+        if not math.isfinite(float(item)):
+            return None
+        vector.append(float(item))
+    return vector
+
+
+def call_multimodal_embedding_cached(runtime: ImageCompetitorRuntimeConfig, image_ref: str) -> List[float]:
+    cache_key = embedding_cache_key(runtime, image_ref)
     cached = EMBEDDING_CACHE.get(cache_key)
+    store = source_progress_store(runtime)
+    progress_key = _sha256_text(cache_key)
     if cached is not None:
+        if store is not None and store.get("emb", progress_key) is None:
+            # Another source of this run paid for it: persist it for this
+            # source too, so a restart of this source never pays again (P2-3a).
+            store.put("emb", progress_key, {"vector": list(cached)})
         return cached
+    if store is not None:
+        saved = store.get("emb", progress_key)
+        vector = _valid_vector(saved.get("vector")) if saved else None
+        if vector is not None:
+            EMBEDDING_CACHE[cache_key] = vector
+            add_provider_metric(runtime, "embedding_reused_from_checkpoint")
+            return vector
     embedding = call_multimodal_embedding(runtime, image_ref)
     EMBEDDING_CACHE[cache_key] = embedding
+    if store is not None:
+        # Persist immediately: a crash or provider error later in this source
+        # must never re-pay this call (L11).
+        store.put("emb", progress_key, {"vector": list(embedding)})
     return embedding
 
 
@@ -3369,6 +4079,86 @@ def resolve_candidate_embedding(
             asin,
             None,
             f"候选图片识别失败：{first_error}；本地转码重试失败：{str(exc)[:180]}",
+        )
+
+
+def resolve_candidate_embedding_for_cascade(
+    runtime: ImageCompetitorRuntimeConfig,
+    candidate: Mapping[str, Any],
+) -> tuple[Optional[List[float]], str]:
+    """Embed one cascade candidate.
+
+    Returns ``(vector, note)``.  ``vector is None`` means this single candidate
+    image cannot be embedded (missing URL, rejected image, download failure or
+    non-image content); it is excluded from the prescreen with a note and the
+    exclusion is persisted so a restart does not pay for it again.  Transient
+    provider failures (timeout/429/5xx after the built-in retries) and fatal
+    credential errors propagate: they belong to the source, not the image.
+    """
+
+    vector, note, _image_ref = embed_cascade_candidate(runtime, candidate)
+    return vector, note
+
+
+INLINE_IMAGE_NOTE = "候选图片 URL 识别失败后已改用本地转码图片。"
+
+
+def embed_cascade_candidate(
+    runtime: ImageCompetitorRuntimeConfig,
+    candidate: Mapping[str, Any],
+) -> tuple[Optional[List[float]], str, str]:
+    """:func:`resolve_candidate_embedding_for_cascade` plus the image form used.
+
+    The third value is the image reference the provider accepted (the URL, or
+    the local base64 data URL after the URL was rejected); Mini is sent the
+    same form (P2-4).  A rejected URL is persisted, so a restart goes straight
+    to the base64 form instead of paying for the rejected URL again (P2-3b).
+    """
+
+    image_url = normalize_space(str(candidate.get("candidate_image_url") or ""))
+    if not image_url:
+        return None, "候选商品缺少可识别图片，已排除在粗筛之外。", ""
+    store = source_progress_store(runtime)
+    base_key = embedding_cache_key(runtime, image_url)
+    exclusion_key = _sha256_text("excluded|" + base_key)
+    url_rejected_key = _sha256_text("url-rejected|" + base_key)
+    first_error: Optional[str] = None
+    if store is not None:
+        saved = store.get("emb-excluded", exclusion_key)
+        if saved and saved.get("note"):
+            return None, str(saved["note"]), ""
+        rejected = store.get("emb-url-rejected", url_rejected_key)
+        if rejected is not None:
+            first_error = str(rejected.get("error") or "HTTP 400")
+
+    def exclude(note: str) -> tuple[Optional[List[float]], str, str]:
+        if store is not None:
+            store.put("emb-excluded", exclusion_key, {"image_url": image_url[:500], "note": note})
+        return None, note, ""
+
+    if first_error is None:
+        try:
+            return call_multimodal_embedding_cached(runtime, image_url), "", image_url
+        except EmbeddingInputRejected as exc:
+            first_error = str(exc)[:160]
+            if store is not None:
+                store.put(
+                    "emb-url-rejected",
+                    url_rejected_key,
+                    {"image_url": image_url[:500], "error": first_error},
+                )
+    try:
+        data_url = image_url_to_data_url(image_url, timeout=min(runtime.vision_timeout, 45))
+    except (UserFacingError, requests.RequestException) as exc:
+        return exclude(
+            f"候选图片无法识别（{first_error}），本地下载也失败（{redact_sensitive_text(exc)[:160]}），"
+            "已排除在粗筛之外。"
+        )
+    try:
+        return call_multimodal_embedding_cached(runtime, data_url), INLINE_IMAGE_NOTE, data_url
+    except EmbeddingInputRejected as exc:
+        return exclude(
+            f"候选图片无法识别（{first_error}；本地转码：{str(exc)[:160]}），已排除在粗筛之外。"
         )
 
 
@@ -3543,7 +4333,9 @@ def parse_mini_match_response(
     text: str,
     candidates: Sequence[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
-    parsed = json.loads(text.strip())
+    # Transport tolerance only: a fenced / prose-wrapped JSON object is
+    # unwrapped; the schema check below stays strict.
+    parsed = parse_json_object(str(text or ""))
     if not isinstance(parsed, dict) or set(parsed) != {"matches"}:
         raise ValueError("Mini 返回根对象必须且只能包含 matches。")
     matches = parsed.get("matches")
@@ -3622,6 +4414,13 @@ def record_mini_usage(runtime: ImageCompetitorRuntimeConfig, data: Dict[str, Any
     record_provider_usage(runtime, data, "mini")
 
 
+MINI_JSON_REPAIR_TEXT = (
+    "上一次回复没有通过 JSON 校验。请只返回一个严格 JSON 对象，"
+    "根节点只有 matches 数组，每项只有 asin、is_same_product、confidence、reason 四个字段，"
+    "覆盖全部候选，不要输出任何其他文字。"
+)
+
+
 def call_doubao_mini_verifier(
     runtime: ImageCompetitorRuntimeConfig,
     source_image_path: Path,
@@ -3659,10 +4458,24 @@ def call_doubao_mini_verifier(
         "thinking": {"type": "disabled"},
         "response_format": {"type": "json_object"},
     }
+    # Same-answer protection: at temperature 0 an identical request returns the
+    # same malformed answer, so a malformed reply is resent at most once, and
+    # that resend carries an explicit "JSON only" repair instruction.
+    repair_payload = dict(payload)
+    repair_payload["messages"] = [
+        {
+            "role": "user",
+            "content": list(content) + [{"type": "text", "text": MINI_JSON_REPAIR_TEXT}],
+        }
+    ]
     endpoint = _provider_url(runtime.mini_base_url, runtime.mini_api_path)
-    attempts = max(runtime.mini_retry_attempts, 1)
+    transport_attempts = max(int(runtime.mini_retry_attempts), 1)
+    malformed_limit = min(MINI_MALFORMED_MAX_SENDS, transport_attempts)
+    transport_failures = 0
+    malformed_sends = 0
     last_error = ""
-    for attempt in range(attempts):
+    while True:
+        request_payload = repair_payload if malformed_sends else payload
         try:
             add_provider_metric(runtime, "mini_api_calls")
             response = requests.post(
@@ -3671,14 +4484,19 @@ def call_doubao_mini_verifier(
                     "Authorization": f"Bearer {runtime.mini_api_key}",
                     "Content-Type": "application/json",
                 },
-                json=payload,
+                json=request_payload,
                 timeout=runtime.vision_timeout,
                 allow_redirects=False,
             )
         except requests.RequestException as exc:
             last_error = redact_sensitive_text(exc, (runtime.mini_api_key,))[:240]
-            if attempt + 1 < attempts:
-                time.sleep(runtime.mini_retry_backoff_seconds * (2**attempt))
+            transport_failures += 1
+            if transport_failures < transport_attempts:
+                provider_sleep(
+                    runtime,
+                    provider_retry_wait_seconds(None, transport_failures - 1, runtime.mini_retry_backoff_seconds),
+                    "豆包 Mini 请求重试",
+                )
                 continue
             raise MiniProviderError(f"豆包 Mini 请求失败：{last_error}") from exc
 
@@ -3699,8 +4517,17 @@ def call_doubao_mini_verifier(
                 )
             retryable = status in {408, 429} or 500 <= status < 600
             last_error = f"HTTP {status}"
-            if retryable and attempt + 1 < attempts:
-                time.sleep(runtime.mini_retry_backoff_seconds * (2**attempt))
+            transport_failures += 1
+            if retryable and transport_failures < transport_attempts:
+                provider_sleep(
+                    runtime,
+                    provider_retry_wait_seconds(
+                        response,
+                        transport_failures - 1,
+                        runtime.mini_retry_backoff_seconds,
+                    ),
+                    f"豆包 Mini HTTP {status} 重试",
+                )
                 continue
             raise MiniProviderError(f"豆包 Mini 调用失败：HTTP {status}。")
         try:
@@ -3711,14 +4538,66 @@ def call_doubao_mini_verifier(
             matches = parse_mini_match_response(extract_response_text(data), candidates)
         except (ValueError, json.JSONDecodeError) as exc:
             last_error = str(exc)[:240]
-            if attempt + 1 < attempts:
-                time.sleep(runtime.mini_retry_backoff_seconds * (2**attempt))
+            malformed_sends += 1
+            if malformed_sends < malformed_limit:
                 continue
-            raise MiniProviderError(
-                f"豆包 Mini 连续 {attempts} 次未返回完整结构化结果：{last_error}"
+            raise MiniMalformedResponseError(
+                f"豆包 Mini 连续 {malformed_sends} 次未返回完整结构化结果：{last_error}"
             ) from exc
         return matches
-    raise MiniProviderError(f"豆包 Mini 复核失败：{last_error}")  # pragma: no cover
+
+
+def mini_batch_progress_key(
+    runtime: Any,
+    source_image_path: Path,
+    batch: Sequence[Mapping[str, Any]],
+) -> str:
+    """Identity of one Mini verdict: model + endpoint + semantics + exact inputs."""
+
+    try:
+        source_digest = hashlib.sha256(Path(source_image_path).read_bytes()).hexdigest()
+    except OSError:
+        source_digest = _sha256_text(str(source_image_path))
+    identity = {
+        "semantics": MINI_RESPONSE_SEMANTICS,
+        "model": str(getattr(runtime, "mini_model", "")),
+        "endpoint": f"{getattr(runtime, 'mini_base_url', '')}/{getattr(runtime, 'mini_api_path', '')}",
+        "source_sha256": source_digest,
+        "candidates": [
+            [
+                str(item.get("asin") or "").upper(),
+                normalize_space(str(item.get("candidate_image_url") or "")),
+                normalize_space(str(item.get("title") or "")),
+            ]
+            for item in batch
+        ],
+    }
+    return _sha256_text(json.dumps(identity, ensure_ascii=False, sort_keys=True))
+
+
+def verify_mini_batch_with_checkpoint(
+    runtime: ImageCompetitorRuntimeConfig,
+    source_image_path: Path,
+    batch: Sequence[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    store = source_progress_store(runtime)
+    key = mini_batch_progress_key(runtime, source_image_path, batch) if store is not None else ""
+    if store is not None:
+        saved = store.get("mini", key)
+        matches = saved.get("matches") if saved else None
+        expected = {str(item.get("asin") or "").upper() for item in batch}
+        if (
+            isinstance(matches, list)
+            and all(isinstance(item, dict) for item in matches)
+            and {str(item.get("asin") or "").upper() for item in matches} == expected
+        ):
+            add_provider_metric(runtime, "mini_reused_from_checkpoint")
+            return [dict(item) for item in matches]
+    runtime_heartbeat(runtime, "provider_calls", f"Mini 复核 {len(batch)} 个候选")
+    matches = call_doubao_mini_verifier(runtime, source_image_path, batch)
+    if store is not None:
+        store.put("mini", key, {"matches": [dict(item) for item in matches]})
+    return matches
 
 
 def run_cascade_match(
@@ -3765,18 +4644,29 @@ def run_cascade_match(
     source_embedding = resolve_source_embedding(runtime, source_image_path, source_image_ref)
     prescreen_matches: List[Dict[str, Any]] = []
     processed_asins = set()
-    for candidate in candidates:
+    unscorable: List[str] = []
+    # Image form the embedding provider accepted when it is not the plain
+    # candidate URL (base64 after a rejected URL); Mini gets the same (P2-4).
+    mini_image_refs: Dict[str, str] = {}
+    progress = ProviderProgress(runtime, "Embedding 粗筛", len(candidates))
+    for index, candidate in enumerate(candidates, start=1):
         asin = str(candidate.get("asin") or "").upper()
         processed_asins.add(asin)
-        if not candidate.get("candidate_image_url"):
-            raise EmbeddingProviderError(
-                f"候选 {asin} 缺少可识别图片；本次不写入同款数量，请修复后重试。"
-            )
-        _, candidate_embedding, note = resolve_candidate_embedding(runtime, candidate)
+        candidate_embedding, note, image_ref = embed_cascade_candidate(runtime, candidate)
+        progress.tick(index)
+        if image_ref and image_ref != normalize_space(str(candidate.get("candidate_image_url") or "")):
+            mini_image_refs[asin] = image_ref
         if candidate_embedding is None:
-            raise EmbeddingProviderError(
-                f"候选 {asin} 无法完成向量识别（{note}）；本次不写入同款数量，请重试。"
-            )
+            # One unembeddable image is excluded and noted; it never fails
+            # the source (and can therefore never loop the run).
+            unscorable.append(asin)
+            decisions[asin] = {
+                "is_competitor": "",
+                "match_confidence": "",
+                "match_reason": note,
+                "prescreen_status": "unscorable",
+            }
+            continue
         similarity = cosine_similarity(source_embedding, candidate_embedding)
         is_prescreen_match = similarity >= runtime.prescreen_min_similarity
         decision_reason = (
@@ -3816,12 +4706,22 @@ def run_cascade_match(
                 match_reason=(
                     f"按 Lens 顺序发现至少 {len(prescreen_matches)} 个视觉近似候选，"
                     f"超过上限 {runtime.prescreen_max_matches}；已停止粗筛且未调用 Mini。"
+                    + unscorable_note(unscorable)
                 ),
                 provider_metrics=provider_metric_delta(
                     before_metrics,
                     provider_metric_snapshot(runtime),
                 ),
             )
+
+    if unscorable and len(unscorable) > len(candidates) * UNSCORABLE_FAIL_RATIO:
+        # P1-6: a count computed from a minority of the candidates (or from
+        # none) is not a verified result; fail the cycle, write no count.
+        preview = "、".join(unscorable[:5]) + ("等" if len(unscorable) > 5 else "")
+        raise CandidatesUnscorableError(
+            f"{len(unscorable)}/{len(candidates)} 个 Lens 候选图片无法识别（{preview}），"
+            "同款数量无法可靠计算；本轮按失败处理，不写入数量。"
+        )
 
     if not prescreen_matches:
         return MatchEvaluation(
@@ -3831,14 +4731,23 @@ def run_cascade_match(
             processing_status="verified_zero",
             same_product_count=0,
             same_product_confidence="",
-            match_reason="Embedding 粗筛没有命中候选，最终同款数量为 0，未调用 Mini。",
+            match_reason=(
+                "Embedding 粗筛没有命中候选，最终同款数量为 0，未调用 Mini。"
+                + unscorable_note(unscorable)
+            ),
             provider_metrics=provider_metric_delta(before_metrics, provider_metric_snapshot(runtime)),
         )
 
     accepted: List[Dict[str, Any]] = []
     for start in range(0, len(prescreen_matches), runtime.mini_batch_size):
         batch = prescreen_matches[start : start + runtime.mini_batch_size]
-        for match in call_doubao_mini_verifier(runtime, source_image_path, batch):
+        mini_batch = [
+            {**item, "candidate_image_url": mini_image_refs[str(item.get("asin") or "").upper()]}
+            if str(item.get("asin") or "").upper() in mini_image_refs
+            else item
+            for item in batch
+        ]
+        for match in verify_mini_batch_with_checkpoint(runtime, source_image_path, mini_batch):
             asin = str(match["asin"])
             candidate = next(item for item in batch if str(item.get("asin") or "").upper() == asin)
             is_same = bool(match["is_same_product"])
@@ -3881,9 +4790,17 @@ def run_cascade_match(
         match_reason=(
             f"Mini 已复核 {len(prescreen_matches)} 个视觉粗筛候选，"
             f"确认 {len(accepted)} 个同款；最终数量只采用 Mini 结果。"
+            + unscorable_note(unscorable)
         ),
         provider_metrics=provider_metric_delta(before_metrics, provider_metric_snapshot(runtime)),
     )
+
+
+def unscorable_note(asins: Sequence[str]) -> str:
+    if not asins:
+        return ""
+    preview = "、".join(asins[:5]) + ("等" if len(asins) > 5 else "")
+    return f" 另有 {len(asins)} 个候选图片无法识别（{preview}），已排除在粗筛之外。"
 
 
 def evaluate_competitor_matches(
@@ -4797,6 +5714,100 @@ def save_image_enrichment_progress(
     state.set_current(current)
 
 
+def duplicate_source_identity(row: Mapping[str, Any]) -> str:
+    """Identity used to dedupe count_only input rows (W8)."""
+
+    asin = normalize_space(str(row.get("source_asin") or "")).upper()
+    image_url = clean_url(str(row.get("input_image_url") or ""))
+    image_path = str(row.get("input_image_path") or "").strip()
+    if asin:
+        return json.dumps(["asin", asin, image_url, image_path], ensure_ascii=False)
+    product_url = clean_url(str(row.get("source_product_url") or ""))
+    if product_url:
+        return json.dumps(["url", product_url, image_url, image_path], ensure_ascii=False)
+    if image_url or image_path:
+        return json.dumps(["image", image_url, image_path], ensure_ascii=False)
+    return ""
+
+
+def duplicate_original_rows(queue: Sequence[Mapping[str, Any]]) -> Dict[int, int]:
+    """Map each duplicate input_row to the first input_row with the same identity."""
+
+    first_by_identity: Dict[str, int] = {}
+    duplicates: Dict[int, int] = {}
+    for row in queue:
+        try:
+            input_row = int(row.get("input_row") or 0)
+        except (TypeError, ValueError):
+            continue
+        identity = duplicate_source_identity(row)
+        if not identity or input_row < 2:
+            continue
+        if identity in first_by_identity:
+            duplicates[input_row] = first_by_identity[identity]
+        else:
+            first_by_identity[identity] = input_row
+    return duplicates
+
+
+def build_duplicate_count_row(
+    runtime: ImageCompetitorRuntimeConfig,
+    current: Dict[str, Any],
+    original: Mapping[str, Any],
+    original_row: int,
+) -> Dict[str, Any]:
+    same_product_count = original.get("same_product_count")
+    evaluation = MatchEvaluation(
+        accepted_records=[],
+        decisions={},
+        prescreen_visual_match_count=original.get("prescreen_visual_match_count", ""),
+        processing_status=str(original.get("processing_status") or ""),
+        same_product_count=(
+            same_product_count
+            if isinstance(same_product_count, int) and not isinstance(same_product_count, bool)
+            else None
+        ),
+        same_product_confidence=original.get("same_product_confidence", ""),
+        match_reason=(
+            f"重复输入：与第 {original_row} 行相同，已沿用其结果（未重复抓取、未重复调用模型）。"
+            + str(original.get("match_reason") or "")
+        ),
+        provider_metrics={},
+    )
+    try:
+        candidate_count = int(original.get("candidate_count") or 0)
+    except (TypeError, ValueError):
+        candidate_count = 0
+    row = build_count_result_row(
+        runtime,
+        current,
+        str(original.get("search_method") or ""),
+        str(original.get("plugin_status") or ""),
+        candidate_count,
+        evaluation,
+    )
+    row["duplicate_of_input_row"] = int(original_row)
+    return row
+
+
+def load_saved_lens_collection(
+    store: Optional[SourceProgressStore],
+) -> Optional[tuple[str, str, List[Dict[str, Any]]]]:
+    if store is None:
+        return None
+    saved = store.get("lens", "collection")
+    if not saved:
+        return None
+    records = saved.get("candidate_records")
+    if not isinstance(records, list) or not all(isinstance(row, dict) for row in records):
+        return None
+    return (
+        str(saved.get("search_method") or ""),
+        str(saved.get("plugin_status") or ""),
+        [dict(row) for row in records],
+    )
+
+
 def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: bool) -> int:
     prepare_vision_provider(runtime)
     initial_queue = load_products(runtime.products_file, runtime.marketplace_domain, dedupe=not runtime.is_count_only)
@@ -4807,6 +5818,7 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
     counts_path = job_dir / "counts.jsonl"
     state_path = job_dir / "state.json"
     source_results_dir = job_dir / "source_results"
+    progress_root = job_dir / SOURCE_PROGRESS_DIRNAME
     output_suffix = "相似竞品数量" if runtime.is_count_only else "同款竞品结果"
     output_xlsx = job_dir / f"{runtime.products_file.stem}_{output_suffix}.xlsx"
     debug_dir = job_dir / "debug_snapshots"
@@ -4832,6 +5844,7 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
     if dry_run:
         print("dry-run：配置、输入表和视觉模型凭据检查完成，未打开浏览器。")
         return 0
+    run_outcome.start_new_run()
 
     safety = LocalSafetyController(
         batch_pause_pages_min=runtime.batch_pause_pages_min,
@@ -4840,12 +5853,13 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
         batch_pause_seconds_max=runtime.batch_pause_seconds_max,
         mode=runtime.operation_mode,
     )
+    safety.job_label = runtime.job_id
     safety.acquire()
     safety.status_path = job_dir / "run_heartbeat.json"
     try:
         safety.begin(resume_after_review=bool(getattr(runtime, "resume_after_review", False)))
-        if safety.rate_probe_active:
-            runtime.amazon_page_unavailable_retry_schedule_seconds = ()
+        # P2-1: the empty retry schedule of an automatic rate probe is chosen
+        # per page stage (page_retry_schedule), not frozen for the whole run.
     except BaseException:
         safety.release()
         raise
@@ -4853,9 +5867,16 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
     job_lock = JobRunLock(job_dir / ".run.lock")
     try:
         job_lock.acquire()
+    except UserFacingError as exc:
+        safety.release()
+        raise run_outcome.CrawlStop(str(exc), exit_code=run_outcome.EXIT_LOCK_HELD) from exc
     except BaseException:
         safety.release()
         raise
+    # Manual waits (CAPTCHA, delivery address) poll the page, honour
+    # outputs/<job_id>/CONTINUE and keep run_heartbeat.json fresh.
+    configure_manual_waits(continue_file=job_dir / "CONTINUE", heartbeat=safety.heartbeat)
+    state: Optional[ImageCompetitorStateStore] = None
     try:
         if not runtime.resume:
             for old_file in (records_path, candidates_path, failures_path, counts_path, output_xlsx):
@@ -4864,6 +5885,8 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
             if source_results_dir.exists():
                 for old_shard in source_results_dir.glob("*.json"):
                     old_shard.unlink()
+            if progress_root.exists():
+                shutil.rmtree(progress_root, ignore_errors=True)
 
         crawl_plan_fingerprint = image_crawl_plan_fingerprint(runtime, initial_queue)
         provider_fingerprint = vision_provider_fingerprint(runtime)
@@ -4885,18 +5908,180 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
             committed_count_results = load_count_results(counts_path)
         else:
             committed_count_results = {}
-        driver = start_driver(runtime)
+        duplicate_of = duplicate_original_rows(initial_queue) if runtime.is_count_only else {}
+        try:
+            driver = start_driver(runtime)
+        except UserFacingError as exc:
+            raise run_outcome.needs_human(
+                f"浏览器启动或连接失败：{exc}",
+                next_action=BROWSER_SETUP_NEXT_ACTION,
+            ) from exc
     except BaseException:
         job_lock.release()
-        safety.release()
+        configure_manual_waits()
+        try:
+            write_run_summary(job_dir, runtime.operation_mode, safety)
+        finally:
+            safety.release()
         raise
+
+    def committed_result_for_row(input_row: int) -> Optional[Dict[str, Any]]:
+        if runtime.match_mode == "cascade":
+            return committed_count_results.get(input_row)
+        return load_count_results(counts_path).get(input_row)
+
+    def commit_count_row(current: Dict[str, Any], count_row: Dict[str, Any]) -> None:
+        nonlocal committed_count_results
+        if runtime.match_mode == "cascade":
+            commit_source_result_shard(
+                source_results_dir,
+                current,
+                crawl_plan_fingerprint,
+                provider_fingerprint,
+                [],
+                [],
+                count_row,
+            )
+            committed_count_results = materialize_source_result_shards(
+                source_results_dir,
+                crawl_plan_fingerprint,
+                provider_fingerprint,
+                candidates_path,
+                records_path,
+                counts_path,
+            )
+        else:
+            append_jsonl(counts_path, count_row)
+
+    def discard_source_progress(current: Mapping[str, Any]) -> None:
+        shutil.rmtree(source_progress_dir(job_dir, current), ignore_errors=True)
+
+    def skip_after_repeated_failures(
+        current: Dict[str, Any],
+        label: str,
+        reason: str,
+        message: str,
+        cycles: int,
+    ) -> None:
+        work_key = image_work_key(current)
+        append_jsonl(
+            failures_path,
+            {
+                "time": now_iso(),
+                "source_id": current.get("source_id", ""),
+                "source_asin": current.get("source_asin", ""),
+                "source_product_url": current.get("source_product_url", ""),
+                "input_row": current.get("input_row", ""),
+                "page_url": "",
+                "reason": QUARANTINE_REASON,
+                "message": f"连续 {cycles} 轮失败（最后一次：{reason}）：{message[:300]}",
+            },
+        )
+        run_outcome.record_skipped_item(
+            state.data,
+            work_key,
+            reason=QUARANTINE_REASON,
+            label=str(label or ""),
+            url=str(current.get("source_product_url") or ""),
+        )
+        reason_text = f"连续 {cycles} 轮失败已跳过（最后一次：{reason}），同款数量留空。"
+        if runtime.is_count_only:
+            count_row = build_count_result_row(
+                runtime,
+                current,
+                "",
+                "",
+                0,
+                MatchEvaluation([], {}, "", "skipped", None, "", reason_text),
+            )
+            count_row["skip_reason"] = QUARANTINE_REASON
+            commit_count_row(current, count_row)
+        state.clear_amazon_page_retry()
+        run_outcome.clear_item_failures(state.data, work_key)
+        discard_source_progress(current)
+        state.finish_current_source(
+            "skipped",
+            result={
+                "processing_status": "skipped",
+                "same_product_count": None,
+                "match_reason": reason_text,
+                "skip_reason": QUARANTINE_REASON,
+            },
+        )
+        print(f"来源 {label} 连续 {cycles} 轮失败，已跳过；同款数量留空。", flush=True)
+
+    def fail_source_cycle(
+        current: Dict[str, Any],
+        label: str,
+        reason: str,
+        message: str,
+        cause: BaseException,
+        *,
+        keep_page_retry: bool = False,
+    ) -> None:
+        """D2: one exhausted retry cycle for this source.
+
+        First failure: supervised stops with retry_later (current kept, the
+        same command retries it once); unattended defers it to the end of the
+        queue.  Second consecutive failure (across runs): skip it.
+        """
+
+        if not keep_page_retry:
+            state.clear_amazon_page_retry()
+        note_reason, note_detail = item_failure_classification(reason, message, cause)
+        cycles = run_outcome.note_item_failure(
+            state.data,
+            image_work_key(current),
+            reason=note_reason,
+            detail=note_detail,
+        )
+        # finalize_run reads last_failure_environment from state.json.
+        state.flush()
+        if run_outcome.should_quarantine(cycles):
+            skip_after_repeated_failures(current, label, reason, message, cycles)
+            if runtime.operation_mode == "unattended" and record_operational_outcome(state, False):
+                raise run_outcome.retry_later(
+                    "夜间连续失败达到阈值；剩余来源保留在断点中，稍后重新运行同一命令。"
+                ) from cause
+            return
+        if runtime.operation_mode == "unattended":
+            state.clear_amazon_page_retry()
+            state.defer_current(reason)
+            if record_operational_outcome(state, False):
+                raise run_outcome.retry_later(
+                    "夜间连续失败达到阈值；剩余来源保留在断点中，稍后重新运行同一命令。"
+                ) from cause
+            print(f"来源 {label} 本轮失败（{reason}），已推迟到队列末尾。", flush=True)
+            return
+        raise run_outcome.retry_later(
+            f"来源 {label} 本轮失败（{reason}）：{message[:300]}。"
+            "断点已保存；重新运行同一命令会再试一次，再次失败将自动跳过。"
+        ) from cause
+
+    def write_output_workbook() -> None:
+        if runtime.is_count_only:
+            write_count_only_workbook(runtime.products_file, counts_path, output_xlsx)
+            print(f"已生成相似竞品数量表：{output_xlsx}")
+        else:
+            write_workbook(runtime.products_file, records_path, candidates_path, failures_path, output_xlsx)
+            print(f"已生成以图搜图竞品表：{output_xlsx}")
+
+    clean_finish = False
     try:
         while True:
             current = state.next_work()
             if not current:
+                deferred = state.deferred_count()
+                if deferred:
+                    raise run_outcome.retry_later(
+                        f"本轮队列已处理完，但仍有 {deferred} 个来源失败后推迟到下次运行；"
+                        "断点已保存，稍后重新运行同一命令继续。"
+                    )
                 print("队列已完成。")
+                clean_finish = True
                 break
-            safety.set_work_key(image_work_key(current))
+            work_key = image_work_key(current)
+            safety.set_work_key(work_key)
             try:
                 current_input_row = int(current.get("input_row") or 0)
             except (TypeError, ValueError):
@@ -4905,6 +6090,7 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
             if committed_result is not None:
                 validate_committed_count_identity(committed_result, current)
                 committed_count = committed_result.get("same_product_count")
+                run_outcome.clear_item_failures(state.data, work_key)
                 state.finish_current_source(
                     str(committed_result.get("processing_status") or "recovered_count_commit"),
                     count=committed_count if isinstance(committed_count, int) else 0,
@@ -4920,6 +6106,7 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                         )
                     },
                 )
+                discard_source_progress(current)
                 record_operational_outcome(state, True)
                 print(
                     f"恢复已提交数量结果：input_row={current_input_row}；"
@@ -4927,9 +6114,62 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                 )
                 continue
             label = current.get("source_asin") or current.get("source_product_url") or current.get("source_id")
+
+            original_row = duplicate_of.get(current_input_row)
+            if original_row:
+                original_result = committed_result_for_row(original_row)
+                if original_result is not None:
+                    commit_count_row(
+                        current,
+                        build_duplicate_count_row(runtime, current, original_result, original_row),
+                    )
+                    state.finish_current_source(
+                        "duplicate",
+                        result={
+                            "processing_status": str(original_result.get("processing_status") or ""),
+                            "same_product_count": original_result.get("same_product_count"),
+                            "duplicate_of_input_row": original_row,
+                        },
+                    )
+                    print(f"重复输入：{label}（第 {current_input_row} 行）沿用第 {original_row} 行结果。")
+                    continue
+                pending_rows = {
+                    int(item.get("input_row") or 0)
+                    for item in (state.data.get("queue") or [])
+                    if isinstance(item, dict)
+                }
+                deferred_rows = {
+                    int((item.get("source") or {}).get("input_row") or 0)
+                    for item in (state.data.get("deferred_sources") or [])
+                    if isinstance(item, dict)
+                }
+                if original_row in pending_rows:
+                    # The original is still queued (e.g. restored deferred work at
+                    # the end): wait for it instead of paying for the same ASIN twice.
+                    state.requeue_current_at_end()
+                    continue
+                if original_row in deferred_rows:
+                    state.defer_current("duplicate_waiting_for_original")
+                    continue
+                # The original has no committed result (legacy/unknown): process normally.
+
             print(f"处理：{label}")
             source_restore_handles = source_window_restore_order(driver)
             source_claimed_before = claimed_crawler_window_handles(driver)
+            progress = SourceProgressStore(
+                source_progress_dir(job_dir, current),
+                {
+                    "source_id": current.get("source_id", ""),
+                    "input_row": current_input_row,
+                    "provider_sha256": provider_fingerprint.get("sha256", ""),
+                    "crawl_plan_sha256": crawl_plan_fingerprint.get("sha256", ""),
+                },
+            )
+            runtime._source_progress = progress
+            runtime._source_budget = SourceBudget(
+                SOURCE_TIME_BUDGET_SECONDS.get(runtime.operation_mode, SOURCE_TIME_BUDGET_SECONDS["supervised"]),
+                clock=getattr(runtime, "_source_budget_clock", time.monotonic),
+            )
 
             def cleanup_source_tabs() -> None:
                 close_claimed_crawler_windows(
@@ -4964,11 +6204,6 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                     if resolved_path is not None and resolved_path.exists():
                         source_image_path = resolved_path
                     else:
-                        needs_product_page = not normalize_space(
-                            str(current.get("input_image_path") or "")
-                        ) and not is_downloadable_image_url(
-                            str(current.get("input_image_url") or "")
-                        )
                         source_operation = lambda _attempt: resolve_source_image(
                             driver,
                             runtime,
@@ -4976,180 +6211,235 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                             image_dir,
                             state,
                         )
-                        if needs_product_page:
-                            source_image_path = run_page_stage(
+
+                        def resolve_from_product_page() -> Path:
+                            return run_page_stage(
                                 "source_product",
                                 str(current.get("source_image_page_url") or current.get("source_product_url") or ""),
                                 source_operation,
                             )
+
+                        needs_product_page = not normalize_space(
+                            str(current.get("input_image_path") or "")
+                        ) and not is_downloadable_image_url(
+                            str(current.get("input_image_url") or "")
+                        )
+                        if needs_product_page:
+                            source_image_path = resolve_from_product_page()
                         else:
-                            source_image_path = source_operation(None)
+                            try:
+                                source_image_path = source_operation(None)
+                            except SourceImageDownloadError as exc:
+                                # Item 8: a dead/expired 主图URL or an HTML
+                                # response falls back to the product page
+                                # (one counted navigation) instead of stopping.
+                                if normalize_space(str(current.get("input_image_path") or "")) or not (
+                                    current.get("source_asin") or current.get("source_product_url")
+                                ):
+                                    raise
+                                failed_url = str(current.pop("input_image_url", "") or "")
+                                current["input_image_url_failed"] = failed_url
+                                state.set_current(current)
+                                log_failure(
+                                    failures_path,
+                                    state,
+                                    current,
+                                    "source_image_download_failed",
+                                    f"{exc}；改为打开商品页获取主图。",
+                                    failed_url,
+                                )
+                                print("主图URL 下载失败或不是图片；改为打开商品页获取主图。", flush=True)
+                                source_image_path = resolve_from_product_page()
                         current["resolved_source_image_path"] = str(source_image_path)
                         state.set_current(current)
 
-                    lens_dispatched = False
-                    search_method = str(current.get("image_search_method") or "")
-                    if resume_stage != "lens_results":
-                        preserve_successful_dispatch = False
-
-                        def dispatch_image_search(_attempt: Any) -> str:
-                            nonlocal preserve_successful_dispatch
-                            method = run_image_search(
-                                driver,
-                                runtime,
-                                current,
-                                source_image_path,
-                                state,
-                            )
-                            preserve_successful_dispatch = True
-                            return method
-
-                        def cleanup_upload_attempt() -> None:
-                            nonlocal preserve_successful_dispatch
-                            if preserve_successful_dispatch:
-                                preserve_successful_dispatch = False
-                                return
-                            cleanup_source_tabs()
-
-                        search_method = run_page_stage(
-                            "lens_upload",
-                            runtime.lens_url,
-                            dispatch_image_search,
-                            cleanup=cleanup_upload_attempt,
+                    saved_lens = load_saved_lens_collection(progress)
+                    if saved_lens is not None:
+                        search_method, plugin_status, candidate_records = saved_lens
+                        state.clear_amazon_page_retry()
+                        print(
+                            f"恢复已保存的 Lens 候选 {len(candidate_records)} 条；"
+                            "跳过重复导航，已完成的模型调用不会重复付费。"
                         )
-                        lens_dispatched = True
-                        current["image_search_method"] = search_method
-                        state.set_current(current)
-
-                    def collect_lens_page(
-                        _attempt: Any,
-                    ) -> tuple[str, str, List[Dict[str, Any]], str]:
-                        nonlocal lens_dispatched, search_method
-                        if not lens_dispatched:
-                            search_method = run_image_search(
-                                driver,
-                                runtime,
-                                current,
-                                source_image_path,
-                                state,
-                            )
-                            current["image_search_method"] = search_method
-                            state.set_current(current)
+                    else:
                         lens_dispatched = False
-                        try:
-                            lens_result_status = wait_for_lens_results_with_health(
-                                driver,
-                                runtime,
-                                state,
-                            )
-                        except TransientAmazonPageUnavailable as exc:
-                            if (
-                                search_method == "sellersprite_find_similar"
-                                and exc.reason == "expected_content_missing"
-                            ):
-                                search_method = "amazon_upload_after_find_similar_timeout"
-                                upload_image_to_lens(
+                        search_method = str(current.get("image_search_method") or "")
+                        if resume_stage != "lens_results":
+                            preserve_successful_dispatch = False
+
+                            def dispatch_image_search(_attempt: Any) -> str:
+                                nonlocal preserve_successful_dispatch
+                                method = run_image_search(
                                     driver,
                                     runtime,
+                                    current,
                                     source_image_path,
                                     state,
                                 )
+                                preserve_successful_dispatch = True
+                                return method
+
+                            def cleanup_upload_attempt() -> None:
+                                nonlocal preserve_successful_dispatch
+                                if preserve_successful_dispatch:
+                                    preserve_successful_dispatch = False
+                                    return
+                                cleanup_source_tabs()
+
+                            search_method = run_page_stage(
+                                "lens_upload",
+                                runtime.lens_url,
+                                dispatch_image_search,
+                                cleanup=cleanup_upload_attempt,
+                            )
+                            lens_dispatched = True
+                            current["image_search_method"] = search_method
+                            state.set_current(current)
+
+                        def collect_lens_page(
+                            _attempt: Any,
+                        ) -> tuple[str, str, List[Dict[str, Any]], str]:
+                            nonlocal lens_dispatched, search_method
+                            if not lens_dispatched:
+                                # A retry never repeats a Find Similar that already
+                                # failed for this source (sticky fallback, W4).
+                                search_method = run_image_search(
+                                    driver,
+                                    runtime,
+                                    current,
+                                    source_image_path,
+                                    state,
+                                )
+                                current["image_search_method"] = search_method
+                                state.set_current(current)
+                            lens_dispatched = False
+                            try:
                                 lens_result_status = wait_for_lens_results_with_health(
                                     driver,
                                     runtime,
                                     state,
                                 )
-                            else:
-                                raise
-                        if runtime.sellersprite_on_lens:
-                            plugin_status = wait_for_lens_sellersprite_data(driver, runtime)
-                            state.mark_sellersprite_readiness(
-                                getattr(driver, "_sellersprite_readiness", {})
-                            )
-                            if runtime.operation_mode == "unattended" and plugin_status in {"plugin_absent", "login_required"}:
-                                raise VerificationUnconfirmedError("卖家精灵插件缺失或登录失效；夜间任务已停止。")
-                            if plugin_status == "blocked":
-                                try:
-                                    handle_image_sellersprite_block(driver, runtime, state)
-                                except VerificationUnconfirmedError:
-                                    if runtime.save_debug_snapshots:
-                                        save_debug_snapshot(
-                                            driver,
-                                            debug_dir,
-                                            "verification_timeout",
-                                        )
+                            except TransientAmazonPageUnavailable as exc:
+                                if (
+                                    search_method == "sellersprite_find_similar"
+                                    and find_similar_fallback_allowed(runtime, exc.reason)
+                                ):
+                                    note_find_similar_outcome(runtime, current, False, state)
+                                    search_method = "amazon_upload_after_find_similar_timeout"
+                                    upload_image_to_lens(
+                                        driver,
+                                        runtime,
+                                        source_image_path,
+                                        state,
+                                    )
+                                    lens_result_status = wait_for_lens_results_with_health(
+                                        driver,
+                                        runtime,
+                                        state,
+                                    )
+                                else:
                                     raise
-                                plugin_status = wait_for_lens_sellersprite_data(
-                                    driver,
-                                    runtime,
-                                )
+                            if runtime.sellersprite_on_lens:
+                                plugin_status = wait_for_lens_sellersprite_data(driver, runtime)
                                 state.mark_sellersprite_readiness(
                                     getattr(driver, "_sellersprite_readiness", {})
                                 )
-                            if plugin_status == "blocked":
-                                raise VerificationUnconfirmedError(
-                                    verification_unconfirmed_message(
-                                        sellersprite_block_reason(driver)
+                                if runtime.operation_mode == "unattended" and plugin_status in {"plugin_absent", "login_required"}:
+                                    raise VerificationUnconfirmedError("卖家精灵插件缺失或登录失效；夜间任务已停止。")
+                                if plugin_status == "blocked":
+                                    try:
+                                        handle_image_sellersprite_block(driver, runtime, state)
+                                    except VerificationUnconfirmedError:
+                                        if runtime.save_debug_snapshots:
+                                            save_debug_snapshot(
+                                                driver,
+                                                debug_dir,
+                                                "verification_timeout",
+                                            )
+                                        raise
+                                    plugin_status = wait_for_lens_sellersprite_data(
+                                        driver,
+                                        runtime,
                                     )
+                                    state.mark_sellersprite_readiness(
+                                        getattr(driver, "_sellersprite_readiness", {})
+                                    )
+                                if plugin_status == "blocked":
+                                    raise VerificationUnconfirmedError(
+                                        verification_unconfirmed_message(
+                                            sellersprite_block_reason(driver)
+                                        )
+                                    )
+                            else:
+                                plugin_status = "skipped_on_lens"
+
+                            # Extension waits can outlive the Amazon page. The
+                            # final gate must classify the current DOM before a
+                            # plugin timeout is surfaced or any candidate is
+                            # merged/committed.
+                            lens_result_status = wait_for_lens_results_with_health(
+                                driver,
+                                runtime,
+                                state,
+                            )
+                            if (
+                                runtime.sellersprite_on_lens
+                                and runtime.sellersprite_required
+                                and plugin_status != "ok"
+                            ):
+                                raise PluginDataTimeout(
+                                    f"卖家精灵数据未达到写入门禁：{plugin_status}。"
                                 )
-                        else:
-                            plugin_status = "skipped_on_lens"
 
-                        # Extension waits can outlive the Amazon page. The
-                        # final gate must classify the current DOM before a
-                        # plugin timeout is surfaced or any candidate is
-                        # merged/committed.
-                        lens_result_status = wait_for_lens_results_with_health(
-                            driver,
-                            runtime,
-                            state,
-                        )
-                        if (
-                            runtime.sellersprite_on_lens
-                            and runtime.sellersprite_required
-                            and plugin_status != "ok"
-                        ):
-                            raise PluginDataTimeout(
-                                f"卖家精灵数据未达到写入门禁：{plugin_status}。"
+                            candidates = merge_lens_product_data(
+                                driver,
+                                runtime,
+                                current,
+                                plugin_status,
+                            )
+                            if (
+                                not candidates
+                                and lens_result_status == "unverified_results"
+                            ):
+                                raise EmbeddingProviderError(
+                                    "Amazon Lens 页面曾检测到结果，但候选商品重新提取为空；"
+                                    "本次不写入零竞品，已保留当前来源供重试。"
+                                )
+                            if not candidates and lens_result_status != "no_results":
+                                raise TransientAmazonPageUnavailable(
+                                    "lens_candidate_reextract_empty",
+                                    reason="expected_content_missing",
+                                    url=safe_driver_current_url(driver),
+                                )
+                            return (
+                                lens_result_status,
+                                plugin_status,
+                                candidates,
+                                search_method,
                             )
 
-                        candidates = merge_lens_product_data(
-                            driver,
-                            runtime,
-                            current,
+                        (
+                            _lens_result_status,
                             plugin_status,
-                        )
-                        if (
-                            not candidates
-                            and lens_result_status == "unverified_results"
-                        ):
-                            raise EmbeddingProviderError(
-                                "Amazon Lens 页面曾检测到结果，但候选商品重新提取为空；"
-                                "本次不写入零竞品，已保留当前来源供重试。"
-                            )
-                        if not candidates and lens_result_status != "no_results":
-                            raise TransientAmazonPageUnavailable(
-                                "lens_candidate_reextract_empty",
-                                reason="expected_content_missing",
-                                url=safe_driver_current_url(driver),
-                            )
-                        return (
-                            lens_result_status,
-                            plugin_status,
-                            candidates,
+                            candidate_records,
                             search_method,
+                        ) = run_page_stage(
+                            "lens_results",
+                            runtime.lens_url,
+                            collect_lens_page,
                         )
-
-                    (
-                        _lens_result_status,
-                        plugin_status,
-                        candidate_records,
-                        search_method,
-                    ) = run_page_stage(
-                        "lens_results",
-                        runtime.lens_url,
-                        collect_lens_page,
-                    )
+                        # L11: the collected candidates are persisted before any
+                        # paid call, so a restart re-evaluates the same list
+                        # without navigating again.
+                        progress.put(
+                            "lens",
+                            "collection",
+                            {
+                                "search_method": search_method,
+                                "plugin_status": plugin_status,
+                                "candidate_records": [dict(row) for row in candidate_records],
+                            },
+                        )
                     evaluation = evaluate_competitor_matches(
                         runtime,
                         source_image_path,
@@ -5250,6 +6540,7 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                         len(candidate_records),
                         evaluation,
                     )
+                run_outcome.clear_item_failures(state.data, work_key)
                 state.finish_current_source(
                     evaluation.processing_status,
                     count=len(accepted_records),
@@ -5262,6 +6553,7 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                         "provider_metrics": evaluation.provider_metrics,
                     },
                 )
+                progress.discard()
                 record_operational_outcome(state, True)
                 count_text = (
                     "空（粗筛排除）"
@@ -5283,25 +6575,19 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                 reason = "Amazon 商品页显示 Page Not Found；来源链接已失效，跳过且不计算同款数量。"
                 evaluation = MatchEvaluation([], {}, "", "source_unavailable", None, "", reason)
                 if runtime.is_count_only:
-                    if runtime.match_mode == "cascade":
-                        count_row = build_count_result_row(runtime, current, "", "", 0, evaluation)
-                        commit_source_result_shard(
-                            source_results_dir, current, crawl_plan_fingerprint,
-                            provider_fingerprint, [], [], count_row,
-                        )
-                        committed_count_results = materialize_source_result_shards(
-                            source_results_dir, crawl_plan_fingerprint,
-                            provider_fingerprint, candidates_path, records_path, counts_path,
-                        )
-                    else:
-                        append_count_result(counts_path, runtime, current, "", "", 0, evaluation)
+                    commit_count_row(
+                        current,
+                        build_count_result_row(runtime, current, "", "", 0, evaluation),
+                    )
                 log_failure(failures_path, state, current, "source_unavailable", reason, exc.url)
                 state.clear_amazon_page_retry()
+                run_outcome.clear_item_failures(state.data, work_key)
                 state.finish_current_source("source_unavailable", result={
                     "processing_status": "source_unavailable",
                     "same_product_count": None,
                     "match_reason": reason,
                 })
+                progress.discard()
                 record_operational_outcome(state, True)
                 print(f"跳过失效商品页：{label}；同款数量留空。")
                 continue
@@ -5318,33 +6604,66 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                         debug_dir,
                         "amazon_page_unavailable_retry_exhausted",
                     )
-                if runtime.operation_mode == "unattended":
-                    state.clear_amazon_page_retry()
-                    state.defer_current(exc.failure_code)
-                    if record_operational_outcome(state, False):
-                        raise UserFacingError("夜间失败达到阈值；剩余来源保留在断点中。") from exc
-                    continue
-                raise UserFacingError(
-                    "Amazon 页面在本模式有限重试后仍不可用；当前产品未提交，"
-                    "断点状态为 manual_resume_required。请稍后重新运行同一命令继续。"
-                ) from exc
+                fail_source_cycle(
+                    current,
+                    str(label),
+                    exc.failure_code,
+                    redact_sensitive_text(exc.last_error)[:300],
+                    exc,
+                    keep_page_retry=True,
+                )
+                continue
+            except SourceTimeBudgetExceeded as exc:
+                log_failure(
+                    failures_path,
+                    state,
+                    current,
+                    exc.reason,
+                    str(exc),
+                    safe_driver_current_url(driver),
+                )
+                if runtime.save_debug_snapshots:
+                    save_debug_snapshot(driver, debug_dir, exc.reason)
+                fail_source_cycle(current, str(label), exc.reason, str(exc), exc)
+                continue
             except PluginDataTimeout as exc:
-                if runtime.operation_mode == "unattended":
-                    state.defer_current("plugin_data_timeout")
-                    if record_operational_outcome(state, False):
-                        raise UserFacingError("夜间失败达到阈值；剩余来源保留在断点中。") from exc
-                    continue
-                raise
+                log_failure(
+                    failures_path,
+                    state,
+                    current,
+                    "plugin_data_timeout",
+                    redact_sensitive_text(exc)[:500],
+                    safe_driver_current_url(driver),
+                )
+                fail_source_cycle(current, str(label), "plugin_data_timeout", str(exc), exc)
+                continue
+            except FatalEmbeddingProviderError as exc:
+                safe_message = redact_sensitive_text(
+                    exc,
+                    (runtime.embedding_api_key, runtime.mini_api_key),
+                )[:500]
+                log_failure(
+                    failures_path,
+                    state,
+                    current,
+                    "embedding_provider_fatal",
+                    safe_message,
+                    safe_driver_current_url(driver),
+                )
+                if runtime.save_debug_snapshots:
+                    save_debug_snapshot(driver, debug_dir, "embedding_provider_fatal")
+                print(
+                    "视觉模型鉴权/模型权限错误，当前来源已保留在断点中；"
+                    + PROVIDER_CONFIG_NEXT_ACTION,
+                    file=sys.stderr,
+                )
+                raise FatalEmbeddingProviderError(safe_message) from exc
             except EmbeddingProviderError as exc:
                 safe_message = redact_sensitive_text(
                     exc,
                     (runtime.embedding_api_key, runtime.mini_api_key),
                 )[:500]
-                failure_reason = (
-                    "embedding_provider_fatal"
-                    if isinstance(exc, FatalEmbeddingProviderError)
-                    else "embedding_provider_error"
-                )
+                failure_reason = str(getattr(exc, "failure_reason", "") or "embedding_provider_error")
                 log_failure(
                     failures_path,
                     state,
@@ -5355,17 +6674,22 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                 )
                 if runtime.save_debug_snapshots:
                     save_debug_snapshot(driver, debug_dir, failure_reason)
-                print(
-                    "视觉向量识别失败，当前来源已保留在断点中；"
-                    "本次未写入该来源的相似竞品数量。",
-                    file=sys.stderr,
-                )
-                error_type = (
-                    FatalEmbeddingProviderError
-                    if isinstance(exc, FatalEmbeddingProviderError)
-                    else EmbeddingProviderError
-                )
-                raise error_type(safe_message) from exc
+                if isinstance(exc, CandidatesUnscorableError):
+                    # The collected candidate list is the suspect input (lazy
+                    # images, DOM change): the next cycle collects it again.
+                    # Paid vectors and per-image exclusions stay saved.
+                    progress.delete("lens", "collection")
+                    print(
+                        "Lens 候选图片大多无法识别，当前来源本轮未写入数量；下次运行会重新收集候选。",
+                        file=sys.stderr,
+                    )
+                else:
+                    print(
+                        "视觉模型暂时失败，当前来源本轮未写入数量；已完成的模型调用已保存，不会重复付费。",
+                        file=sys.stderr,
+                    )
+                fail_source_cycle(current, str(label), failure_reason, safe_message, exc)
+                continue
             except DeliveryLocationUnconfirmedError as exc:
                 safe_message = redact_sensitive_text(
                     exc,
@@ -5398,62 +6722,41 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                 if runtime.save_debug_snapshots:
                     save_debug_snapshot(driver, debug_dir, "verification_unconfirmed")
                 raise VerificationUnconfirmedError(safe_message) from exc
-            except (TimeoutException, requests.RequestException) as exc:
+            except (
+                SourceImageDownloadError,
+                TimeoutException,
+                requests.RequestException,
+                UserFacingError,
+                WebDriverException,
+            ) as exc:
                 safe_message = redact_sensitive_text(
                     exc,
                     (runtime.embedding_api_key, runtime.mini_api_key),
                 )[:500]
+                failure_reason = (
+                    "source_image_download_failed"
+                    if isinstance(exc, SourceImageDownloadError)
+                    else "runtime_error"
+                    if isinstance(exc, (TimeoutException, requests.RequestException))
+                    else "webdriver_error"
+                    if isinstance(exc, WebDriverException)
+                    else "crawler_error"
+                )
                 log_failure(
                     failures_path,
                     state,
                     current,
-                    "runtime_error",
+                    failure_reason,
                     safe_message,
                     safe_driver_current_url(driver),
                 )
                 if runtime.save_debug_snapshots:
-                    save_debug_snapshot(driver, debug_dir, "runtime_error")
-                if runtime.operation_mode == "unattended":
-                    state.defer_current("runtime_error")
-                    if record_operational_outcome(state, False):
-                        raise UserFacingError("夜间失败达到阈值；剩余来源保留在断点中。") from exc
-                    continue
-                if runtime.match_mode == "cascade":
-                    raise UserFacingError(
-                        "cascade 来源处理发生暂时性网络/页面超时；"
-                        "当前来源已保留，未写入同款数量，请稍后按断点重试。"
-                    ) from exc
-                state.finish_current_source("runtime_error")
-            except (UserFacingError, WebDriverException) as exc:
-                safe_message = redact_sensitive_text(
-                    exc,
-                    (runtime.embedding_api_key, runtime.mini_api_key),
-                )[:500]
-                log_failure(
-                    failures_path,
-                    state,
-                    current,
-                    "crawler_error",
-                    safe_message,
-                    safe_driver_current_url(driver),
-                )
-                if runtime.save_debug_snapshots:
-                    save_debug_snapshot(driver, debug_dir, "crawler_error")
-                if runtime.operation_mode == "unattended":
-                    if not isinstance(exc, WebDriverException):
-                        raise UserFacingError(safe_message) from exc
-                    state.defer_current("webdriver_error")
-                    if record_operational_outcome(state, False):
-                        raise UserFacingError("夜间失败达到阈值；剩余来源保留在断点中。") from exc
-                    continue
-                if runtime.match_mode == "cascade":
-                    if isinstance(exc, UserFacingError):
-                        raise UserFacingError(safe_message) from exc
-                    raise UserFacingError(
-                        "cascade 浏览器处理失败；当前来源已保留，未写入同款数量。"
-                    ) from exc
-                state.finish_current_source("crawler_error")
+                    save_debug_snapshot(driver, debug_dir, failure_reason)
+                fail_source_cycle(current, str(label), failure_reason, safe_message, exc)
+                continue
             finally:
+                runtime._source_progress = None
+                runtime._source_budget = None
                 close_claimed_crawler_windows(
                     driver,
                     source_claimed_before,
@@ -5467,43 +6770,105 @@ def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: b
                 pass
         finally:
             job_lock.release()
+            configure_manual_waits()
             safety.fail_review()
             write_run_summary(job_dir, runtime.operation_mode, safety)
             safety.release()
+            if not clean_finish and state is not None and state.data.get("completed_sources"):
+                # Item 9: every exit path with at least one completed source
+                # leaves a workbook of what is done so far.
+                try:
+                    write_output_workbook()
+                    print("（运行未完成：以上表格只包含已完成的来源。）")
+                except Exception as workbook_exc:  # never replaces the run's own outcome (P2-2)
+                    print(
+                        f"部分结果表格生成失败：{type(workbook_exc).__name__}: {workbook_exc}；"
+                        "如表格正在 Excel/WPS 中打开，请关闭表格后重新运行。",
+                        file=sys.stderr,
+                    )
 
-    if runtime.is_count_only:
-        write_count_only_workbook(runtime.products_file, counts_path, output_xlsx)
-        print(f"已生成相似竞品数量表：{output_xlsx}")
-    else:
-        write_workbook(runtime.products_file, records_path, candidates_path, failures_path, output_xlsx)
-        print(f"已生成以图搜图竞品表：{output_xlsx}")
+    try:
+        write_output_workbook()
+    except OSError as exc:
+        # Every source is committed; only the export failed (on Windows
+        # usually because the workbook is open).  A rerun only re-exports.
+        print(f"结果表格写入失败：{exc}；请关闭表格后重新运行同一命令。", file=sys.stderr)
+        raise run_outcome.needs_human(
+            f"结果表格写入失败（{type(exc).__name__}）：{exc}",
+            next_action=WORKBOOK_LOCKED_NEXT_ACTION,
+        ) from exc
     return 0
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Amazon image-search competitor crawler with SellerSprite data.")
+def _skipped_count(job_dir: Optional[Path]) -> int:
+    if job_dir is None:
+        return 0
+    try:
+        state = json.loads((Path(job_dir) / "state.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return 0
+    return len(state.get("skipped_items") or []) if isinstance(state, dict) else 0
+
+
+def classify_crawl_exception(exc: BaseException, *, dry_run: bool = False) -> BaseException:
+    """Map crawler exceptions onto the shared run_outcome contract."""
+
+    if isinstance(exc, (run_outcome.CrawlStop, SafetyPausedError)):
+        return exc
+    message = str(exc)
+    if isinstance(exc, FatalEmbeddingProviderError):
+        return run_outcome.needs_human(message, next_action=PROVIDER_CONFIG_NEXT_ACTION)
+    if dry_run and isinstance(exc, (UserFacingError, ValueError, OSError)):
+        return run_outcome.config_error(message)
+    if isinstance(exc, DeliveryLocationUnconfirmedError):
+        return run_outcome.needs_human(message, next_action=DELIVERY_NEXT_ACTION)
+    if isinstance(exc, VerificationUnconfirmedError):
+        return run_outcome.needs_human(message, next_action=VERIFICATION_NEXT_ACTION)
+    if isinstance(exc, UserFacingError):
+        return run_outcome.config_error(message)
+    return exc
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    parser = argparse.ArgumentParser(description="Amazon image-search competitor crawler (Lens / Find Similar + Doubao cascade).")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="配置文件路径")
     parser.add_argument("--dry-run", action="store_true", help="只检查配置，不打开浏览器")
     parser.add_argument("--no-resume", action="store_true", help="忽略已有断点，重新开始任务")
     parser.add_argument("--resume-after-review", action="store_true")
     parser.add_argument("--operation-mode", choices=("supervised", "unattended"))
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    config_path = Path(args.config).expanduser()
-    if not config_path.is_absolute():
-        config_path = ROOT_DIR / config_path
-    raw_config = load_json(config_path)
-    if args.operation_mode:
-        raw_config["operation_mode"] = args.operation_mode
-    runtime = build_image_runtime_config(raw_config, args.no_resume)
-    runtime.resume_after_review = args.resume_after_review
-    print(policy_description(runtime), flush=True)
-    return run_image_competitor_crawl(runtime, args.dry_run)
+    job_dir: Optional[Path] = None
+    candidate_job_dir: Optional[Path] = None
+    outcome_exc: Optional[BaseException] = None
+    try:
+        config_path = Path(args.config).expanduser()
+        if not config_path.is_absolute():
+            config_path = ROOT_DIR / config_path
+        try:
+            raw_config = load_json(config_path)
+            if not isinstance(raw_config, dict):
+                raise UserFacingError(f"配置文件必须是 JSON 对象：{config_path}")
+            if args.operation_mode:
+                raw_config["operation_mode"] = args.operation_mode
+            runtime = build_image_runtime_config(raw_config, args.no_resume)
+        except (UserFacingError, ValueError, OSError) as exc:
+            raise run_outcome.config_error(f"配置无效：{exc}") from exc
+        runtime.resume_after_review = args.resume_after_review
+        print(policy_description(runtime), flush=True)
+        candidate_job_dir = runtime.outputs_root / runtime.job_id
+        run_image_competitor_crawl(runtime, args.dry_run)
+        job_dir = None if args.dry_run else candidate_job_dir
+    except KeyboardInterrupt as exc:
+        outcome_exc = exc
+    except Exception as exc:
+        outcome_exc = classify_crawl_exception(exc, dry_run=args.dry_run)
+    if outcome_exc is not None:
+        print(f"运行失败：{outcome_exc}", file=sys.stderr)
+        if not args.dry_run and candidate_job_dir is not None and candidate_job_dir.exists():
+            job_dir = candidate_job_dir
+    return run_outcome.exit_with(outcome_exc, job_dir, skipped_count=_skipped_count(job_dir))
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except (UserFacingError, SafetyPausedError) as exc:
-        print(f"运行失败：{exc}", file=sys.stderr)
-        raise SystemExit(2)
+    raise SystemExit(main())
