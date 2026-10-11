@@ -26,7 +26,7 @@ NEVER_PATHS = {"assets/layouts/design_templates.user.json"}
 
 def is_test(relative: str) -> bool:
     name = Path(relative).name
-    return (name.startswith("test_") or name.startswith("benchmark_") or name == "pipeline_test_support.py"
+    return (name.startswith("test_") or name.startswith("benchmark_") or name in {"studio_test_support.py", "pipeline_test_support.py"}
             or relative.startswith("scripts/fixtures/"))
 
 
@@ -99,7 +99,7 @@ def build(out_dir: Path, with_tests: bool, platform: str, name: str) -> dict:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", type=Path, default=ROOT.parent)
-    parser.add_argument("--name", default=f"{NAME}-v7")
+    parser.add_argument("--name", default=f"{NAME}-v8.1")
     parser.add_argument("--with-tests", action="store_true", help="Maintainer package including tests and fixtures")
     parser.add_argument("--platform", choices=("all", "mac", "win", "linux"), default="all",
                         help="Only include the auth checker(s) for one platform")

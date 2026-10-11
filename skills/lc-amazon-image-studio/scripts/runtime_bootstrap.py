@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Standard-library runtime preflight; never imports production/auth or Pillow.
+"""Standard-library runtime preflight (V8): 64-bit Python >= 3.11 with Pillow and NumPy.
 
-Installation is a separate, explicitly authorized operation. Authorization here
-records permission to install dependencies, NOT account authentication or a claim
-about the host's Codex permission settings.
+Never imports production/auth code or Pillow itself. An existing compatible Python is
+always preferred; installation is a separate, explicitly authorized operation that
+creates a private venv with pinned wheels. Authorization here records permission to
+install dependencies, NOT account authentication or a claim about the host's Codex
+permission settings.
 """
 from __future__ import annotations
 
@@ -11,7 +13,7 @@ import argparse
 import hashlib
 import json
 import os
-from pathlib import Path, PurePosixPath, PureWindowsPath
+from pathlib import Path
 import platform
 import re
 import shutil
@@ -19,29 +21,17 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.parse
-# urllib.request (ssl/http), tarfile and zipfile load lazily: the pipeline imports this
-# module only to read selection.json, and that must stay cheap.
 
 ROOT = Path(__file__).resolve().parents[1]
-# Official LTS checked 2026-09-10. Existing valid Node is always preferred;
-# the layout lock itself remains Node >= 20 and is not changed by bootstrap.
-NODE_FALLBACK_VERSION = "24.21.0"
-NODE_ORIGIN = "https://nodejs.org"
-# Additional production dependency, matching the frozen bundled-runtime replay.
-# Kept outside layout-runtime.json so adding bootstrap does not invalidate QA.
-BOOTSTRAP_DEPENDENCIES = {"numpy_version": "2.3.5", "python_min": [3, 11],
-                          "browser_installer": {"package": "playwright-core", "version": "1.61.0",
-                                                "chromium_version": "149.0.7827.55", "chromium_revision": "1228"}}
+# Compatible ranges are accepted as found; `install` pins the tested versions.
+REQUIREMENTS = {"python_min": [3, 11],
+                "pillow": {"install": "12.3.0", "min": "11.0.0", "below": "13"},
+                "numpy": {"install": "2.3.5", "min": "1.26.0", "below": "3"}}
+PACKAGES = ("pillow", "numpy")
 AUTHORIZED = {"full-access", "user-confirmed"}
-BROWSER_PATTERNS = (
-    "chromium*/chrome-headless-shell*/chrome-headless-shell",
-    "chromium*/chrome-headless-shell*/headless_shell.exe",
-    "chromium*/chrome-headless-shell*/chrome-headless-shell.exe",
-    "chromium*/chrome-*/chrome", "chromium*/chrome-*/chrome.exe",
-    "chromium*/chrome-*/Chromium.app/Contents/MacOS/Chromium",
-    "chromium*/chrome-*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-)
+# -E ignores PYTHONPATH/PYTHONHOME, -P keeps the current directory off sys.path (no
+# planted module shadowing); user site-packages stay visible like a normal run.
+PROBE_FLAGS = ("-E", "-P", "-B")
 PYTHON_PROBE = """import json,sys,struct
 try:
  import PIL
@@ -55,17 +45,32 @@ except ImportError:
  numpy_version=None
 print(json.dumps({'version':list(sys.version_info[:3]),'bits':struct.calcsize('P')*8,'pillow':pillow,'numpy':numpy_version}))
 """
-BROWSER_SMOKE = """const {chromium}=require(process.argv[1]);
-(async()=>{let b;try{b=await chromium.launch({executablePath:process.argv[2],headless:true,args:['--disable-gpu']});
-const p=await b.newPage();await p.setContent('<p>Runtime preflight</p>');
-await p.screenshot({type:'png'});console.log(JSON.stringify({passed:true}));
-}finally{if(b)await b.close();}})().catch(e=>{console.error(e.message);process.exitCode=1;});"""
-
-
+# Real behaviour, not presence: the studio modules import, a main image is cut out,
+# composited and verified as exact 255 on the decoded file, and XMP disclosure survives.
+VERIFY_SMOKE = r"""import json, sys, tempfile
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import numpy
+from PIL import Image, ImageDraw
+import studio_catalog, studio_export, studio_main, studio_plan, studio_project, studio_prompt  # noqa: F401
+checks = []
+scene = Image.new("RGB", (600, 600), (248, 248, 248))
+ImageDraw.Draw(scene).rounded_rectangle((180, 120, 420, 480), 20, fill=(30, 60, 140))
+foreground, matte, _ = studio_main.cutout(scene)
+result, placed, _ = studio_main.compose(foreground, matte, (1000, 1000))
+with tempfile.TemporaryDirectory() as temp:
+    report = studio_main.export(result, placed, Path(temp) / "main.jpg")
+    if not report["verify"]["ok"]:
+        raise SystemExit("main image white check failed: " + json.dumps(report["verify"]))
+    checks.append("main_white_" + report["format"])
+    studio_export.export_jpeg(result, Path(temp) / "secondary.jpg", people=True)
+    checks.append("xmp_disclosure")
+print(json.dumps({"passed": True, "checks": checks}))
+"""
 VERIFIED_TTL_SECONDS = 7 * 24 * 3600
 # Runtime-facing sources whose change must force a real (uncached) verification.
-VERIFIED_SOURCES = ("scripts/lc_layout.py", "scripts/render_layout.mjs", "scripts/lc_typography.py",
-                    "scripts/runtime_bootstrap.py", "assets/layout-runtime.json", "assets/fonts/manifest.json")
+VERIFIED_SOURCES = ("scripts/runtime_bootstrap.py", "scripts/studio_main.py", "scripts/studio_export.py")
+OVERRIDE_ENV = ("LC_STUDIO_PYTHON",)
 
 
 class BootstrapError(RuntimeError):
@@ -92,39 +97,23 @@ def _windows():
     return platform.system() == "Windows"
 
 
-def _node_archive_spec(system=None, machine=None):
-    system = system or platform.system()
-    machine = (machine or platform.machine()).lower()
-    archive_os = {"Darwin": "darwin", "Linux": "linux", "Windows": "win"}.get(system)
-    arch = {"arm64": "arm64", "aarch64": "arm64", "x86_64": "x64", "amd64": "x64"}.get(machine)
-    if not archive_os or not arch:
-        raise BootstrapError(f"No approved Node archive for {system}/{machine}; ask user before external setup")
-    folder = f"node-v{NODE_FALLBACK_VERSION}-{archive_os}-{arch}"
-    return {"folder": folder, "filename": folder + (".zip" if system == "Windows" else ".tar.gz"),
-            "binary": "node.exe" if system == "Windows" else "bin/node"}
+def _version(text):
+    numbers = re.findall(r"\d+", str(text or ""))[:3]
+    return tuple(int(number) for number in numbers) + (0,) * (3 - len(numbers)) if numbers else None
+
+
+def _compatible(package, version):
+    spec, parsed = REQUIREMENTS[package], _version(version)
+    return parsed is not None and _version(spec["min"]) <= parsed < _version(spec["below"])
 
 
 def _host_info():
     system, machine = platform.system(), platform.machine().lower()
     version = platform.mac_ver()[0] if system == "Darwin" else platform.version()
     warnings = []
-    supported = None
-    if system == "Darwin":
-        major = int(version.split(".")[0]) if version.split(".")[0].isdigit() else 0
-        supported = major >= 14
-        if not supported:
-            warnings.append("Pinned Playwright documents macOS >=14; this OS requires target-machine verification and is not an officially supported production claim")
-    elif system == "Windows":
-        build = version.split(".")[2] if len(version.split(".")) > 2 else "0"
-        win11 = platform.release() == "11" or (build.isdigit() and int(build) >= 22000)
-        supported = win11
-        if not win11:
-            warnings.append("Windows 10 compatibility is not Playwright 1.62.1 official support; unchanged pinned runtime must pass verify on this machine")
-        if machine not in {"amd64", "x86_64"}:
-            warnings.append("Only Windows x64 is in this skill's platform scope; Windows ARM/32-bit is not covered by the unchanged auth binaries")
-            supported = False
-    return {"system": system, "machine": machine, "version": version,
-            "playwright_official_os_support": supported, "warnings": warnings,
+    if system == "Windows" and machine not in {"amd64", "x86_64"}:
+        warnings.append("Only Windows x64 is in this skill's platform scope; Windows ARM/32-bit is not covered by the unchanged auth binaries")
+    return {"system": system, "machine": machine, "version": version, "warnings": warnings,
             "validation": "Local verify is required; platform mapping tests are not target-machine tests"}
 
 
@@ -138,103 +127,16 @@ def _run(argv, *, env=None, timeout=20):
     if result.returncode:
         message = (result.stderr or result.stdout).strip()[-2400:]
         # Proxy/package server URLs may contain user credentials. They are not
-        # needed to diagnose a missing wheel, inaccessible download or OS library.
+        # needed to diagnose a missing wheel or an inaccessible download.
         message = re.sub(r"(https?://)[^\s/@]+:[^\s/@]+@", r"\1[redacted]@", message)
         raise BootstrapError(f"{Path(str(argv[0])).name} exited {result.returncode}: {message}")
     return result.stdout.strip()
 
 
-def _official_download(url, target):
-    import urllib.error
-    import urllib.request
-    parsed = urllib.parse.urlsplit(url)
-    if parsed.scheme != "https" or parsed.netloc != "nodejs.org" or not parsed.path.startswith("/dist/"):
-        raise BootstrapError("Node downloads must use https://nodejs.org/dist/")
-    class OfficialRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, request, response, code, message, headers, newurl):
-            redirected = urllib.parse.urlsplit(newurl)
-            if redirected.scheme != "https" or redirected.netloc != "nodejs.org":
-                raise BootstrapError("Node download redirected outside the official HTTPS origin")
-            return super().redirect_request(request, response, code, message, headers, newurl)
-
-    def fetch(*handlers):
-        with urllib.request.build_opener(OfficialRedirect(), *handlers).open(url, timeout=60) as response:
-            redirected = urllib.parse.urlsplit(response.geturl())
-            if redirected.scheme != "https" or redirected.netloc != "nodejs.org":
-                raise BootstrapError("Node download redirected outside the official HTTPS origin")
-            with Path(target).open("wb") as stream:
-                shutil.copyfileobj(response, stream)
-
-    try:
-        fetch()
-    except urllib.error.URLError as exc:
-        import ssl
-        # python.org builds on macOS ship without CA roots until "Install Certificates"
-        # runs. Retry once with the system bundle; verification is never disabled.
-        system_bundle = Path("/etc/ssl/cert.pem")
-        if not isinstance(getattr(exc, "reason", None), ssl.SSLCertVerificationError) or not system_bundle.is_file():
-            raise BootstrapError(f"Node download failed: {exc}. On macOS python.org builds run "
-                                 "'Install Certificates.command' once, then retry.") from exc
-        fetch(urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=str(system_bundle))))
-
-
-def _extract_node(archive, destination, expected_root):
-    """No extractall: archive links/devices and path escapes are never followed."""
-    def target_for(name):
-        if "\\" in name:
-            raise BootstrapError("Unsafe Node archive path")
-        parts = PurePosixPath(name).parts
-        if not parts or parts[0] != expected_root or ".." in parts or PurePosixPath(name).is_absolute():
-            raise BootstrapError("Unsafe Node archive path")
-        target = Path(destination).joinpath(*parts)
-        if not target.resolve().is_relative_to(Path(destination).resolve()):
-            raise BootstrapError("Unsafe Node archive target")
-        return target
-
-    if str(archive).endswith(".zip"):
-        import zipfile
-        with zipfile.ZipFile(archive) as bundle:
-            for item in bundle.infolist():
-                target = target_for(item.filename)
-                mode = item.external_attr >> 16
-                if mode & 0o170000 == 0o120000:
-                    raise BootstrapError("Unexpected symlink in Node zip")
-                if item.is_dir():
-                    target.mkdir(parents=True, exist_ok=True)
-                else:
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    with bundle.open(item) as source, target.open("xb") as output:
-                        shutil.copyfileobj(source, output)
-    else:
-        import tarfile
-        with tarfile.open(archive, "r:gz") as bundle:
-            for item in bundle:
-                target = target_for(item.name)
-                if item.isdir():
-                    target.mkdir(parents=True, exist_ok=True)
-                elif item.isfile():
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    with bundle.extractfile(item) as source, target.open("xb") as output:
-                        shutil.copyfileobj(source, output)
-                    target.chmod(item.mode & 0o777)
-                elif item.issym():
-                    # Invoke the bundled npm CLI with Node directly; no link is
-                    # required and no archive-provided symlink is materialized.
-                    continue
-                else:
-                    raise BootstrapError("Unexpected non-file in Node archive")
-
-
 class RuntimeBootstrap:
     def __init__(self, root=ROOT, cache_root=None):
         self.root = Path(root).resolve()
-        self.lock = _json(self.root / "assets/layout-runtime.json")
-        for key in ("pillow_version", "playwright_version", "chromium_version"):
-            if not re.fullmatch(r"\d+(?:\.\d+){2,3}", str(self.lock.get(key, ""))):
-                raise BootstrapError(f"Invalid runtime lock: {key}")
-        if not isinstance(self.lock.get("node_min_major"), int) or self.lock["node_min_major"] < 20:
-            raise BootstrapError("Invalid Node minimum in runtime lock")
-        digest = hashlib.sha256(json.dumps([self.lock, BOOTSTRAP_DEPENDENCIES], sort_keys=True).encode()).hexdigest()[:16]
+        digest = hashlib.sha256(json.dumps(REQUIREMENTS, sort_keys=True).encode()).hexdigest()[:16]
         override = os.environ.get("LC_AMAZON_STUDIO_CACHE", "").strip()
         default_cache = (Path(override).expanduser() / "runtime" if override else
                          Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local") / "lc-amazon-image-studio/runtime"
@@ -258,33 +160,17 @@ class RuntimeBootstrap:
                     return value
             except (OSError, ValueError):
                 continue
-        try:
-            value = _json(self.selection_path)
-            return value if isinstance(value, dict) else {}
-        except (OSError, ValueError):
-            return {}
+        return {}
 
     def _candidates(self):
         selected = self._selection()
         python_name = "Scripts/python.exe" if _windows() else "bin/python"
-        pythons = _unique([os.environ.get("LC_LAYOUT_PYTHON"), selected.get("python"),
-                          sys.executable, shutil.which("python3"), shutil.which("python"),
-                          self.bundled / "python/bin/python3", self.bundled / "python/python.exe",
-                          *self.cache.glob(f"python-*/{python_name}"), *self._launcher_pythons()])
-        nodes = _unique([os.environ.get("LC_LAYOUT_NODE"), selected.get("node"), shutil.which("node"),
-                        self.bundled / "node/bin/node", self.bundled / "node/node.exe",
-                        *self.cache.glob("node-*/node-*/bin/node"), *self.cache.glob("node-*/node-*/node.exe")])
-        modules = _unique([os.environ.get("LC_LAYOUT_NODE_MODULES"), selected.get("modules"),
-                          self.root / "node_modules", self.bundled / "node/node_modules",
-                          *self.cache.glob("npm-*/node_modules")])
-        browser_roots = _unique([os.environ.get("PLAYWRIGHT_BROWSERS_PATH"), self.cache / "browsers",
-                                 Path.home() / "Library/Caches/ms-playwright", Path.home() / ".cache/ms-playwright",
-                                 Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local") / "ms-playwright" if _windows() else None])
-        browsers = [os.environ.get("LC_LAYOUT_CHROMIUM"), selected.get("chromium")]
-        for base in browser_roots:
-            for pattern in BROWSER_PATTERNS:
-                browsers.extend(sorted(Path(base).glob(pattern), reverse=True))
-        return {"python": pythons, "node": nodes, "modules": modules, "chromium": _unique(browsers)}
+        # Private venvs from any earlier lock (V7 installs pinned the same wheels) are probed too.
+        return _unique([*(os.environ.get(name) for name in OVERRIDE_ENV), selected.get("python"),
+                        sys.executable, shutil.which("python3"), shutil.which("python"),
+                        self.bundled / "python/bin/python3", self.bundled / "python/python.exe",
+                        *self.cache.glob(f"python-*/{python_name}"), *sorted(self.cache_root.glob(f"*/python-*/{python_name}")),
+                        *self._launcher_pythons()])
 
     @staticmethod
     def _launcher_pythons():
@@ -303,100 +189,44 @@ class RuntimeBootstrap:
                 result.append(match.group(1).strip().strip('"'))
         return result
 
-    def _font_errors(self):
-        errors = []
-        try:
-            manifest = _json(self.root / "assets/fonts/manifest.json")
-            for item in manifest["fonts"]:
-                path = self.root / "assets/fonts" / item["file"]
-                if not path.is_file() or _sha(path) != item["sha256"]:
-                    errors.append(f"{item['file']}: restore original bundled file (SHA-256 {item['sha256']})")
-            for name in manifest["license_files"]:
-                if not (self.root / "assets/fonts" / name).is_file():
-                    errors.append(f"{name}: restore original bundled license")
-        except (OSError, ValueError, KeyError, TypeError) as exc:
-            errors.append(f"Bundled font manifest unavailable: {exc}")
-        return errors
-
     def inspect(self):
-        candidates = self._candidates()
-        selected = {"python": None, "node": None, "modules": None, "chromium": None}
-        usable_python = None
-        best_python_probe = {}
-        best_python_score = -1
-        versions = {}
-        for candidate in candidates["python"]:
+        selected, usable, usable_probe, versions = None, None, {}, {}
+        for candidate in self._candidates():
             if not Path(candidate).is_file():
                 continue
             try:
-                probe = json.loads(_run([candidate, "-I", "-B", "-c", PYTHON_PROBE]))
-                if tuple(probe["version"]) < tuple(BOOTSTRAP_DEPENDENCIES["python_min"]) or probe.get("bits") != 64:
+                probe = json.loads(_run([candidate, *PROBE_FLAGS, "-c", PYTHON_PROBE]))
+                if tuple(probe["version"]) < tuple(REQUIREMENTS["python_min"]) or probe.get("bits") != 64:
                     continue
-                score = int(probe.get("pillow") == self.lock["pillow_version"]) + int(probe.get("numpy") == BOOTSTRAP_DEPENDENCIES["numpy_version"])
-                if score > best_python_score:
-                    usable_python, best_python_probe, best_python_score = candidate, probe, score
-                if score == 2:
-                    selected["python"] = candidate
-                    versions["python"] = ".".join(map(str, probe["version"]))
-                    versions["pillow"] = probe["pillow"]
-                    versions["numpy"] = probe["numpy"]
-                    break
             except (BootstrapError, ValueError, KeyError, TypeError):
                 continue
-        for candidate in candidates["node"]:
-            if not Path(candidate).is_file():
-                continue
-            try:
-                version = _run([candidate, "--version"])
-                if int(version.lstrip("v").split(".")[0]) >= self.lock["node_min_major"]:
-                    selected["node"] = candidate
-                    versions["node"] = version
-                    break
-            except (BootstrapError, ValueError):
-                continue
-        for candidate in candidates["modules"]:
-            try:
-                if _json(Path(candidate) / "playwright/package.json")["version"] == self.lock["playwright_version"]:
-                    selected["modules"] = candidate
-                    versions["playwright"] = self.lock["playwright_version"]
-                    break
-            except (OSError, ValueError, KeyError, TypeError):
-                continue
-        for candidate in candidates["chromium"]:
-            if not Path(candidate).is_file():
-                continue
-            if self._chromium_matches(candidate, selected["modules"]):
-                selected["chromium"] = candidate
-                versions["chromium"] = self.lock["chromium_version"]
+            if usable is None:
+                usable, usable_probe = candidate, probe
+            if all(_compatible(name, probe.get(name)) for name in PACKAGES):
+                selected = candidate
+                versions = {"python": ".".join(map(str, probe["version"])), "pillow": probe["pillow"], "numpy": probe["numpy"]}
                 break
         missing = []
-        if not selected["python"]:
-            if not usable_python:
+        if not selected:
+            if not usable:
                 missing.append({"name": "python", "version": ">=3.11 64-bit", "installable": False,
-                                "reason": "64-bit Python >=3.11 unavailable (required by pinned NumPy); ask user to install a supported Python first"})
+                                "reason": "64-bit Python >=3.11 unavailable; ask the user to install a supported Python first (see SKILL.md §0)"})
             else:
-                for package, version in (("pillow", self.lock["pillow_version"]), ("numpy", BOOTSTRAP_DEPENDENCIES["numpy_version"])):
-                    if best_python_probe.get(package) != version:
-                        missing.append({"name": package, "version": version, "installable": True, "reason": f"Pinned {package} unavailable"})
-        for key, name, version in (("node", "node", f">={self.lock['node_min_major']}"), ("modules", "playwright", self.lock["playwright_version"]),
-                                   ("chromium", "chromium", self.lock["chromium_version"])):
-            if not selected[key]:
-                missing.append({"name": name, "version": version, "installable": True, "reason": "No matching local runtime found"})
-        font_errors = self._font_errors()
-        if font_errors:
-            missing.append({"name": "bundled_fonts", "installable": False, "reason": "Restore original skill resources; never substitute fonts", "details": font_errors})
-        env = {name: selected[key] for name, key in (("LC_LAYOUT_NODE", "node"), ("LC_LAYOUT_NODE_MODULES", "modules"), ("LC_LAYOUT_CHROMIUM", "chromium")) if selected[key]}
-        commands = {"cwd": str(self.root), "python": selected["python"] or usable_python, "env": env}
-        if commands["python"]:
-            # lc_doctor.py loads lc_layout_style first, so a Windows Chrome for Testing build that
-            # prints nothing for --version is still recognised by its manifest/revision.
-            commands["doctor_argv"] = [commands["python"], "-X", "utf8", "-B", str(self.root / "scripts/lc_doctor.py")]
-            commands["pipeline_argv_prefix"] = [commands["python"], "-X", "utf8", str(self.root / "scripts/lc_image_pipeline.py")]
+                for name in PACKAGES:
+                    found = usable_probe.get(name)
+                    if not _compatible(name, found):
+                        spec = REQUIREMENTS[name]
+                        missing.append({"name": name, "version": spec["install"], "installable": True, "found": found,
+                                        "reason": f"{name} {spec['min']}..<{spec['below']} required (found {found or 'none'})"})
+        python = selected or usable
+        commands = {"cwd": str(self.root), "python": python, "env": {}}
+        if python:
+            commands["studio_argv_prefix"] = [python, "-X", "utf8", str(self.root / "scripts/studio.py")]
         return {"ready": not missing, "verified": False, "verification_required": True,
-                "next_action": "verify" if not missing else "Review missing dependencies and installation authorization",
+                "next_action": "verify" if not missing else "Ask the user to confirm installing the listed dependencies",
                 "missing": missing, "installable": [item["name"] for item in missing if item["installable"]],
-                "needs_confirmation": bool(missing), "selected": selected, "versions": versions, "commands": commands,
-                "usable_python": usable_python, "cache_dir": str(self.cache), "platform": _host_info()}
+                "needs_confirmation": bool(missing), "selected": {"python": selected}, "versions": versions,
+                "commands": commands, "usable_python": usable, "cache_dir": str(self.cache), "platform": _host_info()}
 
     def _prepare_cache(self):
         # Install only inside a dedicated cache subtree; never follow pre-created
@@ -405,10 +235,9 @@ class RuntimeBootstrap:
             if path.is_symlink():
                 raise BootstrapError(f"Cache path must not contain symlinks: {path}")
         self.cache.mkdir(parents=True, exist_ok=True)
-        for name in ("browsers", "npm-cache", "pip-cache"):
-            target = self.cache / name
-            if target.is_symlink() or (target.exists() and not target.is_dir()):
-                raise BootstrapError(f"Installer cache target must be a real directory: {target}")
+        target = self.cache / "pip-cache"
+        if target.is_symlink() or (target.exists() and not target.is_dir()):
+            raise BootstrapError(f"Installer cache target must be a real directory: {target}")
 
     def _install_python(self, python):
         target = Path(tempfile.mkdtemp(prefix="python-", dir=self.cache))
@@ -420,152 +249,24 @@ class RuntimeBootstrap:
         env["PIP_CONFIG_FILE"] = os.devnull
         _run([binary, "-I", "-m", "pip", "--isolated", "install", "--disable-pip-version-check", "--no-input",
               "--only-binary=:all:", "--cache-dir", self.cache / "pip-cache", "--index-url", "https://pypi.org/simple",
-              f"Pillow=={self.lock['pillow_version']}", f"numpy=={BOOTSTRAP_DEPENDENCIES['numpy_version']}"], env=env, timeout=600)
+              f"Pillow=={REQUIREMENTS['pillow']['install']}", f"numpy=={REQUIREMENTS['numpy']['install']}"], env=env, timeout=600)
         return str(binary)
-
-    def _install_node(self):
-        spec = _node_archive_spec()
-        target = Path(tempfile.mkdtemp(prefix="node-", dir=self.cache))
-        folder, filename = spec["folder"], spec["filename"]
-        origin = f"{NODE_ORIGIN}/dist/v{NODE_FALLBACK_VERSION}"
-        checksums, archive = target / "SHASUMS256.txt", target / filename
-        _official_download(f"{origin}/SHASUMS256.txt", checksums)
-        matches = [line.split()[0] for line in checksums.read_text(encoding="utf-8").splitlines()
-                   if len(line.split()) == 2 and line.split()[1] == filename]
-        if len(matches) != 1 or not re.fullmatch(r"[0-9a-f]{64}", matches[0]):
-            raise BootstrapError("Official SHA-256 manifest does not uniquely identify the Node archive")
-        _official_download(f"{origin}/{filename}", archive)
-        if _sha(archive) != matches[0]:
-            raise BootstrapError("Node archive SHA-256 mismatch; archive was not extracted or executed")
-        _extract_node(archive, target, folder)
-        return str(target / folder / spec["binary"])
-
-    @staticmethod
-    def _npm_cli(node):
-        binary = Path(node).resolve()
-        candidates = [binary.parent / "node_modules/npm/bin/npm-cli.js", binary.parent.parent / "lib/node_modules/npm/bin/npm-cli.js",
-                      binary.parent.parent / "node_modules/npm/bin/npm-cli.js"]
-        npm = shutil.which("npm")
-        if npm:
-            candidates.append(Path(npm).resolve())
-        return next((str(path) for path in candidates if path.is_file() and path.suffix == ".js"), None)
-
-    def _install_playwright(self, node):
-        return self._install_npm_package(node, "playwright", self.lock["playwright_version"], "npm-")
-
-    def _install_npm_package(self, node, package, version, prefix):
-        npm_cli = self._npm_cli(node)
-        if not npm_cli:
-            # A usable custom Node can be standalone; install the official Node
-            # bundle privately only to obtain its npm, never replace that Node.
-            npm_cli = self._npm_cli(self._install_node())
-        if not npm_cli:
-            raise BootstrapError("npm CLI unavailable in official Node bundle")
-        target = Path(tempfile.mkdtemp(prefix=prefix, dir=self.cache))
-        env = self._install_env(node)
-        # npm rejects loading the same config source twice; two /dev/null paths
-        # are not valid substitutes for its user AND global configuration.
-        for role in ("user", "global"):
-            config = target / f"{role}.npmrc"
-            config.write_text("", encoding="utf-8")
-            env[f"npm_config_{role}config"] = str(config)
-        _run([node, npm_cli, "install", "--prefix", target, "--ignore-scripts", "--no-audit", "--no-fund", "--save-exact",
-              "--registry=https://registry.npmjs.org", f"{package}@{version}"], env=env, timeout=600)
-        return str(target / "node_modules")
-
-    def _install_env(self, node):
-        env = os.environ.copy()
-        # Do not consume private registry tokens/configuration for public deps.
-        for key in list(env):
-            if key.lower().startswith(("npm_config_", "npm_token", "node_auth_token")) or key.upper() in {"NODE_OPTIONS", "NODE_PATH", "NODE_TLS_REJECT_UNAUTHORIZED"} or (key.upper().startswith("PLAYWRIGHT_") and (key.upper().endswith("DOWNLOAD_HOST") or key.upper() == "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD")):
-                env.pop(key)
-        old_path = next((value for key, value in env.items() if key.upper() == "PATH"), "")
-        for key in list(env):
-            if key.upper() == "PATH":
-                env.pop(key)
-        node_dir = str(PureWindowsPath(node).parent) if _windows() else str(Path(node).parent)
-        env.update({"PATH": node_dir + (";" if _windows() else os.pathsep) + old_path,
-                    "npm_config_cache": str(self.cache / "npm-cache"), "PLAYWRIGHT_BROWSERS_PATH": str(self.cache / "browsers")})
-        return env
-
-    def _install_browser(self, node, modules):
-        expected = BOOTSTRAP_DEPENDENCIES["browser_installer"]
-        package = "playwright"
-        installer_modules = Path(modules)
-        if not self._browser_manifest_matches(installer_modules / "playwright-core/browsers.json", self.lock["chromium_version"]):
-            if self.lock["chromium_version"] != expected["chromium_version"]:
-                raise BootstrapError("No approved browser installer for this Chromium lock; do not substitute a browser version")
-            # Runtime Playwright 1.62.1's default download is Chromium 151, but
-            # frozen rendering uses 149. A separate official installer package
-            # obtains 149; it is never selected as the rendering runtime.
-            installer_modules = Path(self._install_npm_package(node, expected["package"], expected["version"], "browser-installer-"))
-            package = expected["package"]
-            installed_version = _json(installer_modules / package / "package.json").get("version")
-            if installed_version != expected["version"] or not self._browser_manifest_matches(
-                    installer_modules / package / "browsers.json", expected["chromium_version"], expected["chromium_revision"]):
-                raise BootstrapError("Official browser installer does not bind both Chromium targets to the frozen version/revision; no browser was downloaded")
-        cli = installer_modules / package / "cli.js"
-        if not cli.is_file():
-            raise BootstrapError(f"Browser installer CLI missing: {cli}")
-        try:
-            # The renderer uses chrome-headless-shell only; skip the ~380 MB full browser.
-            _run([node, str(cli), "install", "--only-shell", "chromium"], env=self._install_env(node), timeout=900)
-        except BootstrapError:
-            _run([node, str(cli), "install", "chromium"], env=self._install_env(node), timeout=900)
-        return {"installer_package": package, "installer_modules": str(installer_modules),
-                "chromium_version": self.lock["chromium_version"], "rendering_playwright_version": self.lock["playwright_version"]}
-
-    def _chromium_matches(self, candidate, modules=None):
-        """`--version` first; Windows GUI-subsystem builds may print nothing, so fall
-        back to Chrome for Testing's `<version>.manifest` or the Playwright revision."""
-        wanted = self.lock["chromium_version"]
-        try:
-            output = _run([candidate, "--version"], timeout=20)
-        except BootstrapError:
-            output = ""
-        if re.search(r"(?<![\d.])" + re.escape(wanted) + r"(?![\d.])", output):
-            return True
-        if output.strip():
-            return False  # A real, different version was reported.
-        path = Path(candidate)
-        if (path.parent / f"{wanted}.manifest").is_file():
-            return True
-        revision = next((match.group(1) for part in path.parts
-                         for match in [re.fullmatch(r"chromium(?:_headless_shell)?-(\d+)", part)] if match), None)
-        if revision and modules:
-            for package in ("playwright-core", "playwright"):
-                if self._browser_manifest_matches(Path(modules) / package / "browsers.json", wanted, revision):
-                    return True
-        return revision == BOOTSTRAP_DEPENDENCIES["browser_installer"]["chromium_revision"] and \
-            wanted == BOOTSTRAP_DEPENDENCIES["browser_installer"]["chromium_version"]
-
-    @staticmethod
-    def _browser_manifest_matches(path, version, revision=None):
-        try:
-            browsers = _json(path)["browsers"]
-            for name in ("chromium", "chromium-headless-shell"):
-                matching = [item for item in browsers if item.get("name") == name]
-                if len(matching) != 1 or matching[0].get("browserVersion") != version or (revision is not None and matching[0].get("revision") != revision):
-                    return False
-            return True
-        except (OSError, ValueError, KeyError, TypeError, AttributeError):
-            return False
 
     def verify(self, report):
         if not report.get("ready"):
             raise BootstrapError("Required dependencies are missing; cannot verify runtime")
         env = os.environ.copy()
-        env.update(report["commands"]["env"])
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env.pop("PYTHONPATH", None)
-        doctor = json.loads(_run(report["commands"]["doctor_argv"], env=env, timeout=60))
-        if not doctor.get("passed"):
-            raise BootstrapError("Existing layout doctor rejected runtime: " + "; ".join(doctor.get("errors", [])))
-        selected = report["selected"]
-        _run([selected["python"], "-I", "-B", "-c", "import sys;sys.path.insert(0,sys.argv[1]);import PIL,numpy,lc_typography;print('ok')",
-              str(self.root / "scripts")], env=env, timeout=60)
-        _run([selected["node"], "-e", BROWSER_SMOKE, str(Path(selected["modules"]) / "playwright"), selected["chromium"]], env=env, timeout=60)
-        return {"doctor_passed": True, "python_modules_passed": True, "browser_launch_passed": True}
+        output = _run([report["selected"]["python"], *PROBE_FLAGS, "-c", VERIFY_SMOKE, str(self.root / "scripts")],
+                      env=env, timeout=120)
+        try:
+            result = json.loads(output.splitlines()[-1])
+        except (ValueError, IndexError) as exc:
+            raise BootstrapError("Runtime smoke test printed no result") from exc
+        if not result.get("passed"):
+            raise BootstrapError("Runtime smoke test failed")
+        return result
 
     @property
     def verified_path(self):
@@ -579,20 +280,10 @@ class RuntimeBootstrap:
                 return [str(value), info.st_size, info.st_mtime_ns]
             except (OSError, TypeError):
                 return [str(value), None, None]
-        fonts = []
-        try:
-            for item in _json(self.root / "assets/fonts/manifest.json")["fonts"]:
-                fonts.append(stat(self.root / "assets/fonts" / item["file"]))
-        except (OSError, ValueError, KeyError, TypeError):
-            fonts.append(["fonts", None, None])
         sources = {name: _sha(self.root / name) if (self.root / name).is_file() else None for name in VERIFIED_SOURCES}
-        modules = selected.get("modules")
-        return {"lock": self.cache.name, "python": stat(selected.get("python")), "node": stat(selected.get("node")),
-                "playwright": stat(Path(modules) / "playwright/package.json") if modules else None,
-                "chromium": stat(selected.get("chromium")), "fonts": fonts, "sources": sources,
+        return {"lock": self.cache.name, "python": stat(selected.get("python")), "sources": sources,
                 "platform": [platform.system(), platform.release(), platform.machine(), sys.version.split()[0]],
-                "env": {name: os.environ.get(name) for name in ("LC_LAYOUT_PYTHON", "LC_LAYOUT_NODE",
-                                                                "LC_LAYOUT_NODE_MODULES", "LC_LAYOUT_CHROMIUM")}}
+                "env": {name: os.environ.get(name) for name in OVERRIDE_ENV}}
 
     def _publish(self, report):
         """Publish runtime paths (never account data) plus a time-limited verified stamp.
@@ -601,7 +292,7 @@ class RuntimeBootstrap:
         the stamp goes to a per-user temp directory instead; a stamp that cannot be
         written anywhere only costs a re-verification next time.
         """
-        stamp = {"schema": 1, "verified_at": time.time(), "selected": report["selected"],
+        stamp = {"schema": 2, "verified_at": time.time(), "selected": report["selected"],
                  "versions": report.get("versions", {}), "commands": report["commands"],
                  "identity": self._identity(report["selected"])}
         errors = []
@@ -623,12 +314,12 @@ class RuntimeBootstrap:
         raise OSError("; ".join(errors))
 
     def cached_report(self):
-        """Return a still-valid verification without relaunching the browser, else None (read-only)."""
+        """Return a still-valid verification without re-running the smoke test, else None (read-only)."""
         stamp = None
         for path in (self.verified_path, self.fallback_cache / "verified.json"):
             try:
                 candidate = _json(path)
-                if (candidate.get("schema") == 1 and time.time() - float(candidate["verified_at"]) <= VERIFIED_TTL_SECONDS
+                if (candidate.get("schema") == 2 and time.time() - float(candidate["verified_at"]) <= VERIFIED_TTL_SECONDS
                         and candidate["identity"] == self._identity(candidate["selected"])):
                     stamp = candidate
                     break
@@ -639,8 +330,7 @@ class RuntimeBootstrap:
         return {"ready": True, "verified": True, "verification_required": False, "cached_verification": True,
                 "verified_at": stamp["verified_at"], "missing": [], "installable": [], "needs_confirmation": False,
                 "selected": stamp["selected"], "versions": stamp["versions"], "commands": stamp["commands"],
-                "cache_dir": str(self.cache),
-                "next_action": "Use commands.python and commands.env for subsequent pipeline commands"}
+                "cache_dir": str(self.cache), "next_action": "Use commands.python for subsequent studio commands"}
 
     def invalidate(self):
         for path in (self.verified_path, self.fallback_cache / "verified.json"):
@@ -660,7 +350,8 @@ class RuntimeBootstrap:
             return report
         try:
             report["verification"] = self.verify(report)
-            report.update({"verified": True, "verification_required": False, "next_action": "Use commands.python and commands.env for subsequent pipeline commands"})
+            report.update({"verified": True, "verification_required": False,
+                           "next_action": "Use commands.python for subsequent studio commands"})
             try:
                 report["stamp_dir"] = str(self._publish(report))
             except OSError as exc:
@@ -675,78 +366,37 @@ class RuntimeBootstrap:
     def install(self, authorization="unknown"):
         report = self.inspect()
         if authorization not in AUTHORIZED:
-            report.update({"ready": False if report["missing"] else report["ready"], "needs_confirmation": bool(report["missing"]),
-                           "installation_performed": False, "installation_attempted": False, "next_action": "Ask the user to confirm installing the listed dependencies; do not infer full access" if report["missing"] else "verify"})
+            report.update({"needs_confirmation": bool(report["missing"]), "installation_performed": False,
+                           "installation_attempted": False,
+                           "next_action": "Ask the user to confirm installing the listed dependencies; do not infer full access"
+                           if report["missing"] else "verify"})
             return report
         if any(not item["installable"] for item in report["missing"]):
             report.update({"needs_confirmation": True, "installation_performed": False, "installation_attempted": False,
-                           "next_action": "Ask the user to restore original skill resources or supply supported Python before automatic installation"})
+                           "next_action": "Ask the user to install a supported 64-bit Python >=3.11 first (SKILL.md §0)"})
             return report
-        installed = []
-        attempted = False
-        browser_installation = None
+        installed, attempted = [], False
         try:
-            selected = dict(report["selected"])
             if report["missing"]:
                 self._prepare_cache()
                 attempted = True
-            # Independent downloads overlap: pip runs beside the Node -> npm -> browser
-            # chain, and the runtime Playwright package beside the browser download.
-            from concurrent.futures import ThreadPoolExecutor
-            failures = []
-            with ThreadPoolExecutor(max_workers=3) as pool:
-                python_job = pool.submit(self._install_python, report["usable_python"]) if not selected["python"] else None
-                node_ready = True
-                if not selected["node"]:
-                    try:
-                        selected["node"] = self._install_node()
-                        installed.append("node")
-                    except (BootstrapError, OSError, ValueError) as exc:
-                        failures.append(f"node: {exc}")
-                        node_ready = False
-                modules_job = browser_job = None
-                if node_ready:
-                    if not selected["modules"]:
-                        modules_job = pool.submit(self._install_playwright, selected["node"])
-                    if not selected["chromium"]:
-                        # The approved installer package is separate from the rendering
-                        # Playwright, so it does not wait for the runtime install.
-                        browser_job = pool.submit(self._install_browser, selected["node"],
-                                                  selected["modules"] or str(self.cache / "pending-runtime-modules"))
-                for name, job in (("python", python_job), ("playwright", modules_job), ("chromium", browser_job)):
-                    if job is None:
-                        continue
-                    try:
-                        value = job.result()
-                    except (BootstrapError, OSError, ValueError) as exc:
-                        failures.append(f"{name}: {exc}")
-                        continue
-                    if name == "python":
-                        selected["python"] = value
-                        installed.extend(item["name"] for item in report["missing"] if item["name"] in {"pillow", "numpy"})
-                    elif name == "playwright":
-                        selected["modules"] = value
-                        installed.append("playwright")
-                    else:
-                        browser_installation = value
-                        installed.append("chromium")
-            if failures:
-                raise BootstrapError("; ".join(failures))
+                self._install_python(report["usable_python"])
+                installed = [item["name"] for item in report["missing"]]
             report = self.inspect()
             if not report["ready"]:
-                raise BootstrapError("Installed runtime does not match the unchanged lock; no version downgrade is allowed")
+                raise BootstrapError("Installed runtime does not satisfy the requirements")
             report["verification"] = self.verify(report)
-            # Only publish paths after real doctor and browser launch succeed.
+            # Only publish paths after the real smoke test succeeds.
             self._publish(report)
             report.update({"needs_confirmation": False, "verified": True, "verification_required": False,
-                           "next_action": "Use commands.python and commands.env for subsequent pipeline commands",
-                           "installation_performed": bool(installed), "installation_attempted": attempted, "installed": installed,
-                           "browser_installation": browser_installation})
+                           "next_action": "Use commands.python for subsequent studio commands",
+                           "installation_performed": bool(installed), "installation_attempted": attempted, "installed": installed})
         except (BootstrapError, OSError, ValueError) as exc:
             report = self.inspect()
             report.update({"ready": False, "verified": False, "needs_confirmation": True, "installation_performed": bool(installed),
-                           "installation_attempted": attempted, "partial_cache": str(self.cache) if attempted else None, "installed": installed,
-                           "error": str(exc), "next_action": "Stop dependency setup. Review the error and remaining list with the user; do not use sudo, install OS packages, change pinned versions or bypass verification"})
+                           "installation_attempted": attempted, "partial_cache": str(self.cache) if attempted else None,
+                           "installed": installed, "error": str(exc),
+                           "next_action": "Stop dependency setup. Review the error with the user; do not use sudo, install OS packages, change pinned versions or bypass verification"})
         return report
 
 
@@ -762,7 +412,8 @@ def main(argv=None):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     try:
         bootstrap = RuntimeBootstrap()
-        report = bootstrap.inspect() if args.command == "inspect" else bootstrap.verified_report(fresh=args.fresh) if args.command == "verify" else bootstrap.install(args.authorization)
+        report = (bootstrap.inspect() if args.command == "inspect" else
+                  bootstrap.verified_report(fresh=args.fresh) if args.command == "verify" else bootstrap.install(args.authorization))
     except (BootstrapError, OSError, ValueError) as exc:
         report = {"ready": False, "missing": [], "installable": [], "needs_confirmation": True, "error": str(exc)}
     if args.json:

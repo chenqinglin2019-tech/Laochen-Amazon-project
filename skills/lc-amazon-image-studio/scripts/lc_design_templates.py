@@ -18,7 +18,23 @@ import sys
 from pathlib import Path, PureWindowsPath
 from typing import Any
 
-from lc_style_reference import CATEGORY_KEYWORDS, _selection_lock, _write_json
+from lc_jsonstore import _selection_lock, _write_json
+
+# Category keyword hints (moved from the V7 style-reference module).
+CATEGORY_KEYWORDS = (
+    ("home_decor", ("home decor", "home-decor", "decoration", "decor", "figurine", "ornament", "摆件", "装饰", "家居")),
+    ("power_tool", ("chainsaw", "drill", "saw", "power tool", "工具", "电钻", "电锯")),
+    ("beauty_cosmetic", ("skincare", "cosmetic", "concealer", "makeup", "beauty", "护肤", "美妆", "遮瑕")),
+    ("travel_gear", ("suitcase", "luggage", "carry-on", "travel bag", "行李箱", "旅行箱")),
+    ("audio_electronics", ("headphone", "earphone", "speaker", "耳机", "音箱")),
+    ("cookware", ("wok", "pan", "cookware", "锅", "炊具")),
+    ("bedding", ("bedding", "duvet", "bed sheet", "床品", "被套")),
+    ("drinkware", ("water bottle", "tumbler", "drinkware", "水瓶", "保温杯")),
+    ("footwear", ("running shoe", "sneaker", "shoe", "跑鞋", "鞋")),
+    ("apparel", ("jacket", "dress", "apparel", "服装", "外套", "裙")),
+    ("pet_accessory", ("litter mat", "cat litter", "pet accessory", "猫砂", "宠物")),
+    ("animal_decor", ("rabbit", "bunny", "animal figure", "兔子", "兔")),
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BUILTIN = ROOT / "assets/layouts/design_templates.json"

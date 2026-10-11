@@ -9,7 +9,7 @@ prepare  -> validates/hashes images, dedupes against the library, detects shape,
             generation parameters, family profile and tokens
 submit   -> validates, builds neutralized style plates + thumbnails, compiles family +
             templates, imports atomically under the library lock, returns IDs and
-            (with --manifest) prefers/pins the family for the current project
+            (with --project) prefers the family for the current V8 project
 revise   -> one post-production revision (new revision number) per project
 Code never interprets images semantically and never calls a model.
 """
@@ -33,7 +33,19 @@ from lc_template_library import Library, LibraryError, merge_documents  # noqa: 
 
 PACKET_SCHEMA = "lc-template-intake/1"
 ACCEPTED = {".png", ".jpg", ".jpeg", ".webp"}
-FONT = SCRIPT_DIR.parent / "assets/fonts/NotoSans-Regular.ttf"
+# People in a reference are never part of a template: they are flattened out of the plate and may be
+# described only by role, framing and pose (never by appearance), so no one can be re-created.
+PERSON_NOUNS = re.compile(r"\b(person|people|model|models|woman|women|man|men|girl|girls|boy|boys|lady|ladies|guy|guys|"
+                          r"child|children|kid|kids|teen\w*|adult|adults|mother|father|couple|she|he|her|his)\b", re.I)
+APPEARANCE_WORDS = re.compile(
+    r"\b(blond\w*|brunette|red-?head\w*|ginger|auburn|(grey|gray|silver|dark|fair|long|short)-haired|bald\w*|beard\w*|"
+    r"moustache|mustache|freckle\w*|tattoo\w*|piercing\w*|caucasian|asian|african|latin[oa]|latinx|hispanic|ethnic\w*|"
+    r"skin(?![ -]?care)|complexion|tanned|(pale|dark|fair|olive)-skinned|curly|wavy|ponytail|braid\w*|"
+    r"hair(?![ -]?(dryer|drier|brush|comb|clip|tie|band|care|oil|spray|straightener|curler|iron))|eyes|(blue|brown|green)-eyed|"
+    r"slim|slender|curvy|plus-size|muscular|petite|tall|elderly|young|old|aged|\d{2}s|\d{1,2}[- ]years?[- ]old|"
+    r"twenties|thirties|forties|fifties|sixties)\b", re.I)
+COLOUR_PERSON = re.compile(r"\b(black|white|brown|asian) (woman|women|man|men|girl|girls|boy|boys|person|people|model|models|"
+                           r"lady|guy)\b", re.I)
 GENERATION_FIELDS = ("background", "props", "surface", "lighting", "color_grade", "camera", "depth_of_field",
                      "product_placement", "product_scale", "shadow", "negative_space", "mood")
 
@@ -45,8 +57,8 @@ class IntakeError(RuntimeError):
 def _font(size):
     from PIL import ImageFont
     try:
-        return ImageFont.truetype(str(FONT), size)
-    except OSError:
+        return ImageFont.load_default(size=size)   # scalable built-in font (Pillow >= 10.1); no bundled fonts in V8
+    except TypeError:
         return ImageFont.load_default()
 
 
@@ -217,7 +229,7 @@ def prepare(images, *, set_name=None, set_id=None, library=None):
             "suggested_slot_role": "main" if _white_corner_score(image) > 0.95 else None,
             "duplicate_of": sha if sha in known else None, "similar_to": similar, "include": sha not in known,
             "slot_role": None, "recipe": None, "observation": None,
-            "product_bbox_norm": None, "text_boxes_norm": [], "logo_boxes_norm": [],
+            "product_bbox_norm": None, "text_boxes_norm": [], "logo_boxes_norm": [], "person_boxes_norm": [],
             "layout": {"product_region_norm": None, "text_groups": [], "graphics": []},
             "generation": {key: None for key in GENERATION_FIELDS}})
         sheet_items.append((number, image, entries[-1]["observed_shape"]))
@@ -244,11 +256,14 @@ def prepare(images, *, set_name=None, set_id=None, library=None):
                        "shadow_types": tax["shadow_types"]},
         "how": ("Look at contact_sheet (numbers match images[].index; ticks mark 10% steps). For each included image set "
                 "slot_role, recipe (main -> none), English observation, product_bbox_norm, text_boxes_norm + logo_boxes_norm "
-                "(ALL visible text/logos, used to neutralize the plate), layout.text_groups (roles, boxes, align, font_role, "
-                "size = 360px token, color_role, case, letter_spacing_em, line_height, surface{kind,color_role,radius_em,"
+                "(ALL visible text/logos, used to neutralize the plate), person_boxes_norm (EVERY person, face, hand or body part; "
+                "they are flattened out of the plate so no one can be re-created), layout.text_groups (unique lowercase id, role, box, align, "
+                "font_role, size = 360px token 12..64, color_role, case none|uppercase, letter_spacing_em, line_height, "
+                "surface{kind,color_role,radius_em,"
                 "border_color_role,border_width_px,shadow}, pill{color_role,text_color_role} for tag/pill labels, "
                 "divider{color_role,width_px,length_em} for a rule under the text; never the sample words), layout.product_region_norm "
-                "and generation fields. Then fill family (name, description, product_profile, tokens) and set "
+                "and generation fields (describe people only by role, framing and pose - never hair, skin, age, ethnicity, "
+                "body or other appearance). Then fill family (name, description, product_profile, tokens) and set "
                 "review.visual_reviewed=true with notes. Use sample-colors for exact hex values. Only borrow design, never "
                 "the sample product, brand, logos or claims.")}
     (folder / "packet.json").write_text(json.dumps(packet, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -287,6 +302,19 @@ def _english(value, where, errors):
         errors.append(f"{where}: write observations in English")
 
 
+def _appearance_errors(value, where, errors):
+    """A person noun plus an appearance word in the same clause describes a real person: refuse it."""
+    texts = value if isinstance(value, list) else [value]
+    for text in texts:
+        if not isinstance(text, str):
+            continue
+        for clause in re.split(r"[.;,]", text):
+            if COLOUR_PERSON.search(clause) or (PERSON_NOUNS.search(clause) and APPEARANCE_WORDS.search(clause)):
+                errors.append(f"{where}: describe people only by role, framing and pose (e.g. 'adult model, waist-up, "
+                              f"holding the product'), never by appearance: {clause.strip()[:80]!r}")
+                break
+
+
 def _validate_packet(packet):
     from lc_template_schema import taxonomy, _box, validate_profile, HEX
     tax, errors = taxonomy(), []
@@ -311,7 +339,12 @@ def _validate_packet(packet):
             for item in entry.get(key, []):
                 if not _box(item) or item[2] * item[3] > 0.5:
                     errors.append(f"{where}.{key} boxes must be normalized and at most half the image")
+        for item in entry.get("person_boxes_norm") or []:
+            if not _box(item) or item[2] * item[3] > 0.95:
+                errors.append(f"{where}.person_boxes_norm boxes must be normalized and below 95% of the image")
         generation = entry.get("generation") or {}
+        for key, value in generation.items():
+            _appearance_errors(value, f"{where}.generation.{key}", errors)
         if not any(generation.get(key) for key in GENERATION_FIELDS):
             errors.append(f"{where}.generation needs the observed photographic parameters")
         for key, value in generation.items():
@@ -323,6 +356,9 @@ def _validate_packet(packet):
                     _english(value, f"{where}.generation.{key}", errors)
     family = packet.get("family") or {}
     _english(family.get("name"), "family.name", errors)
+    _appearance_errors(family.get("description"), "family.description", errors)
+    for key, value in ((family.get("tokens") or {}).get("photography") or {}).items():
+        _appearance_errors(value, f"family.tokens.photography.{key}", errors)
     errors.extend(validate_profile(family.get("product_profile"), "family.product_profile"))
     palette = (family.get("tokens") or {}).get("palette") or {}
     if not palette or any(role not in tax["palette_roles"] or not isinstance(value, str) or not HEX.fullmatch(value)
@@ -348,7 +384,7 @@ def _template_record(entry, family_id, template_id, assets):
     return record
 
 
-def submit(packet_path, *, library=None, manifest_path=None, dry_run=False, product_mode="flatten"):
+def submit(packet_path, *, library=None, project_dir=None, dry_run=False, product_mode="flatten"):
     from lc_style_plate import make_plate, make_thumb
     from lc_template_schema import empty_document, validate_document, semantic_hash
     library = library or Library()
@@ -363,8 +399,8 @@ def submit(packet_path, *, library=None, manifest_path=None, dry_run=False, prod
         family = next((f for f in latest(document["families"]) if sources & set(f.get("source_ids", []))), None)
         result = {"family": family["id"] if family else None, "templates": [], "reused": "all images are already in the library",
                   "slots": sorted({t["slot_role"] for t in latest(document["templates"]) if family and t["family_id"] == family["id"]})}
-        if manifest_path and family:
-            result["project"] = _prefer_family(Path(manifest_path), family["id"])
+        if project_dir and family:
+            result["project"] = _prefer_family(Path(project_dir), family["id"])
         return result
     errors = _validate_packet(packet)
     if errors:
@@ -378,7 +414,7 @@ def submit(packet_path, *, library=None, manifest_path=None, dry_run=False, prod
         text_boxes = entry.get("text_boxes_norm") or [g["box"] for g in (entry.get("layout") or {}).get("text_groups", []) if g.get("box")]
         try:
             plate, metrics = make_plate(image, entry["product_bbox_norm"], text_boxes, entry.get("logo_boxes_norm", []),
-                                        mode=product_mode)
+                                        person_boxes=entry.get("person_boxes_norm") or [], mode=product_mode)
         except ValueError as exc:
             raise IntakeError(f"image #{entry['index']}: {exc}") from exc
         thumb = make_thumb(image)
@@ -436,49 +472,38 @@ def submit(packet_path, *, library=None, manifest_path=None, dry_run=False, prod
         library._write(library.v2_path, merged)
     result = {"family": family_id, "templates": [t["id"] for t in templates], "reused": reused,
               "slots": sorted(slot_counts), "plates": plates}
-    if manifest_path:
-        result["project"] = _prefer_family(Path(manifest_path), family_id)
+    if project_dir:
+        result["project"] = _prefer_family(Path(project_dir), family_id)
     (packet_path.parent / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
     for entry in included:  # originals now live content-addressed in the library
         (library.root / entry["file"]).unlink(missing_ok=True)
     return result
 
 
-def _prefer_family(manifest_path, family_id):
-    import lc_image_pipeline as p
-    from lc_workflow import manifest_lock
-    with manifest_lock(manifest_path):
-        manifest = p.read_json(manifest_path)
-        policy = manifest.get("design_template_policy") or {}
-        if policy.get("version") != 2:
-            return {"pinned": False, "reason": "project does not use template policy v2"}
-        preferred = list(dict.fromkeys(policy.get("prefer_family_ids", []) + [family_id]))
-        policy["prefer_family_ids"] = preferred
-        manifest["design_template_policy"] = policy
-        started = any(job.get("generation_attempts") for job in manifest.get("jobs", []))
-        pinned = False
-        if not started and len(preferred) == 1:
-            manifest["design_template_set_id"] = family_id
-            manifest.pop("design_template_set_revision", None)
-            pinned = True
-        p.write_json(manifest_path, manifest)
-    return {"pinned": pinned, "preferred": preferred,
-            "reason": None if pinned else "generation already started or several preferred families; set design_template_set_id explicitly"}
+def _prefer_family(project_dir, family_id):
+    """V8: the newly imported family is preferred for this project's set (shown first in the catalog)."""
+    import studio_project as sp
+    with sp.locked(project_dir) as project:
+        preferred = list(dict.fromkeys(list(project.get("preferred_families") or []) + [family_id]))
+        project["preferred_families"] = preferred
+    return {"preferred": preferred, "note": "the catalog lists this family first; pick it in plan.json"}
 
 
-def revise(manifest_path, template_id, patch, *, library=None):
+def revise(project_dir, template_id, patch, *, library=None):
     """One post-production revision per project: generation/layout/tokens only."""
-    import lc_image_pipeline as p
+    import studio_project as sp
     from lc_template_schema import latest, validate_document
-    from lc_workflow import manifest_lock
     library = library or Library()
     allowed = {"generation", "layout", "tokens"}
     if not isinstance(patch, dict) or not patch or set(patch) - allowed:
         raise IntakeError(f"A revision may only change {sorted(allowed)}")
-    manifest_path = Path(manifest_path)
-    with manifest_lock(manifest_path):
-        manifest = p.read_json(manifest_path)
-        log = manifest.setdefault("design_template_revision_log", [])
+    problems = []
+    for key, value in (patch.get("generation") or {}).items():
+        _appearance_errors(value, f"generation.{key}", problems)
+    if problems:
+        raise IntakeError("Revision rejected:\n- " + "\n- ".join(problems))
+    with sp.locked(project_dir) as project:
+        log = project.setdefault("template_revision_log", [])
         if log:
             raise IntakeError("This project already used its one template revision")
         with library.lock():
@@ -503,9 +528,8 @@ def revise(manifest_path, template_id, patch, *, library=None):
                 raise IntakeError("Revision is invalid:\n- " + "\n- ".join(errors[:20]))
             library._write(library.v2_path, document)
         log.append({"template": template_id, "revision": revised["revision"], "at": time.time()})
-        p.write_json(manifest_path, manifest)
     return {"template": template_id, "revision": revised["revision"],
-            "note": "Jobs that should adopt it need design_template_revision or a fresh selection; this regenerates them."}
+            "note": "Run plan again: images using this template get a new prompt (pass --regenerate for finished ones)."}
 
 
 def main(argv=None) -> int:
@@ -522,11 +546,11 @@ def main(argv=None) -> int:
     colors.add_argument("--box", required=True, help="x,y,w,h normalized")
     sub = subs.add_parser("submit")
     sub.add_argument("--packet", required=True)
-    sub.add_argument("--manifest")
+    sub.add_argument("--project", help="V8 project folder: prefer the imported family for this set")
     sub.add_argument("--dry-run", action="store_true")
     sub.add_argument("--product-mode", choices=("flatten", "blur"), default="flatten")
     rev = subs.add_parser("revise")
-    rev.add_argument("--manifest", required=True)
+    rev.add_argument("--project", required=True)
     rev.add_argument("--template", required=True)
     rev.add_argument("--patch", required=True, help="JSON file with generation/layout/tokens changes")
     args = parser.parse_args(argv)
@@ -541,10 +565,10 @@ def main(argv=None) -> int:
             box = [float(v) for v in args.box.split(",")]
             result = sample_colors(args.packet, args.image, box, library=library)
         elif args.command == "submit":
-            result = submit(args.packet, library=library, manifest_path=args.manifest, dry_run=args.dry_run,
+            result = submit(args.packet, library=library, project_dir=args.project, dry_run=args.dry_run,
                             product_mode=args.product_mode)
         else:
-            result = revise(args.manifest, args.template, json.loads(Path(args.patch).read_text(encoding="utf-8")),
+            result = revise(args.project, args.template, json.loads(Path(args.patch).read_text(encoding="utf-8")),
                             library=library)
         print(json.dumps({"ok": True, "command": args.command, **result}, ensure_ascii=False, separators=(",", ":")))
         return 0

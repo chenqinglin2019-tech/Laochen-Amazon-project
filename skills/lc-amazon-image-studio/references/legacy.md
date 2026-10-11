@@ -1,64 +1,24 @@
-# V8 历史路由
+# V7 及更早项目（V8 不再处理）
 
-没有 workflow_policy 或显式 legacy 的项目继续使用原管线。V7/V7.2 完整命令见 [v7-workflow.md](v7-workflow.md)，更早兼容说明如下；不要将 one_pass_v1 字段或直交状态写入历史项目。
+V8 只保留一次成图流程（用户决定 F1）。旧流水线（先生成底图、本地排字、复核审查、QA）已从发布包移除。
 
-# 旧项目兼容（V1–V6）
+## 识别
 
-只在 `status` 判定为旧项目，或 manifest 缺少新字段时阅读。总原则是恢复而不迁移：旧项目保持原行为，不例行运行 migrate。本页不改变 SKILL.md 的鉴权和硬规则。
+- 项目文件夹里有 `project_manifest.json` 的是 V7（或更早）项目。V8 的任何命令遇到它都会返回 `LEGACY_PROJECT_V7`，不读取、不修改其中任何文件。
+- V8 项目的状态文件是 `project.json`（schema `lc-studio-project/8`）。
 
-## 永不自动升级的内容
+## 怎么处理
 
-- 缺少 `prompt_profile`（或显式 `legacy`）的图：保持原提示字节和生成指纹，不会因升级重新生成。`PIPELINE_VERSION` 保持不变。某张图显式改为 `images_2_5_v1` 只影响这一张。
-- 缺少 `generation_dependency_version`：沿用旧的哈希算法。
-- 缺少 `scheduler_policy`：沿用旧并发策略（上限 2）。
-- 缺少 `review_rule_profile`（或显式 `legacy`）：审核规则摘要仍按完整源码计算，不改写历史审核哈希。
-- 缺少 `delivery_profile`（或 `legacy`）：旧交付方式与编码保持不变。
-- 缺少 `design_template_policy`：走外部参考路线（见下）；v1 项目不会自动变成 v2。
-- `style_contract` version 1/2、`copy_budget`：按原规则运行。
-- 升级后可能需要本地复核，不花模型调用：排版代码哈希变化会让已排版图重新本地渲染并重审排版结论；审核规则摘要变化时，QA 会用已存结论重新签发。不会重新生成未变的底图。
+- **进行中的 V7 项目**：请用户用 V7.2 发布包（`lc-amazon-image-studio-v7.2.zip`）完成。不要尝试转换，也不要手改 manifest。
+- **想用 V8 重做**：在新的项目文件夹里 `init`，重新登记产品照片，按 SKILL.md §2 写 plan.json。旧项目里批准过的文案可以作为 `copy` 的来源，但要按 V8 的文案档位重新检查。
 
-## 版式 V1 / V2
+## 不受影响的部分
 
-| 版本 | 特征 |
-|---|---|
-| V1 | 顶层 `headline/body/items`，`font_sizes`（以 2000 px 短边为基准：headline 120–160、body 72–88、label 64–80），固定 Noto Sans 400/700，`template` ∈ scene/split/benefits/detail/dimensions/components，`theme` ∈ neutral/warm/technical/playful，`text_surface` transparent/solid/gradient，`text_color` |
-| V2 | `mobile_sizes`（360 px 预览 token）、单个 `text_group{box, align, gap_em, max_height}`、`headline_family` sans/serif、`faq[{question,answer}]`、items 最多 3 项；禁止 `font_sizes` |
+- **用户模板库**：V7 和 V8 共用同一个库目录（见 [templates.md](templates.md#1-用户库位置)），参考套图模板直接可用，不需要迁移。
+- **鉴权**：鉴权入口、组件、12 小时通过记录和 `config.json` 完全相同；同一台机器上的通过记录对两个版本都有效。
+- **运行时缓存**：V7 安装过的私有 Python 环境（Pillow + NumPy）会被 V8 的 `verify` 自动发现并复用；Node、Playwright 和浏览器缓存 V8 不再使用，可以由用户自行删除。
 
-- `template/theme` 目前也会在 V3 上按 V1 列表校验（theme 文件还计入布局指纹）；新项目 init 不写这两个字段。
-- `job.text_overlays` 是更早期的字段，校验会要求把文案迁到结构化 layout。
-- 旧项目套用新的 `style_contract` v3 时，带营销文字的图必须显式迁移到 `layout.version=3`，只重新验证受影响部分。
+## V8 项目升级到 V8.1
 
-## 模板策略 v1（内置文本模板）
-
-- `design_template_policy={version:1,mode:"auto"}`：本地排序器按 kind/画幅过滤，再按意图/recipe 打分；品类门槛只认少量标签，常常 needs_input。
-- 控制字段：`design_template_set_id/_revision`、`job.design_template_id/_revision`、`design_style_preferences`、`design_template_library_path` / `design_template_user_library_path`、`design_overrides`、`design_template_original_reason`（无合适模板时写原创 brief，记为 matched=false）。
-- 快照固定：库更新不会改变已采用的版本。要重选同一套系，只删除对应的派生 `design_template_selection` / `design_resolution`，然后重新 prepare 并复审。
-- 模板的 `prompt_template` 只用 `{product}` `{scene}` `{selling_job}` 占位；`layout.canvas_variants` 按 square/portrait/wide 给出文字框和商品框。
-- 库文件：`assets/layouts/design_templates.json`（内置）。旧的 skill 内 `design_templates.user.json` 首次使用时会迁入外部库（原文件不动）。内置库可停用：`lc_template_library.py builtin --disable`。
-
-## 外部参考路线（未启用模板模式的旧项目）
-
-- 命令：`lc_style_reference.py prepare --product-context <ctx.json> --selection-output <sel.json>`。项目通过 `style_reference_selection_path` 绑定，选一个主参考、最多两个辅助参考。
-- 单元索引 `design_reference_units.json`（schema 1，`asset_policy: external_regions_only`）每项含绝对 `external_path`、sha256、`unit_region_norm`、recipe、generation、layout、`reviewed:true`、`product_evidence:false`。项目用 `design_reference_units_path` + `design_reference_ids`，单图用 `design_reference_id`。
-- **不可移植**：现有索引写死了作者 Mac 的 `/Users/...` 路径，换机器后原图缺失，显式参考会变成 needs_input 并暂停受影响的新生成。可选的通用参考不可用时不阻断，但不能签“匹配参考”。建议改为用这些原图做一次 `intake`，生成 v2 用户模板。
-- 对照板外层的左右关系、UI、编号都不是目标设计。
-
-## 迁移命令（仅在明确要求升级时使用）
-
-- `migrate --manifest M [--marketplace --language]`：升级旧 schema，保留备份、`legacy_text_overlays` 和旧审核记录。旧 A+ 不能只凭 970×600 猜 `a_plus_module`。迁移不切换提示、审核规则或设计 profile。
-- `migrate-dependencies --manifest M --source-manifest OLD --jobs ... [--source-kind historical_snapshot|reconstructed_verified_dependency_view] [--allow-project-fork]`：把已有 raw 升级到依赖 v2，必须严格重现已入库的 attempt 和 raw SHA。重建视图时需显式声明 source-kind；project fork 只放开 project_id 差异。
-- 不得手改旧 generated 哈希或状态来冒充完成。
-
-## copy_budget（仅旧项目显式字段）
-
-`{version:1, max_headline_words, max_ordinary_words, max_supporting_points, baseline_words?, target_ratio (0.7), tolerance ([.65,.75]), required_text[{text, job_id?}]}`。有精简目标时必须给出真实的 `baseline_words`。新项目不创建该字段，也不压缩文案。
-
-## 旧交付
-
-- 显式 deliver 旧项目时，分散的已审成品会汇集到 `delivery/images-vNNN/`，不覆盖历史版本，也不改变原 PNG/JPEG 编码；无变化时重复交付会复用。
-- 旧 profile 中的 `standalone_html:false` 会被忽略，`true` 会被拒绝。
-- 要改用 `compact_jpg`，必须显式设置并重新验证，不能重写旧审核哈希。
-
-## 旧 product_truth 字段
-
-`product_truth.source_quality/master_asset_mode/master_confirmed` 仅作兼容保留，不再控制生成方式；V3 使用逐图的来源审阅与 `render_decision`。
+- 升级前规划过的 V8 项目，未完成的图在预约时会返回 `PLAN_OUTDATED`（它们还指向旧的风格底板）。重新运行一次 `plan` 即可：已完成的图保留；未完成的图换成新的提示（不再附风格底板，参考只以色调光线板、按 `tone_ref` 附上）。
+- 用户模板图位现在必须写 `scene`；有人物的图位必须写 `cast`。`plan` 会一次列出所有需要补的字段。
