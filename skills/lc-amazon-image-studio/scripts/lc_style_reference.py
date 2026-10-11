@@ -377,6 +377,9 @@ def _validate_saved_selection(value: dict[str, Any]) -> list[str]:
     return errors
 
 
+SELECTION_LOCK_TIMEOUT_SECONDS = 60
+
+
 @contextlib.contextmanager
 def _selection_lock(selection_path: Path) -> Iterator[None]:
     """Serialize the complete selection read/select/commit transaction."""
@@ -384,9 +387,17 @@ def _selection_lock(selection_path: Path) -> Iterator[None]:
     lock_path = selection_path.with_name(f".{selection_path.name}.lock")
     # Keep this lock file rather than unlinking it after release: a late opener
     # must lock the same inode as any process already waiting on it.
+    deadline = time.monotonic() + SELECTION_LOCK_TIMEOUT_SECONDS
     with lock_path.open("a+b") as lock_file:
         if fcntl is not None:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            while True:  # bounded: a crashed holder must not block every later command forever
+                try:
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    break
+                except OSError:
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(f"STYLE_SELECTION_BUSY: {lock_path} is locked by another process") from None
+                    time.sleep(0.05)
         else:  # pragma: no cover - exercised on Windows hosts.
             import msvcrt
 
@@ -400,6 +411,8 @@ def _selection_lock(selection_path: Path) -> Iterator[None]:
                     msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
                     break
                 except OSError:
+                    if time.monotonic() > deadline:
+                        raise TimeoutError(f"STYLE_SELECTION_BUSY: {lock_path} is locked by another process") from None
                     time.sleep(0.05)
         try:
             yield

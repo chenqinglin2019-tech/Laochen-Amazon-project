@@ -199,7 +199,46 @@ def input_image_lines(manifest, paths, *, edit_target=None, background_only=Fals
     return lines
 
 
+# V7.1 compact prompt format (new projects: job.prompt_format = "compact_v2"). Only text that
+# every prompt repeats is removed; every lock, detail field, design parameter and
+# template-specific safeguard stays. Jobs without the field keep their exact bytes.
+COMPACT = "compact_v2"
+_BOILERPLATE_EXTRA = ("Create an evidence-faithful commercial base photograph of",
+                      "Follow the project's text_mode and approved copy",
+                      "Preserve the current product's geometry, material appearance",
+                      "Follow the selected canvas composition_note")
+_STANDARD_SAFEGUARDS = (
+    "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, "
+    "measurements, claims, badges or sales controls beyond explicit approval.",
+    "Do not borrow product identity, sample copy, claimed effects, packaging, accessories or quantities from a design source.",
+    "Do not invent hidden geometry, material identity, human scale or safe-use behavior. Follow current product evidence "
+    "and protection regions.")
+_DETAIL_CLAUSE = (" Do not delete, fill, move, redesign or invent the component; its projected location and apparent size "
+                  "must follow the target camera naturally.")
+
+
+def _compact_design(design, extra):
+    design = copy.deepcopy(design)
+    safeguards = design.get("product_safeguards")
+    if isinstance(safeguards, list):
+        kept = [item for item in safeguards if item not in _STANDARD_SAFEGUARDS]
+        if kept:
+            design["product_safeguards"] = kept
+        else:
+            design.pop("product_safeguards")
+    elif isinstance(safeguards, str):
+        kept = [part for part in safeguards.split("; ") if part not in _STANDARD_SAFEGUARDS]
+        if kept:
+            design["product_safeguards"] = "; ".join(kept)
+        else:
+            design.pop("product_safeguards")
+    extra = [part for part in extra if not part.startswith(_BOILERPLATE_EXTRA)]
+    return design, extra
+
+
 def compile_image_prompt(manifest, job, paths, detail_blocks, geometry, locks):
+    from lc_composition import applies as composition_applies, prompt_lines
+    layout_first = composition_applies(manifest, job)
     mode = resolve_text_mode(job)
     background_only = job["render_mode"] == "pixel_composite"
     request = job.get("prompt_edit") or {}
@@ -207,6 +246,10 @@ def compile_image_prompt(manifest, job, paths, detail_blocks, geometry, locks):
     use_case = ("precise-object-edit" if editing else "photorealistic-natural" if background_only
                 else "ads-marketing" if mode == "model_native" else "product-mockup")
     composition, design, extra = _design(job)
+    compact = job.get("prompt_format") == COMPACT
+    if compact:
+        design, extra = _compact_design(design, extra)
+        detail_blocks = [block.replace(_DETAIL_CLAUSE, "") for block in detail_blocks]
     if background_only:
         composition = "Prepare the empty backdrop and support around the planned local product container."
         design = {key: value for key, value in design.items() if key in {"background", "lighting", "family_visual_style"}}
@@ -229,12 +272,14 @@ def compile_image_prompt(manifest, job, paths, detail_blocks, geometry, locks):
     if request:
         lines.append("Observed failures to correct: " + ", ".join(request["failures"]) + ".")
         lines.append("The edit target is a previous model result to repair, not evidence for unsupported product facts. "
-                     "Change only these failures; preserve the already-correct scene, geometry and approved typography.")
+                     + ("Correct the failed framing or negative space; preserve physical product details and proportions."
+                        if layout_first else "Change only these failures; preserve the already-correct scene, geometry and approved typography."))
     if not background_only:
         lines.append(f"Target view: {job.get('target_view', job.get('view'))}.")
     lines.extend(_lines("Composition/framing", composition))
     lines.extend([f"Canvas intent: {job['canvas'][0]} x {job['canvas'][1]}; compose for this aspect ratio.",
                   "Placement containers (normalized x, y, width, height; not observed product masks): " + _json(geometry)])
+    lines.extend(prompt_lines(manifest, job))
     lines.extend(_lines("Lighting", job.get("lighting")))
     for key, value in design.items():
         lines.extend(_lines("Design / " + key.replace("_", " "), value))
@@ -263,6 +308,23 @@ def compile_image_prompt(manifest, job, paths, detail_blocks, geometry, locks):
     else:
         for title, key in (("Geometry", "geometry"), ("Material", "material"), ("Scene scale", "scene_scale")):
             lines.extend(f"- {title} / {text.lstrip('- ')}" for text in locks[key])
+    if compact and not background_only:
+        lines.extend(["- Keep the evidenced structure, component relationships, dimensions, material, colour, finish and texture; "
+                      "perspective, occlusion, highlights and reflections may follow the target view.",
+                      "- Credible support, scale, grip and contact shadows; no invented measurements.",
+                      *["- Critical detail / " + text.lstrip("- ") for text in detail_blocks],
+                      *(["- Critical details: never delete, fill, move, redesign or invent them; their projected location "
+                         "and size follow the target camera."] if detail_blocks else []),
+                      "- Keep genuine labels and branding; never infer illegible text, hidden surfaces, internal materials "
+                      "or accessories from a style sample or generated image."])
+        lines.append("Allowed changes: " + (
+            ("correct product placement and negative space to match the planned composition; preserve physical product details and proportions."
+             if layout_first else "only the specified defective region or environment; preserve already-correct product details, framing and typography.")
+            if editing else "supported view, pose, lighting and scene integration; rebuild supported appearance without reproducing source blur."))
+        lines.append("Avoid: invented claims, unapproved props, extra product units, watermarks and reference-board UI; never take "
+                     "product identity, sample copy, claims, packaging, accessories or quantities from a design source.")
+        return "\n".join(lines) + "\n"
+    if not background_only:
         lines.extend(["- Preserve physical structure, component relationships and confirmed dimensions. "
                       "Allow natural perspective, silhouette projection and occlusion in the supported target view.",
                       "- Preserve evidenced material identity, product color, finish and identifying texture; "
@@ -276,6 +338,11 @@ def compile_image_prompt(manifest, job, paths, detail_blocks, geometry, locks):
             if editing else "supported view, pose, lighting and scene integration; rebuild supported appearance without reproducing source blur."))
     lines.append("Avoid: invented claims, unapproved props, extra product units, watermarks and reference-board UI. "
                  "Reference styling never overrides verified product facts or the approved copy.")
+    if layout_first:
+        lines = [line.replace("preserve already-correct product details, framing and typography",
+                              "preserve physical product details; recompose framing for the planned text regions")
+                 .replace("preserve the already-correct scene, geometry and approved typography",
+                          "preserve physical geometry; correct the failed placement or negative space") for line in lines]
     return "\n".join(lines) + "\n"
 
 

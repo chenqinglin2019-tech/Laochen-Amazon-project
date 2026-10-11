@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import copy
 import hashlib
-import importlib.metadata
 import importlib.util
 import json
 import os
@@ -79,9 +78,10 @@ def runtime_identity():
     packages = {}
     for module, distribution in (("PIL", "Pillow"), ("numpy", "numpy")):
         spec = importlib.util.find_spec(module)
+        from importlib import metadata  # lazy: ~20 ms per CLI process otherwise
         try:
-            version = importlib.metadata.version(distribution)
-        except importlib.metadata.PackageNotFoundError:
+            version = metadata.version(distribution)
+        except metadata.PackageNotFoundError:
             version = None
         packages[module] = {"version": version, "origin": _file_identity(spec.origin) if spec else None}
     browsers = [os.environ.get("LC_LAYOUT_CHROMIUM")]

@@ -463,6 +463,7 @@ def _approved_delivery_images(manifest: dict, base: Path) -> list[dict]:
         images.append({"job_id": identifier, "filename": source.name, "source": source, "sha256": expected})
     if not images:
         raise ValueError("No current QA-approved images are available for delivery")
+    images.sort(key=lambda image: image["job_id"])
     # Flatten without losing original names unless two legacy subfolders clash.
     names = [image["filename"].casefold() for image in images]
     for image in images:

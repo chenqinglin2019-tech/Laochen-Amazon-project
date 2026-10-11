@@ -1,6 +1,32 @@
-# 维护手册（V7）
+# 维护手册（V8 / 旧项目兼容）
 
 适用：修改、测试或打包 skill，以及替换鉴权二进制。维护不调用模型，不读真实凭据，不访问真实账户。
+
+## V8 整图直出维护
+
+- 新入口 lc_image_studio.py 用标准库判断 workflow_policy：one_pass_v1 按需导入新模块，历史项目用参数数组子进程透传原入口，不经过 shell。未知策略拒绝，不自动迁移。
+- 原脚本、渲染器、资源、PIPELINE_VERSION 及审核指纹文件保持字节不变；不要把新状态添加到旧常量。V8 模块独立实现策划、预约、技术导出与交付，不调用旧 workflow/dispatch/导出审核函数。
+- 运行时先 `python3.12 scripts/lc_image_studio.py verify --json`，只验证 Python≥3.11/Pillow。不调用旧 bootstrap，不修改旧 selection/verified 语义。
+- 新回归：在 scripts 下 `P -B -m unittest test_lc_one_pass test_lc_one_pass_main.MainProcessingTests -v`，使用临时库和测试鉴权旁路；覆盖 7/13 张、逐字文案/数字、无浏览器、并发、预约冲突/过期/未知、导出变更、比例异常、主图三次模型专项修复和最终纯白像素。主图新增 lc_one_pass_main.py，合成测试覆盖保护区/连通残留清理、预乘 alpha 居中、处理 ID、历史恢复和篡改拦截；合成测试不能证明模型文字或产品细节正确。
+- 主图处理版本与生图指纹分离；新主图 main_prompt_version=2，历史缺省为 1 并保持原提示字节。不得提高所有图片的 export_settings 版本来启用主图处理，也不得因 prepare-main 清零修复预算。维护完成后仅在用户授权的生产恢复阶段运行原鉴权入口并处理实际项目。
+- 旧回归保留下面的 test_lc_composition、test_lc_composition_compatibility、test_orchestrate_composition.mjs。改前基线只复制 scripts/assets/references，不复制 config.json 或用户凭据；用 LC_COMPOSITION_BASELINE 做旧提示、指纹及规则对照。
+- 新状态 status/deliver 只读；未知或在途预约未核实前禁止修改其生成输入，不能通过 plan 释放槽位。工具比例异常在相同输入下保留 needs_input，不能无预算反复派发；只有导出关键词变化可从有效原图重新本地导出。
+- 发布仍使用原打包器，显式 `--name lc-amazon-image-studio-v8`；它自动包含新增模块、生成空 token 配置。默认不含测试，不修改本机配置。不要把基线和临时测试项目放进发布目录。
+
+下面的 V7.2/V7.1 维护规则只约束历史生产链。
+
+## V7.2 构图先行维护
+
+- 新逻辑集中于 `lc_composition.py`，经现有编排入口安装渲染/QA 门禁；冻结渲染器、PIPELINE_VERSION 和 scoped_v1 审核摘要保持不变。新项目默认 `layout_first/1` + `full_review_first/1`，旧项目无此策略时不自动迁移。
+- `composition_contract` 从真实布局派生；审核绑定底图、构图、面板/插图/预览文件及规则哈希。原图审核和显式成品美感判断均不可缺省。矩形插图 contain，圆形插图 cover+遮罩，面板使用现有 `panel_placement`；最终像素仍由原冻结渲染器审核。
+- 本地商品合成返修用 `review-prepare --stage composition --repair-local --job J`：只允许原画布、文案、文字区与面板内纠正商品图层，沿用一次质量预算，不手改快照。模型底图失败仍走现有生成返修队列。
+- 不再以套图 contact sheet、micro detail contact sheet 作为交付前置，不自动 finalize；只交付按图位排序的图片文件，逐图审核和手机预览仍必需。
+
+隔离回归：在 `scripts/` 下用已验证 Python 执行 `P -B -m unittest test_lc_composition test_lc_composition_compatibility`，再执行 `node --test test_orchestrate_composition.mjs`。测试自行隔离鉴权和模板库，不调用模型。
+
+- `LC_COMPOSITION_BASELINE` 指向改动前的干净 skill 根目录：比较 5 个旧项目变体 × 6 组提示/指纹/规则摘要，另比对冻结文件字节。没提供则明确跳过，不以当前代码重建 golden。
+- `LC_COMPOSITION_DOORBELL` 可指向门铃原失败底图：仅复制到临时项目，用人工观察的实际外接框复现遮挡拦截；不改历史项目。没提供则跳过真实图回放，其余合成回归照常运行。
+- 当前安装包没有原 `test_invalidation_tripwire`、`test_review_rule_epoch` 完整测试集；以上 baseline 对照提供本次兼容证据，不等于跑过缺失测试。合成端到端验证流程、真实字体/浏览器渲染和交付门禁，不能证明真实生图的美感已经改善；实际样板需在下一次生产中验证。
 
 ## 测试环境
 
@@ -110,3 +136,33 @@
 - `--platform` 只带对应平台的鉴权二进制；打包前会核对 `auth-binaries.json`。
 - 打包前检查所选平台的每个组件是否存在、非符号链接且哈希匹配；缺一即拒绝打包。跨平台发布使用 `--platform all`；zip 显式使用 Unix 权限元数据，组件 0755、空凭据 config.json 0600，即使从 Windows 打包也保留该元数据。
 - 发布包：默认名 `lc-amazon-image-studio-v7.zip`。维护包：`--with-tests --name lc-amazon-image-studio-v7-dev`。
+
+
+## V7.1 维护要点
+
+**改动区域**（保证在途项目不重生、不重审）
+- **冻结文件**：
+  - 布局指纹文件：`lc_layout.py`、`render_layout.mjs`、`layout-runtime.json`、`lc_layout_v3.py`、`lc_project_contracts.py`、`lc_typography.py`、`lc_title_effects.py`、字体；
+  - style_v1 任务的指纹包含的 `lc_layout_style.py`、`render_layout_style.mjs`。
+- **审核规则摘要**（`lc_review_rules` scoped_v1）：`lc_image_pipeline`、`lc_workflow`、`lc_delivery` 只改 `_EXCLUDED` 函数的函数体，并用局部 import；`lc_assets`、`lc_quality`、`lc_design`、`lc_review_rules` 不改。
+- **新行为放在新模块**：`lc_dispatch`、`lc_speculation`、`lc_manifest_defaults`、`lc_layout_heal`、`lc_layout_autofit`、`lc_source_assess`、`lc_source_rebind`、`lc_main_composite`、`lc_references`、`lc_fsretry`、`lc_fastpath`、`lc_doctor`。
+- **运行时钩子**：集中在 `lc_fastpath.install()`，提供 Windows 文件重试、审核规则切片的跨进程缓存、渲染时用 verify 戳代替 doctor。设 `LC_FASTPATH=0` 可关闭。
+
+**保护测试**
+- `test_invalidation_tripwire`：旧任务的提示字节、生成/版式/排字指纹不变。可正常生成的任务要求逐字节相同；原本被拦下的任务只允许变为可生成。
+- `test_review_rule_epoch`：scoped_v1 的审核规则摘要不变（按 Python 小版本比较）。
+- 金标只能有意重写：`python -X utf8 test_xxx.py --write`，并在发布说明中写明原因。
+- `test_lc_v71`：新功能的单测，外加一个从 init 开始的端到端快速协议测试。
+
+**基准**
+- 命令：`python -X utf8 scripts/benchmark_e2e_agent.py --skill <目录> --protocol baseline|fast --images 7|13 --out r.json`。
+- 用合成实拍图和假生图模拟代理，统计调用次数、代理输出字符数、plan 轮数、本地耗时。
+- 发布包会排除 `benchmark_*`。
+
+**平台**
+- Windows 杀软/索引器占用文件时自动重试，最终报 `FILE_IN_USE`。
+- 未开启长路径时提前报 `PATH_TOO_LONG`。
+- verify 改用 `lc_doctor.py`：Windows 上 Chromium 的 `--version` 不输出时，按 version manifest / revision 判定。
+- 缓存目录不可写（宿主沙箱）时：verify 戳写到 `<TEMP>/lc-amazon-image-studio-<user>/runtime/…`，鉴权记录写到 `<TEMP>/lc-amazon-image-studio-<user>-<hash>/auth-pass.json`，都可正常读取。
+- macOS python.org 版 Python 下载 Node 时，遇到证书错误会改用 `/etc/ssl/cert.pem` 重试，不会关闭校验。
+- Windows 上 Smart App Control / Defender 拦截未签名的鉴权组件时：在文件属性里“解除锁定”，或执行 `Unblock-File tools\bin\lc-auth-check-windows-amd64.exe`，然后重跑鉴权入口（鉴权逻辑不变）。

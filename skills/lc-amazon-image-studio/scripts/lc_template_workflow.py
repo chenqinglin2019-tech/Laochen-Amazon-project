@@ -125,6 +125,40 @@ def prepare_template_briefs(manifest, base, selected):
     return _prepare_template_briefs_v1(manifest, base, selected)
 
 
+# Built-in families do not cover every slot. Instead of "needs_input" (the agent then
+# hand-writes a brief and re-plans), try the slot's natural intents, then another
+# built-in family's template for that slot. The project family selection is kept.
+SLOT_INTENTS = {
+    "size_or_components": ("kit_overview", "dimensions", "specifications", "feature_detail"),
+    "primary_use_case": ("lifestyle_hero", "scene_context", "function_demo"),
+    "compatibility_or_installation": ("installation", "setup", "fit", "assembly", "how_to", "feature_detail"),
+    "material_or_detail": ("material_detail", "craftsmanship", "feature_detail"),
+    "storage_or_package": ("organization", "portability", "kit_overview", "scene_context"),
+    "problem_solution": ("function_demo", "handling", "scene_context", "lifestyle_hero"),
+    "a_plus": ("lifestyle_hero", "scene_context", "feature_detail", "multi_scene"),
+}
+
+
+def slot_intents(job):
+    import re
+    if job.get("kind") == "a_plus":
+        return SLOT_INTENTS["a_plus"]
+    role = job.get("template_slot_role") or re.sub(r"^\d+_", "", str(job.get("id", "")))
+    return SLOT_INTENTS.get(role, ("lifestyle_hero", "feature_detail", "scene_context"))
+
+
+def fallback_template(library_api, library, family, job):
+    """(template_entry, family_id, reason) or None; same family first, then others."""
+    families = [family["id"]] + sorted(f["id"] for f in library_api._latest(library["families"]) if f["id"] != family["id"])
+    for family_id in families:
+        for intent in slot_intents(job):
+            candidates = library_api.rank_templates(library, family_id, {**job, "image_intent": [intent]})
+            if candidates:
+                where = "same family" if family_id == family["id"] else f"cross-family ({family_id})"
+                return candidates[0], family_id, f"Slot intent fallback ({intent}, {where})"
+    return None
+
+
 def _prepare_template_briefs_v1(manifest, base, selected):
     import lc_design_templates as library_api
     from lc_style_reference import ReferenceIndexError
@@ -243,8 +277,12 @@ def _prepare_template_briefs_v1(manifest, base, selected):
                 if template is None:
                     candidates = library_api.rank_templates(load(), family["id"], job)
                     if not candidates:
-                        unresolved(job, "No compatible image template in the selected family. Author an original design or choose another template.")
-                        continue
+                        fallback = fallback_template(library_api, load(), family, job)
+                        if fallback is None:
+                            unresolved(job, "No compatible image template in the selected family. Author an original design or choose another template.")
+                            continue
+                        candidates = [fallback[0]]
+                        reasons = reasons + [fallback[2]]
                     # Stable diversification only among equally suitable options;
                     # do not reduce intent/format suitability just to vary a grid.
                     top_score = candidates[0]["score"]
@@ -260,7 +298,8 @@ def _prepare_template_briefs_v1(manifest, base, selected):
                     saved_set = {"schema_version": 1, "request": copy.deepcopy(project_request),
                                  "family": family_entry(family), "selection_reasons": reasons}
                     manifest["design_template_selection"] = saved_set
-            compiled = library_api.compile_template(family, template, context, job)
+            template_family = family if template["family_id"] == family["id"] else library_api.get_family(load(), template["family_id"])
+            compiled = library_api.compile_template(template_family, template, context, job)
             brief = compiled["brief"]
             for section, override in job.get("design_overrides", {}).items():
                 brief[section].update(copy.deepcopy(override))

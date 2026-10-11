@@ -72,21 +72,25 @@ def build_packet(manifest, base, job_ids=None):
         for rid in q._reference_ids(manifest, job):
             if rid in refs and rid not in ordered:
                 ordered.append(rid)
-    references = []
+    from lc_source_assess import propose_reference, propose_job, propose_census
+    references, proposals = [], {}
     for rid in ordered:
         ref = refs[rid]
         review = ref.get("quality_review") or {}
         bound = not q._review_problems(ref)
+        proposals[rid] = propose_reference(manifest, base, ref) if not bound else {
+            "clarity": review.get("clarity"), "evidence": review.get("evidence")}
         references.append({
             "id": rid, "path": ref.get("path"), "role": ref.get("role"), "view": ref.get("view"),
             "product_bbox_norm": ref.get("product_bbox_norm"), "sha256": ref.get("sha256"),
             "region_fingerprint": q.source_region_fingerprint(ref),
             "crop": (ref.get("quality_metrics") or {}).get("product_crop_path"),
             "previously_bound": bound,
-            "clarity": review.get("clarity") if bound else None,
-            "evidence": review.get("evidence") if bound else None,
+            "clarity": review.get("clarity") if bound else proposals[rid]["clarity"],
+            "evidence": review.get("evidence") if bound else proposals[rid]["evidence"],
             "defects": list(review.get("defects", [])) if bound else [],
-            "notes": review.get("notes", "") if bound else ""})
+            "notes": review.get("notes", "") if bound else proposals[rid]["notes"],
+            "proposed": not bound and proposals[rid]["clarity"] is not None})
     job_entries, layers = [], []
     for job in jobs:
         assessment = job.get("source_assessment") or {}
@@ -94,15 +98,18 @@ def build_packet(manifest, base, job_ids=None):
         previous = assessment.get("reviewed_context_inputs")
         current = _context_inputs(job)
         changed = sorted(key for key in CONTEXT_KEYS if previous is not None and previous.get(key) != current.get(key))
+        reviewed = assessment.get("scene_fit") not in (None, "unknown") and not changed
+        proposal = None if reviewed else propose_job(manifest, job, proposals)
         job_entries.append({
             "id": job["id"], **current, "source_reference_ids": q._reference_ids(manifest, job),
             "recommended_mode": decision.get("recommended_mode"), "recommendation": decision.get("reason"),
             "context_changed_since_last_review": changed,
-            "scene_fit": assessment.get("scene_fit") if assessment.get("scene_fit") != "unknown" else None,
-            "evidence": assessment.get("evidence") if assessment.get("evidence") != "unknown" else None,
-            "degradation": assessment.get("degradation") if assessment.get("degradation") != "unknown" else None,
-            "reason": assessment.get("reason", ""),
-            "matched_reference_ids": list(assessment.get("matched_reference_ids", []))})
+            "scene_fit": proposal["scene_fit"] if proposal else assessment.get("scene_fit"),
+            "evidence": proposal["evidence"] if proposal else assessment.get("evidence"),
+            "degradation": proposal["degradation"] if proposal else assessment.get("degradation"),
+            "reason": proposal["reason"] if proposal else assessment.get("reason", ""),
+            "matched_reference_ids": proposal["matched_reference_ids"] if proposal else list(assessment.get("matched_reference_ids", [])),
+            "proposed": bool(proposal)})
         for index, layer in enumerate(job.get("product_layers", [])):
             records = job.get("layer_asset_hashes", [])
             record = records[index] if index < len(records) else {}
@@ -112,31 +119,52 @@ def build_packet(manifest, base, job_ids=None):
                            "asset_sha256": record.get("asset_sha256"), "mask_sha256": record.get("mask_sha256"),
                            "reviewed": True if (binding.get("reviewed") and binding.get("reviewed_asset_sha256") == record.get("asset_sha256")
                                                 and binding.get("reviewed_mask_sha256") == record.get("mask_sha256")) else None})
-    sheet = _sheet(base, references, base / "review" / "source" / "sheet.jpg")
+    tiles = list(references)
+    for job in jobs:
+        overlay = (job.get("main_composite") or {}).get("overlay")
+        if (job.get("main_composite") or {}).get("status") == "proposed" and overlay:
+            tiles.append({"id": f"{job['id']} cutout (magenta = removed)", "crop": overlay})
+    sheet = _sheet(base, tiles, base / "review" / "source" / "sheet.jpg")
+    census = bool(manifest.get("critical_detail_census_completed")) or propose_census(manifest)
     packet = {"schema": SCHEMA, "created_at": time.time(), "enums": _enums(),
               "sheet": p.relpath(sheet, base) if sheet else None,
-              "critical_detail_census_completed": bool(manifest.get("critical_detail_census_completed")),
+              "critical_detail_census_completed": census,
+              "census_proposed": census and not manifest.get("critical_detail_census_completed"),
+              "observation": "",
               "references": references, "jobs": job_entries, "layers": layers,
-              "instructions": ("View the sheet (and original crops where needed). Fill clarity/evidence/defects/notes per "
-                               "reference and scene_fit/evidence/degradation/reason per job from what you actually see; "
-                               "set layers[].reviewed=true only after checking each cutout/mask. Set "
-                               "critical_detail_census_completed=true only after every P0/P1 source was inspected. "
-                               "Hashes are bound by source-review-submit; never copy them by hand.")}
+              "instructions": ("View the sheet (and original crops where needed). Values marked proposed are measured "
+                               "pre-assessments: correct any that do not match what you see, fill every null, set "
+                               "layers[].reviewed=true only after checking each cutout/mask, then submit with "
+                               "--observation \"<what you saw>\". Hashes are bound by source-review-submit; never copy them by hand.")}
     out = base / "review" / "source" / "packet.json"
     p.write_json(out, packet)
-    needs = [entry["id"] for entry in references if not entry["previously_bound"]] + \
-            [entry["id"] for entry in job_entries if entry["scene_fit"] is None or entry["context_changed_since_last_review"]]
+    needs = [entry["id"] for entry in references if entry["clarity"] is None or entry["evidence"] is None] + \
+            [entry["id"] for entry in job_entries if None in (entry["scene_fit"], entry["evidence"], entry["degradation"])] + \
+            [f"{entry['job']}:layer{entry['index']}" for entry in layers if entry["reviewed"] is None]
     return {"packet": p.relpath(out, base), "sheet": packet["sheet"], "references": len(references),
             "jobs": len(job_entries), "needs_review": needs}
 
 
-def submit_packet(manifest, base, packet):
+def submit_packet(manifest, base, packet, observation=None):
     import lc_image_pipeline as p
     import lc_quality as q
     base = Path(base).resolve()
     if not isinstance(packet, dict) or packet.get("schema") != SCHEMA:
         raise p.PipelineError("Not a source-review packet; run source-review-prepare")
     enums = _enums()
+    observation = (observation or packet.get("observation") or "").strip()
+    accepts_proposals = any(entry.get("proposed") for entry in packet.get("references", []) + packet.get("jobs", [])) \
+        or packet.get("census_proposed")
+    if accepts_proposals and len(observation) < 20:
+        raise p.PipelineError("Source review accepts measured proposals: add --observation \"<what you saw on the sheet>\" "
+                              "(>= 20 characters), after correcting any proposal that does not match")
+    if accepts_proposals:
+        for entry in packet.get("references", []):
+            if entry.get("proposed") and isinstance(entry.get("notes"), str):
+                entry["notes"] = f"{entry['notes'].strip()} Agent: {observation}"
+        for entry in packet.get("jobs", []):
+            if entry.get("proposed") and isinstance(entry.get("reason"), str):
+                entry["reason"] = f"{entry['reason'].strip()} Agent: {observation}"
     refs = {ref["id"]: ref for ref in manifest.get("references", [])}
     errors = []
     for entry in packet.get("references", []):
@@ -174,6 +202,10 @@ def submit_packet(manifest, base, packet):
             "notes": entry["notes"].strip(), "reviewed_sha256": entry["sha256"],
             "reviewed_region_fingerprint": entry["region_fingerprint"]}
     for entry in packet.get("layers", []):
+        if entry.get("rejected") is True and (jobs.get(entry.get("job")) or {}).get("main_composite"):
+            from lc_main_composite import reject
+            reject(manifest, jobs[entry["job"]])
+            continue
         if entry.get("reviewed") is not True:
             continue
         job = jobs.get(entry.get("job"))
@@ -187,6 +219,8 @@ def submit_packet(manifest, base, packet):
             raise p.PipelineError(f"{job['id']} layer {index} changed since the packet; run source-review-prepare again")
         provenance = refs.get(layer.get("reference_id"), {}).get("provenance", {})
         sources = set([layer.get("reference_id")] + layer.get("source_reference_ids", []) + provenance.get("source_reference_ids", []))
+        if (job.get("main_composite") or {}).get("status") == "proposed":
+            job["main_composite"]["status"] = "confirmed"
         layer["source_binding"] = {"reviewed": True, "reviewed_asset_sha256": record.get("asset_sha256"),
                                    "reviewed_mask_sha256": record.get("mask_sha256"),
                                    "source_reference_hashes": {rid: refs[rid]["sha256"] for rid in sources if rid in refs}}

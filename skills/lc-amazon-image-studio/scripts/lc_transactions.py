@@ -43,6 +43,11 @@ _JOB_ARTIFACT_DIRS = ("review/layouts", "review/image_layers", "review/packets",
                       "review/submissions", "review/sheets", "prompts", "repairs")
 
 
+
+def _fs_replace(source, target):
+    import lc_fsretry
+    lc_fsretry.replace(source, target)
+
 def _json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
@@ -63,7 +68,7 @@ def _atomic(path, payload):
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        _fs_replace(temporary, path)
     finally:
         if temporary is not None and temporary.exists():
             temporary.unlink()
@@ -450,7 +455,7 @@ def recover_pending(manifest_path):
                     if item["old_sha256"] is None:
                         target.unlink()
                     elif backup.is_file() and _sha(backup) == item["old_sha256"]:
-                        os.replace(backup, target)
+                        _fs_replace(backup, target)
                     else:
                         raise TransactionConflict(f"TRANSACTION_RECOVERY_REQUIRED: missing backup: {target}")
                 elif _sha(target) != item["old_sha256"]:
@@ -459,6 +464,40 @@ def recover_pending(manifest_path):
         else:
             raise TransactionConflict("TRANSACTION_RECOVERY_REQUIRED: manifest changed before pending recovery")
         _atomic(journal_path, _bytes(journal))
+
+
+def _long_paths_enabled():
+    if os.name != "nt":
+        return True
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as key:
+            return winreg.QueryValueEx(key, "LongPathsEnabled")[0] == 1
+    except OSError:
+        return False
+
+
+def _guard_path_length(stage, relatives):
+    """Windows without long-path support: fail early with advice instead of mid-command."""
+    if os.name != "nt" or _long_paths_enabled():
+        return
+    longest = max((len(str(stage / relative)) for relative in relatives), default=len(str(stage))) + 48
+    if longest > 259:
+        raise ValueError(f"PATH_TOO_LONG: staged paths reach ~{longest} characters (Windows limit 260). Move the project "
+                         "to a short folder such as D:\\lc\\<sku>, or enable Windows long paths, then retry.")
+
+
+def _sweep_old_transactions(area, max_age_seconds=3600):
+    """Best effort: drop finished transaction folders whose cleanup was blocked earlier."""
+    import lc_fsretry
+    now = time.time()
+    for folder in area.glob("tx-*"):
+        try:
+            journal = _json(folder / "journal.json")
+            if journal.get("state") in {"committed", "rejected"} and now - folder.stat().st_mtime > max_age_seconds:
+                lc_fsretry.rmtree(folder, best_effort=True)
+        except (OSError, ValueError):
+            continue
 
 
 def run_staged_command(manifest_path, job_ids, operation, *, command_name):
@@ -492,6 +531,7 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
                "snapshot_lock_hold_seconds": round(snapshot_lock_hold, 6)}
     area = base / _AREA
     area.mkdir(exist_ok=True)
+    _sweep_old_transactions(area)
     transaction = Path(tempfile.mkdtemp(prefix="tx-", dir=area))
     stage = transaction / "workspace"
     stage.mkdir()
@@ -504,6 +544,7 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
         clone_started = time.monotonic()
         declared = _declared_project_files(snapshot, base)
         staged_files = _stage_project_files(snapshot, base, selected, command_name=command_name)
+        _guard_path_length(stage, staged_files)
         for relative in sorted(staged_files):
             source = base / relative
             if source == manifest_path:
@@ -642,7 +683,7 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
                 for item in journal["files"]:
                     target = _target(base, item["relative"])
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(stage / item["relative"], target)
+                    _fs_replace(stage / item["relative"], target)
                 _atomic(manifest_path, manifest_payload)
                 journal["state"] = "committed"
                 metrics["commit_seconds"] = round(time.monotonic() - commit_started, 6)
@@ -652,9 +693,12 @@ def run_staged_command(manifest_path, job_ids, operation, *, command_name):
                 recover_pending(manifest_path)
                 raise
         # Keep only a tiny timing journal after success; failures retain artifacts.
-        shutil.rmtree(stage)
+        # Cleanup is best effort: the work is committed, so a locked file left behind
+        # (antivirus/indexer on Windows) must not turn this success into an error.
+        import lc_fsretry
+        lc_fsretry.rmtree(stage, best_effort=True)
         if (transaction / "backup").is_dir():
-            shutil.rmtree(transaction / "backup")
+            lc_fsretry.rmtree(transaction / "backup", best_effort=True)
         if plan is not None:
             _refresh_dispatch_output(stdout, command_name, plan)
             if isinstance(result, dict) and "dispatch" in result:

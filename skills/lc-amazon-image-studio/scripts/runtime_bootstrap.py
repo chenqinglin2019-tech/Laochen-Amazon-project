@@ -17,12 +17,11 @@ import re
 import shutil
 import subprocess
 import sys
-import tarfile
 import tempfile
 import time
 import urllib.parse
-import urllib.request
-import zipfile
+# urllib.request (ssl/http), tarfile and zipfile load lazily: the pipeline imports this
+# module only to read selection.json, and that must stay cheap.
 
 ROOT = Path(__file__).resolve().parents[1]
 # Official LTS checked 2026-09-10. Existing valid Node is always preferred;
@@ -146,6 +145,8 @@ def _run(argv, *, env=None, timeout=20):
 
 
 def _official_download(url, target):
+    import urllib.error
+    import urllib.request
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme != "https" or parsed.netloc != "nodejs.org" or not parsed.path.startswith("/dist/"):
         raise BootstrapError("Node downloads must use https://nodejs.org/dist/")
@@ -156,12 +157,25 @@ def _official_download(url, target):
                 raise BootstrapError("Node download redirected outside the official HTTPS origin")
             return super().redirect_request(request, response, code, message, headers, newurl)
 
-    with urllib.request.build_opener(OfficialRedirect()).open(url, timeout=60) as response:
-        redirected = urllib.parse.urlsplit(response.geturl())
-        if redirected.scheme != "https" or redirected.netloc != "nodejs.org":
-            raise BootstrapError("Node download redirected outside the official HTTPS origin")
-        with Path(target).open("wb") as stream:
-            shutil.copyfileobj(response, stream)
+    def fetch(*handlers):
+        with urllib.request.build_opener(OfficialRedirect(), *handlers).open(url, timeout=60) as response:
+            redirected = urllib.parse.urlsplit(response.geturl())
+            if redirected.scheme != "https" or redirected.netloc != "nodejs.org":
+                raise BootstrapError("Node download redirected outside the official HTTPS origin")
+            with Path(target).open("wb") as stream:
+                shutil.copyfileobj(response, stream)
+
+    try:
+        fetch()
+    except urllib.error.URLError as exc:
+        import ssl
+        # python.org builds on macOS ship without CA roots until "Install Certificates"
+        # runs. Retry once with the system bundle; verification is never disabled.
+        system_bundle = Path("/etc/ssl/cert.pem")
+        if not isinstance(getattr(exc, "reason", None), ssl.SSLCertVerificationError) or not system_bundle.is_file():
+            raise BootstrapError(f"Node download failed: {exc}. On macOS python.org builds run "
+                                 "'Install Certificates.command' once, then retry.") from exc
+        fetch(urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=str(system_bundle))))
 
 
 def _extract_node(archive, destination, expected_root):
@@ -178,6 +192,7 @@ def _extract_node(archive, destination, expected_root):
         return target
 
     if str(archive).endswith(".zip"):
+        import zipfile
         with zipfile.ZipFile(archive) as bundle:
             for item in bundle.infolist():
                 target = target_for(item.filename)
@@ -191,6 +206,7 @@ def _extract_node(archive, destination, expected_root):
                     with bundle.open(item) as source, target.open("xb") as output:
                         shutil.copyfileobj(source, output)
     else:
+        import tarfile
         with tarfile.open(archive, "r:gz") as bundle:
             for item in bundle:
                 target = target_for(item.name)
@@ -219,14 +235,29 @@ class RuntimeBootstrap:
         if not isinstance(self.lock.get("node_min_major"), int) or self.lock["node_min_major"] < 20:
             raise BootstrapError("Invalid Node minimum in runtime lock")
         digest = hashlib.sha256(json.dumps([self.lock, BOOTSTRAP_DEPENDENCIES], sort_keys=True).encode()).hexdigest()[:16]
-        default_cache = (Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local") / "lc-amazon-image-studio/runtime"
+        override = os.environ.get("LC_AMAZON_STUDIO_CACHE", "").strip()
+        default_cache = (Path(override).expanduser() / "runtime" if override else
+                         Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData/Local") / "lc-amazon-image-studio/runtime"
                          if _windows() else Path.home() / ".cache/lc-amazon-image-studio/runtime")
         self.cache_root = Path(cache_root) if cache_root else default_cache
         self.cache = self.cache_root / digest
         self.selection_path = self.cache / "selection.json"
         self.bundled = Path.home() / ".cache/codex-runtimes/codex-primary-runtime/dependencies"
 
+    @property
+    def fallback_cache(self):
+        """Where stamps go when the cache cannot be written (e.g. a host sandbox)."""
+        user = re.sub(r"[^A-Za-z0-9_.-]", "_", os.environ.get("USER") or os.environ.get("USERNAME") or "user")
+        return Path(tempfile.gettempdir()).resolve() / f"lc-amazon-image-studio-{user}" / "runtime" / self.cache.name
+
     def _selection(self):
+        for path in (self.selection_path, self.fallback_cache / "selection.json"):
+            try:
+                value = _json(path)
+                if isinstance(value, dict) and value:
+                    return value
+            except (OSError, ValueError):
+                continue
         try:
             value = _json(self.selection_path)
             return value if isinstance(value, dict) else {}
@@ -357,7 +388,9 @@ class RuntimeBootstrap:
         env = {name: selected[key] for name, key in (("LC_LAYOUT_NODE", "node"), ("LC_LAYOUT_NODE_MODULES", "modules"), ("LC_LAYOUT_CHROMIUM", "chromium")) if selected[key]}
         commands = {"cwd": str(self.root), "python": selected["python"] or usable_python, "env": env}
         if commands["python"]:
-            commands["doctor_argv"] = [commands["python"], "-X", "utf8", "-B", str(self.root / "scripts/lc_layout.py"), "--doctor"]
+            # lc_doctor.py loads lc_layout_style first, so a Windows Chrome for Testing build that
+            # prints nothing for --version is still recognised by its manifest/revision.
+            commands["doctor_argv"] = [commands["python"], "-X", "utf8", "-B", str(self.root / "scripts/lc_doctor.py")]
             commands["pipeline_argv_prefix"] = [commands["python"], "-X", "utf8", str(self.root / "scripts/lc_image_pipeline.py")]
         return {"ready": not missing, "verified": False, "verification_required": True,
                 "next_action": "verify" if not missing else "Review missing dependencies and installation authorization",
@@ -474,7 +507,11 @@ class RuntimeBootstrap:
         cli = installer_modules / package / "cli.js"
         if not cli.is_file():
             raise BootstrapError(f"Browser installer CLI missing: {cli}")
-        _run([node, str(cli), "install", "chromium"], env=self._install_env(node), timeout=900)
+        try:
+            # The renderer uses chrome-headless-shell only; skip the ~380 MB full browser.
+            _run([node, str(cli), "install", "--only-shell", "chromium"], env=self._install_env(node), timeout=900)
+        except BootstrapError:
+            _run([node, str(cli), "install", "chromium"], env=self._install_env(node), timeout=900)
         return {"installer_package": package, "installer_modules": str(installer_modules),
                 "chromium_version": self.lock["chromium_version"], "rendering_playwright_version": self.lock["playwright_version"]}
 
@@ -558,26 +595,46 @@ class RuntimeBootstrap:
                                                                 "LC_LAYOUT_NODE_MODULES", "LC_LAYOUT_CHROMIUM")}}
 
     def _publish(self, report):
-        """Publish runtime paths (never account data) plus a time-limited verified stamp."""
-        self._prepare_cache()
+        """Publish runtime paths (never account data) plus a time-limited verified stamp.
+
+        Returns the directory written. When the cache is not writable (host sandbox),
+        the stamp goes to a per-user temp directory instead; a stamp that cannot be
+        written anywhere only costs a re-verification next time.
+        """
         stamp = {"schema": 1, "verified_at": time.time(), "selected": report["selected"],
                  "versions": report.get("versions", {}), "commands": report["commands"],
                  "identity": self._identity(report["selected"])}
-        for path, payload in ((self.selection_path, report["selected"]), (self.verified_path, stamp)):
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=path.stem + "-", suffix=".json",
-                                             dir=self.cache, delete=False) as stream:
-                json.dump(payload, stream, ensure_ascii=False, indent=2)
-                temporary = Path(stream.name)
-            os.replace(temporary, path)
+        errors = []
+        for directory in (self.cache, self.fallback_cache):
+            try:
+                if directory == self.cache:
+                    self._prepare_cache()
+                else:
+                    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+                for name, payload in (("selection.json", report["selected"]), ("verified.json", stamp)):
+                    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=Path(name).stem + "-", suffix=".json",
+                                                     dir=directory, delete=False) as stream:
+                        json.dump(payload, stream, ensure_ascii=False, indent=2)
+                        temporary = Path(stream.name)
+                    os.replace(temporary, directory / name)
+                return directory
+            except (OSError, BootstrapError) as exc:
+                errors.append(f"{directory}: {exc}")
+        raise OSError("; ".join(errors))
 
     def cached_report(self):
-        """Return a still-valid verification without relaunching the browser, else None."""
-        try:
-            stamp = _json(self.verified_path)
-            if (stamp.get("schema") != 1 or time.time() - float(stamp["verified_at"]) > VERIFIED_TTL_SECONDS
-                    or stamp["identity"] != self._identity(stamp["selected"])):
-                return None
-        except (OSError, ValueError, KeyError, TypeError):
+        """Return a still-valid verification without relaunching the browser, else None (read-only)."""
+        stamp = None
+        for path in (self.verified_path, self.fallback_cache / "verified.json"):
+            try:
+                candidate = _json(path)
+                if (candidate.get("schema") == 1 and time.time() - float(candidate["verified_at"]) <= VERIFIED_TTL_SECONDS
+                        and candidate["identity"] == self._identity(candidate["selected"])):
+                    stamp = candidate
+                    break
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        if stamp is None:
             return None
         return {"ready": True, "verified": True, "verification_required": False, "cached_verification": True,
                 "verified_at": stamp["verified_at"], "missing": [], "installable": [], "needs_confirmation": False,
@@ -586,10 +643,11 @@ class RuntimeBootstrap:
                 "next_action": "Use commands.python and commands.env for subsequent pipeline commands"}
 
     def invalidate(self):
-        try:
-            self.verified_path.unlink()
-        except OSError:
-            pass
+        for path in (self.verified_path, self.fallback_cache / "verified.json"):
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
     def verified_report(self, fresh=False):
         if not fresh:
@@ -603,7 +661,11 @@ class RuntimeBootstrap:
         try:
             report["verification"] = self.verify(report)
             report.update({"verified": True, "verification_required": False, "next_action": "Use commands.python and commands.env for subsequent pipeline commands"})
-            self._publish(report)
+            try:
+                report["stamp_dir"] = str(self._publish(report))
+            except OSError as exc:
+                # Verification itself passed; only the cache stamp could not be stored.
+                report.update(stamp_written=False, warning=f"Verification passed but its cache stamp could not be written ({exc}); the next verify repeats the check.")
         except (BootstrapError, OSError, ValueError) as exc:
             self.invalidate()
             report.update({"ready": False, "verified": False, "needs_confirmation": True, "error": str(exc),
@@ -628,18 +690,48 @@ class RuntimeBootstrap:
             if report["missing"]:
                 self._prepare_cache()
                 attempted = True
-            if not selected["python"]:
-                selected["python"] = self._install_python(report["usable_python"])
-                installed.extend(item["name"] for item in report["missing"] if item["name"] in {"pillow", "numpy"})
-            if not selected["node"]:
-                selected["node"] = self._install_node()
-                installed.append("node")
-            if not selected["modules"]:
-                selected["modules"] = self._install_playwright(selected["node"])
-                installed.append("playwright")
-            if not selected["chromium"]:
-                browser_installation = self._install_browser(selected["node"], selected["modules"])
-                installed.append("chromium")
+            # Independent downloads overlap: pip runs beside the Node -> npm -> browser
+            # chain, and the runtime Playwright package beside the browser download.
+            from concurrent.futures import ThreadPoolExecutor
+            failures = []
+            with ThreadPoolExecutor(max_workers=3) as pool:
+                python_job = pool.submit(self._install_python, report["usable_python"]) if not selected["python"] else None
+                node_ready = True
+                if not selected["node"]:
+                    try:
+                        selected["node"] = self._install_node()
+                        installed.append("node")
+                    except (BootstrapError, OSError, ValueError) as exc:
+                        failures.append(f"node: {exc}")
+                        node_ready = False
+                modules_job = browser_job = None
+                if node_ready:
+                    if not selected["modules"]:
+                        modules_job = pool.submit(self._install_playwright, selected["node"])
+                    if not selected["chromium"]:
+                        # The approved installer package is separate from the rendering
+                        # Playwright, so it does not wait for the runtime install.
+                        browser_job = pool.submit(self._install_browser, selected["node"],
+                                                  selected["modules"] or str(self.cache / "pending-runtime-modules"))
+                for name, job in (("python", python_job), ("playwright", modules_job), ("chromium", browser_job)):
+                    if job is None:
+                        continue
+                    try:
+                        value = job.result()
+                    except (BootstrapError, OSError, ValueError) as exc:
+                        failures.append(f"{name}: {exc}")
+                        continue
+                    if name == "python":
+                        selected["python"] = value
+                        installed.extend(item["name"] for item in report["missing"] if item["name"] in {"pillow", "numpy"})
+                    elif name == "playwright":
+                        selected["modules"] = value
+                        installed.append("playwright")
+                    else:
+                        browser_installation = value
+                        installed.append("chromium")
+            if failures:
+                raise BootstrapError("; ".join(failures))
             report = self.inspect()
             if not report["ready"]:
                 raise BootstrapError("Installed runtime does not match the unchanged lock; no version downgrade is allowed")
