@@ -67,11 +67,15 @@ def anchor_approve(manifest, base, job_id, *, verdicts=None, notes=None):
     path = base / "review" / "submissions" / f"{job_id}-anchor-{uuid.uuid4().hex[:12]}.json"
     p.write_json(path, record)
     proof = {"path": p.relpath(path, base), "sha256": p.sha256_file(path)}
+    voided = {}
     if passed:
         job["anchor_product_proof"] = proof
+        job.pop("anchor_product_failure", None)
     else:
         job.pop("anchor_product_proof", None)
-    return {"job": job_id, "anchor_passed": passed, "proof": proof["path"],
+        from lc_speculation import record_anchor_failure
+        voided = record_anchor_failure(manifest, job, checked)
+    return {"job": job_id, "anchor_passed": passed, "proof": proof["path"], **({"speculative": voided} if voided else {}),
             "next_action": ("siblings may now generate; the anchor still needs its normal full review" if passed
                             else "use review-prepare/review-submit with the failed checks to enter the repair flow")}
 

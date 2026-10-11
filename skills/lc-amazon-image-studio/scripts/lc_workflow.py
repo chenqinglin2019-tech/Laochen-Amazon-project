@@ -118,7 +118,8 @@ def _atomic_bytes(path: Path, payload: bytes):
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temp, path)
+        import lc_fsretry
+        lc_fsretry.replace(temp, path)  # Windows: retry brief sharing violations
     finally:
         if temp is not None and temp.exists():
             temp.unlink()
@@ -191,8 +192,14 @@ def ingest(manifest, base: Path, job_id, artifact: Path, attempt_id, *, tool_ret
         attempt["tool_duration_unavailable"] = True
         if unpaired_return is not None:
             attempt["unpaired_tool_returned_at"] = unpaired_return
+    plan = p.execution_plan(manifest, base)
+    # V7.1: the next dispatch, scheduler and anchor state come back here, so callers
+    # never need a separate `status` call between images.
+    from lc_composition import applies
     return {"job": job_id, "attempt_id": attempt_id, "idempotent": False, "status": "generated",
-            "raw_output": job["raw_output"], "dispatch": p.execution_plan(manifest, base)["dispatch"]}
+            "raw_output": job["raw_output"], "dispatch": plan["dispatch"], "scheduler": plan.get("scheduler"),
+            "anchor": plan.get("anchor"), "anchor_passed": plan.get("anchor_passed"),
+            **({"composition_review_required": [job_id]} if applies(manifest, job) else {})}
 
 
 def annotation_fingerprint(job):
@@ -582,7 +589,8 @@ def _prepare_reviews(manifest, base, selected, annotations, *, force, only_ready
     def finish():
         order = {job["id"]: i for i, job in enumerate(manifest["jobs"])}
         # V7: one sheet image + one compact todo per packet (review token savings).
-        from lc_review_sheets import write_sheet_and_todo
+        from lc_review_sheets import write_sheet_and_todo, write_prefill, write_answers_template
+        answer_entries = []
         for result in results:
             if result.get("packet"):
                 try:
@@ -590,8 +598,14 @@ def _prepare_reviews(manifest, base, selected, annotations, *, force, only_ready
                     thumb = ((job.get("design_resolution") or {}).get("assets") or {}).get("reference_thumbnail") or {}
                     reference = p.resolve_path(thumb.get("path"), base) if thumb.get("path") else None
                     result.update(write_sheet_and_todo(base, result["packet"], reference=reference))
+                    # V7.1 exceptions-only review: deterministic values prefilled server-side.
+                    review = write_prefill(base, result["packet"], manifest, job)
+                    result.update(rid=review["rid"], check=review["check"], people_required=review["people_required"],
+                                  explicit=review["explicit"])
+                    answer_entries.append({"job": result["job"], **review})
                 except (OSError, ValueError, KeyError) as exc:
                     result["sheet_error"] = str(exc)[:200]
+        answers_template = write_answers_template(base, answer_entries) if answer_entries else None
         results.sort(key=lambda result: order[result["job"]])
         errors.sort(key=lambda result: order[result["job"]])
         if results:
@@ -599,7 +613,8 @@ def _prepare_reviews(manifest, base, selected, annotations, *, force, only_ready
                 started=started, cached=all(result.get("cached", False) for result in results),
                 measurement="local_review_package_preparation_or_cache_validation",
                 includes=["planning", "reference_compile", "image_prepare", "layout"])
-        return {"packets": results, "skipped": skipped, "errors": errors}
+        return {"packets": results, "skipped": skipped, "errors": errors,
+                **({"answers_template": answers_template} if answers_template else {})}
 
     for job in manifest["jobs"]:
         if job["id"] not in selected:
@@ -676,6 +691,16 @@ def _prepare_reviews(manifest, base, selected, annotations, *, force, only_ready
 
 
 def review_submit(manifest, base: Path, packet):
+    from lc_composition import install, submit_review, final_review
+    install()
+    if not isinstance(packet, dict):
+        raise ValueError("Review packet must be an object")
+    if packet.get("stage") == "composition":
+        return submit_review(manifest, base, packet)
+    job = _job(manifest, packet.get("job"))
+    routed = final_review(manifest, job, base, packet)
+    if routed is not None:
+        return routed
     from lc_stage_timing import record_stage
     started, submit_started_at = time.perf_counter(), time.time()
     result = _review_submit_impl(manifest, base, packet)

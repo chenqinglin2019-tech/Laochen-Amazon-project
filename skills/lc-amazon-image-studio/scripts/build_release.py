@@ -19,7 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NAME = "lc-amazon-image-studio"
 PLATFORM_BINARIES = {"mac": ("lc-auth-check-darwin-amd64", "lc-auth-check-darwin-arm64"),
                      "win": ("lc-auth-check-windows-amd64.exe",), "linux": ("lc-auth-check-linux-amd64",)}
-NEVER = {"config.json", ".DS_Store"}
+NEVER = {"config.json", "config.example.json", ".env", ".DS_Store"}  # the blank config.json is generated
 NEVER_DIRS = {"__pycache__", "__MACOSX", ".lc-transactions", ".lc-compaction", ".git", "node_modules"}
 NEVER_PATHS = {"assets/layouts/design_templates.user.json"}
 

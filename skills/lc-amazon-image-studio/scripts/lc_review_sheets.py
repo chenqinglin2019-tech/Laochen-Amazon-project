@@ -98,9 +98,202 @@ def write_sheet_and_todo(base, packet_path, reference=None):
     return {"sheet": todo["look_at"]["sheet"], "todo": out.relative_to(base).as_posix()}
 
 
-def expand_todos(base, payload):
-    """Turn compact todos (single, list or map) back into full bound packets."""
+ANSWERS_SCHEMA = "lc-review-answers/1"
+EXPLICIT_FIELDS = ("model_text_review", "panel_reviews", "title_effect_review")
+PEOPLE = {"none": "none", "synthetic": "synthetic", "real": "real", "non_photorealistic": "non_photorealistic"}
+_PEOPLE_WORDS = ("person", "people", "woman", "women", "man ", "men ", "hand", "hands", "model wearing", "child", "kid",
+                 "baby", "user holding", "holding", "人", "手", "模特", "宝宝", "孩子")
+
+
+def _people_planned(job):
+    text = " ".join(str(job.get(key) or "") for key in ("selling_job", "scene", "composition"))
+    text += " " + json.dumps((job.get("layout") or {}).get("text_groups", []), ensure_ascii=False)
+    text += " " + json.dumps(((job.get("design_brief") or {}).get("generation") or {}), ensure_ascii=False)
+    lowered = f" {text.lower()} "
+    return any(word in lowered for word in _PEOPLE_WORDS)
+
+
+def _measured_readability(job):
+    """pass + numbers when every measured glyph-contrast and text-fit check passed, else None."""
+    checks = (job.get("layout_result") or {}).get("checks") or []
+    contrast = [c for c in checks if c.get("check") == "glyph_contrast"]
+    fit = [c for c in checks if c.get("check") in {"text_fit", "text_group_fit"}]
+    if not contrast or not fit or not all(c.get("passed") for c in contrast + fit):
+        return None
+    minimum = min(float(c.get("ratio_min") or 0) for c in contrast)
+    return f"Measured on the final render: glyph-core contrast >= {minimum:.2f}:1 (min 4.5) and all text fits its region."
+
+
+def prefill_for(manifest, job, packet):
+    """Deterministic review values, all valid under the unchanged QA rules."""
+    import lc_image_pipeline as p
+    reviews = packet.get("reviews", {})
+    prefill, hidden = {}, set()
+
+    def put(field, key, verdict, notes, hide=True):
+        if key in reviews.get(field, {}) and (reviews[field][key] or {}).get("verdict") is None:
+            prefill[f"{field}.{key}"] = {"verdict": verdict, "notes": notes}
+            if hide:
+                hidden.add(f"{field}.{key}")
+    is_main, text = job.get("kind") == "main", p.has_text(job)
+    if not is_main:
+        put("policy_qa_results", "main_product_only", "not_applicable", "Not the main image; the main-image-only rule does not apply.")
+    else:
+        put("semantic_qa_results", "scene_scale", "not_applicable", "Main image: product alone on white; no scene to scale.")
+    if not text:
+        for key in ("text_readability", "mobile_readability"):
+            put("policy_qa_results", key, "not_applicable", "No marketing text in this image.")
+        if job.get("text_mode") == "none":
+            put("policy_qa_results", "visual_design", "pass", "No marketing text or graphics; composition judged in the overall observation.")
+    else:
+        measured = _measured_readability(job)
+        if measured:
+            for key in ("text_readability", "mobile_readability"):
+                put("policy_qa_results", key, "pass", measured, hide=False)
+    if manifest is not None and manifest.get("anchor_job_id") == job.get("id"):
+        try:
+            from lc_anchor import anchor_quick_proof_valid
+            if anchor_quick_proof_valid(manifest, job, Path(packet.get("_base", "."))):
+                for key in ("geometry", "material", "components", "clarity"):
+                    put("semantic_qa_results", key, "pass", "Confirmed by the bound anchor product check of this exact raw image.", hide=False)
+        except Exception:  # noqa: BLE001 - a prefill is optional
+            pass
+    people_required = _people_planned(job)
+    if not people_required:
+        prefill["ai_disclosure"] = {"human_source": "none", "notes": "No person planned; set 'people' if one appears in the image."}
+    explicit = [field for field in EXPLICIT_FIELDS if field in reviews]
+    from lc_composition import applies
+    if manifest is not None and applies(manifest, job):
+        explicit.append("visual_design")
+    return {"schema": "lc-review-prefill/1", "job": job.get("id"), "review_id": packet.get("review_id"),
+            "values": prefill, "hidden": sorted(hidden), "people_required": people_required, "explicit": explicit}
+
+
+def write_prefill(base, packet_path, manifest, job):
     base = Path(base).resolve()
+    packet = json.loads(Path(packet_path).read_text(encoding="utf-8"))
+    packet["_base"] = str(base)
+    record = prefill_for(manifest, job, packet)
+    out = base / "review" / "packets" / f"{packet['job']}.prefill.json"
+    out.write_text(json.dumps(record, ensure_ascii=False, indent=1), encoding="utf-8")
+    keys = [f"{field}.{key}" for field, values in packet.get("reviews", {}).items()
+            if field not in EXPLICIT_FIELDS and field != "ai_disclosure" and isinstance(values, dict) for key in values]
+    to_check = [key for key in keys if key not in record["hidden"]]
+    return {"rid": packet["review_id"][:8], "check": to_check, "people_required": record["people_required"],
+            "explicit": record["explicit"]}
+
+
+def write_answers_template(base, entries):
+    """One file the agent fills for the whole batch (exceptions-only review)."""
+    base = Path(base).resolve()
+    answers = {}
+    for entry in entries:
+        item = {"rid": entry["rid"], "observation": "", "exceptions": {}}
+        if entry.get("people_required"):
+            item["people"] = ""
+        for field in entry.get("explicit", []):
+            item.setdefault("explicit", {})[field] = None
+        answers[entry["job"]] = item
+    template = {"schema": ANSWERS_SCHEMA, "answers": answers,
+                "how": ("For each image: look at its sheet, write one specific observation (>=20 chars, different per image). "
+                        "Every listed check not in 'exceptions' is recorded as pass with that observation; put only failed or "
+                        "doubtful checks in exceptions as {\"<field>.<key>\": {\"verdict\": \"fail\", \"notes\": \"...\"}}. "
+                        "people: none/synthetic/real/non_photorealistic when a person may appear. Then review-submit --packet <this file>.")}
+    out = base / "review" / "packets" / "answers.template.json"
+    out.write_text(json.dumps(template, ensure_ascii=False, indent=1), encoding="utf-8")
+    return out.relative_to(base).as_posix()
+
+
+def _expand_answers(base, payload):
+    answers = payload.get("answers")
+    if not isinstance(answers, dict) or not answers:
+        raise ValueError("Review answers need a nonempty 'answers' map keyed by job id")
+    packets, problems, seen = [], [], {}
+    for job_id, answer in answers.items():
+        where = f"{job_id}:"
+        todo_path = base / "review" / "packets" / f"{job_id}.todo.json"
+        prefill_path = base / "review" / "packets" / f"{job_id}.prefill.json"
+        if not isinstance(answer, dict) or not todo_path.is_file() or not prefill_path.is_file():
+            problems.append(f"{where} no prepared review; run review-prepare first")
+            continue
+        todo = json.loads(todo_path.read_text(encoding="utf-8"))
+        prefill = json.loads(prefill_path.read_text(encoding="utf-8"))
+        packet_path = (base / todo["packet"]).resolve()
+        packet = json.loads(packet_path.read_text(encoding="utf-8"))
+        rid = str(answer.get("rid") or "")
+        if (not rid or not packet.get("review_id", "").startswith(rid) or prefill.get("review_id") != packet.get("review_id")
+                or todo.get("review_id") != packet.get("review_id")):
+            problems.append(f"{where} STALE_REVIEW_PACKET: rid does not match the latest review packet; re-run review-prepare")
+            continue
+        observation = str(answer.get("observation") or "").strip()
+        if len(observation) < 20:
+            problems.append(f"{where} observation must describe what you saw (>= 20 characters)")
+            continue
+        if observation.lower() in seen:
+            problems.append(f"{where} observation duplicates {seen[observation.lower()]}; describe this image specifically")
+            continue
+        seen[observation.lower()] = job_id
+        reviews = copy.deepcopy(packet.get("reviews", {}))
+        for dotted, value in prefill.get("values", {}).items():
+            if dotted == "ai_disclosure":
+                reviews["ai_disclosure"] = copy.deepcopy(value)
+                continue
+            field, key = dotted.split(".", 1)
+            if key in reviews.get(field, {}):
+                reviews[field][key] = copy.deepcopy(value)
+        exceptions = answer.get("exceptions") or {}
+        if not isinstance(exceptions, dict):
+            problems.append(f"{where} exceptions must be an object")
+            continue
+        bad = []
+        for dotted, value in exceptions.items():
+            field, _, key = str(dotted).partition(".")
+            if (field in EXPLICIT_FIELDS or field == "ai_disclosure" or key not in reviews.get(field, {})
+                    or not isinstance(value, dict) or value.get("verdict") not in {"pass", "fail", "not_applicable"}
+                    or not str(value.get("notes") or "").strip()):
+                bad.append(str(dotted))
+                continue
+            reviews[field][key] = {"verdict": value["verdict"], "notes": str(value["notes"]).strip()}
+        if bad:
+            problems.append(f"{where} unknown or incomplete exceptions {bad}; use <field>.<key> with verdict and notes")
+            continue
+        for field, values in reviews.items():
+            if field in EXPLICIT_FIELDS or field == "ai_disclosure" or not isinstance(values, dict):
+                continue
+            for key, value in values.items():
+                if isinstance(value, dict) and value.get("verdict") is None:
+                    values[key] = {"verdict": "pass", "notes": f"Reviewed on the sheet: {observation}"}
+        people = answer.get("people")
+        if people:
+            if people not in PEOPLE:
+                problems.append(f"{where} people must be one of {sorted(PEOPLE)}")
+                continue
+            reviews["ai_disclosure"] = {"human_source": PEOPLE[people], "notes": f"Observed on the sheet: {observation}"}
+        elif prefill.get("people_required") or (reviews.get("ai_disclosure") or {}).get("human_source") in {None, "unknown"}:
+            problems.append(f"{where} a person may appear: set people to none/synthetic/real/non_photorealistic")
+            continue
+        explicit = answer.get("explicit") or {}
+        missing_explicit = [field for field in prefill.get("explicit", []) if not explicit.get(field)]
+        if missing_explicit:
+            problems.append(f"{where} fill the explicit review fields {missing_explicit} (see the todo guidance)")
+            continue
+        for field in prefill.get("explicit", []):
+            if field == "visual_design":
+                reviews.setdefault("policy_qa_results", {})[field] = copy.deepcopy(explicit[field])
+            else:
+                reviews[field] = copy.deepcopy(explicit[field])
+        packet["reviews"] = reviews
+        packets.append(packet)
+    if problems:
+        raise ValueError("Review answers rejected (nothing submitted):\n- " + "\n- ".join(problems))
+    return packets
+
+
+def expand_todos(base, payload):
+    """Turn compact todos (single, list or map) or exceptions-only answers into full bound packets."""
+    base = Path(base).resolve()
+    if isinstance(payload, dict) and payload.get("schema") == ANSWERS_SCHEMA:
+        return _expand_answers(base, payload)
 
     def expand(item):
         if not (isinstance(item, dict) and item.get("schema") == TODO_SCHEMA):

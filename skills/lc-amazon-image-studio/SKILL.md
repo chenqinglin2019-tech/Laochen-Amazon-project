@@ -1,21 +1,20 @@
 ---
 name: lc-amazon-image-studio
-description: 基于真实产品资料制作 Amazon Listing 与 A+ 套图。用户可提供自己满意的成品图套系，skill 拆解后生成用户专属模板（参考底板＋版式＋配色＋字体），按产品特性自动选择并近似还原；内置模板可一键停用或清空；本地精确排字、产品一致性审核、增量交付。
+description: 基于真实产品资料策划 Amazon Listing 与 A+ 套图提示词，由 Codex 内置生图一次完成图文设计；附图生成后直接交付，主图经保守背景清理、等比居中、背景专项检查与 RGB(255,255,255) 纯白处理。支持用户参考套图、模板库管理与旧项目继续加工。
 ---
 
-# 易逊-亚马逊套图生成 V7
+# 易逊-亚马逊套图生成 V8
 
-默认 1 张主图＋6 张副图；A+ 按需（默认 6 个模块，可逐图设模块与画布）。用户的图位计划优先。Listing 默认 2000×2000（可选 2000×2600），两边 ≥1600 px。
+默认 1 张主图＋6 张附图；A+ 按需，默认 6 个模块。用户图位计划优先。Listing 默认 2000×2000，可选 2000×2600，两边 ≥1600 px；A+ 每个模块独立指定画布。
 
-## 1. 边界（先判断再动手）
+## 1. 边界与准备
 
-- **维护**：修改、测试、审阅 skill 或管理模板库（清空/恢复/导入导出），不需要鉴权与生产输入；只用合成配置，不读真实凭据、不访问真实账户。
-- **生产**：分析真实产品、生成、编辑、恢复或交付。每个生产任务开始时鉴权一次：
-  - macOS/Linux：`python3 scripts/auth_gate.py`
-  - Windows：`py -3 scripts\auth_gate.py`（任意 Python ≥3.8，无需 Pillow）
-  - 成功后写入 12 小时通过记录，`plan`/`deliver` 会校验它，同一任务内不重复鉴权。失败时原样回复入口输出的两行（“云端鉴权未通过，本轮不继续执行。”＋脱敏原因）并停止。不得打印 config.json 或 token，不直接运行 tools/bin 下的二进制。
-- **生图协作**：整个生图使用 Codex 内置生图能力，并配合当前环境的系统默认 `imagegen` Skill；从宿主技能列表定位并每个会话读一次它的 SKILL.md，撰写原创 brief 或返修时才按需读它的提示参考。提示由本地编译器生成并绑定指纹，生图时原样使用，不再二次增强。
-- **执行入口**：遵循系统 `imagegen` Skill 的内置生图流程，具体工具名称、参数和图片展示方式以当前宿主实际提供的接口为准，不将固定工具名或 JavaScript 方法名作为额外安装依赖。接入方式见 [tool-orchestration.md](references/tool-orchestration.md)，不自动改用 CLI/API。
+- **维护**：修改、测试、审阅 skill 或管理模板库，不执行真实鉴权、生图，不读真实凭据；测试只用合成数据与隔离库。
+- **运行时**：新流程只需要 Python ≥3.11、Pillow 和宿主内置生图能力。先运行 `python3.12 scripts/lc_image_studio.py verify --json`，Windows 用 `py -3.12 scripts\lc_image_studio.py verify --json`；使用其 `commands.python`（下文 `P`）。缺 Pillow 时在选定解释器中安装；不为新项目安装 Node、Playwright、Chromium 或字体。旧项目按 [V7 流程](references/v7-workflow.md) 使用完整运行时。
+- **生产鉴权**：每个真实生产任务先运行原 `scripts/auth_gate.py`（Windows `py -3 scripts\auth_gate.py`），保留 12 小时通过记录。新流程 plan/reserve/ingest/主图处理/deliver 均校验记录。鉴权失败原样回复入口的两行安全信息并停止，不绕过，不打印 config.json/token，不直接调用 tools/bin。
+- **生图入口**：使用宿主实际提供的 Codex 内置生图接口，每会话读取一次系统默认 imagegen Skill；不固定工具名，不自动切换 CLI/API。提示在 plan 时完成编译并绑定，调用时原样使用，参考图按返回顺序传入。
+- **用户指定的交付方式优先**：新流程附图和 A+ 不执行通用 imagegen 的出图检查、OCR、转录、产品一致性、美感、对比度或手机预览审核，也不自动质量返修；不修改系统 imagegen Skill。只主图有背景专项检查。
+- **路径**：命令都在本 Skill 根目录执行并带 `--json`。中文、空格路径加引号；Windows 解释器路径用 `& "C:\…\python.exe"`，JSON 写进文件传路径。项目建议放短路径，如 `D:\lc\sku`。
 
 ### 联网权限与鉴权恢复
 
@@ -26,59 +25,40 @@ description: 基于真实产品资料制作 Amazon Listing 与 A+ 套图。用�
 - 离线、loopback 和合成凭据测试只验证安装与调用链路，不代表接收者公网或真实账户已通过验收。
 - 接收者报启动问题时，可运行只读 `python3 scripts/diagnose_auth.py --json`（Windows：`py -3 scripts\diagnose_auth.py --json`），不读 token、不联网、不改文件。安装诊断通过不代表云端鉴权通过；此命令不能替代原 auth_gate.py。平台范围和排查方法见 [maintenance.md](references/maintenance.md#接收者鉴权故障排查)。
 
-## 2. 生产命令序列
 
-以下命令都在 skill 根目录执行，并带 `--json`。`P` 表示 `verify` 返回的 `commands.python`。
+## 2. 默认生产流程
 
-1. **运行时**：`python3 scripts/runtime_bootstrap.py verify --json`，7 天内有缓存，命中时约 0.1 秒。失败时看 `inspect --json` 的缺失项；只有用户明确授权，或当前权限明确为完全访问时，才执行 `install --authorization user-confirmed`（不用 sudo，不改系统 Python）。之后管线会自动读取已选运行时，无需手抄 `LC_LAYOUT_*`。
-2. **产品事实**：确认产品身份、真实图片、包含物、站点语言和图位计划，建立四项锁（§3），一次写完整套批准文案。
-3. **建项目**：`P scripts/lc_image_pipeline.py init --project-dir D --project-id ID --marketplace US --language en [--include-a-plus --a-plus-modules header:1464x600,feature,...]`。随后填写 manifest 的 `product_profile`（品类与属性，词表见 `lc_template_select.py taxonomy`）。
-4. **模板**（详见 [templates.md](references/templates.md)）：
-   - 用户给了参考套图：先按 templates.md 入库（`intake prepare` → 看联系表填观察 → `intake submit --manifest D/project_manifest.json`），本轮入库的套系自动优先。
-   - 然后 `P scripts/lc_template_select.py recommend --manifest M --apply`；只有用户指定套系时才改 `design_template_set_id`。
-5. **来源审阅**：`source-review-prepare --manifest M` → 看 `review/source/sheet.jpg` → 按包内说明填写 → `source-review-submit --manifest M --packet review/source/packet.json`，一次完成绑定。
-6. **规划**：`plan --manifest M` 一次列出全部问题和 `next_actions`，按列表集中修完再 plan；输入没变就不重复 plan。查看进度用只读的 `status`。
-7. **生成**：配合系统默认 `imagegen` Skill 使用 Codex 内置生图能力，按 [tool-orchestration.md](references/tool-orchestration.md) 接入队列或逐图派发。锚点图入库后先看 raw，只核对商品身份、结构、材质和清晰度，然后 `anchor-approve --manifest M --job J --notes "..."`，兄弟图随即放行（最终完整审核照常进行）。
-8. **审核**：`review-prepare --manifest M --jobs ...`，第一次调用就带 annotations → 默认只看 `review/sheets/<job>.jpg` 这一张总图，需要时再看原尺寸 → 填写 `review/packets/<job>.todo.json` → `review-submit --manifest M --packet <todo>`。
-9. **交付**：`deliver --manifest M`（总览过期时会自动刷新），核对 `image_count`，然后回复 `output_dir`。缓存清理由用户另行要求时再执行 `compact`。
+新入口为 `P scripts/lc_image_studio.py`，`M` 为项目 `project_manifest.json`。命令字段与输入样例见 [one-pass.md](references/one-pass.md)，工具交接见 [tool-orchestration.md](references/tool-orchestration.md)。
 
-## 3. 硬规则（每条只写在这里）
+1. **策划资料**：查看真实商品图，确认身份、包含物、站点语言、图位与四项锁。核对文案及数字依据；不制作来源审核包。资料不足的问题一次汇总，单图缺资料只停该图。
+2. **建项目**：`init --project-dir D --project-id ID --marketplace US --language en [--include-a-plus]`；可用 `--a-plus-modules header:1464x600 ...` 独立设画布。默认保守并发 1；只有宿主已知允许并发时才用 `--concurrency N`。
+3. **导入参考**：`add-references --manifest M --photos <真实商品图…> [--views front detail]`。风格图使用独立的 `--role style`，不能作为商品事实。查看本地输入图遵循 imagegen 的输入要求。
+4. **写整套计划**：用 `configure --manifest M --input <planning.json>` 设置 `product_truth`、`facts`、`critical_details`、套系风格及逐图 `design_brief`/`approved_copy`。每图有 goal/scene/composition；文案支持标题、正文、标签、尺寸、步骤、FAQ 和自有品牌。主图 `main_foreground_type` 默认为 unknown；只有资料与图片明确为不透明商品时设 opaque，含半透明材质设 translucent，不猜测。有关人物（含手部）提前填写 `human_source`；默认 none，提示禁止添加人物。
+5. **采用模板**：用户提供套图时按 [templates.md](references/templates.md) 入库；新项目规划时自动选择并保存设计快照。模板只贡献设计，不进入本地排字。没有可用模板时使用已策划的原创设计。
+6. **编译提示**：`plan --manifest M`，一次形成整套的六段式完整提示词：图位目标、商品事实、场景构图、套系设计、逐字文案、禁止事项。充分资料直接推进，不增加逐图确认。已批准文案不能擅改；数字文案绑定事实来源。
+7. **整图生成**：`reserve --manifest M [--max N]`，每个预约调用一次内置生图；没有样板等待。`ingest-batch --manifest M --item J A <真实绝对路径> ...`，附图经文件/比例检查和必要等比尺寸标准化后直接进入 `ready_to_deliver`，不建立视觉审核任务。下一波继续 reserve。
+8. **仅主图校白**：请求真实透明背景、完整主体约占画布 90%。新主图入库后在原尺寸分析，保守清理不透明商品的外部低 alpha 孤立残留，再将全部保留部件等比居中。返回 `main_background_pending` 时查看 `raw_path` 与处理图 `path`，确认挂件、端点、镂空、白色及半透明区域完整；提交 `main-background-check --manifest M --job J --attempt-id A --processing-id ID --verdict pass --observation "<原图与处理图背景分离所见>"`。脚本铺 RGB(255,255,255) 底、保存 RGB PNG，重新解码验证全部背景掩膜像素。处理规则及历史恢复见 [main-background.md](references/main-background.md)。背景分离错误用 verdict repair；缺 alpha 或明显主体触边进入最多三次模型专项修复，文件完整性错误先排查，不重生商品。不要扩展为整套审核。
+9. **直接交付**：`deliver --manifest M`，只按 `images[].path` 顺序交付最终图片链接。`complete:false` 时同时说明 missing_jobs，不称整套完成；主图失败不阻断已完成附图。无需 finalize，不制作拼图、网页、ZIP、提示词或审核文件。
 
-- **四项锁**：
-  - Geometry：锁定结构、部件关系和真实比例。
-  - Material：锁定已知材质、颜色和工艺。
-  - Scene Scale：明确支撑面、相对尺度和接触方式，不编造尺寸。
-  - Critical Detail：P0 功能 / P1 识别 / P2 次要。
-  - 未知尺寸、基材、背面、配件不能从参考图或生成图补事实。必要的 P0/P1 细节没有依据时，补资料或改构图。
-- **路线**：逐图选择 pixel_composite / reference_edit / reference_generate，依据是区域质量、放大倍率和证据。合成需要遮罩；实拍白底图可先 `cutout --reference R`，看叠加图确认后再用。
-- **文字路线**（每图设置 text_mode）：
-  - `none`：主图和白底图。
-  - `local_overlay`：默认路线。尺寸、数值、步骤、FAQ、必要限制、品牌/Logo 都走这条；文案只写在 layout 里。
-  - `model_native`：只用于一个非数值标题＋可选短正文，并写明 `model_native_reason`。对比度用 `native-text-measure` 测，不能目测。
-- **文案**：不删、不缩、不改写批准文案；放不下时换配方、扩大文字区或重新分配图位，仍放不下就 `needs_input`。
-- **可读性**：最终 JPG 字形核心对比度 ≥4.5:1；按宽 360 px 预览时，标题 ≥18 px，正文/标签 ≥12 px。
-- **主图**：纯白底（255），无营销文字和道具。
-- **模板只借设计**：不抄参考图里的商品、品牌、文案、Logo 或主张。参考底板只用于学习背景、光线、机位和构图。
-- AI 图片披露与站点规则见 [production.md](references/production.md#ai-图片规则)。
-- 历史记录与哈希不得手改；状态只能通过命令改变。
+## 3. 约束与失败恢复
 
-## 4. 循环上限（到达即停，汇总给用户）
+- **四项锁**：geometry_lock 锁结构/部件/比例；material_lock 锁已确认材质/颜色/工艺；scene_scale_lock 明确支撑与相对尺度；critical_details 记录 P0/P1/P2。未知尺寸、背面和配件不能从生成图补事实；必需 P0/P1 无证据时补资料或改构图。
+- **整图设计**：模型一次完成商品、场景、文字、标注和版式。附图提示不得混入仅生底图、禁文字、留白后本地排字等旧指令。模板只借配色、字体气质、摄影和版式，不复制参考的商品、品牌、Logo、文案或主张。
+- **文案变更**：所有文案都是生成输入。用户明确修改时 configure 后 plan，只更新受影响的图；没有本地换字路线。用户反馈前不自动视觉返修。
+- **规格处理**：附图和 A+ 仅允许等比尺寸标准化，不拉伸、裁切或加侧栏；源图比例只容许整数像素舍入误差。新版主图允许移除完全透明的外围空白，将全部保留部件整体等比放入目标画布，不裁商品、不重排部件、不掩盖截断。最终统一无损 PNG，记录实际尺寸。
+- **主图**：无新增营销文字、道具和投影，保留商品真实标签。不按 RGB 亮度漂白、全图 alpha 阈值删除或只保留最大主体；透明/未知材质不自动去噪。半透明边缘保留为前景，背景掩膜来自最终处理图 alpha=0 区域，逐像素验证纯白。首次生成和本地处理不计模型专项修复次数，主图背景最多模型专项修复三次，用尽后单独报告。
+- **工具失败**：已确定失败用 ingest-batch --failed 当场登记；首发＋2 次瞬时重试，429 不计次数并按 retry_after_seconds 等待。用尽后只有用户明确要求才 reset-transient，并记录 reason。
+- **提交未知**：用 --unknown 登记，保留原预约，不重复生图。超 30 分钟的预约也保留待核对槽位；找到实际结果后 `recover-attempt --job J --attempt-id A --reason "…"` 延续原预约，再 ingest；该命令不授权重新调用模型。
+- **未发出预约**：用 --not-started 或 release 退回；前 2 次免费，第 3 次起计瞬时失败。重复入库相同文件幂等；不同文件、过期/串图预约和被替换文件拒绝。
+- **状态与证据**：使用新流程 ready_to_deliver，不填 qa_passed 或虚构审核记录。状态、预约、哈希、尝试历史只能通过命令改变；status 和 deliver 不改项目。保留文件完整性检查及策划人物来源对应的披露元数据，不宣称出图后已经复核。
 
-- **瞬时失败**：首发＋最多 2 次重试，限流（429）不计入次数。用尽后必须经用户确认，再执行 `transition --status pending --reset-transient --reason "..."`。
-- **质量修复**：每图 1 次。达到上限后是终态，plan 不会自动解封。
-- **本地修复**：排版/容量问题每图 3 次，超过即 `needs_input`。
-- **同命令同输入连续两次同样的错误**：按 `diagnosis_required` 做针对性检查，不要重复 plan/force/审核。锁 10 分钟后过期；瞬时错误不计次。
-- **needs_input**：所有问题一次性汇总后问用户，不逐条来回询问。
+## 4. 旧项目与按需阅读
 
-## 5. 按场景读取
-
-| 场景 | 读 |
-|---|---|
-| 每次生产 | 本文件 + [production.md](references/production.md) + [tool-orchestration.md](references/tool-orchestration.md) |
-| 用户给参考套图、选模板、管理模板库 | [templates.md](references/templates.md) |
-| 报错里出现不认识的字段或枚举 | [fields.md](references/fields.md) |
-| `status` 判定为旧项目（V1/V2、外部参考、copy_budget） | [legacy.md](references/legacy.md) |
-| 修改 skill、测试、性能、平台细节、替换鉴权二进制 | [maintenance.md](references/maintenance.md) |
+- 没有 workflow_policy 或显式 legacy 的 manifest，新入口透传给原 lc_image_pipeline.py；旧提示、指纹、渲染与审核保留。不自动迁移；未知策略报错。
+- 新项目生产：本文件＋[tool-orchestration.md](references/tool-orchestration.md)；策划读 [production.md](references/production.md)，字段读 [one-pass.md](references/one-pass.md)。
+- 参考套图与模板管理：[templates.md](references/templates.md)。
+- 旧项目：[v7-workflow.md](references/v7-workflow.md)，更早版本另读 [legacy.md](references/legacy.md)。composition.md、旧 fields.md 的旧字段不应用于 one_pass_v1。
+- 修改、测试或发布：[maintenance.md](references/maintenance.md)。
 
 ## 对话提供凭据
 

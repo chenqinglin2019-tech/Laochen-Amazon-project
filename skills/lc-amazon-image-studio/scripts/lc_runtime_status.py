@@ -54,7 +54,8 @@ def diagnostic_input_fingerprint(manifest, command, job_ids=(), parameters=None)
 
 
 DIAGNOSIS_TTL_SECONDS = 600
-_TRANSIENT = re.compile(r"timed? ?out|timeout|temporarily unavailable|ebusy|winerror 32|used by another process|"
+_TRANSIENT = re.compile(r"timed? ?out|timeout|temporarily unavailable|ebusy|winerror (?:5|32|33|145)\b|used by another process|"
+                        r"access is denied|directory is not empty|file_in_use|manifest is busy|"
                         r"econnreset|econnrefused|connection (?:reset|refused)|browser has been closed|"
                         r"target (?:page|browser|context)[^\n]*closed|\b429\b|rate[ _-]?limit", re.I)
 

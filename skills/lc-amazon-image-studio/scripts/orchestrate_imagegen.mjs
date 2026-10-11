@@ -120,12 +120,22 @@ export async function runImagegenQueue(options) {
       // Native output stays native. The callback must use generatedImage/image;
       // no result object is ever included in this adapter's JSON summary.
       if (showImage) notify(() => showImage(outcome.result));
-      if (onReviewReady) notify(() => onReviewReady({ job: entry.id, artifact, status: ingested.status }));
+      if (onReviewReady) notify(() => onReviewReady({ job: entry.id, artifact, status: ingested.status,
+        stage: entry.review_stage || "final" }));
       return ingested;
     } catch (error) {
       const failure = { job: entry.id, attempt_id: attempt?.attempt_id, phase,
         error: errorMessage(error), artifact, tool_returned_at: returnedAt };
       errors.push(failure);
+      if (phase === "tool" && attempt?.attempt_id) {
+        // Record the failed call now (429 is not charged) instead of leaving the job
+        // "generating" until the 30-minute timeout releases its slot.
+        try {
+          await call(["transition", "--job", entry.id, "--status", "pending",
+            "--reason", `TOOL_ERROR: ${failure.error}`.slice(0, 280)]);
+          failure.failure_recorded = true;
+        } catch (recordError) { failure.failure_record_error = errorMessage(recordError); }
+      }
       // Let the existing retry/diagnostic writer record a true failure. It must
       // not sign QA or reset counters. A failed job never cancels sibling calls.
       if (onFailure) {
@@ -138,9 +148,12 @@ export async function runImagegenQueue(options) {
 
   async function local(entry) {
     try {
-      await call(["review-prepare", "--job", entry.id]);
+      const stage = entry.review_stage || "final";
+      const prepared = await call(["review-prepare", "--job", entry.id, "--stage", stage]);
+      if (prepared.errors?.length) throw new Error(prepared.errors.map(item => item.error).join("; "));
       reviews.add(entry.id);
-      if (onReviewReady) await onReviewReady({ job: entry.id, status: "review_pending" });
+      if (onReviewReady) await onReviewReady({ job: entry.id, stage,
+        status: stage === "composition" ? "generated" : "review_pending", prepared });
     } catch (error) {
       const failure = { job: entry.id, phase: "local", error: errorMessage(error) };
       errors.push(failure);
@@ -167,17 +180,24 @@ export async function runImagegenQueue(options) {
       attempted.add(key);
       const promise = (entry.action === "image_gen" ? generate(entry) : local(entry))
         .catch(error => { errors.push({ job: entry.id, phase: "adapter", error: errorMessage(error) }); })
-        .then(() => entry.id);
+        .then(value => ({ id: entry.id, value }));
       active.set(entry.id, { promise, model: entry.action === "image_gen" });
     }
     if (!active.size) break;
     // Refill after the first completed ingest, not the slowest image in a batch.
     const finished = await Promise.race([...active.values()].map(value => value.promise));
-    active.delete(finished);
+    active.delete(finished.id);
     if (onProgress) {
       const progress = { completed: completed.length, active: active.size,
         review_ready: [...reviews], failed: errors.length };
       notify(() => onProgress(progress));
+    }
+    // ingest already returns the next dispatch and scheduler state: no status call per image.
+    const ingested = finished.value;
+    if (ingested && Array.isArray(ingested.dispatch) && ingested.scheduler) {
+      snapshot = { dispatch: ingested.dispatch, scheduler: ingested.scheduler, next_actions: [],
+        review_pending: [], deterministic_resume: [] };
+      continue;
     }
     try { snapshot = await call(["status"]); }
     catch (error) {

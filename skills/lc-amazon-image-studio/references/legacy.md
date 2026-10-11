@@ -1,3 +1,7 @@
+# V8 历史路由
+
+没有 workflow_policy 或显式 legacy 的项目继续使用原管线。V7/V7.2 完整命令见 [v7-workflow.md](v7-workflow.md)，更早兼容说明如下；不要将 one_pass_v1 字段或直交状态写入历史项目。
+
 # 旧项目兼容（V1–V6）
 
 只在 `status` 判定为旧项目，或 manifest 缺少新字段时阅读。总原则是恢复而不迁移：旧项目保持原行为，不例行运行 migrate。本页不改变 SKILL.md 的鉴权和硬规则。

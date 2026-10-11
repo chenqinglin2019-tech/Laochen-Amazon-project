@@ -1,73 +1,27 @@
-# Codex 内置生图与系统 imagegen Skill 协作（V7）
+# V8 内置生图交接
 
-本 Skill 负责产品约束、提示绑定、队列、审核和交付；实际生成与编辑使用 Codex 内置生图能力，配合当前环境的系统默认 `imagegen` Skill 执行。`imagegen` Skill 是执行指引，不是可直接调用的 JavaScript API；读取它后，使用宿主实际提供的内置生图接口。
+仅适用于 workflow_policy=one_pass_v1；历史项目读 [v7-orchestration.md](v7-orchestration.md)。生产前读取系统默认 imagegen Skill；模型接口、参数及结果展示采用宿主实际能力。新路径不使用旧 orchestrate_imagegen.mjs，其 transition/审核回调属于旧流程。
 
-适配器 `scripts/orchestrate_imagegen.mjs` 通过调用方提供的 `imagegen` 回调交接已绑定的提示，不绑定具体工具名，也不提供模型后端、鉴权或审核。生产前提（鉴权、`verify`）见 SKILL.md。维护测试只用合成回调。
+## 波次生成
 
-## 生图入口
+1. `P scripts/lc_image_studio.py reserve --manifest M --json [--max N]`。
+2. 对每个 reservations 条目调用一次宿主内置生图：prompt 原文；references 按顺序附上；transparent_background 按条目传入。reference_roles 区分 product、style、edit_target。模型能力支持透明时请求真实 alpha；不把棋盘格当透明。
+3. 等待已发起调用全部落定，保存工具实际返回的绝对路径。按宿主接口展示结果；附图不再查看和评价输出，不调用 OCR 或审核命令。
+4. `ingest-batch --manifest M --item <job> <attempt_id> <绝对路径> ... --json`。每张结果一项；部分失败不丢弃其他成功结果。
+5. 若返回主图 main_background_pending，查看 raw_path 与实际处理图 path，检查背景分离与端点完整，按 SKILL.md 的 main-background-check 提交返回的 processing_id、attempt_id；历史没有处理 ID 的主图兼容原命令。无需审核包。其他图直接 ready_to_deliver。
+6. 再 reserve 派发余下图片。没有样板或 anchor 等待；不在每波之间重复 plan。
+7. deliver 返回按项目图位顺序排列的 images 与 missing_jobs；complete=false 时照常交付完成部分，并说明缺失。
 
-- 从当前宿主技能列表定位并读取系统默认 `imagegen` Skill，按其内置生图流程确认可用能力和输入方式；宿主提供工具发现入口时，先发现再判断。
-- 不因没有某个固定工具名或 JavaScript 方法名就判定无法生图，也不要求用户单独安装名为 `image_gen` 的工具。具体调用名、参数、参考图传入和结果展示遵循当前宿主接口。
-- 若确认当前会话确实未提供 Codex 内置生图能力，在派发前说明实际缺失及宿主给出的恢复条件；不进入 `generating`，不伪造输出，不自动改用 CLI/API。系统 Skill 本身不能补出宿主未提供的能力。
-- 管线 `dispatch.action == "image_gen"` 是已有的“需要生成图片”动作枚举，不是工具安装要求；保留该枚举及原状态契约。
+默认并发 1；已知宿主容量后，在 init --concurrency N 或 configure 中设置。reserve --max 只能缩小一波，不能越过项目容量。所有生成由宿主工具执行，脚本本身不调用任何模型或 API。
 
-## 宿主支持 JavaScript 回调时
+## 失败与恢复
 
-按系统 `imagegen` Skill 和当前宿主接口接好 `invokeBuiltinImageGeneration` 回调；这个名字只是调用方的本地函数名，不是要求宿主提供的工具。回调仅调用 Codex 内置生图能力，参数在 `readBoundInput` 阶段准备好；不把它替换为 CLI/API 或第三方生图服务。
+- 确定工具失败：`ingest-batch --failed J A "<错误>"`；429 返回等待，其他失败沿用首发＋2 次预算。
+- 没有提交：`ingest-batch --not-started J A` 或 `release --job J --attempt-id A --reason "…"`。
+- 提交结果未知：`ingest-batch --unknown J A "<原因>"`。预约保持占槽，禁止重复生成。
+- 已返回图片但找不到路径：保持原预约，核对工具真实输出；找到后 ingest，不重新生成。
+- 预约超过 30 分钟：保留等待结果。确定已有结果后 `recover-attempt --job J --attempt-id A --reason "已找到真实返回文件"`，再 ingest；不会产生新 attempt 或调用模型。
+- 主图背景修复：新主图先自动执行 [保守本地处理](main-background.md)，不占模型修复额度。历史背景阻断使用 prepare-main 复用原图恢复，保留已用次数。有效 alpha 缺失或明显触边会绑定原图为 edit_target；透明分离不正确时 main-background-check verdict repair。下一次 reserve 返回一轮背景专项编辑，仍保持商品结构、材质、标签和包含物。首次生成不计次数，最多三次模型专项修复；每轮基于最新返回图，工具确定失败的瞬时重试仍受独立预算，不重复占用专项修复次数。
+- 附图视觉修改只响应用户明确要求：更新该图 approved_copy/design_brief，再 plan；不自动从交付文件推断质量问题。
 
-在可用工具的 JavaScript 单元里，先用本地命令读取适配器源码，保存为 `lcImagegenAdapter`。读取时使用选定 Python 的 argv（`P -X utf8 -c <读文件>`），Windows 用 PowerShell 引号规则。以下为接入示意，回调需按本节约定实现后使用；若宿主无法在 JS 中调用内置生图，使用下方逐图流程。
-
-```javascript
-const adapter = new Function(load("lcImagegenAdapter").replace(/^export /gm, "") +
-  "\nreturn {runImagegenQueue, safeImageSummary};")();
-const result = await adapter.runImagegenQueue({
-  initialPlan: planResult,                          // 本轮唯一一次 plan 的结果（或一次 status 结果）
-  command: pipeline,                                // 执行 lc_image_pipeline.py <args> --manifest M --json，解析单个 JSON
-  readInput: readBoundInput,                        // 返回含 prompt 的当前内置接口参数
-  imagegen: invokeBuiltinImageGeneration,          // 按系统 imagegen Skill 接入当前宿主的内置生图
-  selectArtifact: actualArtifactPath,               // 从工具返回元数据取真实绝对路径
-  showImage: showNativeImage,                      // 当前宿主支持的原生图片展示方式
-  onReviewReady: item => notify(item), onProgress: p => notify(p),
-  onFailure: recordFailure
-});
-text(result); // 只含路径/状态，不含 Base64 或原始工具对象
-```
-
-## 回调约定
-
-- `pipeline(args)`：使用 `verify` 返回的 Python（`LC_LAYOUT_*` 已从 selection.json 自动补齐），追加 `--manifest` 和 `--json`，按 UTF-8 解码，等待命令结束。命令退出码非零或 `ok:false` 视为失败。
-- `readBoundInput(entry)`：返回含 `prompt` 的当前内置接口真实参数，不修改已绑定内容。
-  - 原样读取 `entry.prompt_file`，读到截断内容时拒绝。
-  - 把 `entry.generation_reference_paths` 按项目目录解析，按顺序给出：商品参考在前，风格底板（`design/plates/…`）在最后。
-  - 按系统 `imagegen` Skill 和宿主要求预先查看本地编辑目标，将参考图作为当前接口支持的输入；不支持路径参数时使用宿主的附件或会话图片方式，不能静默丢掉参考图。
-  - 新图没有附件时省略当前接口的参考图参数。不得增强文字，不得在 transition 之后再拼参考。
-- `actualArtifactPath`：
-  - 返回工具实际写出的绝对路径（接受 Windows 盘符/UNC 路径），不猜目标位置，不序列化图片。
-  - 路径缺失或有歧义属于可恢复的交接失败：保留该图和 attempt，找到真实路径后手动 `ingest`，**不再生图**。
-- `invokeBuiltinImageGeneration(args)`：调用当前宿主的 Codex 内置生图接口，等待完成并返回真实结果；不再次增强提示或改换参考图。
-- `showNativeImage(result)`：按宿主原生图片方式展示（如可用的 `generatedImage`/`image`）；需要文字诊断时用 `safeImageSummary`；禁止对原始工具结果 `JSON.stringify`。
-- 单元内的 promise 必须等全部已发起的模型调用落定后才能结束，包括出错路径；不 fire-and-forget，不起系统后台进程。
-
-## 适配器做什么
-
-1. 对 plan/status 的 `dispatch` 列表中 `image_gen`/`compose` 项，按 `scheduler.effective_concurrency` 放行：
-   - 跳过 `next_actions` 里标为 diagnose 的图。
-   - 同一 job+prompt 绑定在一次调用里最多尝试一次。
-2. 先 `readInput`，再 `transition --status generating`。**只有返回 `status == "generating"` 且没有 `dispatch_refused` 时才调用内置生图能力。**
-   - 预算用尽或被拒时，命令退出码 2、`ok:false`，状态会持久化为 blocked/failed，不花模型调用。
-   - `prompt_hash` 与预读不一致时，要求重新 plan 该图。
-3. 调用开始后用 `attempt-event --event tool_started` 记录真实开始时间，结果返回时立刻 `ingest --tool-returned-at <epoch>`。`--tool-returned-at` 可选，缺少开始事件时只把计时标为不可用，图照常入库。
-4. 每完成一张，只做一次只读 `status` 来补槽位，不等同批最慢的图或审核。agent 自己不要再逐图调用 `status`。
-5. 返回的 `review_ready` 表示“需要真实审核”，不代表整套完成；`retry_after_seconds` 和 `next_actions` 照原样执行。
-
-锚点图入库后：看 raw，然后 `anchor-approve --job J --notes "..."`（或 `--verdicts` 覆盖 geometry/material/components/clarity），再从 `status` 续跑放行兄弟图。适配器不代写注释、转录或结论。
-
-## 宿主不支持 JavaScript 回调时（逐图执行）
-
-1. `plan --manifest M --json`，得到 `dispatch`（每项含 prompt_file、generation_reference_paths、prompt_hash）；先完整读取提示并按系统 `imagegen` Skill 和宿主要求准备、查看参考图，确认内置生图入口可用。
-2. `transition --manifest M --job J --status generating --reason "dispatch" --json`：返回 `status` 不是 `generating`（退出码 2）时停止这张图。
-3. 按系统默认 `imagegen` Skill 的内置流程生图：提示为 prompt_file 原文，参考图按 generation_reference_paths 顺序；具体工具名和参数以当前宿主为准。
-4. 返回后立即 `ingest --manifest M --job J --artifact <绝对路径> --attempt-id <A> --tool-returned-at <epoch> --json`。
-5. `status --manifest M --json` 取下一批 dispatch；每张下一图均先按第 1 步准备输入，再重复 2–5，不重复 plan；锚点入库后先 `anchor-approve`。
-
-失败时照 `retry_after_seconds` 等待后从 `status` 续跑。不得手改状态或 attempt 哈希；诊断规则见 [maintenance.md](maintenance.md#状态诊断与计时契约)。
+入库只证明文件、规格与绑定有效，不证明附图内容经过审核。主图背景验证只证明被确认的透明掩膜区域在最终 PNG 中为纯白；透明分离的语义正确性由主图专项查看确认。

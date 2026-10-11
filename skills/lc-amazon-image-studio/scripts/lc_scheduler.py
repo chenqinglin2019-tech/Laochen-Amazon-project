@@ -30,7 +30,8 @@ def _seconds(value):
 
 
 def validate(manifest):
-    errors = []
+    from lc_composition import validate_policy
+    errors = validate_policy(manifest)
     policy = manifest.get("scheduler_policy")
     if "scheduler_policy" in manifest:
         if (not isinstance(policy, dict) or policy.get("version") != 1
@@ -118,6 +119,11 @@ def anchor_passed(manifest, base=None):
     This authorizes scheduling only, never final QA or delivery. Without a
     filesystem base we cannot validate a proof and retain the legacy status gate.
     """
+    from lc_composition import enabled as composition_enabled, sample_passed
+    if composition_enabled(manifest):
+        result = sample_passed(manifest, base)
+        if result is not None:
+            return result
     anchor = manifest.get("anchor_job_id")
     job = next((value for value in manifest.get("jobs", []) if value.get("id") == anchor), None)
     if job is None:
@@ -176,9 +182,11 @@ def require_capacity(manifest, job, *, exclude_product=None, base=None):
         if manifest.get("generation_gate", {}).get("status") != "open":
             raise ValueError("MODEL_GENERATION_GATE_CLOSED: run plan before dispatch")
         if not anchor_passed(manifest, base):
+            from lc_speculation import eligible as speculative_eligible, parallel as parallel_wave
             if manifest.get("anchor_job_id") != job.get("id"):
-                raise ValueError("MODEL_ANCHOR_REQUIRED: only the selected anchor may run before its QA passes")
-            if active_count(manifest, exclude_product=exclude_product):
+                if not speculative_eligible(manifest, job, current["effective_concurrency"]):
+                    raise ValueError("MODEL_ANCHOR_REQUIRED: only the selected anchor may run before its QA passes")
+            elif active_count(manifest, exclude_product=exclude_product) and not parallel_wave(manifest):
                 raise ValueError("MODEL_ANCHOR_REQUIRED: finish the active anchor call first")
     return current
 

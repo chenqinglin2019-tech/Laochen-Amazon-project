@@ -1,4 +1,14 @@
-# 模板库、入库与自动选择（V7）
+# 模板库、入库与自动选择（V8 / 旧项目兼容）
+
+## V8 使用方式
+
+one_pass_v1 保留下面的库管理与参考套图 prepare/submit。只分析用户提供的设计参考，这是生成前的模板提取，不是附图出图后审核。
+
+- 新项目 submit 时省略 --manifest，避免旧 intake 导入旧管线；submit 返回套系 ID 后，用新入口 configure 设置 design_template_set_id 或 design_template_policy.prefer_family_ids。
+- 新 plan 通过现有选择器读取套系/模板，保存 template_snapshot、设计字段和底板副本。清空或停用库不改变已钉选项目；显式更换套系才重新绑定。
+- 配色、字体气质、图形语言、相对构图、摄影和阅读顺序进入整图提示。不测字体，不运行本地排字，不建立样板或成品审核。
+- 主图采用自己的产品摄影策划，不附风格底板；默认透明背景、无投影，之后铺纯白 PNG。不能套用下面旧项目的阴影或本地合成路线。
+- 模板修订仍可在库中管理；对新项目的修改用 configure 的明确设计输入或更换套系，不能调用旧 revise --manifest 修改新状态。第 5 节的 renderer/ledger 和第 6 节的出图审核只适用于旧项目。
 
 适用：用户提供参考套图、选择或指定套系、管理模板库。命令在 skill 根目录执行，`P` 为 `verify` 返回的 Python；三个脚本都可在子命令前加 `--library-dir D` 临时指定库目录。
 
@@ -88,7 +98,7 @@
 - **主图**：只接受 observed/adapted 模板，且只取机位、摆放、占比、阴影；不带文字、道具和底板，白底 255 规则不变。
 - 内置 v1 套系映射到同一词表参与打分；选中后走冻结的 v1 路线（无底板）。
 
-## 5. plan 时如何采用（`lc_template_workflow_v2.py`，policy version 2）
+## 5. 旧项目 plan 时如何采用（`lc_template_workflow_v2.py`，policy version 2）
 
 - **钉选**：未显式指定时，把选中套系写入 `design_template_set_id`/`_revision`，以后回放快照、不再重选。钉选的套系从库里消失后，照常回放已采用快照，**不会**改选内置或其他套系。
 - **资产**：底板复制到 `design/plates/<sha>.jpg`，参考缩略图复制到 `design/references/<sha>.jpg`，用 sha 绑定。
@@ -108,7 +118,7 @@
 
 - 只借设计（版式、配色、字体、光线、机位、构图），不抄参考里的商品、品牌、Logo、样张文案、主张、包装或配件数量；底板的模糊/抹平区是空占位。
 - 商品外观只服从本项目证据和四项锁，冲突时以证据为准。
-- 审核总图并排显示参考缩略图；`visual_design` 备注按版式/配色/字体/光线逐项写 close/partial/off。
+- 旧项目审核总图并排显示参考缩略图；`visual_design` 备注按版式/配色/字体/光线逐项写 close/partial/off。V8 附图不执行此审核。
 
 ## 7. 兼容
 
