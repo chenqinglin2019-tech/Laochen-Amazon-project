@@ -96,7 +96,7 @@ class Library:
         return self.root / "assets" / sha[:2] / f"{sha}.{ext}"
 
     def lock(self):
-        from lc_style_reference import _selection_lock
+        from lc_jsonstore import _selection_lock
         self.root.mkdir(parents=True, exist_ok=True)
         return _selection_lock(self.root / "library")
 
@@ -113,7 +113,7 @@ class Library:
         return value
 
     def _write(self, path, value):
-        from lc_style_reference import _write_json
+        from lc_jsonstore import _write_json
         _write_json(Path(path), value)
 
     def settings(self) -> dict:

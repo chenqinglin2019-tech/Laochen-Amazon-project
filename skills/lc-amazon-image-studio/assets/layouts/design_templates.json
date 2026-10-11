@@ -602,7 +602,7 @@
         "palette": "Warm ivory and pale stone backgrounds, charcoal information, subtle scene-derived accents; no tinting of skin or product to match a sample.",
         "typography": "Noto Sans Bold for functional headings, Regular for supporting copy, with generous breathing room; optional Noto Serif only when explicitly approved for the project.",
         "photography": "Broad soft window illumination, natural skin texture, controlled specular highlights and shallow background depth without smoothing product detail.",
-        "graphics": "Simple line symbols or pale horizontal information bands only for verified facts; no seals or invented ingredient imagery.",
+        "graphics": "Simple line symbols or pale horizontal text bands, used sparingly; no seals or invented ingredient imagery.",
         "rhythm": "Recommended sequence from separate examples: clean use hero, tactile detail, organized context, then a concise information module."
       },
       "avoid": [
@@ -890,12 +890,12 @@
         "toy",
         "contents"
       ],
-      "description": "Layered foreground product clarity and softly receding shared activity support friendly gifting stories. A dedicated inventory area is used only when contents are documented.",
+      "description": "Layered foreground product clarity and softly receding shared activity support friendly gifting stories. A dedicated inventory area shows only the contents that are sold.",
       "style": {
         "palette": "Warm neutral domestic backgrounds with the actual product's color as the energetic accent; a clean pale inventory area stabilizes the composition.",
         "typography": "Noto Sans Bold approachable heading and Regular concise information, with an unmistakable distinction between story and inventory.",
         "photography": "Product-level viewpoint and soft daylight; background people indicate context without implying age approval or distracting from the focal item.",
-        "graphics": "A restrained pale contents strip or simple supporting labels, with ample separation between documented items.",
+        "graphics": "A restrained pale contents strip or simple supporting labels, with ample separation between the included items.",
         "rhythm": "Suggested extension from one source: contextual hero, verified contents overview, then an evidenced handling or detail view; the reference itself is not an observed suite."
       },
       "avoid": [
@@ -932,9 +932,9 @@
         "wide"
       ],
       "recipe": "photo_overlay",
-      "description": "Place the evidenced use interaction in the lower-right or right half with a calm upper-left information field; keep the product recognizable even when held or worn.",
+      "description": "Place the product in use in the lower-right or right half with a calm upper-left text field; keep the product recognizable even when held or worn.",
       "generation": {
-        "composition": "Place the evidenced use interaction in the lower-right or right half with a calm upper-left information field; keep the product recognizable even when held or worn.",
+        "composition": "Place the product in use in the lower-right or right half with a calm upper-left text field; keep the product recognizable even when held or worn.",
         "background": "Use layered neutral architecture and a believable mirror only when the reflected view is supported; simplify reflections if they would invent an unseen side.",
         "lighting": "Soft lateral window light models the subject with warm neutral highlights and gentle contrast.",
         "focus": "Keep product and interaction sharply legible; the person supports the product rather than becoming a detached portrait.",
@@ -983,7 +983,7 @@
               0.44,
               0.84
             ],
-            "composition_note": "Square composition: Place the quiet editorial copy on the left and the evidenced use interaction on the right. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
+            "composition_note": "Square composition: Place the quiet editorial copy on the left and the product in use on the right. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
           },
           "portrait": {
             "text_group_box": [
@@ -1017,7 +1017,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Place the evidenced use interaction in the lower-right or right half with a calm upper-left information field; keep the product recognizable even when held or worn. Use layered neutral architecture and a believable mirror only when the reflected view is supported; simplify reflections if they would invent an unseen side. Soft lateral window light models the subject with warm neutral highlights and gentle contrast. Keep product and interaction sharply legible; the person supports the product rather than becoming a detached portrait. Reserve a quiet side area for an editorial title and tightly grouped explanation, free of hands and product edges. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Place the product in use in the lower-right or right half with a calm upper-left text field; keep the product recognizable even when held or worn. Use layered neutral architecture and a believable mirror only when the reflected view is supported; simplify reflections if they would invent an unseen side. Soft lateral window light models the subject with warm neutral highlights and gentle contrast. Keep product and interaction sharply legible; the person supports the product rather than becoming a detached portrait. Reserve a quiet side area for an editorial title and tightly grouped explanation, free of hands and product edges. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "a softly lit personal-use area with a quiet mirror or pale interior",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -1067,7 +1067,7 @@
       "generation": {
         "composition": "Build depth from a crisp foreground product arrangement to softly receding table settings; a restrained hand gesture may enter from the side when appropriate.",
         "background": "Use a dark warm room with subordinate natural materials; keep the supporting arrangement sparse enough to distinguish the sold object from props.",
-        "lighting": "Use believable warm practical light with gentle localized highlights; depict flame or heat only for a verified safe-use scene.",
+        "lighting": "Use believable warm practical light with gentle localized highlights; show flame or heat only in a clearly safe use.",
         "focus": "Maintain a strong foreground focal cluster and realistic surface contact; background people, if any, remain soft.",
         "reserved_space": "Leave a quiet upper field and a small low information region without covering the primary objects.",
         "product_safeguards": [
@@ -1149,7 +1149,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Build depth from a crisp foreground product arrangement to softly receding table settings; a restrained hand gesture may enter from the side when appropriate. Use a dark warm room with subordinate natural materials; keep the supporting arrangement sparse enough to distinguish the sold object from props. Use believable warm practical light with gentle localized highlights; depict flame or heat only for a verified safe-use scene. Maintain a strong foreground focal cluster and realistic surface contact; background people, if any, remain soft. Leave a quiet upper field and a small low information region without covering the primary objects. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Build depth from a crisp foreground product arrangement to softly receding table settings; a restrained hand gesture may enter from the side when appropriate. Use a dark warm room with subordinate natural materials; keep the supporting arrangement sparse enough to distinguish the sold object from props. Use believable warm practical light with gentle localized highlights; show flame or heat only in a clearly safe use. Maintain a strong foreground focal cluster and realistic surface contact; background people, if any, remain soft. Leave a quiet upper field and a small low information region without covering the primary objects. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "an intimate evening tabletop appropriate to the product",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -1327,9 +1327,9 @@
         "wide"
       ],
       "recipe": "header_footer",
-      "description": "Arrange the current product as a clear focal element above or beside the social interaction, leaving the people in a supporting role.",
+      "description": "Arrange the product as a clear focal element above or beside the social interaction, leaving the people in a supporting role.",
       "generation": {
-        "composition": "Arrange the current product as a clear focal element above or beside the social interaction, leaving the people in a supporting role.",
+        "composition": "Arrange the product as a clear focal element above or beside the social interaction, leaving the people in a supporting role.",
         "background": "Use a pale comfortable room with sparse decor, allowing the actual product color to provide the main accent.",
         "lighting": "Broad soft daylight preserves natural highlights and avoids theatrical glare.",
         "focus": "Keep the actual product silhouette and surface reflections readable; do not hide all product details behind faces or props.",
@@ -1412,7 +1412,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Arrange the current product as a clear focal element above or beside the social interaction, leaving the people in a supporting role. Use a pale comfortable room with sparse decor, allowing the actual product color to provide the main accent. Broad soft daylight preserves natural highlights and avoids theatrical glare. Keep the actual product silhouette and surface reflections readable; do not hide all product details behind faces or props. Provide a quiet pale upper region and an optional modest lower information zone. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Arrange the product as a clear focal element above or beside the social interaction, leaving the people in a supporting role. Use a pale comfortable room with sparse decor, allowing the actual product color to provide the main accent. Broad soft daylight preserves natural highlights and avoids theatrical glare. Keep the actual product silhouette and surface reflections readable; do not hide all product details behind faces or props. Provide a quiet pale upper region and an optional modest lower information zone. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "a bright restrained celebration setting appropriate to the product",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -1463,7 +1463,7 @@
         "composition": "Use a close, calm application or handling view with the actual product visibly held beside the relevant interaction, not hidden by the model.",
         "background": "A pale warm-neutral interior gives context without introducing other branded containers or ingredient displays.",
         "lighting": "Broad diffused window light maintains natural skin and material texture with restrained specular highlights.",
-        "focus": "Keep product markings and the evidenced functional contact legible; avoid beautification that implies an unproven result.",
+        "focus": "Keep product markings and the point of use clearly legible; avoid beautification that implies an unproven result.",
         "reserved_space": "Preserve a quiet upper title region and a pale lower supporting-information band outside the product silhouette.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
@@ -1543,8 +1543,8 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Use a close, calm application or handling view with the actual product visibly held beside the relevant interaction, not hidden by the model. A pale warm-neutral interior gives context without introducing other branded containers or ingredient displays. Broad diffused window light maintains natural skin and material texture with restrained specular highlights. Keep product markings and the evidenced functional contact legible; avoid beautification that implies an unproven result. Preserve a quiet upper title region and a pale lower supporting-information band outside the product silhouette. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
-      "scene_default": "a bright personal-care area suitable for the current product",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Use a close, calm application or handling view with the actual product visibly held beside the relevant interaction, not hidden by the model. A pale warm-neutral interior gives context without introducing other branded containers or ingredient displays. Broad diffused window light maintains natural skin and material texture with restrained specular highlights. Keep product markings and the point of use clearly legible; avoid beautification that implies an unproven result. Preserve a quiet upper title region and a pale lower supporting-information band outside the product silhouette. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "scene_default": "a bright personal-care area suitable for the product",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
         "Separate the primary subject from visual noise; keep graphic information subordinate to the product."
@@ -1593,7 +1593,7 @@
       "generation": {
         "composition": "Center the product in a three-quarter practical-use view; a small hand interaction may show access while keeping the structure and openings visible.",
         "background": "Use a clean pale interior with soft reflected depth; any stored objects are subordinate, unbranded and explicitly contextual.",
-        "lighting": "Diffuse side illumination reveals clear, glossy or matte surfaces according to current evidence without flattening edges.",
+        "lighting": "Diffuse side illumination reveals clear, glossy or matte surfaces exactly as they are, without flattening edges.",
         "focus": "Keep compartments and actual physical separations crisp; do not invent additional drawers, handles or contents.",
         "reserved_space": "Leave deliberate upper and lower pale information bands, with the main photograph between them.",
         "product_safeguards": [
@@ -1677,7 +1677,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Center the product in a three-quarter practical-use view; a small hand interaction may show access while keeping the structure and openings visible. Use a clean pale interior with soft reflected depth; any stored objects are subordinate, unbranded and explicitly contextual. Diffuse side illumination reveals clear, glossy or matte surfaces according to current evidence without flattening edges. Keep compartments and actual physical separations crisp; do not invent additional drawers, handles or contents. Leave deliberate upper and lower pale information bands, with the main photograph between them. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Center the product in a three-quarter practical-use view; a small hand interaction may show access while keeping the structure and openings visible. Use a clean pale interior with soft reflected depth; any stored objects are subordinate, unbranded and explicitly contextual. Diffuse side illumination reveals clear, glossy or matte surfaces exactly as they are, without flattening edges. Keep compartments and actual physical separations crisp; do not invent additional drawers, handles or contents. Leave deliberate upper and lower pale information bands, with the main photograph between them. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "a bright organized tabletop or personal-care station",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -1727,7 +1727,7 @@
         "composition": "Let the product dominate the foreground or central surface while a person, if helpful, remains at the edge or softly behind it.",
         "background": "Use pale domestic architecture and minimal greenery to create context, not a dense styled catalog set.",
         "lighting": "Soft window light with neutral white balance reveals pattern and surface texture while preserving highlight detail.",
-        "focus": "Keep the current product's actual pattern, color and structure sharply legible; avoid shifting the visual focal point to flowers or people.",
+        "focus": "Keep the product's actual pattern, color and structure sharply legible; avoid shifting the visual focal point to flowers or people.",
         "reserved_space": "Maintain a quiet upper wall or background field for compact title information.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
@@ -1807,7 +1807,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Let the product dominate the foreground or central surface while a person, if helpful, remains at the edge or softly behind it. Use pale domestic architecture and minimal greenery to create context, not a dense styled catalog set. Soft window light with neutral white balance reveals pattern and surface texture while preserving highlight detail. Keep the current product's actual pattern, color and structure sharply legible; avoid shifting the visual focal point to flowers or people. Maintain a quiet upper wall or background field for compact title information. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Let the product dominate the foreground or central surface while a person, if helpful, remains at the edge or softly behind it. Use pale domestic architecture and minimal greenery to create context, not a dense styled catalog set. Soft window light with neutral white balance reveals pattern and surface texture while preserving highlight detail. Keep the product's actual pattern, color and structure sharply legible; avoid shifting the visual focal point to flowers or people. Maintain a quiet upper wall or background field for compact title information. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "an airy room with pale walls, natural light and limited contextual furnishings",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -1861,7 +1861,7 @@
         "background": "Use a pale desk, soft room depth and only enough contextual objects to explain the setting; an optional person stays out of focus.",
         "lighting": "Natural side light keeps the object dimensional without harsh dark shadows under the information area.",
         "focus": "The product is the first focal point, contextual activity is secondary, and laptop or document content is unreadable and unbranded.",
-        "reserved_space": "Reserve one continuous pale sidebar that can hold a heading and a compact explanation or a small set of approved questions.",
+        "reserved_space": "Reserve one continuous pale sidebar that holds a heading and a compact explanation or a few short questions.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
           "Do not borrow product identity, sample copy, claimed effects, packaging, accessories or quantities from a design source.",
@@ -1939,7 +1939,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Place the sharp product in the left or right foreground on a believable working surface, leaving the opposite side open for information. Use a pale desk, soft room depth and only enough contextual objects to explain the setting; an optional person stays out of focus. Natural side light keeps the object dimensional without harsh dark shadows under the information area. The product is the first focal point, contextual activity is secondary, and laptop or document content is unreadable and unbranded. Reserve one continuous pale sidebar that can hold a heading and a compact explanation or a small set of approved questions. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Place the sharp product in the left or right foreground on a believable working surface, leaving the opposite side open for information. Use a pale desk, soft room depth and only enough contextual objects to explain the setting; an optional person stays out of focus. Natural side light keeps the object dimensional without harsh dark shadows under the information area. The product is the first focal point, contextual activity is secondary, and laptop or document content is unreadable and unbranded. Reserve one continuous pale sidebar that holds a heading and a compact explanation or a few short questions. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "a quiet bright workspace with minimal unbranded desk objects",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -1985,13 +1985,13 @@
         "wide"
       ],
       "recipe": "detail_callouts",
-      "description": "Show the product unobstructed with one or two natural supporting hands only when current scale evidence permits it; otherwise place it alone on the same surface.",
+      "description": "Show the product unobstructed, with one or two natural supporting hands when they help show its real size; otherwise place it alone on the same surface.",
       "generation": {
-        "composition": "Show the product unobstructed with one or two natural supporting hands only when current scale evidence permits it; otherwise place it alone on the same surface.",
+        "composition": "Show the product unobstructed, with one or two natural supporting hands when they help show its real size; otherwise place it alone on the same surface.",
         "background": "Keep the scene sparse and pale, with contextual edges receding so the object outline remains easy to trace.",
-        "lighting": "Broad soft side light reveals edges and surface contact without heavy cast shadows in annotation areas.",
-        "focus": "Preserve the entire evidence-supported silhouette and keep hands away from critical functional details.",
-        "reserved_space": "Leave quiet margins outside the object for separately placed dimension lines or detail labels derived from verified facts.",
+        "lighting": "Broad soft side light reveals edges and surface contact without heavy cast shadows near the labels.",
+        "focus": "Show the complete product silhouette and keep hands away from key functional details.",
+        "reserved_space": "Leave quiet margins outside the object for dimension lines or detail labels.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
           "Do not borrow product identity, sample copy, claimed effects, packaging, accessories or quantities from a design source.",
@@ -2037,7 +2037,7 @@
               0.7,
               0.66
             ],
-            "composition_note": "Square composition: Keep the short title upper left and the complete handled silhouette below, with internal margin for verified dimension leaders. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
+            "composition_note": "Square composition: Keep the short title upper left and the complete handled silhouette below, with margin around it for dimension lines. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
           },
           "portrait": {
             "text_group_box": [
@@ -2052,7 +2052,7 @@
               0.7,
               0.67
             ],
-            "composition_note": "Portrait composition: Place information above a vertically centered product with unobstructed hands and annotation margins. Extend real context vertically without stretching the product; keep the primary information and product containers separate. The product container is a target, not an observed pixel boundary."
+            "composition_note": "Portrait composition: Place the text above a vertically centered product with unobstructed hands and clear margins for labels. Extend real context vertically without stretching the product; keep the primary information and product containers separate. The product container is a target, not an observed pixel boundary."
           },
           "wide": {
             "text_group_box": [
@@ -2071,7 +2071,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Show the product unobstructed with one or two natural supporting hands only when current scale evidence permits it; otherwise place it alone on the same surface. Keep the scene sparse and pale, with contextual edges receding so the object outline remains easy to trace. Broad soft side light reveals edges and surface contact without heavy cast shadows in annotation areas. Preserve the entire evidence-supported silhouette and keep hands away from critical functional details. Leave quiet margins outside the object for separately placed dimension lines or detail labels derived from verified facts. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Show the product unobstructed, with one or two natural supporting hands when they help show its real size; otherwise place it alone on the same surface. Keep the scene sparse and pale, with contextual edges receding so the object outline remains easy to trace. Broad soft side light reveals edges and surface contact without heavy cast shadows near the labels. Show the complete product silhouette and keep hands away from key functional details. Leave quiet margins outside the object for dimension lines or detail labels. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "a bright uncluttered handling area with a pale surface and neutral room depth",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -2119,12 +2119,12 @@
         "wide"
       ],
       "recipe": "scene_grid",
-      "description": "Plan four independently evidenced product views as an even gallery, each with one readable subject and a different meaningful context.",
+      "description": "Plan four distinct product views as an even gallery, each with one readable subject and a different meaningful context.",
       "generation": {
-        "composition": "Plan four independently evidenced product views as an even gallery, each with one readable subject and a different meaningful context.",
+        "composition": "Plan four distinct product views as an even gallery, each with one readable subject and a different meaningful context.",
         "background": "Use compatible pale interiors, limited furnishings and comparable visual density across panels.",
         "lighting": "Keep natural light direction and white balance coherent without pretending the views share one physical room.",
-        "focus": "Each panel must preserve the same product identity; use real registered panels or generate independently approved views rather than inventing a multi-unit pack.",
+        "focus": "Each panel shows the same product; show one unit per view rather than inventing a multi-unit pack.",
         "reserved_space": "Reserve a clean shared header and consistent gutters; keep local panel captions outside critical product regions.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
@@ -2173,7 +2173,7 @@
               0.9,
               0.71
             ],
-            "composition_note": "Square composition: Place the shared header above four equally weighted panels inside the lower product-view container. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
+            "composition_note": "Square composition: Place the shared header above four equally weighted panels filling the lower area. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
           },
           "portrait": {
             "text_group_box": [
@@ -2203,11 +2203,11 @@
               0.585,
               0.9
             ],
-            "composition_note": "Wide A+ composition: Place the shared explanation on the left and four distinct contexts in the larger right gallery container; preserve individual panel readability. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
+            "composition_note": "Wide A+ composition: Place the shared explanation on the left and four distinct contexts in a larger gallery on the right; preserve individual panel readability. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Plan four independently evidenced product views as an even gallery, each with one readable subject and a different meaningful context. Use compatible pale interiors, limited furnishings and comparable visual density across panels. Keep natural light direction and white balance coherent without pretending the views share one physical room. Each panel must preserve the same product identity; use real registered panels or generate independently approved views rather than inventing a multi-unit pack. Reserve a clean shared header and consistent gutters; keep local panel captions outside critical product regions. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Plan four distinct product views as an even gallery, each with one readable subject and a different meaningful context. Use compatible pale interiors, limited furnishings and comparable visual density across panels. Keep natural light direction and white balance coherent without pretending the views share one physical room. Each panel shows the same product; show one unit per view rather than inventing a multi-unit pack. Reserve a clean shared header and consistent gutters; keep local panel captions outside critical product regions. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "four distinct appropriate real-use contexts with consistent pale natural styling",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -2337,12 +2337,12 @@
               0.585,
               0.9
             ],
-            "composition_note": "Wide A+ composition: Move the shared explanation left and arrange one lead view with two smaller supporting contexts inside the right gallery container. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
+            "composition_note": "Wide A+ composition: Move the shared explanation left and arrange one lead view with two smaller supporting contexts in a gallery on the right. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
           }
         }
       },
       "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Compose one broad lead scene with two subordinate detail or context views, giving the most informative view greater visual weight. Use compatible light neutral surroundings and sparse contextual props; avoid promotional or packaging narratives not supplied by the project. Soft natural illumination and a consistent neutral grade tie the views together. Preserve one consistent product across all views, with the lead scene setting the focus and the smaller views adding new information. Keep a pale header and even fine gutters; no social-proof heading or sales language is inherited. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
-      "scene_default": "three appropriate natural-light use contexts for the current product",
+      "scene_default": "three appropriate natural-light use contexts for the product",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
         "Separate the primary subject from visual noise; keep graphic information subordinate to the product."
@@ -2391,7 +2391,7 @@
         "composition": "Use a small sequence of distinct hand-action views, with the final view wider only if it clarifies the actual completed state.",
         "background": "Keep the working surface, background and visible product identity consistent across all process views.",
         "lighting": "Use soft even daylight so contact, openings and orientation remain clear.",
-        "focus": "Each view must correspond to an approved real step; preserve actual parts and avoid inventing tools or extra units.",
+        "focus": "Each view shows one real step; preserve actual parts and avoid inventing tools or extra units.",
         "reserved_space": "Reserve a clean shared title region and concise independent step-caption areas with a clear reading order.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
@@ -2416,7 +2416,7 @@
         "text_surface": {
           "kind": "transparent"
         },
-        "reading_order": "Shared title followed by the documented step order.",
+        "reading_order": "Shared title followed by the step order.",
         "product_region_norm": [
           0.05,
           0.235,
@@ -2437,7 +2437,7 @@
               0.9,
               0.71
             ],
-            "composition_note": "Square composition: Put the process heading above the documented sequence, keeping all step views in the lower product container. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
+            "composition_note": "Square composition: Put the process heading above the step sequence, keeping all step views in the lower area. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
           },
           "portrait": {
             "text_group_box": [
@@ -2467,12 +2467,12 @@
               0.62,
               0.7
             ],
-            "composition_note": "Wide A+ composition: Place the process explanation on the left and documented steps across the right container; preserve procedure order and sufficient visual scale. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
+            "composition_note": "Wide A+ composition: Place the process explanation on the left and the steps across the right side; preserve procedure order and sufficient visual scale. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Use a small sequence of distinct hand-action views, with the final view wider only if it clarifies the actual completed state. Keep the working surface, background and visible product identity consistent across all process views. Use soft even daylight so contact, openings and orientation remain clear. Each view must correspond to an approved real step; preserve actual parts and avoid inventing tools or extra units. Reserve a clean shared title region and concise independent step-caption areas with a clear reading order. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
-      "scene_default": "a bright consistent work surface suitable for the verified process",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Use a small sequence of distinct hand-action views, with the final view wider only if it clarifies the actual completed state. Keep the working surface, background and visible product identity consistent across all process views. Use soft even daylight so contact, openings and orientation remain clear. Each view shows one real step; preserve actual parts and avoid inventing tools or extra units. Reserve a clean shared title region and concise independent step-caption areas with a clear reading order. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "scene_default": "a bright consistent work surface suitable for the process",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
         "Separate the primary subject from visual noise; keep graphic information subordinate to the product."
@@ -2488,7 +2488,7 @@
         "Do not borrow product identity, sample copy, claimed effects, packaging, accessories or quantities from a design source.",
         "Do not invent hidden geometry, material identity, human scale or safe-use behavior. Follow current product evidence and protection regions.",
         "Do not copy sample step count or multiply products in the completion view.",
-        "For wide A+ arrange the documented sequence horizontally; for portrait use ordered stacked panels without changing the procedure."
+        "For wide A+ arrange the step sequence horizontally; for portrait use ordered stacked panels without changing the procedure."
       ],
       "source_ids": [
         "screenshot_11_03"
@@ -2522,8 +2522,8 @@
       "generation": {
         "composition": "Build a small orderly set of true detail views or an own-product information rail beside one larger view, using consistent spacing and restrained framing.",
         "background": "Use a neutral light presentation field with simple separators; do not place the layout inside a pictured device or browser.",
-        "lighting": "Match detail lighting and color to the real source; avoid stylized cutaways or falsely enhanced texture.",
-        "focus": "Each crop must be traceable to current evidence and contribute a distinct visible detail or approved answer.",
+        "lighting": "Match detail lighting and color to the product photos; avoid stylized cutaways or falsely enhanced texture.",
+        "focus": "Each crop shows a distinct, real visible detail of the product.",
         "reserved_space": "Leave a shared title area and independent compact labels or explanation groups, with capacity measured before production.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
@@ -2603,8 +2603,8 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Build a small orderly set of true detail views or an own-product information rail beside one larger view, using consistent spacing and restrained framing. Use a neutral light presentation field with simple separators; do not place the layout inside a pictured device or browser. Match detail lighting and color to the real source; avoid stylized cutaways or falsely enhanced texture. Each crop must be traceable to current evidence and contribute a distinct visible detail or approved answer. Leave a shared title area and independent compact labels or explanation groups, with capacity measured before production. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
-      "scene_default": "a clean pale detail presentation using only current-product source crops",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Build a small orderly set of true detail views or an own-product information rail beside one larger view, using consistent spacing and restrained framing. Use a neutral light presentation field with simple separators; do not place the layout inside a pictured device or browser. Match detail lighting and color to the product photos; avoid stylized cutaways or falsely enhanced texture. Each crop shows a distinct, real visible detail of the product. Leave a shared title area and independent compact labels or explanation groups, with capacity measured before production. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "scene_default": "a clean pale detail presentation built from close crops of the product",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
         "Separate the primary subject from visual noise; keep graphic information subordinate to the product."
@@ -2923,7 +2923,7 @@
         "background": "Use a blurred warm interior with sparse practical light and a quiet middle-right or upper-right field.",
         "lighting": "Soft directional warm light reveals the object's outline and texture without artificial glow.",
         "focus": "Keep the object dominant; hands and nearby props must not cover the distinguishing functional or identity details.",
-        "reserved_space": "Retain one naturally quiet right-side text area, moving the composition around approved copy needs rather than masking the product.",
+        "reserved_space": "Retain one naturally quiet right-side text area, composing around the copy rather than covering the product.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
           "Do not borrow product identity, sample copy, claimed effects, packaging, accessories or quantities from a design source.",
@@ -3001,7 +3001,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Place the product prominently along the left or lower-left region, balancing it with a small believable gesture or softly receding person to the right. Use a blurred warm interior with sparse practical light and a quiet middle-right or upper-right field. Soft directional warm light reveals the object's outline and texture without artificial glow. Keep the object dominant; hands and nearby props must not cover the distinguishing functional or identity details. Retain one naturally quiet right-side text area, moving the composition around approved copy needs rather than masking the product. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Place the product prominently along the left or lower-left region, balancing it with a small believable gesture or softly receding person to the right. Use a blurred warm interior with sparse practical light and a quiet middle-right or upper-right field. Soft directional warm light reveals the object's outline and texture without artificial glow. Keep the object dominant; hands and nearby props must not cover the distinguishing functional or identity details. Retain one naturally quiet right-side text area, composing around the copy rather than covering the product. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "a warm quiet interior with one contextual surface",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -3047,13 +3047,13 @@
         "wide"
       ],
       "recipe": "photo_sidebar",
-      "description": "Fill one side with a traceable close crop of a real surface or attachment, leaving an uninterrupted information rail on the other side.",
+      "description": "Fill one side with a close crop of a real surface or attachment, leaving an uninterrupted text rail on the other side.",
       "generation": {
-        "composition": "Fill one side with a traceable close crop of a real surface or attachment, leaving an uninterrupted information rail on the other side.",
+        "composition": "Fill one side with a close crop of a real surface or attachment, leaving an uninterrupted text rail on the other side.",
         "background": "Use soft wood-toned depth or restrained natural bokeh, selected to separate the actual product color rather than recolor it.",
         "lighting": "Gentle raking light reveals visible texture, seam and edge transitions without inventing material properties.",
-        "focus": "Focus tightly on one verified construction detail; an optional fingertip can indicate it only when scale and touch behavior are supported.",
-        "reserved_space": "Keep an uncluttered side rail and route any later local leader away from the protected product detail.",
+        "focus": "Focus tightly on one real construction detail; an optional fingertip can indicate it only when scale and touch behavior are supported.",
+        "reserved_space": "Keep an uncluttered side rail for the text and keep any callout line away from the product detail.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
           "Do not borrow product identity, sample copy, claimed effects, packaging, accessories or quantities from a design source.",
@@ -3099,7 +3099,7 @@
               0.48,
               0.86
             ],
-            "composition_note": "Square composition: Keep the traceable macro crop on the left and a continuous warm information rail on the right. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
+            "composition_note": "Square composition: Keep the macro crop on the left and a continuous warm text rail on the right. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
           },
           "portrait": {
             "text_group_box": [
@@ -3133,7 +3133,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Fill one side with a traceable close crop of a real surface or attachment, leaving an uninterrupted information rail on the other side. Use soft wood-toned depth or restrained natural bokeh, selected to separate the actual product color rather than recolor it. Gentle raking light reveals visible texture, seam and edge transitions without inventing material properties. Focus tightly on one verified construction detail; an optional fingertip can indicate it only when scale and touch behavior are supported. Keep an uncluttered side rail and route any later local leader away from the protected product detail. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Fill one side with a close crop of a real surface or attachment, leaving an uninterrupted text rail on the other side. Use soft wood-toned depth or restrained natural bokeh, selected to separate the actual product color rather than recolor it. Gentle raking light reveals visible texture, seam and edge transitions without inventing material properties. Focus tightly on one real construction detail; an optional fingertip can indicate it only when scale and touch behavior are supported. Keep an uncluttered side rail for the text and keep any callout line away from the product detail. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "a softly lit detail setting with a warm or natural bokeh background",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -3404,7 +3404,7 @@
         }
       },
       "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Place one clear foreground product on a real surface while a daily-routine activity recedes softly behind it. Use a small number of appropriate unbranded belongings and restrained points of warm background light. Soft side illumination gives the foreground object a natural highlight gradient and a believable contact shadow. Keep the actual object sharp and unobstructed; background people or bags should communicate context without implying inclusion. Leave a quiet upper information area and a small low supporting region without inserting a promotional control. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
-      "scene_default": "a warm everyday preparation surface relevant to the current product",
+      "scene_default": "a warm everyday preparation surface relevant to the product",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
         "Separate the primary subject from visual noise; keep graphic information subordinate to the product."
@@ -3453,9 +3453,9 @@
       "generation": {
         "composition": "Compose a strong diagonal or three-quarter action view in which the product, hand position and real contact point are immediately understandable.",
         "background": "Use a restrained workshop, garden or kitchen background appropriate to the actual product; contextual tools and materials remain secondary.",
-        "lighting": "Use directional practical light with crisp contact detail and controlled background blur; visible heat, debris or motion must be plausible and evidenced.",
+        "lighting": "Use directional practical light with crisp contact detail and controlled background blur; visible heat, debris or motion must be plausible.",
         "focus": "Freeze the product's geometry and functional contact clearly; avoid aggressive effects that imply unsupported performance.",
-        "reserved_space": "Preserve a quiet upper or side field for later explanation, with ample clearance around the working edge.",
+        "reserved_space": "Preserve a quiet upper or side field for the copy, with ample clearance around the working edge.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
           "Do not borrow product identity, sample copy, claimed effects, packaging, accessories or quantities from a design source.",
@@ -3535,8 +3535,8 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Compose a strong diagonal or three-quarter action view in which the product, hand position and real contact point are immediately understandable. Use a restrained workshop, garden or kitchen background appropriate to the actual product; contextual tools and materials remain secondary. Use directional practical light with crisp contact detail and controlled background blur; visible heat, debris or motion must be plausible and evidenced. Freeze the product's geometry and functional contact clearly; avoid aggressive effects that imply unsupported performance. Preserve a quiet upper or side field for later explanation, with ample clearance around the working edge. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
-      "scene_default": "an appropriate practical work area for the verified product use",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Compose a strong diagonal or three-quarter action view in which the product, hand position and real contact point are immediately understandable. Use a restrained workshop, garden or kitchen background appropriate to the actual product; contextual tools and materials remain secondary. Use directional practical light with crisp contact detail and controlled background blur; visible heat, debris or motion must be plausible. Freeze the product's geometry and functional contact clearly; avoid aggressive effects that imply unsupported performance. Preserve a quiet upper or side field for the copy, with ample clearance around the working edge. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "scene_default": "an appropriate practical work area for the product's real use",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
         "Separate the primary subject from visual noise; keep graphic information subordinate to the product."
@@ -3667,7 +3667,7 @@
               0.45,
               0.88
             ],
-            "composition_note": "Wide A+ composition: Keep the mobile product and evidenced grip left and the structured feature explanation right, with background movement kept behind the product. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
+            "composition_note": "Wide A+ composition: Keep the mobile product and its grip left and the structured feature explanation right, with background movement kept behind the product. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
           }
         }
       },
@@ -3717,9 +3717,9 @@
         "wide"
       ],
       "recipe": "scene_grid",
-      "description": "Make one close action scene dominant and add a restrained row of smaller context views only when each contributes a distinct approved use setting.",
+      "description": "Make one close action scene dominant and add a restrained row of smaller context views, each showing a distinct use setting.",
       "generation": {
-        "composition": "Make one close action scene dominant and add a restrained row of smaller context views only when each contributes a distinct approved use setting.",
+        "composition": "Make one close action scene dominant and add a restrained row of smaller context views, each showing a distinct use setting.",
         "background": "Keep the main scene natural and the supporting views consistent in product identity, camera quality and tonal treatment.",
         "lighting": "Use environment-appropriate daylight, with crisp focal product detail and controlled background motion.",
         "focus": "Preserve actual surface behavior and geometry; repeated views show alternative situations rather than multiple included units.",
@@ -3768,7 +3768,7 @@
               0.9,
               0.66
             ],
-            "composition_note": "Square composition: Put the shared title above one lead action view and smaller context thumbnails, all inside the lower photographic container. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
+            "composition_note": "Square composition: Put the shared title above one lead action view and smaller context thumbnails, all in the lower photographic area. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
           },
           "portrait": {
             "text_group_box": [
@@ -3802,8 +3802,8 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Make one close action scene dominant and add a restrained row of smaller context views only when each contributes a distinct approved use setting. Keep the main scene natural and the supporting views consistent in product identity, camera quality and tonal treatment. Use environment-appropriate daylight, with crisp focal product detail and controlled background motion. Preserve actual surface behavior and geometry; repeated views show alternative situations rather than multiple included units. Leave an upper title region and clear gutters around the supporting views, avoiding labels directly across contact points. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
-      "scene_default": "one primary real-use context with a small set of evidenced alternative contexts",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Make one close action scene dominant and add a restrained row of smaller context views, each showing a distinct use setting. Keep the main scene natural and the supporting views consistent in product identity, camera quality and tonal treatment. Use environment-appropriate daylight, with crisp focal product detail and controlled background motion. Preserve actual surface behavior and geometry; repeated views show alternative situations rather than multiple included units. Leave an upper title region and clear gutters around the supporting views, avoiding labels directly across contact points. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "scene_default": "one primary real-use context with a small set of alternative contexts",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
         "Separate the primary subject from visual noise; keep graphic information subordinate to the product."
@@ -3849,13 +3849,13 @@
         "wide"
       ],
       "recipe": "detail_callouts",
-      "description": "Frame a clear worn or handled product in a medium view, with space for a small number of traceable detail crops outside its critical features.",
+      "description": "Frame a clear worn or handled product in a medium view, with space for a few detail crops outside its key features.",
       "generation": {
-        "composition": "Frame a clear worn or handled product in a medium view, with space for a small number of traceable detail crops outside its critical features.",
-        "background": "Use an uncluttered cool or neutral outdoor setting whose conditions are justified by the current product brief.",
+        "composition": "Frame a clear worn or handled product in a medium view, with space for a few detail crops outside its key features.",
+        "background": "Use an uncluttered cool or neutral outdoor setting that suits the product's real use.",
         "lighting": "Soft outdoor light separates the actual product edges from the background without artificial weather effects.",
-        "focus": "Keep the fit or handling interaction and real construction legible; detail crops must come from current evidence.",
-        "reserved_space": "Leave a quiet upper field and uncluttered lower or side pockets for local detail insets and approved labels.",
+        "focus": "Keep the fit or handling interaction and real construction legible; detail crops show real product details.",
+        "reserved_space": "Leave a quiet upper field and uncluttered lower or side pockets for detail insets and short labels.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
           "Do not borrow product identity, sample copy, claimed effects, packaging, accessories or quantities from a design source.",
@@ -3915,7 +3915,7 @@
               0.8,
               0.67
             ],
-            "composition_note": "Portrait composition: Use the top information field above an extended use view and traceable detail crops. Extend real context vertically without stretching the product; keep the primary information and product containers separate. The product container is a target, not an observed pixel boundary."
+            "composition_note": "Portrait composition: Use the top text field above an extended use view and detail crops. Extend real context vertically without stretching the product; keep the primary information and product containers separate. The product container is a target, not an observed pixel boundary."
           },
           "wide": {
             "text_group_box": [
@@ -3934,8 +3934,8 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Frame a clear worn or handled product in a medium view, with space for a small number of traceable detail crops outside its critical features. Use an uncluttered cool or neutral outdoor setting whose conditions are justified by the current product brief. Soft outdoor light separates the actual product edges from the background without artificial weather effects. Keep the fit or handling interaction and real construction legible; detail crops must come from current evidence. Leave a quiet upper field and uncluttered lower or side pockets for local detail insets and approved labels. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
-      "scene_default": "an appropriate outdoor context for the current product",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Frame a clear worn or handled product in a medium view, with space for a few detail crops outside its key features. Use an uncluttered cool or neutral outdoor setting that suits the product's real use. Soft outdoor light separates the actual product edges from the background without artificial weather effects. Keep the fit or handling interaction and real construction legible; detail crops show real product details. Leave a quiet upper field and uncluttered lower or side pockets for detail insets and short labels. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "scene_default": "an appropriate outdoor context for the product",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
         "Separate the primary subject from visual noise; keep graphic information subordinate to the product."
@@ -3985,7 +3985,7 @@
         "composition": "Place one large installed product at a clear three-quarter angle and leave peripheral space for a limited set of independently sourced detail crops.",
         "background": "Use tonal practical surroundings, preserving enough edge contrast to distinguish the product from its mounting or supporting surface.",
         "lighting": "Controlled soft highlights reveal seams, edges and actual openings; avoid metallic glow or invented technical texture.",
-        "focus": "Focus on the real installed geometry and visible detail evidence; stored belongings remain subordinate context.",
+        "focus": "Focus on the real installed geometry and visible details; stored belongings remain subordinate context.",
         "reserved_space": "Reserve an upper title area and external callout pockets with clear leader routes that do not cross critical product details.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
@@ -4061,11 +4061,11 @@
               0.43,
               0.88
             ],
-            "composition_note": "Wide A+ composition: Place the technical explanation left and the installed product plus traceable detail crops right; preserve dark edge separation and real contact. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
+            "composition_note": "Wide A+ composition: Place the technical explanation left and the installed product plus detail crops right; preserve dark edge separation and real contact. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Place one large installed product at a clear three-quarter angle and leave peripheral space for a limited set of independently sourced detail crops. Use tonal practical surroundings, preserving enough edge contrast to distinguish the product from its mounting or supporting surface. Controlled soft highlights reveal seams, edges and actual openings; avoid metallic glow or invented technical texture. Focus on the real installed geometry and visible detail evidence; stored belongings remain subordinate context. Reserve an upper title area and external callout pockets with clear leader routes that do not cross critical product details. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Place one large installed product at a clear three-quarter angle and leave peripheral space for a limited set of independently sourced detail crops. Use tonal practical surroundings, preserving enough edge contrast to distinguish the product from its mounting or supporting surface. Controlled soft highlights reveal seams, edges and actual openings; avoid metallic glow or invented technical texture. Focus on the real installed geometry and visible details; stored belongings remain subordinate context. Reserve an upper title area and external callout pockets with clear leader routes that do not cross critical product details. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "a dark neutral installed-use setting appropriate to the actual product",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -4116,8 +4116,8 @@
         "composition": "Balance a sharp product-use close-up against a quieter contextual side area, using two clear tonal zones rather than an unsupported before-and-after comparison.",
         "background": "Let a softly blurred real environment occupy the secondary zone; omit fictitious competing products and visualized performance effects.",
         "lighting": "Use controlled natural light with clear separation between the product edge, person and background.",
-        "focus": "Keep the current product and authentic use gesture clear; avoid rays, force fields or effects that imply quantified efficacy.",
-        "reserved_space": "Reserve a compact continuous information column on one side, using local high-contrast surfaces when the photograph cannot support approved copy.",
+        "focus": "Keep the product and the authentic use gesture clear; avoid rays, force fields or effects that imply quantified efficacy.",
+        "reserved_space": "Reserve a compact continuous text column on one side, on a solid high-contrast panel where the photo behind it is busy.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
           "Do not borrow product identity, sample copy, claimed effects, packaging, accessories or quantities from a design source.",
@@ -4199,7 +4199,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Balance a sharp product-use close-up against a quieter contextual side area, using two clear tonal zones rather than an unsupported before-and-after comparison. Let a softly blurred real environment occupy the secondary zone; omit fictitious competing products and visualized performance effects. Use controlled natural light with clear separation between the product edge, person and background. Keep the current product and authentic use gesture clear; avoid rays, force fields or effects that imply quantified efficacy. Reserve a compact continuous information column on one side, using local high-contrast surfaces when the photograph cannot support approved copy. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Balance a sharp product-use close-up against a quieter contextual side area, using two clear tonal zones rather than an unsupported before-and-after comparison. Let a softly blurred real environment occupy the secondary zone; omit fictitious competing products and visualized performance effects. Use controlled natural light with clear separation between the product edge, person and background. Keep the product and the authentic use gesture clear; avoid rays, force fields or effects that imply quantified efficacy. Reserve a compact continuous text column on one side, on a solid high-contrast panel where the photo behind it is busy. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "a practical tonal setting with a strong contrast between subject and contextual background",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -4246,13 +4246,13 @@
         "wide"
       ],
       "recipe": "steps",
-      "description": "Pair a narrow orderly process rail with one or two contextual working-surface views; each action crop must show a documented step.",
+      "description": "Pair a narrow orderly process rail with one or two contextual working-surface views; each action crop shows one real step.",
       "generation": {
-        "composition": "Pair a narrow orderly process rail with one or two contextual working-surface views; each action crop must show a documented step.",
+        "composition": "Pair a narrow orderly process rail with one or two contextual working-surface views; each action crop shows one real step.",
         "background": "Use a warm neutral work surface and a restrained accent from the actual product; richer occasion color remains outside the process information field.",
         "lighting": "Soft even top-down or side light makes folds, contact and hand position readable across all views.",
         "focus": "Preserve the real product and process orientation; avoid invented flaps, openings, tools or extra contents.",
-        "reserved_space": "Reserve clear local step markers and caption areas; keep the process order readable and the contextual views subordinate.",
+        "reserved_space": "Reserve clear step markers and caption areas; keep the process order readable and the contextual views subordinate.",
         "product_safeguards": [
           "Follow the project's text_mode and approved copy. Do not introduce additional marketing lettering, icons, measurements, claims, badges or sales controls beyond explicit approval.",
           "Do not borrow product identity, sample copy, claimed effects, packaging, accessories or quantities from a design source.",
@@ -4279,7 +4279,7 @@
           "opacity": 1,
           "padding_em": 0.4
         },
-        "reading_order": "Process heading, documented step order, then contextual result views.",
+        "reading_order": "Process heading, step order, then contextual result views.",
         "product_region_norm": [
           0.055,
           0.3,
@@ -4300,7 +4300,7 @@
               0.89,
               0.65
             ],
-            "composition_note": "Square composition: Place the process heading upper left, then documented action views and a contextual result within the lower product-view container. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
+            "composition_note": "Square composition: Place the process heading upper left, then the action views and a contextual result in the lower area. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
           },
           "portrait": {
             "text_group_box": [
@@ -4334,7 +4334,7 @@
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Pair a narrow orderly process rail with one or two contextual working-surface views; each action crop must show a documented step. Use a warm neutral work surface and a restrained accent from the actual product; richer occasion color remains outside the process information field. Soft even top-down or side light makes folds, contact and hand position readable across all views. Preserve the real product and process orientation; avoid invented flaps, openings, tools or extra contents. Reserve clear local step markers and caption areas; keep the process order readable and the contextual views subordinate. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Pair a narrow orderly process rail with one or two contextual working-surface views; each action crop shows one real step. Use a warm neutral work surface and a restrained accent from the actual product; richer occasion color remains outside the process information field. Soft even top-down or side light makes folds, contact and hand position readable across all views. Preserve the real product and process orientation; avoid invented flaps, openings, tools or extra contents. Reserve clear step markers and caption areas; keep the process order readable and the contextual views subordinate. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
       "scene_default": "a clean practical tabletop with restrained occasion-appropriate styling",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
@@ -4381,10 +4381,10 @@
         "wide"
       ],
       "recipe": "header_footer",
-      "description": "Keep the actual product clear in the foreground, with a softly receding shared activity behind it and a separate inventory area only for documented contents.",
+      "description": "Keep the actual product clear in the foreground, with a softly receding shared activity behind it and a separate inventory area only for the contents that are sold.",
       "generation": {
-        "composition": "Keep the actual product clear in the foreground, with a softly receding shared activity behind it and a separate inventory area only for documented contents.",
-        "background": "Use warm neutral domestic surroundings; show packaging only if the current project establishes the exact included package.",
+        "composition": "Keep the actual product clear in the foreground, with a softly receding shared activity behind it and a separate inventory area only for the contents that are sold.",
+        "background": "Use warm neutral domestic surroundings; show packaging only if it is part of what is sold.",
         "lighting": "Soft daylight separates the focal object from background people while preserving material detail.",
         "focus": "Maintain the exact included count and shape of each listed item; do not reproduce a duplicate foreground-and-background unit as a pack claim.",
         "reserved_space": "Reserve a quiet title area and a clean lower inventory strip that remains distinct from incidental scene props.",
@@ -4436,7 +4436,7 @@
               0.88,
               0.7
             ],
-            "composition_note": "Square composition: Keep the contextual hero and documented inventory views within the upper photographic container and put the primary inventory explanation in the separate footer. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
+            "composition_note": "Square composition: Keep the contextual hero and the inventory views in the upper photographic area and put the main inventory explanation in a separate footer. Keep the primary information group entirely in its text container and all protected product views inside the separate product container. The product container describes the target composition, not a measured product mask."
           },
           "portrait": {
             "text_group_box": [
@@ -4451,7 +4451,7 @@
               0.84,
               0.7
             ],
-            "composition_note": "Portrait composition: Extend the context and verified contents vertically above the footer information, keeping incidental props distinct. Extend real context vertically without stretching the product; keep the primary information and product containers separate. The product container is a target, not an observed pixel boundary."
+            "composition_note": "Portrait composition: Extend the context and the included contents vertically above the footer text, keeping incidental props distinct. Extend real context vertically without stretching the product; keep the primary information and product containers separate. The product container is a target, not an observed pixel boundary."
           },
           "wide": {
             "text_group_box": [
@@ -4466,12 +4466,12 @@
               0.43,
               0.88
             ],
-            "composition_note": "Wide A+ composition: Place the inventory explanation left and the contextual product plus documented contents right; all actual item views stay inside the product-view container. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
+            "composition_note": "Wide A+ composition: Place the inventory explanation left and the contextual product plus the included contents right; all actual item views stay inside the product-view container. Recompose the real scene horizontally; do not compress a square poster. Use the tall side information region for readable approved copy at the 360-pixel preview and reserve a clear gap before the product container. If the copy cannot fit, change the module rather than shrink or delete it. The product container is a target, not a measured product mask."
           }
         }
       },
-      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Keep the actual product clear in the foreground, with a softly receding shared activity behind it and a separate inventory area only for documented contents. Use warm neutral domestic surroundings; show packaging only if the current project establishes the exact included package. Soft daylight separates the focal object from background people while preserving material detail. Maintain the exact included count and shape of each listed item; do not reproduce a duplicate foreground-and-background unit as a pack claim. Reserve a quiet title area and a clean lower inventory strip that remains distinct from incidental scene props. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
-      "scene_default": "a bright everyday activity setting suitable for the product's verified audience",
+      "prompt_template": "Create an evidence-faithful commercial base photograph of {product} in {scene}, designed to support {selling_job}. Keep the actual product clear in the foreground, with a softly receding shared activity behind it and a separate inventory area only for the contents that are sold. Use warm neutral domestic surroundings; show packaging only if it is part of what is sold. Soft daylight separates the focal object from background people while preserving material detail. Maintain the exact included count and shape of each listed item; do not reproduce a duplicate foreground-and-background unit as a pack claim. Reserve a quiet title area and a clean lower inventory strip that remains distinct from incidental scene props. Follow the project's text_mode and approved copy exactly; do not add marketing text, icons, claims, badges or controls beyond explicit approval. Preserve the current product's geometry, material appearance, count, verified accessories and real contact relationships. Follow the selected canvas composition_note and target containers for actual placement; these override generic directional guidance when the scene is recomposed for a different aspect ratio.",
+      "scene_default": "a bright everyday activity setting suitable for the product's real audience",
       "fixed_style": [
         "Keep a clear visual hierarchy and the family's photographic atmosphere while preserving the current product's actual appearance.",
         "Separate the primary subject from visual noise; keep graphic information subordinate to the product."
