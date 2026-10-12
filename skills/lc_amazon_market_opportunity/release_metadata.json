@@ -1,0 +1,164 @@
+{
+  "metadata_schema_version": "1.0.0",
+  "skill_release_version": "V13-dual-source-robust-shortlist",
+  "released_at": "2026-09-14T00:00:00+08:00",
+  "baseline": {
+    "version": "V4",
+    "backup_path": "/Users/laochen/.codex/skill-backups/lc_amazon_market_opportunity/V4_20260913-100412+0800",
+    "backup_tree_sha256": "60b3d1e929f06495709aa72a0462576c2fca6bae8f602af90c6fdcc49802113e",
+    "restoration_verification": "passed"
+  },
+  "prd": {
+    "version": "Two-round-Top10-Top3-v1.2-supply-demand-compressed-anchors",
+    "status": "implemented",
+    "previous_product_requirements": {
+      "path": "/Users/laochen/Documents/亚马逊选品/市场调研/skill_prd/PRD-lc_amazon_market_opportunity-Top3细分市场推荐增量-v1.0.md",
+      "sha256": "83ba4d1ed0445d6fdf7033984570557504b579c9bd2a10375ac4267fc08ccea5"
+    },
+    "source": "User-approved two-round Top10 → Top3 implementation plan in current task, 2026-09-13"
+  },
+  "compatibility": {
+    "existing_authentication": "unchanged; V5 does not read, replace, route through, or retry with existing backend, YouTube, ScrapeCreators, or browser-login credentials",
+    "independent_flyfus_configuration": "/Users/laochen/.config/lc_amazon_market_opportunity/flyfus_api.env",
+    "schema_versions_unchanged": [
+      "原市场研究与机会分析产物"
+    ],
+    "rollback_scope": "skill directory only; project data, reports, cost ledgers, and Flyfus user configuration are retained"
+  },
+  "split": {
+    "retained_skill": "lc_amazon_market_opportunity",
+    "display_name": "易逊-细分市场机会分析",
+    "consumer_components_moved_to": "lc_amazon_voc_to_product",
+    "installation_status": "market-opportunity-only"
+  },
+  "v6_additions": [
+    "用户提供的商机探测器 Excel 作为需求边界旁证",
+    "基于完整关键词、已有标签与全部有效商品的 Top 3 细分市场推荐",
+    "每个推荐细分市场按原字段月销量排序的 Top 20 ASIN 清单",
+    "市场机会看板中独立的 Top 3 推荐板块"
+  ],
+  "v8_additions": [
+    "商机探测器准确对应的主评分行用于规模、头部点击集中度、新品、退货和点击转化率评分",
+    "广告成本压力仅使用完整关键词表中直接需求词的 PPC竞价，并按月搜索量加权",
+    "搜索增长只展示90/180/360天原始值；近期90天和180天均下降至少20%时列为待观察，不计趋势分",
+    "Top 3 使用显式互斥关系及商品／直接关键词 Jaccard 重叠去重后，从互不重复组合中选择",
+    "候选依赖标签不足时，允许基于标题、参数、其他文案、图片和详情页完成全量补标；通用未限定、未披露充电和非候选安装位明确表示不具备候选属性"
+  ],
+  "v9_additions": [
+    "两轮独立评分：商机表初筛最多Top10，完整商品与用户新关键词转化表复评Top3",
+    "初筛冻结候选与输入指纹；run为shortlist兼容别名；最终08仅refine生成",
+    "第二轮竞价和转化率统一参与词样本，卖家精灵竞价按购买量加权，转化率为总购买量除以总点击量",
+    "第二轮前10%商品／品牌销量集中度、快照360天新品与本市场销量前20%成功新品、完整商品算术均价",
+    "最终Top3独立八项结论、Top20 ASIN和核心词明细；原HTML保留并创建两轮新报告",
+    "原鉴权、配置、API和二进制接口不变；退货率和原始搜索增长继续使用准确主商机行"
+  ],
+  "v10_additions": [
+    "两轮评分统一改为供需指数50%、竞争开放度10%、广告成本压力30%、新品进入证据5%、需求承接规模5%",
+    "供需指数固定使用原始品类有效商品全集母集，并按0/1/2/3/4/5/6到0/30/50/70/80/90/100分的锚点线性计分",
+    "初筛广告只使用准确主评分行原始英文市场名称完整匹配的卖家精灵PPC竞价；不再按直接词搜索量加权或使用80%搜索量覆盖门槛",
+    "退货率退出两轮评分和正式推荐门槛，仅作为商机表补充风险提示；第二轮购买量加权广告计算和八项结论保持独立"
+  ],
+  "v11_additions": [
+    "两轮供需指数评分锚点统一调整为0/0.8/1/1.2/1.4/1.6/1.8对应0/30/50/70/80/90/100分，1.8以上封顶",
+    "供需指数公式、固定原始品类母集、两轮权重、输入输出schema、鉴权、Token、API Key、API接口及二进制保持不变"
+  ],
+  "v11_verification": {
+    "test_command": "python3 -B -m unittest discover -s tests -q",
+    "test_count": 56,
+    "protected_opportunity_sha256_unchanged": true,
+    "protected_scope": [
+      "config.json",
+      "agents/openai.yaml",
+      "tools/bin/market-opportunity-*"
+    ],
+    "scope": "仅 lc_amazon_market_opportunity 的供需指数评分锚点、规则版本、契约、发布回执和相关测试；未修改上下游 Skill、鉴权、Token、API Key 或 API 接口。"
+  },
+  "v9_verification": {
+    "status": "passed_with_existing_name_validation_exception",
+    "test_count": 51,
+    "test_command": "python3 -m unittest discover -s tests -q",
+    "protected_opportunity_files": [
+      "config.json",
+      "tools/bin/market-opportunity-windows-amd64.exe",
+      "tools/bin/market-opportunity-darwin-arm64",
+      "tools/bin/market-opportunity-linux-amd64",
+      "tools/bin/market-opportunity-darwin-amd64",
+      "agents/openai.yaml"
+    ],
+    "protected_opportunity_sha256_unchanged": true,
+    "market_research_skill_unchanged": true,
+    "niche_skill_unchanged": true,
+    "baseline_hash_manifest": "/var/folders/v8/q_2f5v3s3nsbd4pxqrvw3d200000gn/T/niche-two-round-backup-jrl992an/hashes.json",
+    "pre_edit_skill_backup": "/var/folders/v8/q_2f5v3s3nsbd4pxqrvw3d200000gn/T/niche-two-round-backup-jrl992an/original_skill",
+    "existing_skill_name_validation": {
+      "current": {
+        "exit_code": 1,
+        "message": "Name 'lc_amazon_market_opportunity' should be hyphen-case (lowercase letters, digits, and hyphens only)"
+      },
+      "baseline": {
+        "exit_code": 1,
+        "message": "Name 'lc_amazon_market_opportunity' should be hyphen-case (lowercase letters, digits, and hyphens only)"
+      }
+    },
+    "out_of_scope_observed_changes": [
+      {
+        "path": "/Users/laochen/.codex/skills/lc_amazon_voc_to_product/tests/test_consumer_product_development.py",
+        "before": "13e20ba3f59ab685e972f2550373167192ae499f7229f642291a28d168e9b7c7",
+        "after": "54439dc9a9b787a40b9dc12709600fa695bcb89b531aa742fb801e7df91ad178",
+        "handling": "Observed outside this task; not edited or reverted by this task."
+      },
+      {
+        "path": "/Users/laochen/.codex/skills/lc_amazon_voc_to_product/scripts/consumer_product_development.py",
+        "before": "ae416e0c479e6ae102823d8986fd4f9541e5dd856291c876839496fed894afcd",
+        "after": "afd7a48d1eaec0bc67c9c6dd979c6d42375e8d566ccb3de860bb470167d39b84",
+        "handling": "Observed outside this task; not edited or reverted by this task."
+      }
+    ],
+    "independent_review": "Three reproduced defects corrected and reverified; no remaining blocking findings.",
+    "live_analysis": "Not executed; end-to-end fixture reports tested. User new keyword-level conversion workbook still required for live refinement."
+  },
+  "v10_verification": {
+    "test_command": "python3 -B -m unittest discover -s tests -q",
+    "test_count": 55,
+    "protected_opportunity_sha256_unchanged": true,
+    "protected_scope": [
+      "config.json",
+      "agents/openai.yaml",
+      "tools/bin/market-opportunity-*"
+    ],
+    "scope": "仅 lc_amazon_market_opportunity 的本地推荐层、报告、契约和测试；未修改上下游 Skill、鉴权、Token、API Key 或 API 接口。"
+  },
+  "v12_additions": [
+    "进一步分析按冻结市场数接收 2×N 个关键词文件；卖家精灵 Asin 工作表按该市场实际冻结 Top20 校验（不足 20 个按实际数量），不匹配时列出缺少／多出的 ASIN",
+    "进一步分析沿用冻结成员与 Top20；价格或销量无效的商品只从八项结论样本中剔除并留痕",
+    "初筛报告的补表提示按实际市场数与 Top20 数量生成",
+    "正式市场不足 3 个时补充不冲突的“候补”市场并写清未达标原因；不放宽正式门槛，不改变合计得分最高的选择规则",
+    "每个进一步分析市场给出“进入建议／风险等级”提示行与总览表，不改变排名",
+    "广告有效竞价点击覆盖低于 60% 时标注“低覆盖”，不设门槛、不改计算",
+    "报告版式升级为 two-round-competition-v2；规则版本 niche_recommendation_v9_top3_backups_entry_advice，schema 4.1.0（已于 V13 撤回，报告恢复 v1）"
+  ],
+  "v12_verification": {
+    "test_command": "python3 -B -m unittest discover -s tests",
+    "scope": "仅推荐层脚本、报告渲染、契约与测试；未修改 config.json、二进制、agents/openai.yaml、鉴权、Token 或 API。"
+  },
+  "v13_additions": [
+    "候选市场双来源：商机探测器细分市场 + 多维打标组合（按机会分取前 20 个组合核心，优先方向必含）；与商机表相同的组合合并",
+    "组合生成规则：剥离“未体现X”类条件并保留为切入点提示；“泛X”按“带X（任意）”处理；含不可识别值或超过 3 个条件的组合跳过",
+    "Agent 逐个审核组合（combo_reviews：keep／drop 必须写原因），组合需有搜索量的 direct 核心词才能正式推荐",
+    "四项评分统一按商品样本计算，权重 80/10/5/5 不变；商机表指标只作需求证据与风险参考，必需列只剩名称与分类",
+    "稳健供需指数：去掉前 3 个爆款并以 k=20 向品类平均收缩；锚点不变；稳健指数 <1.0 只能作候补",
+    "去重改为共享月销量占较小市场 ≥50% 自动判定，替代原 Jaccard 规则；显式互斥仍有效",
+    "广告计算只用同时有转化数据和卖家精灵建议竞价的关键词，转化率与加权CPC使用同一批词；缺任一项的词整行忽略，不用关键词表推荐竞价补齐",
+    "建议竞价只取卖家精灵关键词反查表（含 Asin 工作表）的 PPC竞价；关键词转化表只取点击量与购买量，其出价列忽略；停用以项目关键词表竞价计算的单文件参数 --keyword-conversion-xlsx；粗筛核心词 CSV 不再输出关键词表竞价",
+    "新增只读 status 命令做阶段路由，防止重跑计费词根或重新打标导致冻结 Top3 失效",
+    "新增 validate 命令：一次列出候选定义、组合审核、关键词归属的全部错误，按轮次记录并在连续 2 轮错误数不降时提示停止",
+    "粗筛把商机表与候选定义复制到 market_opportunity/frozen_inputs/，第二轮只读副本；exclusive_with 可附互斥依据",
+    "INSTRUCTIONS 补齐原 CLI 五条命令格式、两个 Agent 文件字段及重试／循环上限；打标仅在文本无法判断时查看图片或链接",
+    "报告保持用户冻结的原始 two-round-competition-v1 格式（只修正与现行规则不符的 4 处文字）；候补、进入建议／风险等级、广告低覆盖只写入 JSON，不在报告展示；候补不进入第二轮"
+  ],
+  "v13_verification": {
+    "test_command": "python3 -B -m unittest discover -s tests",
+    "case_replay": "电脑桌案例真实数据粗筛 Top3 与离线模拟一致（.skill-opt/simulation）",
+    "scope": "仅推荐层脚本、报告渲染、契约与测试；未修改 config.json、二进制、agents/openai.yaml、鉴权、Token 或 API。"
+  }
+}

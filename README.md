@@ -25,8 +25,13 @@ Public repository for Laochen Amazon workflow skills.
 - `skills/lc_amazon_competitor_promotion/` - Analyze competitor promotion,
   pricing, ads, reviews, seasonality, Woot signals, and optional offsite traces.
 - `skills/lc_amazon_market_opportunity/` - Continue from market research into
-  product feature tagging, opportunity combinations, and supply-demand indexes.
-  Last updated: 2026-07-30 23:42 (UTC+8).
+  feature tagging, dual-source candidate review, a robust Top3 shortlist, and
+  frozen-market keyword/ad metrics with the fixed two-round report.
+  Last updated: 2026-10-12 (UTC+8).
+- `skills/lc_amazon_voc_to_product/` - Develop one selected segment through
+  traceable consumer evidence, KANO, a twelve-role product workshop, and the
+  fixed offline report template. Includes scripts, schemas, tests and templates.
+  Last updated: 2026-10-12 (UTC+8).
 - `skills/lc_amazon_market_research/` - Generate Amazon market research reports
   from SellerSprite Excel exports. Last updated: 2026-07-30 23:42 (UTC+8).
 - `skills/lc_amazon_niche/` - Score and rank Amazon niche candidates by seller
@@ -63,6 +68,7 @@ https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-amazon-data-crawl
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_competitor_promotion
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_market_opportunity
+https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_voc_to_product
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_market_research
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_niche
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-ipr-risk-screening
@@ -76,3 +82,10 @@ Do not commit backend tokens, cookies, API keys, or local credential files.
 The two Listing skills ship blank `config.json` files and save user-supplied
 backend tokens locally through `scripts/configure_credentials.py` without
 echoing them. They use the existing backend CLI credential route.
+
+The market opportunity and VOC skills ship `config.json` with an empty
+`backend_token`. Configure it locally before authenticated use. The VOC backend
+configuration requires file permissions `0600` on Unix (`chmod 600 config.json`).
+Provider `.env` files, API keys, browser state, and collection outputs are excluded;
+only credential-free provider examples are included. Local credential files and
+existing authentication behavior are unchanged by this publication.

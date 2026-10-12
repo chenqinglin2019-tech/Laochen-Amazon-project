@@ -1,0 +1,14 @@
+{
+  "version": "compact-desk-example-1",
+  "need_aliases": {},
+  "rules": [
+    {
+      "id": "explicit_purchase_question",
+      "product_phrases": ["small computer desk", "small office desk", "desk for small spaces"],
+      "phrases": ["where can I buy", "where did you buy"],
+      "reject_phrases": ["affiliate", "sponsored", "promo code"],
+      "semantic_codes": ["purchase_selection_recommendation"],
+      "decision": "include"
+    }
+  ]
+}
