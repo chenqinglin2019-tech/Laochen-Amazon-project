@@ -1,0 +1,68 @@
+{
+  "metadata_schema_version": "1.0.0",
+  "skill_release_version": "V5-single-segment-production",
+  "released_at": "2026-09-13T11:00:00+08:00",
+  "baseline": {
+    "version": "V4",
+    "backup_path": "/Users/laochen/.codex/skill-backups/lc_amazon_market_opportunity/V4_20260913-100412+0800",
+    "backup_tree_sha256": "60b3d1e929f06495709aa72a0462576c2fca6bae8f602af90c6fdcc49802113e",
+    "restoration_verification": "passed"
+  },
+  "prd": {
+    "version": "V5",
+    "status": "正式采集：使用同字段本地 backend config",
+    "product_requirements": {
+      "path": "/Users/laochen/Documents/亚马逊选品/市场调研/skill_prd/PRD-lc_amazon_market_opportunity-需求洞察升级-V5.md",
+      "sha256": "b23a8e9abc9fae79b6a54c133cf2fe606adfdd5d9085fad8132c799df74496c1"
+    },
+    "business_logic": {
+      "path": "/Users/laochen/Documents/亚马逊选品/市场调研/skill_prd/业务逻辑-lc_amazon_market_opportunity-需求洞察升级-V5.md",
+      "sha256": "b3e39b50a5e10cd72171906c020f757a677d6f92a2523d1beaaaaf13b27d54a9"
+    }
+  },
+  "compatibility": {
+    "existing_authentication": "VOC Skill reads only its root config.json backend_url/backend_token with 0600 validation; upstream configuration remains unchanged; Flyfus, ScrapeCreators and browser-login credentials remain independent",
+    "independent_flyfus_configuration": "/Users/laochen/.config/lc_amazon_market_opportunity/flyfus_api.env",
+    "schema_versions_unchanged": [
+      "3.0.0-all-history",
+      "KANO review version 1.0.0"
+    ],
+    "rollback_scope": "skill directory only; project data, reports, cost ledgers, and Flyfus user configuration are retained"
+  },
+  "split": {
+    "source_skill": "lc_amazon_market_opportunity",
+    "new_skill": "lc_amazon_voc_to_product",
+    "display_name": "易逊-消费洞察与产品开发",
+    "installation_status": "production_enabled_with_local_backend_config",
+    "reason": "用户已提供与原 CLI 相同字段的本地后端配置；第三方供应商凭据仍按各自接入使用。"
+  },
+  "v5_additions": [
+    "isolated Flyfus configuration parser and controlled API receipts",
+    "reproducible review sampling, duplicate/denominator summaries, question-plan limits, and evidence sidecars",
+    "recommended and active Alexa/Rufus question workflow",
+    "evidence fusion guardrails for KANO and product development"
+  ],
+  "report_layout": {
+    "template_version": "1.5.0",
+    "layout_contract_version": "2.5",
+    "approved_on": "2026-10-04",
+    "approved_reference": "/Users/laochen/Documents/亚马逊选品/市场调研/market_project_20261003_134738/consumer_voc_horseshoe_20261003/social_expansion_20261003_221452/ui_product_review_20261004/马蹄形鼻饰-产品开发排版审阅版.html",
+    "approved_reference_sha256": "9801e943681860c7d8c61609387a69781631557aca7779a3017111b7b06e22e3",
+    "renderer": "scripts/consumer_all_history_report.py",
+    "template": "assets/consumer_all_history_report.template.html",
+    "contract": "references/consumer_report_layout_contract.md",
+    "presentation_schema": "consumer-report-presentation-1.0",
+    "historical_reports_preserved": true,
+    "changes": [
+      "front cleaning funnel before four Amazon/offsite raw/valid KPI cards",
+      "two-row product section title; JTBD and costs before imagery",
+      "two-column evidence/KANO/MoSCoW/design-thinking disclosures with mobile single column",
+      "one compact benchmark directly after each product direction",
+      "operator/developer actions replace runtime role/process block"
+    ],
+    "business_rules_unchanged": true,
+    "renderer_sha256": "e39113681f63e20c946f736f2313f5e842a10a78c862172642bac596eb83bad5",
+    "template_sha256": "56161edf6487af37c9cffd47f027108c7cd2acd375a684170d402cee64b91ca4",
+    "contract_sha256": "69748b26a976ed20b9cedbe7e48ec0536400c2461249dd15fec9412151a9b102"
+  }
+}

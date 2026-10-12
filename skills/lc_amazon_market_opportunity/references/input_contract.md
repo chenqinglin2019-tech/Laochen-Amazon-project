@@ -2,76 +2,38 @@
 
 ## 来自市场主报告的文件
 
-- `cleaned_30d_listings.json`：近 30 天有效 listing，已经完成硬规则清洗和 agent 明显不相关 ASIN 剔除。
-- `06_top90_keywords.json`：按流量占比累计到 90% 的关键词。
-- `03_market_metrics.json`：总指标和垄断/趋势指标。
-- `01_input_manifest.json`：站点、Excel 原币种、核心词、类目、源文件路径。站点必须是 `US`、`UK`、`DE`、`FR`、`JP`、`AU`、`CA`、`IT`、`ES`、`MX` 之一；旧值 `GB` 只规范为 `UK`。
-- `report_data.json`：HTML 看板使用的公开数据。
+- `cleaned_30d_listings.json`：近 30 天有效 Listing；不在本 Skill 重新清洗或补抓。
+- `01_input_manifest.json`：站点、核心词、类目和源文件路径；站点继承项目，不在本 Skill 覆盖。
+- `agent_listing_tags.json`：最终标签、归一化值、中文展示值与证据。
+- `07_opportunity_analysis.json`：其正式机会组合是多维组合候选的来源（只读）；`市场机会深挖看板.html`：原报告，只读。
 
-## 本 skill 生成的文件
+## 初筛输入与产物
 
-- `02_keyword_roots.json`：统一后端关键词词根返回、项目站点、主要语言和请求计数。
-- `03_dimension_candidates.json`：按词根类型聚合的维度候选。
-- `agent_dimensions.json`：agent 确认的最终维度。
-- `04_tagging_workspace.json`：给 agent 逐 listing 打标的工作区。
-- `agent_listing_tags.json`：agent 打标结果。
-- `07_opportunity_analysis.json`：结构化机会分析结果。
-- `市场机会深挖看板.html`：最终阅读入口。
+用户提供商机探测器细分市场 `.xlsx`，工作表为`细分市场列表`。必需列只有`细分市场名称`和`细分市场分类1`；其余指标只作需求证据、风险显示与参考，不参与评分。
 
-## 可选消费者声音阶段输入
+Agent 创建 `niche_candidate_definitions.json`，声明商机表候选的需求边界、标签表达式、`exact` 主行、direct 关键词归属及互斥关系，并在 `combo_reviews` 中审核每个多维组合候选（格式见 `niche_recommendation_contract.md` §2）。冻结前可补标；冻结后任何商品、标签、关键词、商机表或定义变化均需重跑。
 
-- `07_opportunity_analysis.json.feature_distribution`：Top3 的唯一选择来源。
-- 当前上下文明确给出的 `collector.sqlite3`：全历史全量清洗的唯一源语料；不得扫描其他项目猜测。
-- `selected_segments.json`：Top3 选择痕迹，输出时映射为 `segment_1_all_history` 至 `segment_3_all_history`。
-- `consumer_voice_taxonomy.json`：当前品类的产品词、六语义扩展词、主题、Top3 和 KANO 映射。
-- 用户明确要求首次采集或刷新时，可额外读取 `last30days` 原始候选、`agent-reach` 深读结果和 YouTube Data API 评论；这些采集字段不形成分析时间窗。
-- 当前机会报告快照中的 listing 标题、参数、图片与详情，用于 Top3 供给验证。
+初筛产物保留原文件名：
 
-## 可选消费者声音阶段输出
+- `niche_shortlist.json`：四项评分、固定 Top3 ID 与排名、候补 ID 与原因、冻结输入和状态；它是唯一 Top3 与候补来源。
+- `niche_shortlist_keywords.json`、`niche_shortlist_memberships.json`：核心词、完整成员和未知成员。
+- `niche_shortlist_core_keywords.csv`、`niche_shortlist_top20_asins.csv`：供用户统一补转化表及查看榜单。
+- `niche_shortlist_run.json`、`市场机会深挖看板-两轮初筛.html`：回执和初筛报告。
 
-- `market_opportunity/consumer_voice_all_history_<timestamp>/selected_segments.json`
-- `market_opportunity/consumer_voice_all_history_<timestamp>/consumer_voice_taxonomy.json`
-- `market_opportunity/consumer_voice_all_history_<timestamp>/source_snapshot.json`
-- `market_opportunity/consumer_voice_all_history_<timestamp>/social_voice_all_history_coding.json`
-- `market_opportunity/consumer_voice_all_history_<timestamp>/social_voice_all_history_analysis.json`
-- `market_opportunity/consumer_voice_all_history_<timestamp>/` 下的三份概念图提示词与图片。
-- `market_opportunity/消费者声音与产品创意开发报告-全历史-<timestamp>.html`：独立离线阅读入口，不覆盖基础机会看板。
+## 进一步分析输入与产物
 
-`project_manifest.json` 仅原子增加：
+用户一次提供冻结市场数 2 倍的 `.xlsx`（Top3 时 6 个），顺序不限：每个市场 1 个细分市场关键词转化表及 1 个卖家精灵关键词表。两类表分工固定：关键词转化表（如 `关键词-20260905-….xlsx`）只取关键词、点击量和购买量，表内“最高出价／最低出价／建议出价”等出价列一律忽略；建议竞价只取自卖家精灵关键词反查表（如 `ExpandKeywords-US-<ASIN>-batch(20)-….xlsx`，以含 `Asin` 工作表识别）的 `PPC竞价` 列。转化表选择第一个同时含`关键词`、点击量和购买量的工作表；接受`近90天点击量`／`点击量-近90天`／`点击量`和`近90天购买量`／`购买量-近90天`／`销量-近90天`／`购买量`／`销量`。表头已显式标明近90天时可视为统一窗口；其他表必须有统一有效周期或显式传 `--conversion-period`。若有站点列则必须匹配项目站点。卖家精灵表必须含`关键词`、`PPC竞价`、`流量占比`，并在名称为`Asin`（大小写不敏感）的工作表中提供与该市场冻结 Top20 完全一致的 ASIN（不足 20 个时按实际数量）。
 
-- `artifacts.consumer_voice_all_history_coding`
-- `artifacts.consumer_voice_all_history_analysis`
-- `artifacts.consumer_voice_all_history_report_html`
-- `status.consumer_voice_all_history = ready | partial | failed`
+`refine --keyword-input-xlsx <2×市场数 files>` 通过 `--shortlist-result` 绑定当前成功的 v10 初筛，不能另传定义或商机表，不能扩大冻结成员。每份卖家精灵表的 ASIN 必须与一个冻结细分市场 Top20 ASIN 完全一致；转化表必须与其卖家精灵表累计流量占比前90%关键词至少80%精确重叠。单文件参数 `--keyword-conversion-xlsx` 已停用。
 
-详细字段、全历史分母和无置信度约束见 `consumer_voice_contract.md` 及两个全历史 JSON Schema。
+进一步分析产物保留原文件名：
 
-## Agent 文件必须包含的追溯字段
+- `08_niche_recommendations.json`：绑定固定 Top3 的八项结论和各市场分析状态，不重新选择 Top3。
+- `09_niche_keyword_assignments.json`、`10_niche_product_memberships.json`：参与词（同时有转化与建议竞价）计算明细、成员、Top20、文件关联和排除原因。
+- `niche_top20_asins.csv`、`niche_rule_conclusions.json`、`niche_recommendation_run.json`、`市场机会深挖看板-两轮复评.html`：结果、回执和报告。
 
-`agent_dimensions.json`：
+## 阶段与交接
 
-- `llm_calls`
-- `dimensions`
-- `rejected_dimensions`
-- `supplemented_dimensions`
+初筛成功且有正式 Top 市场时 manifest 状态为`awaiting_keyword_conversion`（只有候补时为 `shortlist_pending`）；进一步分析全部可判定时为`refined_ready`，任何一个市场有缺项时为`refinement_pending`。失败只更新当次回执与失败状态，历史成功产物保留阅读。
 
-`agent_listing_tags.json`：
-
-- `llm_calls`
-- `tags`
-- `normalization_dictionary`
-- `unrecognized_samples`
-- `review_summary`
-
-`tags` 内每条 ASIN 必须同时包含：
-
-- `values`：原始识别值
-- `normalized_values`：标准语义值
-- `display_values`：中文展示标签，供 CLI 统计、CSV 和 HTML 使用
-- `evidence`：每个维度的判断依据
-
-`normalization_dictionary` 每条映射必须包含 `display_value`，用于追溯 `display_values`。
-
-非英语站点的原始值和 evidence 必须保留源语言；`display_values` 必须是中文展示标签。项目站点在本 skill 内不可更改。
-
-消费者声音的每条记录还必须保留可审计来源、可选发布时间、采集 scope、query ID、细分语义归属和硬身份去重 trace；同一底层声音的多路发现来源要合并，不能复制成多条。无日期和早期内容必须正常进入全量语义检查，日期不得决定量化资格。
+下游必须核对当前规则版本、粗筛／进一步分析运行 ID、输入指纹、成功回执、产物哈希、固定 Top3 ID 与顺序，再消费 08 及同批 09／10。不得根据 `feature_distribution`、Listing 占比或供需指数再次选择市场。
