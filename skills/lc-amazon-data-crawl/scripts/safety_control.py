@@ -44,6 +44,11 @@ MAX_PERSISTED_WAIT_SECONDS = {
     "captcha_cooldown_until": 15 * 60,
 }
 OPERATION_MODES = ("supervised", "unattended")
+# Daily-Chrome image search only; plugin exports and legacy category keep their policy.
+IMAGE_TRAFFIC_POLICY = {
+    "supervised": {"spacing": (4.0, 6.0), "batch": 20, "rest": (20.0, 35.0), "long_rest": (60.0, 120.0)},
+    "unattended": {"spacing": (8.0, 15.0), "batch": 10, "rest": (20.0, 35.0), "long_rest": (120.0, 180.0)},
+}
 
 
 def operation_mode(value: Any) -> str:
@@ -72,6 +77,11 @@ def apply_operation_policy(runtime: Any, mode: str, *, image: bool = False) -> N
     runtime.batch_pause_seconds_min, runtime.batch_pause_seconds_max = (
         (180.0, 300.0) if mode == "supervised" else (900.0, 1200.0)
     )
+    if image and getattr(runtime, "browser_backend", "") == "opencli":
+        policy = IMAGE_TRAFFIC_POLICY[mode]
+        runtime.delay_seconds_min, runtime.delay_seconds_max = policy["spacing"]
+        runtime.batch_pause_pages_min = runtime.batch_pause_pages_max = policy["batch"]
+        runtime.batch_pause_seconds_min, runtime.batch_pause_seconds_max = policy["rest"]
     schedule = ((60.0, 60.0),) if mode == "supervised" else ((120.0, 120.0), (300.0, 300.0))
     if image:
         runtime.amazon_page_unavailable_retry_schedule_seconds = schedule
@@ -111,7 +121,9 @@ def policy_description(runtime: Any) -> str:
         f"运行策略：{runtime.operation_mode}；导航 {runtime.delay_seconds_min:g}–"
         f"{runtime.delay_seconds_max:g} 秒；每 {runtime.batch_pause_pages_min} 次休息 "
         f"{runtime.batch_pause_seconds_min / 60:g}–{runtime.batch_pause_seconds_max / 60:g} 分钟"
-        + ("，每 100 次改为 10–12 分钟" if runtime.operation_mode == "supervised" else "")
+        + (("，每 100 次改为 1–2 分钟" if runtime.operation_mode == "supervised" else "，每 100 次改为 2–3 分钟")
+           if getattr(runtime, "browser_backend", "") == "opencli" and hasattr(runtime, "find_similar_timeout")
+           else ("，每 100 次改为 10–12 分钟" if runtime.operation_mode == "supervised" else ""))
         + f"；普通故障等待 {retry}；页面 {runtime.page_timeout} 秒；插件 {runtime.plugin_timeout} 秒；"
         f"预滚动自适应（底部检查每次≤{runtime.page_scroll_wait_seconds:g} 秒）；"
         + (f"人工等待最多 {runtime.manual_pause_timeout} 秒" if runtime.operation_mode == "supervised"
@@ -135,10 +147,6 @@ class SafetyPausedError(RuntimeError):
         super().__init__(message)
         self.kind = kind
         self.resume_at = resume_at
-
-
-class SafetyWaitCancelled(RuntimeError):
-    """A cancelled wait must not consume an action or its saved rest."""
 
 
 @dataclass(frozen=True)
@@ -344,6 +352,7 @@ class LocalSafetyController:
         batch_pause_seconds_min: float = 180,
         batch_pause_seconds_max: float = 300,
         mode: str = "supervised",
+        traffic_profile: str = "default",
     ) -> None:
         self.storage_root = (storage_root or default_safety_root()).expanduser()
         self.pause_path = self.storage_root / "risk-pause.json"
@@ -358,6 +367,20 @@ class LocalSafetyController:
         self.job_label = ""
         self._action_lock = threading.Lock()
         self.mode = operation_mode(mode)
+        if traffic_profile not in {"default", "image", "plugin"}:
+            raise ValueError("未知采集节流策略")
+        self.traffic_profile = traffic_profile
+        self._spacing = (20.0, 30.0) if self.mode == "supervised" else (45.0, 75.0)
+        self._long_rest = (600.0, 720.0) if self.mode == "supervised" else None
+        if traffic_profile == "plugin":
+            self._long_rest = (120.0, 180.0) if self.mode == "supervised" else None
+            batch_pause_pages_min = batch_pause_pages_max = 20 if self.mode == "supervised" else 10
+            batch_pause_seconds_min, batch_pause_seconds_max = ((60.0, 90.0) if self.mode == "supervised" else (120.0, 180.0))
+        if traffic_profile == "image":
+            policy = IMAGE_TRAFFIC_POLICY[self.mode]
+            self._spacing, self._long_rest = policy["spacing"], policy["long_rest"]
+            batch_pause_pages_min = batch_pause_pages_max = policy["batch"]
+            batch_pause_seconds_min, batch_pause_seconds_max = policy["rest"]
         self._batch_pause_pages_min = int(batch_pause_pages_min)
         self._batch_pause_pages_max = int(batch_pause_pages_max)
         self._batch_pause_seconds_min = float(batch_pause_seconds_min)
@@ -429,17 +452,13 @@ class LocalSafetyController:
     def heartbeat(self, phase: str, *, until: str = "", detail: str = "") -> None:
         write_heartbeat(self.status_path, phase, until=until, detail=detail)
 
-    def _wait_until(self, deadline: dt.datetime, reason: str, stop_event=None) -> None:
+    def _wait_until(self, deadline: dt.datetime, reason: str) -> None:
         remaining = max((deadline - self._now()).total_seconds(), 0.0)
         while remaining > 0:
             print(f"{reason}；剩余约 {remaining:.0f} 秒。", flush=True)
             self.heartbeat("waiting", until=deadline.isoformat(), detail=reason)
             chunk = min(remaining, 30.0)
-            if stop_event is not None:
-                if stop_event.wait(chunk):
-                    raise SafetyWaitCancelled("采集节流等待已取消。")
-            else:
-                time.sleep(chunk)
+            time.sleep(chunk)
             remaining = min(max((deadline - self._now()).total_seconds(), 0.0), remaining - chunk)
 
     def acquire(self) -> None:
@@ -542,7 +561,10 @@ class LocalSafetyController:
         resume_at = not_before.isoformat(sep=" ") if not_before else ""
         if not resume_after_review and not automatic_probe:
             raise SafetyPausedError(self._pause_message(pause), kind="risk_pause", resume_at=resume_at)
-        if not_before is not None and now < not_before:
+        captcha_review = (resume_after_review and self.traffic_profile == "plugin"
+                          and pause.get("reason") == "captcha_or_robot_check"
+                          and pause.get("platform") in {"amazon", "sellersprite"})
+        if not_before is not None and now < not_before and not captcha_review:
             raise SafetyPausedError(
                 f"风险暂停尚未到期，最早可在 {resume_at} 后人工复核恢复。",
                 kind="review_not_due",
@@ -570,9 +592,7 @@ class LocalSafetyController:
         pause = self._load_pause()
         return bool(self._review_mode and pause and pause.get("kind") == "rate_probe")
 
-    def before_remote_action(self, action: str, stop_event=None) -> None:
-        if stop_event is not None and stop_event.is_set():
-            raise SafetyWaitCancelled("采集操作已取消。")
+    def before_remote_action(self, action: str) -> None:
         pause = self._load_pause()
         if pause is not None and not (
             self._review_mode and bool(pause.get("review_attempt_pending"))
@@ -612,8 +632,8 @@ class LocalSafetyController:
                 # Re-drawing it made every restart wait a full rest again.
                 pass
             elif due and int(state.get("rested_after") or 0) < count:
-                long_rest = self.mode == "supervised" and count % 100 == 0
-                low, high = ((600.0, 720.0) if long_rest else
+                long_rest = self._long_rest is not None and count % 100 == 0
+                low, high = (self._long_rest if long_rest else
                              (self._batch_pause_seconds_min, self._batch_pause_seconds_max))
                 duration = random.uniform(low, high)
                 new_deadline = self._now() + dt.timedelta(seconds=duration)
@@ -630,20 +650,16 @@ class LocalSafetyController:
             ]
             deadline = max(deadlines, default=None)
             if deadline and self._now() < deadline:
-                if stop_event is None:
-                    self._wait_until(deadline, "采集节流等待")
-                else:
-                    self._wait_until(deadline, "采集节流等待", stop_event)
-            if stop_event is not None and stop_event.is_set():
-                raise SafetyWaitCancelled("采集操作已取消。")
+                self._wait_until(deadline, "采集节流等待")
             if int(state.get("rest_for") or 0) == count:
                 state["rested_after"] = count
                 state.pop("rest_until", None)
                 state.pop("rest_for", None)
             state["actions_count"] = count + 1
-            spacing = random.uniform(20.0, 30.0) if self.mode == "supervised" else random.uniform(45.0, 75.0)
+            spacing = random.uniform(*self._spacing)
             state["next_allowed_at"] = (self._now() + dt.timedelta(seconds=spacing)).isoformat()
             state["last_mode"] = self.mode
+            state["last_traffic_profile"] = self.traffic_profile
             self._write_traffic(state)
 
     def trip(self, signal: RiskSignal, *, page_url: str = "") -> None:
@@ -658,7 +674,7 @@ class LocalSafetyController:
             cooldown = max(1800, int(getattr(signal, "retry_after_seconds", 0) or 0))
             traffic["rate_detected_at"] = now.isoformat()
             self._write_traffic(traffic)
-        if signal.reason == "captcha_or_robot_check" and self.mode == "unattended":
+        if signal.reason == "captcha_or_robot_check" and self.mode == "unattended" and self.traffic_profile != "plugin":
             cooldown = 0
         not_before = now + dt.timedelta(seconds=cooldown)
         previous_deadline = self._parse_iso(previous.get("not_before")) if previous else None

@@ -65,15 +65,11 @@ def capture_storefront_script() -> str:
 BOX_HARNESS = r"""
 const input = JSON.parse(require('fs').readFileSync(0, 'utf8'));
 const out = {};
-global.window = {};
-global.location = {href: 'https://www.amazon.com/s?me=fixture'};
 for (const [asin, text] of Object.entries(input.boxes)) {
   const box = { innerText: text, querySelectorAll: () => [], getAttribute: () => null,
-                nodeType: 1, parentElement: null, getClientRects: () => [1], matches: () => false };
+                nodeType: 1, parentElement: null, getClientRects: () => [1] };
   global.document = {
-    hidden: false, visibilityState: 'visible', hasFocus: () => true,
     querySelector: (sel) => (sel.includes(asin) ? box : null),
-    querySelectorAll: (sel) => (sel.includes(asin) ? [box] : []),
     scrollingElement: {scrollTop: 0, scrollHeight: 100, scrollBy() {}},
   };
   global.innerHeight = 100;
@@ -325,7 +321,7 @@ class StorefrontCoverageTests(unittest.TestCase):
         clock = FakeClock()
         driver = SimpleNamespace(current_url="https://www.amazon.com/s?me=A", execute_script=lambda *_: True)
         with (
-            patch.object(front, "inspect_sellersprite_block", return_value={"status": "data_loading"}),
+            patch.object(front, "inspect_sellersprite_readiness", return_value={"status": "data_loading"}),
             patch.object(front, "inspect_storefront_plugin_page", side_effect=snapshots),
             patch.object(front.time, "monotonic", side_effect=clock.monotonic),
             patch.object(front.time, "sleep", side_effect=clock.sleep),

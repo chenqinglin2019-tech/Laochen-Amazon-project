@@ -203,9 +203,6 @@ class ImageWorkflowRecoveryTests(unittest.TestCase):
         self.addCleanup(pacing.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
-        safety_root = patch("safety_control.default_safety_root", return_value=self.root / "safety")
-        safety_root.start()
-        self.addCleanup(safety_root.stop)
         self.products = self.root / "products.csv"
         self.products.write_text(
             "ASIN,主图URL\nB012345678,https://example.invalid/source.jpg\n",
@@ -230,6 +227,7 @@ class ImageWorkflowRecoveryTests(unittest.TestCase):
                 "products_file": str(self.products),
                 "save_debug_snapshots": False,
                 "search_strategy": "amazon_upload",
+                "browser_backend": "cdp",
                 "amazon_page_unavailable_retry_schedule_seconds": [
                     [0, 0],
                     [0, 0],

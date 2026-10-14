@@ -44,7 +44,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
 from browser_runtime import DEFAULT_CHROME_USER_DATA_DIR, CdpWebDriver
-from runtime_watchdog import browser_call
 from scrapling_adapter import ScraplingUnavailable, extract_card_fields, scrapling_available
 from amazon_page_recovery import (
     AmazonPageRetryController,
@@ -112,7 +111,7 @@ SELLERSPRITE_EXTENSION_ID = "lnbmbgocenenhhhdojdielgnmeflbnfb"
 ASIN_RE = re.compile(r"\b([A-Z0-9]{10})\b")
 URL_ASIN_RE = re.compile(r"/(?:dp|gp/product)/([A-Z0-9]{10})(?:[/?#]|$)", re.I)
 FULFILLMENT_METHODS = {"FBA", "FBM", "AMZ"}
-RECORD_SCHEMA_VERSION = 3
+RECORD_SCHEMA_VERSION = 2
 CATEGORY_STATE_SCHEMA_VERSION = 2
 CRAWL_PLAN_SCHEMA_VERSION = 2
 DEFAULT_MAX_PAGES_PER_CATEGORY = 2
@@ -1993,57 +1992,37 @@ def maybe_materialize_category_records(
     return result
 
 
-QUALITY_FIELDS = tuple(REQUESTED_DATA_FIELDS) + ("subcategory_bsr_ranks",)
-QUALITY_CORE_FIELDS = ("sales_30_days_child", "sales_30_days_parent", "fba_fee", "gross_margin")
+def write_quality_report(records_path: Path, output_path: Path) -> None:
+    """Write a compact, non-Excel report without changing the field contract."""
 
-
-def quality_counts(records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
-    states = ("value", "explicit_unavailable", "missing", "invalid", "zero_unconfirmed")
-    by_field = {name: {state: 0 for state in states} for name in QUALITY_FIELDS}
-    partial = 0
-    unloaded = 0
-    for row in records:
-        has_gap = False
-        previous_statuses = row.get("_field_statuses")
-        previous_statuses = previous_statuses if isinstance(previous_statuses, dict) else {}
-        for name in QUALITY_FIELDS:
-            # Recompute from the final value, including historical rows without statuses.
-            status = sellersprite_field_status(name, row.get(name))
-            if str(previous_statuses.get(name) or "") == "invalid":
-                status = "invalid"
-            by_field[name][status] += 1
-            has_gap |= status in {"missing", "invalid", "zero_unconfirmed"}
-        partial += int(has_gap)
-        unloaded += int(row.get("plugin_fields_status") == "插件字段未加载")
-    for counts in by_field.values():
-        counts["valid_coverage"] = (counts["value"] + counts["explicit_unavailable"]) / len(records) if records else 0.0
-    core_available = sum(by_field[name]["value"] + by_field[name]["explicit_unavailable"] + by_field[name]["zero_unconfirmed"] for name in QUALITY_CORE_FIELDS)
-    status = "not_evaluated" if not records else ("failed" if core_available == 0 else ("partial" if partial else "passed"))
-    return {"status": status, "total_records": len(records), "partial_records": partial,
-            "complete_records": len(records) - partial, "unloaded_cards": unloaded,
-            "by_field": by_field}
-
-
-def write_quality_report(
-    records_path: Path, output_path: Path,
-    dedup_records: Optional[Sequence[Dict[str, Any]]] = None,
-) -> None:
     records = read_jsonl(records_path)
-    raw = quality_counts(records)
-    payload = {
-        "schema_version": 2, "generated_at": now_iso(), **raw,
-        "raw": raw,
-        "missing_by_field": {name: raw["by_field"][name]["missing"] for name in QUALITY_FIELDS},
-        "zero_unconfirmed_by_field": {name: raw["by_field"][name]["zero_unconfirmed"] for name in QUALITY_FIELDS},
-        "export_succeeded": False,
+    partial = 0
+    missing_by_field: Dict[str, int] = {field: 0 for field in REQUESTED_DATA_FIELDS}
+    zero_unconfirmed_by_field: Dict[str, int] = {
+        field: 0 for field in REQUESTED_DATA_FIELDS
     }
-    if dedup_records is not None:
-        payload["unique"] = quality_counts(dedup_records)
-        payload["unique_asins"] = len(dedup_records)
-        payload["status"] = payload["unique"]["status"]
-        # Unloaded page cards must remain visible even if another appearance filled their values.
-        if payload["status"] == "passed" and raw["unloaded_cards"]:
-            payload["status"] = "partial"
+    for record in records:
+        statuses = record.get("_field_statuses") if isinstance(record, dict) else {}
+        statuses = statuses if isinstance(statuses, dict) else {}
+        has_gap = False
+        for field_name in REQUESTED_DATA_FIELDS:
+            status = str(statuses.get(field_name) or "")
+            if status == "missing":
+                missing_by_field[field_name] += 1
+                has_gap = True
+            elif status == "zero_unconfirmed":
+                zero_unconfirmed_by_field[field_name] += 1
+                has_gap = True
+        if has_gap:
+            partial += 1
+    payload = {
+        "generated_at": now_iso(),
+        "total_records": len(records),
+        "partial_records": partial,
+        "complete_records": len(records) - partial,
+        "missing_by_field": missing_by_field,
+        "zero_unconfirmed_by_field": zero_unconfirmed_by_field,
+    }
     ensure_dir(output_path.parent)
     output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
@@ -2091,14 +2070,12 @@ def launch_debug_chrome(runtime: RuntimeConfig) -> Optional[subprocess.Popen]:
         f"--user-data-dir={runtime.chrome_user_data_dir}",
         f"--profile-directory={runtime.chrome_profile_directory}",
         "--no-first-run",
-        "--enable-logging=stderr",
         "--new-window",
         "about:blank",
     ]
     if runtime.extension_path and runtime.extension_path.exists():
         command.insert(-2, f"--load-extension={runtime.extension_path}")
-    from start_cdp_browser import launch_with_diagnostics
-    process = launch_with_diagnostics(command, runtime.chrome_user_data_dir)
+    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not wait_for_debugger(runtime.debugger_address, timeout=90):
         raise UserFacingError(
             "Chrome 调试端口没有启动成功。请关闭刚打开的专用 Chrome 后重试，"
@@ -2177,55 +2154,35 @@ def safe_find_text(driver: WebDriver) -> str:
 # DOM evidence for detect_block.  Amazon's CAPTCHA page has its own form and
 # input; a page with product DOM is a real listing/product page, never a block
 # page, so prose markers ("CAPTCHA Puzzle Book") on it must not count.
-SELLERSPRITE_NODES_JS = r"""
-const sellerSpriteCandidateSelector = [
+BLOCK_PAGE_DOM_JS = r"""
+const has = (selector) => {
+  try { return Boolean(document.querySelector(selector)); } catch (error) { return false; }
+};
+const pluginSelector = [
   '[id*="sellersprite" i]', '[class*="sellersprite" i]',
   '[id*="seller-sprite" i]', '[class*="seller-sprite" i]',
-  '[name*="seller-sprite" i]', '[name*="sellersprite" i]',
-  '[id*="__ss" i]', '.robot-card-container', '.robot-dialog'
+  '[id*="__ss" i]', '[class*="vxe-" i]', '[class*="ss-" i]'
 ].join(',');
-const sellerSpriteVisible = el => {
-  if (!el || /^(HTML|BODY)$/.test(el.tagName)) return false;
-  for (let n = el; n && n.nodeType === 1; n = n.parentElement) {
-    if (n.hidden || n.getAttribute('aria-hidden') === 'true') return false;
-    const st = getComputedStyle(n);
-    if (st.display === 'none' || st.visibility === 'hidden' || st.visibility === 'collapse' || st.opacity === '0') return false;
-  }
-  return el.getClientRects().length > 0;
-};
-const sellerSpriteNodes = () => [...document.querySelectorAll(sellerSpriteCandidateSelector)]
-  .filter(sellerSpriteVisible);
-const sellerSpriteEvidence = () => {
-  const nodes = sellerSpriteNodes();
-  const roots = nodes.filter(n => !nodes.some(p => p !== n && p.contains(n)));
-  const evidence = roots.map(el => ({
-    node: [el.tagName.toLowerCase(), el.id ? '#' + el.id : '', String(el.className || '').slice(0, 120)].join(' '),
-    visible: true,
-    text: String(el.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 4000)
-  })).filter(e => e.text);
-  const areas = roots.flatMap(root => [root, ...root.querySelectorAll(
-    '.robot-card-container,.robot-dialog,[class*="captcha" i],[id*="captcha" i],[class*="verif" i],[id*="verif" i],[role="dialog"]')]);
-  const challenge = areas.some(el => sellerSpriteVisible(el)
-    && /机器人检测|我不是机器人|验证码|captcha|verif|slide to verify/i.test(String(el.innerText || ''))
-    && [...el.querySelectorAll('input:not([type="hidden"]),canvas,[role="slider"],button,[role="button"]')]
-      .some(control => sellerSpriteVisible(control) && (control.matches('input,canvas,[role="slider"]')
-        || /我不是机器人|verify|验证/i.test(String(control.innerText || '')))));
-  return {nodes: nodes.length, text: evidence.map(e => e.text).join(' ').slice(0, 20000), challenge, evidence};
-};
-"""
-BLOCK_PAGE_DOM_JS = SELLERSPRITE_NODES_JS + r"""
-const has = selector => Boolean(document.querySelector(selector));
-const plugin = sellerSpriteEvidence();
+let pluginText = '';
+try {
+  pluginText = [...document.querySelectorAll(pluginSelector)]
+    .map(node => node.innerText || node.textContent || '')
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .slice(0, 20000);
+} catch (error) {
+  pluginText = '';
+}
 return {
   captcha_form: has('form[action*="validateCaptcha" i]'),
   captcha_input: has('#captchacharacters'),
-  product_dom: has('[data-asin]:not([data-asin=""]),#productTitle,#gridItemRoot,.zg-grid-general-faceout,[data-component-type="s-search-result"],#dp-container'),
-  plugin_text: plugin.text,
-  plugin_challenge: plugin.challenge,
-  plugin_evidence: plugin.evidence
+  product_dom: has([
+    '[data-asin]:not([data-asin=""])', '#productTitle', '#gridItemRoot',
+    '.zg-grid-general-faceout', '[data-component-type="s-search-result"]', '#dp-container'
+  ].join(',')),
+  plugin_text: pluginText,
 };
 """
-
 AMAZON_ROBOT_CHECK_TITLES = {"robot check"}
 AMAZON_ROBOT_CHECK_MARKERS = (
     "robot check",
@@ -2243,10 +2200,9 @@ SELLERSPRITE_STRONG_VERIFY_MARKERS = (
     "complete the verification",
     "enter the characters you see",
     "validatecaptcha",
-    "请完成机器人验证",
-    "请进行人机验证",
-    "滑动验证",
-    "验证失败",
+    "机器人检测",
+    "我不是机器人",
+    "验证码",
 )
 SELLERSPRITE_VERIFY_MARKERS = SELLERSPRITE_STRONG_VERIFY_MARKERS + ("captcha", "robot check")
 AMAZON_SIGN_IN_MARKERS = (
@@ -2274,8 +2230,6 @@ def _block_page_dom_evidence(driver: WebDriver) -> Dict[str, Any]:
         "captcha_input": value.get("captcha_input") is True,
         "product_dom": value.get("product_dom") is True,
         "plugin_text": normalize_space(plugin_text).lower() if isinstance(plugin_text, str) else "",
-        "plugin_challenge": value.get("plugin_challenge") is True,
-        "plugin_evidence": value.get("plugin_evidence") or [],
     }
 
 
@@ -2312,12 +2266,7 @@ def detect_block(driver: WebDriver) -> Optional[str]:
         return "amazon_robot_check"
     text_markers_count = len(text) <= RISK_BODY_MAX_CHARS and not dom.get("product_dom")
     plugin_text = str(dom.get("plugin_text") or "")
-    if dom.get("plugin_challenge") or any(marker in plugin_text for marker in SELLERSPRITE_STRONG_VERIFY_MARKERS):
-        setattr(driver, "_lc_block_evidence", {
-            "reason": "sellersprite_verification", "url": current_url,
-            "rule": "visible_challenge" if dom.get("plugin_challenge") else "visible_verification_instruction",
-            "nodes": dom.get("plugin_evidence") or [],
-        })
+    if any(marker in plugin_text for marker in SELLERSPRITE_STRONG_VERIFY_MARKERS):
         return "sellersprite_verification"
     if text_markers_count:
         if ("sellersprite" in haystack or "卖家精灵" in haystack) and any(
@@ -3173,16 +3122,6 @@ def handle_amazon_verification(
     reason = detect_block(driver)
     if not reason:
         return
-    evidence = dict(getattr(driver, "_lc_block_evidence", {}) or {})
-    evidence.update({"reason": reason, "url": safe_driver_current_url(driver), "time": now_iso()})
-    if getattr(runtime, "outputs_root", None) and getattr(runtime, "job_id", None):
-        evidence_path = Path(runtime.outputs_root) / runtime.job_id / "block_evidence.jsonl"
-        try:
-            ensure_dir(evidence_path.parent)
-            with evidence_path.open("a", encoding="utf-8") as fh:
-                fh.write(json.dumps(evidence, ensure_ascii=False) + "\n")
-        except OSError as exc:
-            print(f"保存验证证据失败：{type(exc).__name__}；仍按验证规则暂停。", file=sys.stderr)
     if reason in {"amazon_rate_limit", "access_denied"}:
         # These are transient page-health failures. The shared recovery
         # controller applies the configured long backoff; they are not manual
@@ -3295,8 +3234,7 @@ def _reopen_amazon_target(
         try:
             if before_navigation is not None:
                 before_navigation()
-            safety_before_remote_action(runtime, "重新导航 Amazon 页面", stop_event)
-            prepare_navigation(driver, runtime, stop_event)
+            safety_before_remote_action(runtime, "重新导航 Amazon 页面")
             driver.get(target_url)
             observe_amazon_risk(driver, runtime)
             last_error = None
@@ -3562,8 +3500,7 @@ def open_amazon_page(
     defer_delivery: bool = False,
 ) -> None:
     _raise_if_stop_requested(stop_event)
-    safety_before_remote_action(runtime, "导航 Amazon 页面", stop_event)
-    prepare_navigation(driver, runtime, stop_event)
+    safety_before_remote_action(runtime, "导航 Amazon 页面")
     driver.get(url)
     observe_amazon_risk(driver, runtime)
     handle_amazon_verification(
@@ -3606,8 +3543,6 @@ def wait_for_amazon_products(
     deadline = time.monotonic() + max(float(runtime.page_timeout), 0.1)
     while time.monotonic() < deadline:
         _raise_if_stop_requested(stop_event)
-        from desktop_runtime import ensure_page_desktop
-        deadline += ensure_page_desktop(driver, runtime, stop_event)
         try:
             driver.find_element(By.CSS_SELECTOR, combined_selector)
             return
@@ -3741,33 +3676,12 @@ def effective_amazon_page_retry_schedule(runtime: Any) -> RetrySchedule:
     return getattr(runtime, "amazon_page_retry_schedule", DEFAULT_RETRY_SCHEDULE_SECONDS)
 
 
-def prepare_navigation(driver, runtime, stop_event=None) -> None:
-    _raise_if_stop_requested(stop_event)
-    prepare = getattr(driver, "prepare_foreground", None)
-    if callable(prepare):
-        driver.set_foreground_runtime(runtime, stop_event)
-        prepare()
-    else:
-        restore = getattr(driver, "restore_worker_page", None)
-        if callable(restore):
-            restore()
-    _raise_if_stop_requested(stop_event)
-
-
-def safety_before_remote_action(runtime: Any, action: str, stop_event=None) -> None:
+def safety_before_remote_action(runtime: Any, action: str) -> None:
     """Block crawler-owned traffic when the shared local risk pause is active."""
 
     safety = getattr(runtime, "safety", None)
     if isinstance(safety, LocalSafetyController):
-        from safety_control import SafetyWaitCancelled
-        try:
-            if stop_event is None:
-                safety.before_remote_action(action)
-            else:
-                safety.before_remote_action(action, stop_event)
-        except SafetyWaitCancelled:
-            _raise_if_stop_requested(stop_event)
-            raise
+        safety.before_remote_action(action)
 
 
 def observe_amazon_risk(driver: WebDriver, runtime: Any) -> None:
@@ -3811,7 +3725,19 @@ def observe_amazon_risk(driver: WebDriver, runtime: Any) -> None:
 def sellersprite_visible_text(driver: WebDriver) -> str:
     """Read only extension-owned visible text to avoid Amazon-page false positives."""
 
-    script = SELLERSPRITE_NODES_JS + "return sellerSpriteEvidence().text;"
+    script = r"""
+const selector = [
+  '[id*="sellersprite" i]', '[class*="sellersprite" i]',
+  '[id*="seller-sprite" i]', '[class*="seller-sprite" i]',
+  '[id*="__ss" i]', '[class*="vxe-" i]', '[class*="ss-" i]',
+  '[class*="sprite" i]'
+].join(',');
+return [...document.querySelectorAll(selector)]
+  .map(node => node.innerText || node.textContent || '')
+  .join(' ')
+  .replace(/\s+/g, ' ')
+  .slice(0, 20000);
+"""
     try:
         return normalize_space(str(driver.execute_script(script) or ""))
     except (AttributeError, JavascriptException, WebDriverException):
@@ -4114,8 +4040,7 @@ def load_category_page_attempt(
 
     def navigate_with_delivery() -> PageHealthAssessment:
         try:
-            safety_before_remote_action(runtime, "导航 Amazon 页面", stop_event)
-            prepare_navigation(driver, runtime, stop_event)
+            safety_before_remote_action(runtime, "导航 Amazon 页面")
             driver.get(page_url)
             observe_amazon_risk(driver, runtime)
         except (TimeoutException, WebDriverException) as exc:
@@ -4221,6 +4146,27 @@ return false;
 # SellerSprite-specific DOM nodes.  Substring selectors such as
 # [class*="sprite"] / [class*="ss-"] also matched Amazon's own header
 # (`nav-sprite`, `cross-sell`), so `plugin_absent` could never be diagnosed.
+SELLERSPRITE_NODES_JS = r"""
+const sellerSpriteCandidateSelector = [
+  '[id*="sellersprite" i]', '[class*="sellersprite" i]',
+  '[id*="seller-sprite" i]', '[class*="seller-sprite" i]',
+  '[name*="seller-sprite" i]', '[name*="sellersprite" i]',
+  '[id*="__ss" i]', '[class*="vxe-" i]', '[class*="ss-" i]', '[class*="sprite" i]'
+].join(',');
+const isSellerSpriteNode = (el) => {
+  const id = String(el.id || '').toLowerCase();
+  const name = String((el.getAttribute && el.getAttribute('name')) || '').toLowerCase();
+  if (/sellersprite|seller-sprite/.test(id + ' ' + name) || id.includes('__ss')) return true;
+  const tokens = [...(el.classList || [])].map(token => String(token).toLowerCase());
+  return tokens.some(token => (
+    /sellersprite|seller-sprite/.test(token)
+    || /^vxe-/.test(token)
+    || /^ss-/.test(token)
+    || /^sprite[-_]/.test(token)
+  ));
+};
+const sellerSpriteNodes = () => [...document.querySelectorAll(sellerSpriteCandidateSelector)].filter(isSellerSpriteNode);
+"""
 
 
 def plugin_node_count(driver: WebDriver) -> int:
@@ -4235,11 +4181,17 @@ return sellerSpriteNodes().length;
 
 def sellersprite_login_required(driver: WebDriver) -> bool:
     script = SELLERSPRITE_NODES_JS + r"""
-const phrases = ['登录卖家精灵', '重新登录', '授权已过期', 'login required',
-  'sign in to sellersprite', 'session expired', 'please login', 'please sign in', '请登录', '立即登录'];
-const lines = sellerSpriteNodes().flatMap(el => String(el.innerText || '').split(/[\r\n]+/));
-return lines.some(line => !/亚马逊.*买家|amazon.*buyer|登录亚马逊|sign in to amazon/i.test(line)
-  && phrases.some(p => line.toLowerCase().includes(p)));
+const phrases = [
+  '请登录', '立即登录', '登录卖家精灵', '重新登录', '授权已过期',
+  'login required', 'sign in to sellersprite', 'session expired',
+  'please login', 'please sign in'
+];
+const text = sellerSpriteNodes()
+  .map(el => el.innerText || el.textContent || '')
+  .join(' ')
+  .replace(/\s+/g, ' ')
+  .toLowerCase();
+return phrases.some(phrase => text.includes(phrase.toLowerCase()));
 """
     try:
         return bool(driver.execute_script(script))
@@ -4296,27 +4248,11 @@ def safe_sellersprite_readiness(report: Dict[str, Any]) -> Dict[str, Any]:
         "stable_checks",
         "blocked",
         "blocked_reason",
-        "timeout_reason",
     }
-    safe = {key: report.get(key) for key in allowed if key in report}
-    render = report.get("page_render")
-    if isinstance(render, dict):
-        evidence = {}
-        for key in ("document_hidden", "focused", "frame_supported", "reactivation_hidden", "reactivation_focused"):
-            if isinstance(render.get(key), bool):
-                evidence[key] = render[key]
-        for key in ("frame_callbacks", "frame_pending_ms", "last_frame_age_ms"):
-            value = render.get(key)
-            if value is None or (type(value) is int and value >= 0):
-                evidence[key] = value
-        if render.get("visibility_state") in ("visible", "hidden", "prerender", "unloaded"):
-            evidence["visibility_state"] = render["visibility_state"]
-        safe["page_render"] = evidence
-    return safe
+    return {key: report.get(key) for key in allowed if key in report}
 
 
-def inspect_sellersprite_block(driver: WebDriver, runtime: RuntimeConfig) -> Dict[str, Any]:
-    """Check risk and visible challenges without extracting product fields."""
+def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) -> Dict[str, Any]:
     observe_amazon_risk(driver, runtime)
     safety = getattr(runtime, "safety", None)
     plugin_signal = classify_sellersprite_risk(sellersprite_visible_text(driver))
@@ -4324,12 +4260,6 @@ def inspect_sellersprite_block(driver: WebDriver, runtime: RuntimeConfig) -> Dic
         if not (plugin_signal.reason == "verification_required" and safety.mode == "supervised"):
             safety.trip(plugin_signal, page_url=safe_driver_current_url(driver))
     blocked_reason = detect_block(driver)
-    return {"status": "blocked" if blocked_reason else "data_loading", "blocked_reason": blocked_reason}
-
-
-def inspect_sellersprite_readiness(driver: WebDriver, runtime: RuntimeConfig) -> Dict[str, Any]:
-    block = inspect_sellersprite_block(driver, runtime)
-    blocked_reason = block["blocked_reason"]
     engine = str(getattr(runtime, "page_extraction_engine", "browser") or "browser")
     use_scrapling = engine == "scrapling" and bool(runtime.field_selectors)
     cards = extract_product_cards(driver, include_html=use_scrapling)
@@ -4994,18 +4924,14 @@ def first_regex(text: str, patterns: Sequence[str]) -> str:
 def sellersprite_field_status(field_name: str, value: Any) -> str:
     """Keep missing, provider-declared unavailable and rendered-zero distinct."""
 
-    normalized = normalize_space(str(value if value is not None else ""))
-    if not normalized or (isinstance(value, (list, tuple)) and not value):
+    normalized = normalize_space(str(value or ""))
+    if not normalized:
         return "missing"
-    if field_name == "brand_name" and re.search(r"加入产品库|近30天销量|FBA费用|毛利率|全部流量词", normalized):
-        return "invalid"
-    if field_name == "delivery_duration" and re.search(r"add to cart|ASIN:|加入产品库|全部流量词|自然搜索词|广告流量词", normalized, re.I):
-        return "invalid"
-    if normalized.casefold() in {"n/a", "na", "--", "-", "—", "–", "暂无", "无", "无数据"}:
+    if normalized.casefold() in {"n/a", "na", "--", "-", "暂无", "无数据"}:
         return "explicit_unavailable"
     # SellerSprite's rendered UI can collapse an absent source value to 0.
     # Preserve the value for audit, but do not treat it as confirmed evidence.
-    if re.fullmatch(r"[+\-]?0+(?:\.0+)?%?", normalized) and field_name in {
+    if normalized in {"0", "0.0", "0%"} and field_name in {
         "sales_30_days_child",
         "sales_30_days_parent",
         "organic_keywords_count",
@@ -5020,7 +4946,7 @@ def sellersprite_field_status(field_name: str, value: Any) -> str:
 # fallbacks below, which otherwise skip "--" and capture the NEXT label's
 # number (e.g. "FBA费用: -- 毛利率: 35%" → fba_fee "35") or drop the minus
 # sign of a negative margin ("毛利率: -12%" → "12%").
-_SS_PLACEHOLDER = r"N/A|NA\b|--|—|–|暂无|无数据|无|-(?![\d$€£¥₹])"
+_SS_PLACEHOLDER = r"N/A|--|—|暂无|无数据|无|-(?![\d$€£¥₹])"
 _SS_NUMBER = r"[-−]?\s*[$€£¥₹]?\s*[\d][\d,.]*"
 _SS_LABELLED_FIELDS = {
     "fba_fee": r"FBA费用[:：]",
@@ -5029,9 +4955,6 @@ _SS_LABELLED_FIELDS = {
 
 
 def parse_field_from_text(field_name: str, text: str) -> str:
-    if field_name == "brand_name":
-        # Preserve line boundaries when a card has no seller field.
-        return parse_sellersprite_inline_field(field_name, text)
     text = normalize_space(text)
     if not text:
         return ""
@@ -5039,14 +4962,6 @@ def parse_field_from_text(field_name: str, text: str) -> str:
     zh_value = parse_sellersprite_inline_field(field_name, text)
     if zh_value:
         return zh_value
-    if field_name == "seller_country":
-        return first_regex(text, [
-            r"\b(?:seller\s+country|country|location)\s*[:：]\s*([^:：]{1,60}?)(?=\s+\S+\s*[:：]|$)",
-            r"(?:国家|所在地)\s*[:：]\s*([^\s]+)",
-        ])
-    if field_name == "launch_date":
-        # A malformed date must not capture the next field or title text.
-        return ""
     if field_name == "sales_30_days_parent":
         return ""
     label = _SS_LABELLED_FIELDS.get(field_name)
@@ -5056,9 +4971,9 @@ def parse_field_from_text(field_name: str, text: str) -> str:
         return ""
 
     if field_name == "review_count":
-        return first_regex(text, [r"评分\(评分数\)[:：]\s*(?:[0-9.]+|N/A)\s*\(\s*([\d,]+|N/A)\s*\)", r"([\d,]+)\s+(?:ratings?|reviews?)", r"(?:评论|评价)\D{0,8}([\d,]+)"])
+        return first_regex(text, [r"评分\(评分数\)[:：]\s*(?:[0-9.]+|N/A)\(([\d,]+|N/A)\)", r"([\d,]+)\s+(?:ratings?|reviews?)", r"(?:评论|评价)\D{0,8}([\d,]+)"])
     if field_name == "rating_value":
-        return first_regex(text, [r"评分\(评分数\)[:：]\s*([0-9.]+|N/A)\s*\(\s*(?:[\d,]+|N/A)\s*\)", r"([1-5](?:\.\d)?)\s+out of\s+5", r"([1-5](?:\.\d)?)\s*(?:stars?|星)"])
+        return first_regex(text, [r"评分\(评分数\)[:：]\s*([0-9.]+|N/A)\((?:[\d,]+|N/A)\)", r"([1-5](?:\.\d)?)\s+out of\s+5", r"([1-5](?:\.\d)?)\s*(?:stars?|星)"])
     if field_name in {"sales_30_days", "sales_30_days_child", "sales_30_days_parent"}:
         return first_regex(text, [r"([\d,.]+[Kk万]?)\s*(?:units sold|sold|月销量|销量)", r"(?:30 days?|近30天)\D{0,12}([\d,.]+[Kk万]?)"])
     if field_name == "fba_fee":
@@ -5084,9 +4999,6 @@ def parse_field_from_text(field_name: str, text: str) -> str:
             ],
         )
 
-    if field_name == "delivery_duration":
-        # English delivery dates are read from their own DOM, never full-card prose.
-        return ""
     labels = HEADER_ALIASES.get(field_name, [])
     labelled = value_near_labels(text, labels)
     if labelled:
@@ -5099,21 +5011,21 @@ def parse_sellersprite_inline_field(field_name: str, text: str) -> str:
         method, _raw = parse_fulfillment_evidence(text)
         return method
     patterns = {
-        "brand_name": [r"(?:品牌|\bBrand)\s*[:：][ \t]*(?:\r?\n[ \t]*)?([^\r\n]*?)(?=\r?\n|\s+(?:卖家\s*[:：]|加入产品库|近30天销量|#[\d,]+\s+in\b)|$)"],
+        "brand_name": [r"品牌[:：]\s*(.*?)\s+卖家[:：]"],
         "seller_name": [r"卖家[:：]\s*(.*?)\s+配送[:：]"],
         "seller_country": [r"卖家所处国家[:：]\s*([^\s]+)", r"卖家国家[:：]\s*([^\s]+)"],
-        "sales_30_days": [r"近30天销量\(子体\)[:：]\s*([<>~≈]?\s*[^\s]+)", r"近30天销量[:：]\s*([<>~≈]?\s*[^\s]+)"],
-        "sales_30_days_child": [r"近30天销量\(子体\)[:：]\s*([<>~≈]?\s*[^\s]+)", r"近30天销量[:：]\s*([<>~≈]?\s*[^\s]+)"],
-        "sales_30_days_parent": [r"近30天销量\(父体\)[:：]\s*([<>~≈]?\s*[^\s]+)"],
+        "sales_30_days": [r"近30天销量\(子体\)[:：]\s*([^\s]+)", r"近30天销量[:：]\s*([^\s]+)"],
+        "sales_30_days_child": [r"近30天销量\(子体\)[:：]\s*([^\s]+)", r"近30天销量[:：]\s*([^\s]+)"],
+        "sales_30_days_parent": [r"近30天销量\(父体\)[:：]\s*([^\s]+)"],
         "fba_fee": [rf"FBA费用[:：]\s*({_SS_NUMBER}|{_SS_PLACEHOLDER})"],
         "gross_margin": [rf"毛利率[:：]\s*({_SS_NUMBER}%?|{_SS_PLACEHOLDER})"],
         "delivery_duration": [r"(?<!Prime)配送时长[:：]\s*([^\s]+)"],
-        "launch_date": [rf"上架时间[:：]\s*(\d{{4}}-\d{{2}}-\d{{2}}(?:\s*\([^)]+\))?|{_SS_PLACEHOLDER})"],
+        "launch_date": [r"上架时间[:：]\s*(\d{4}-\d{2}-\d{2}(?:\s*\([^)]+\))?)"],
         "organic_keywords_count": [r"自然搜索词[:：]\s*([\d,]+)"],
         "ad_keywords_count": [r"广告(?:搜索|流量)词[:：]\s*([\d,]+)"],
     }
     if field_name in {"rating_value", "review_count"}:
-        match = re.search(r"评分\(评分数\)[:：]\s*([0-9.]+|N/A)\s*\(\s*([\d,]+|N/A)\s*\)", text)
+        match = re.search(r"评分\(评分数\)[:：]\s*([0-9.]+|N/A)\(([\d,]+|N/A)\)", text)
         if match:
             return match.group(1) if field_name == "rating_value" else match.group(2)
     for pattern in patterns.get(field_name, []):
@@ -5523,15 +5435,6 @@ def wait_for_sellersprite_data(
     last_status = "data_loading"
     next_heartbeat_at = 0.0
     while True:
-        from desktop_runtime import ensure_page_desktop
-        paused = ensure_page_desktop(driver, runtime, stop_event, wall_clock=True)
-        if paused:
-            deadline += paused
-            base_deadline += paused
-            if last_progress_at:
-                last_progress_at += paused
-            stable_seen = 0
-            next_heartbeat_at = 0.0
         if time.time() >= next_heartbeat_at:
             runtime_heartbeat(runtime, "plugin_wait", until_epoch=deadline, detail="等待卖家精灵字段加载")
             next_heartbeat_at = time.time() + 25
@@ -5792,15 +5695,14 @@ def save_debug_snapshot(driver: WebDriver, debug_dir: Path, label: str) -> None:
     safe_label = slugify(label)
     html_path = debug_dir / f"{now_ts()}_{safe_label}.html"
     png_path = debug_dir / f"{now_ts()}_{safe_label}.png"
-    with browser_call("failure_diagnostics", 10):
-        try:
-            html_path.write_text(driver.page_source, encoding="utf-8")
-        except WebDriverException:
-            pass
-        try:
-            driver.save_screenshot(str(png_path))
-        except WebDriverException:
-            pass
+    try:
+        html_path.write_text(driver.page_source, encoding="utf-8")
+    except WebDriverException:
+        pass
+    try:
+        driver.save_screenshot(str(png_path))
+    except WebDriverException:
+        pass
 
 
 def build_failure_record(

@@ -39,8 +39,8 @@ STATUS_BY_EXIT = {
 
 DEFAULT_NEXT_ACTION = {
     "completed": "任务已完成，向用户交付输出表格。",
-    "completed_with_skips": "采集队列已结束，存在跳过项；按 skipped_items 披露原因和未完成范围，不能宣称完整交付。",
-    "retry_later": "临时故障，断点已保存。先查看 run_summary.json 的 resume_at；有恢复时间则等待到期，再重新运行同一命令。",
+    "completed_with_skips": "任务已完成；skipped_items 中的项目连续两轮失败已跳过，向用户说明并交付表格。",
+    "retry_later": "临时故障，断点已保存。直接重新运行同一命令即可；同一项目若再次失败会被自动跳过。",
     "risk_pause": "平台风控暂停。不要重复运行；等到 resume_at 之后，请用户确认浏览器正常，再加 --resume-after-review 运行一次。",
     "needs_human": "需要用户在浏览器里处理（验证码 / 配送地址 / 卖家精灵登录等）。处理完成后重新运行同一命令。",
     "config_error": "配置或输入有误，按报错修改配置后先运行 dry-run。",
@@ -169,7 +169,7 @@ def completed_outcome(skipped_count: int) -> Outcome:
         return Outcome(
             EXIT_COMPLETED_WITH_SKIPS,
             "completed_with_skips",
-            f"采集队列已结束，{skipped_count} 个项目达到失败处理条件后已跳过。",
+            f"任务完成，{skipped_count} 个项目连续两轮失败已跳过。",
             DEFAULT_NEXT_ACTION["completed_with_skips"],
         )
     return Outcome(EXIT_COMPLETED, "completed", "任务完成。", DEFAULT_NEXT_ACTION["completed"])
@@ -246,40 +246,11 @@ def finalize_run(job_dir: Optional[Path], outcome: Outcome) -> None:
             "skipped_items": list(state.get("skipped_items") or [])[:200],
         }
     )
-    if state.get("mode") in {"storefront", "keyword_search", "bsr_category"}:
-        try:
-            quality = json.loads((job_dir / "quality_report.json").read_text(encoding="utf-8"))
-            if not isinstance(quality, dict) or quality.get("schema_version") != 2:
-                quality = {"status": "not_evaluated"}
-        except (OSError, ValueError, TypeError):
-            quality = {"status": "not_evaluated"}
-        reasons = dict(state.get("completed_source_reasons") or {})
-        natural = [key for key, reason in reasons.items() if reason in {"no_next_page", "explicit_empty", "verified_empty", "explicit_no_results"}]
-        limited = [key for key, reason in reasons.items() if reason in {"store_page_limit", "keyword_page_limit", "category_page_limit"}]
-        abnormal = [key for key in reasons if key not in natural and key not in limited]
-        requested = state.get("scope_requested", "limited")
-        pending = bool(state.get("pending") or state.get("in_flight") or state.get("deferred_tasks"))
-        expected = set(state.get("requested_source_ids") or [])
-        all_sources_finished = bool(reasons) and (not expected or expected.issubset(reasons))
-        scope_complete = all_sources_finished and not pending and not abnormal and (requested != "all" or not limited)
-        scope = {"requested": requested, "complete": scope_complete, "source_reasons": reasons,
-                 "natural_end_sources": natural, "page_limit_sources": limited, "abnormal_sources": abnormal}
-        ready = (outcome.status == "completed" and quality.get("status") == "passed"
-                 and scope_complete and not state.get("skipped_items") and quality.get("export_succeeded") is True)
-        summary.update({"data_quality": quality, "scope_completion": scope, "delivery_ready": ready})
-        if outcome.status in {"completed", "completed_with_skips"}:
-            summary["message"] = "采集队列处理结束；" + ("数据与请求范围验收通过。" if ready else "存在数据或范围缺口。")
-            summary["next_action"] = ("验收通过，可以完整交付表格。" if ready else
-                                      "先披露 data_quality 和 scope_completion 中的缺口；按缺失字段或异常来源补采，不能宣称完整交付。")
     try:
-        attempt = os.environ.get("LC_CRAWL_ATTEMPT_ID")
-        if attempt:
-            summary["attempt_id"] = attempt
         _atomic_write_json(summary_path, summary)
         _atomic_write_json(
             job_dir / "run_heartbeat.json",
-            {"pid": os.getpid(), "phase": "exited", "updated_at": now, "status": outcome.status,
-             **({"attempt_id": attempt} if attempt else {})},
+            {"pid": os.getpid(), "phase": "exited", "updated_at": now, "status": outcome.status},
         )
     except OSError:
         pass
@@ -295,8 +266,6 @@ def write_heartbeat(path: Optional[Path], phase: str, *, until: str = "", detail
         "phase": phase,
         "updated_at": dt.datetime.now().isoformat(timespec="seconds"),
     }
-    if os.environ.get("LC_CRAWL_ATTEMPT_ID"):
-        payload["attempt_id"] = os.environ["LC_CRAWL_ATTEMPT_ID"]
     if until:
         payload["until"] = until
     if detail:

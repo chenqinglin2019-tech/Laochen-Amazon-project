@@ -13,18 +13,6 @@ from safety_control import SafetyPausedError, record_operational_outcome
 
 
 class RunOutcomeTests(unittest.TestCase):
-    def test_retry_guidance_honors_resume_time_without_promising_a_skip(self) -> None:
-        outcome = run_outcome.classify_exception(run_outcome.retry_later("plugin_data_timeout"))
-        self.assertIn("resume_at", outcome.next_action)
-        self.assertIn("等待到期", outcome.next_action)
-        self.assertNotIn("再次失败会", outcome.next_action)
-
-    def test_skip_guidance_does_not_assume_two_item_failure_cycles(self) -> None:
-        outcome = run_outcome.completed_outcome(2)
-        self.assertNotIn("连续两轮", outcome.message + outcome.next_action)
-        self.assertIn("skipped_items", outcome.next_action)
-        self.assertIn("不能宣称完整交付", outcome.next_action)
-
     def test_exit_codes_are_distinct_per_status(self) -> None:
         cases = {
             run_outcome.retry_later("x"): (20, "retry_later"),

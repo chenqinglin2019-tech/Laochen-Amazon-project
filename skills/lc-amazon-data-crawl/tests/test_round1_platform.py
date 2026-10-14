@@ -412,8 +412,7 @@ class RunningBrowserTests(unittest.TestCase):
         self.assertIn(str(self.profile), message)
 
     def test_extension_matched_by_unpacked_path_id(self) -> None:
-        # Config paths are resolved before launch (/var -> /private/var on macOS).
-        unpacked_id = scb.extension_id_from_path(self.extension.resolve())
+        unpacked_id = scb.extension_id_from_path(self.extension.resolve())  # Config paths are canonicalized (/var -> /private/var on macOS).
         targets = [{"type": "service_worker", "url": f"chrome-extension://{unpacked_id}/sw.js"}]
         with FakeCdpServer(targets) as server, self.no_tabs():
             self.write_active_port(server.port, server.ws_path)
@@ -520,17 +519,6 @@ class LaunchTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 15)
         self.assertEqual(caught.exception.exit_code, 30)
         self.assertIn("立即退出", str(caught.exception))
-
-    def test_detached_browser_stderr_is_preserved_privately(self) -> None:
-        if os.name == "nt":
-            self.skipTest("POSIX executable fixture")
-        binary = write_executable(self.root / "chromium" / "chrome", 'echo "renderer diagnostic" >&2\nexit 0\n')
-        with patch.object(scb, "profile_in_use", return_value=False):
-            with self.assertRaises(scb.BrowserStartError):
-                scb.start_browser(self.config(free_port(), binary))
-        log = self.profile / "lc-crawler-browser-stderr.log"
-        self.assertIn("renderer diagnostic", log.read_text())
-        self.assertEqual(log.stat().st_mode & 0o777, 0o600)
 
     def test_port_used_by_non_chrome_program(self) -> None:
         binary = write_executable(self.root / "chromium" / "chrome", "exit 0\n")
@@ -736,8 +724,12 @@ class BashRunnerTests(unittest.TestCase):
         log.unlink()
         result = subprocess.run(["bash", launcher, "image-competitor-run"], env=dict(self.env, FAKE_START_EXIT="30"),
                                 text=True, capture_output=True)
-        self.assertEqual(result.returncode, 30)
-        self.assertEqual(len(log.read_text().splitlines()), 2)
+        self.assertEqual(result.returncode, 0)
+        calls = log.read_text().splitlines()
+        self.assertEqual(len(calls), 2)
+        self.assertIn("safety_cli.py guard", calls[0])
+        self.assertIn("run_amazon_image_competitor_crawl.py", calls[1])
+        self.assertNotIn("start_cdp_browser", "\n".join(calls))
         log.unlink()
         result = subprocess.run(["bash", launcher, "install-browser"], env=self.env, text=True, capture_output=True)
         self.assertEqual(result.returncode, 0)

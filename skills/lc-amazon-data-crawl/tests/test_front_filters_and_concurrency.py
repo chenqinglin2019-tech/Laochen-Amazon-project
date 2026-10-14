@@ -27,6 +27,7 @@ class FrontConfigTests(unittest.TestCase):
                 encoding="utf-8"
             )
         )
+        raw.update(browser_backend="cdp", sellersprite_required=True)  # Legacy pure-function coverage.
         raw["keywords_file"] = str(
             SKILL_ROOT / "assets" / "inputs" / "keywords.example.csv"
         )

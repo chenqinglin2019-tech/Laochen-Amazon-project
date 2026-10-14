@@ -50,7 +50,7 @@ def pick_python() -> str:
     return sys.executable
 
 
-def build_command(config_path: Path, dry_run: bool, no_resume: bool, operation_mode: str = "", resume_after_review: bool = False) -> List[str]:
+def build_command(config_path: Path, dry_run: bool, no_resume: bool, operation_mode: str = "", resume_after_review: bool = False, confirm_logged_out: bool = False, rebind: bool = False, migrate_from_job: str = "") -> List[str]:
     command = [
         pick_python(),
         "-u",
@@ -66,6 +66,12 @@ def build_command(config_path: Path, dry_run: bool, no_resume: bool, operation_m
         command.extend(("--operation-mode", operation_mode))
     if resume_after_review:
         command.append("--resume-after-review")
+    if confirm_logged_out:
+        command.append("--confirm-sellersprite-logged-out")
+    if rebind:
+        command.append("--rebind")
+    if migrate_from_job:
+        command.extend(("--migrate-from-job", migrate_from_job))
     return command
 
 
@@ -76,13 +82,16 @@ def main() -> int:
     parser.add_argument("--no-resume", action="store_true", help="忽略已有断点，重新开始任务")
     parser.add_argument("--operation-mode", choices=("supervised", "unattended"))
     parser.add_argument("--resume-after-review", action="store_true")
+    parser.add_argument("--confirm-sellersprite-logged-out", action="store_true")
+    parser.add_argument("--rebind", action="store_true")
+    parser.add_argument("--migrate-from-job", default="")
     args = parser.parse_args()
 
     config_path = Path(args.config).expanduser()
     if not config_path.is_absolute():
         config_path = ROOT_DIR / config_path
     load_json(config_path)
-    command = build_command(config_path, args.dry_run, args.no_resume, args.operation_mode or "", args.resume_after_review)
+    command = build_command(config_path, args.dry_run, args.no_resume, args.operation_mode or "", args.resume_after_review, args.confirm_sellersprite_logged_out, args.rebind, args.migrate_from_job)
     print(f"配置文件：{config_path}", flush=True)
     return run_child(command)
 

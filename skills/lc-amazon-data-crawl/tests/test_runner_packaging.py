@@ -53,7 +53,7 @@ class RunnerPackagingTests(unittest.TestCase):
         ):
             directory.mkdir(parents=True)
 
-        for script in ("setup_runner.sh", "check_auth.sh", "migrate_operation_config.py", "install_for_user.sh"):
+        for script in ("setup_runner.sh", "check_auth.sh", "migrate_operation_config.py", "install_for_user.sh", "sellersprite_panel.js", "image_background_dom.js"):
             shutil.copy2(SKILL_ROOT / "scripts" / script, skill / "scripts" / script)
         (skill / "scripts" / "stub.py").write_text("# fixture\n", encoding="utf-8")
         (skill / "assets" / "requirements.txt").write_text("", encoding="utf-8")
@@ -112,12 +112,12 @@ class RunnerPackagingTests(unittest.TestCase):
         return skill, runner
 
     def run_setup(self, skill: Path, runner: Path) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
+        result = subprocess.run(
             ["bash", str(skill / "scripts" / "setup_runner.sh"), str(runner)],
-            check=True,
-            text=True,
-            capture_output=True,
+            check=True, text=True, capture_output=True,
         )
+        self.assertTrue((runner / "scripts/image_background_dom.js").is_file())
+        return result
 
     def run_doctor(self, runner: Path) -> subprocess.CompletedProcess[str]:
         return subprocess.run(

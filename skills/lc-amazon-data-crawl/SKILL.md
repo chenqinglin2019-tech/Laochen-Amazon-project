@@ -2,22 +2,20 @@
 name: lc-amazon-data-crawl
 description: 采集 Amazon 关键词搜索、类目榜单、店铺和图片相似竞品数据，并可结合卖家精灵字段与筛选条件导出。
 metadata:
-  last_updated: 2026-10-07
+  last_updated: 2026-10-14
 ---
 
 # 易逊-亚马逊数据采集
 
-Local crawler for public Amazon pages in a visible Chrome (CDP), enriched by the
-user's own SellerSprite (卖家精灵) extension. This file is the operating runbook;
-field-level details live in `references/configuration.md`.
+关键词与店铺使用日常 Chrome + OpenCLI 操作卖家精灵面板：加载更多 → 原生导出 → 校验、截取、去重与筛选。完整说明见 `references/plugin-collection.md`。找同款也使用日常 Chrome 后台标签，开始前必须确认退出卖家精灵登录，详见 `references/image-background.md`。只有类目保留原 CDP 流程。
 
 | Mode (config template) | What it crawls |
 |---|---|
-| `keyword_search` (`amazon_front_keyword_search.json`) | search results per keyword × sort, `max_pages_per_keyword` pages |
-| `storefront` (`amazon_front_storefront.json`) | seller storefront lists per store × sort, 1–20 pages or explicit `all` to natural end |
+| `keyword_search` (`amazon_front_keyword_search.json`) | 每个关键词默认最多 2000 条，排序共享预算 |
+| `storefront` (`amazon_front_storefront.json`) | 每个店铺默认最多 1008 条，排序共享预算 |
 | `bsr_category` (`amazon_front_bsr_category.json`) | a Best Sellers / New Releases URL **and its child categories** (recursive; start page always included; defaults `max_depth: 3`, `max_pages_per_category: 2`) → `dedup_total.xlsx` |
 | `category-rank` (`category_rank_crawler.json`) | recursive category tree from `start_url` (`include_root` decides whether the start node itself is crawled) |
-| `image-competitor` (`amazon_image_competitors.json`) | same-product competitor counts via Find Similar / Amazon Lens + Doubao cascade |
+| `image-competitor` (`amazon_image_competitors.json`) | 每来源默认 48 个候选，图片网址搜索 + Doubao cascade；运行前确认退出插件登录 |
 
 ## Hard rules
 
@@ -36,8 +34,8 @@ field-level details live in `references/configuration.md`.
 4. **One crawl per computer.** Never start a second crawl command while one runs
    (it exits 50 anyway). Never delete files under `~/.lc-amazon-data-crawl/safety/`
    by hand; use `safety-status` / `safety-clear`.
-5. Do not change timing/traffic values to "speed up": spacing, rests, retries and
-   plugin waits are fixed by `operation_mode` in code and are not config keys.
+5. 使用各流程已定义的频率策略，不临时绕过间隔、休息或风险暂停。用户明确修改频率时，同步更新实现、说明与模拟时钟测试；频率不作为任意配置字段。
+6. **原始下载表无损合并。** 凡基于下载表格合并，必须保留原始表的所有字段及顺序、图片、颜色、字体、数字格式、列宽、行高、布局、链接、冻结和其他格式。不得从标准化 JSON 字段重建简化表，不添加替代模板或审计工作表。店铺/关键词使用 `scripts/native_export_merge.py`（正式输出自动调用）；跨任务或旧断点重合并用 `scripts/merge_plugin_outputs.py`。无法完整保留时明确报错、保留原文件和已有成品，修复兼容性后再本地合并，禁止静默降级。详见 `references/plugin-collection.md` 的“原生格式合并”。
 
 ## Install / update
 
@@ -47,7 +45,7 @@ The installer reads the token from a hidden prompt, so **the user runs it in the
 - Windows: `powershell -ExecutionPolicy Bypass -File C:\path\to\lc-amazon-data-crawl\scripts\install_for_user.ps1`
 
 It creates `lc-amazon-data-crawl-runner` beside the skill, installs Python deps and runs `doctor`.
-If `doctor`/a run reports that Chrome for Testing is missing, run `install-browser` once.
+关键词/店铺需要 OpenCLI CLI、日常 Chrome 中的 Browser Bridge 和卖家精灵，不需要测试浏览器。只有类目旧流程缺少专用浏览器时才使用 `install-browser`。
 After updating the skill, refresh an existing runner (keeps configs, inputs, outputs, credentials):
 `bash "$SKILL_DIR/scripts/setup_runner.sh" <runner>` (Windows: `powershell -ExecutionPolicy Bypass -File scripts\setup_runner.ps1 <runner>`).
 
@@ -57,12 +55,13 @@ All commands below run inside the runner (`./lc-amazon-data-crawl.sh …` on mac
 ```
 install | install-browser | doctor
 amazon-front-dry-run / amazon-front-run          --config config/<front config>.json
-amazon-front-supervise                          --config config/<store or keyword config>.json
-verify-output --job outputs/<job_id> [--live]
 category-rank-dry-run / category-rank-run        --config config/category_rank_crawler.json
 image-competitor-dry-run / image-competitor-run  --config config/amazon_image_competitors.json
 sellersprite-check --config <config>     cdp-browser-start --config <config>
 safety-status                            safety-clear --confirm-reviewed
+plugin-export-review [--confirm-no-active-download]
+front/image: --rebind
+image: --confirm-sellersprite-logged-out, --migrate-from-job OLD_JOB_ID
 options for *-run: --operation-mode supervised|unattended, --resume-after-review, --no-resume
 ```
 
@@ -72,94 +71,65 @@ options for *-run: --operation-mode supervised|unattended, --resume-after-review
    (a job_id is a checkpoint; reuse it only to resume the same task).
 2. Put the user's input (CSV/XLSX) in `inputs/` and point the config at it.
    Columns: keywords `keyword`/`关键词`/`search_term`; stores `store_url`(+`store_name`);
-   images `ASIN`, `商品URL`, `主图URL`, `本地图片路径`.
-3. Set only business fields: marketplace/start URL, sorts, page limits, `include_sponsored`,
+   images `ASIN`, `商品URL`, `主图URL`；仅本地图片必须补充链接。
+3. Set only business fields: marketplace/start URL, sorts, quantity limits (keyword/store) or page limits (legacy category), `include_sponsored`,
    `product_filters`, image `result_mode`/`match_mode`. See `references/configuration.md`.
 4. Run the matching `*-dry-run`. Fix every error before a real run (exit 40 = config error).
-5. If SellerSprite fields are required, run `sellersprite-check` once on a new profile.
+5. 关键词/店铺：用户先选好日常 Chrome 工作标签，脚本绑定并固定 ID。之后可以切去其他页面或应用。不得启动测试浏览器、切换窗口/标签、移动系统鼠标或读取插件内部变量。可运行 `sellersprite-check` 核对已打开的面板。找同款也遵守上述后台约束，并先取得本次退出卖家精灵登录的明确确认；只有类目检查专用 Profile。
 6. Start the real run **in the background with output to a log file** (crawls take minutes to
-   hours), Storefront/keyword default to `nohup ./lc-amazon-data-crawl.sh amazon-front-supervise --config config/x.json > outputs/x.log 2>&1 &`; category runs retain `amazon-front-run`
+   hours), e.g. `nohup ./lc-amazon-data-crawl.sh amazon-front-run --config config/x.json > outputs/x.log 2>&1 &`
    (Windows: `Start-Process` with `-RedirectStandardOutput`). Do not run it as a blocking command
    that your tool may kill; never start it twice.
-7. Supervise (next section), then check `data_quality`, `scope_completion` and `delivery_ready` in `run_summary.json` before delivery.
-8. Ignoring an Amazon buyer-account login suggestion never changes `sellersprite_required`. Keep it true for enriched data; false is only for an explicitly requested basic-data task.
-9. Record each newly discovered runtime failure immediately in the workspace `运行报错.md`: evidence, affected job, root cause or uncertainty, mitigation and validation status. Append corrections and preserve history.
+7. Supervise (next section), then deliver the workbook and summarize `run_summary.json`.
+
+## 关键词与店铺约束
+
+- 默认每店铺 `store_max_records: 1008`、每关键词 `keyword_max_records: 2000`。明确数量覆盖默认；明确全部才设 `"all"`。先按导出顺序截取，再去重筛选，不补抓。
+- `entry_mode=current_tab|batch`；batch 也只导航同一绑定标签。标签关闭、连接断开、网址被改就停；人工选好替代页后用 `--rebind`，未完成目标重采并替换快照。
+- 每轮一次加载，等上一轮完成、数据稳定、间隔与休息到期。远程操作共享下述持久化调度，跨来源与重启不清零；DOM 每 2 秒只读检查。
+- 店铺商品页在 Amazon 主搜索区明确显示无搜索结果且连续稳定 10 秒时，视为店铺消失或暂无可售商品，记录 `store_no_results` 和 `skipped_items`，直接跳过并继续下一店铺；不操作缺失的插件控件，不导出空文件。验证码、加载超时、仅插件无数据不能据此跳过。
+- 默认结束时导出一次；每 100 次成功加载做中间导出，恰好结束合并最终导出。全局导出间隔至少 60 秒；未确认下载不得重点击，明确失败只重试一次。
+- 区分 `limit_reached` 和 `source_exhausted`；数量不符保留原文件并报告部分完成。插件显示“2000 条上限”须以真实文件核对，不能假定不存在截断。
+- 旧分页参数/断点必须显式迁移到新模板和新 job_id，不换算为加载轮数。所有细节以 `references/plugin-collection.md` 为准。
+
+## 找同款约束
+
+完整配置、恢复与迁移见 `references/image-background.md`。必须先提醒用户退出卖家精灵账号并保持插件启用，取得本次任务确认后才能传 `--confirm-sellersprite-logged-out`；不得从历史确认或用户要求开始采集推断退出。后台未确认则退出 30，不查询。
+
+- 固定日常 Chrome 标签，读取公开 DOM 主图网址并在同标签打开 `/stylesnap?q=…`；不点击会激活新标签的原按钮，不下载再上传图片，不使用插件私有接口。
+- `entry_mode=batch|current_tab`，默认每来源最多 48 个候选，`count_only` + `cascade`。纯本地图片报错。实际数量只代表采集范围。
+- 找同款不调用登录后的插件指标或导出。普通登录入口不算故障；明确仍已登录则停止并提醒退出。店铺和关键词的登录要求保持独立。
+- cascade 按批流式粗筛：每批候选稳定后立即复用现有 Embedding 规则，累计视觉命中超过 10 个即停止后续加载、记录 `prescreen_excluded` 并进入下一产品；未超限才继续到原采集结束条件，然后按原规则调用 Mini。提前排除不写成精确同款数；部分候选和向量保存断点。
+- 模型优先使用图片网址，必要时仅在内存转码并有界缓存复用；已有候选和成功模型结果必须复用。普通阶段失败自动恢复一次，连续失败留空并继续后续来源；风险、身份变化与凭据错误不自动重试。未完成导航先核对原标签；已确认到达目标且有主图／候选但文档持续加载时，按原节流规则仅重新加载一次，预算跨重启保留；未知导航不重放，标签丢失仍需人工 `--rebind`。同文档且 DOM ASIN 一致的商品页允许 `th=1` 规范化改写；身份校验异常保存脱敏差异，详见 image-background.md。
+- 旧任务用新配置、新 job_id 和 `--migrate-from-job` 显式迁移，原输出保持不动。不得把旧上传／CDP 配置静默继续执行。
 
 ## Supervising a run
 
 Check every few minutes, not continuously. Read `outputs/<job_id>/run_heartbeat.json`
 (`pid`, `phase`, `updated_at`, optional `until`, `detail`) and the log tail.
 
-Storefront and keyword long tasks use `amazon-front-supervise`; `amazon-front-run`
-remains one attempt. The supervisor continues retryable exits automatically at
-`resume_at`, validates this attempt's heartbeat/commits, and stops on auth failure,
-risk pause or human action. No repeated chat message “继续” is needed. Run only one
-supervisor; it holds a separate machine lock and the child holds the crawl lock.
-`supervisor.json` records the supervisor's final reason and `exit_code`, plus the
-last child's separate `child_exit_code`; it is
-authoritative for recovery/manual-action stops. `run_summary.json` describes the
-last collection attempt and must not be treated as a later supervisor result.
-
-SellerSprite collection uses the dedicated foreground: actual spacing/rest ends
-before checking cancellation/lock, activating the exact browser PID and its owned
-tab, confirming visibility, then navigating/clicking. On macOS, lock pauses access
-until unlock, up to the manual wait limit (including system sleep); unknown inspection or activation failure
-requires human action. Hidden/no-frame evidence alone never proves a crash.
-On macOS the supervisor holds a temporary `caffeinate -di -w <supervisor_pid>`
-power assertion for required SellerSprite collection, preventing idle display/system
-sleep. It releases on exit, keeps system settings unchanged, and never unlocks a
-locked computer or changes manual-lock handling.
-
-Ordinary CDP calls have a process-external 10 s watchdog; navigation and plugin
-loading retain their own budgets. Screenshots have 3 s and diagnostics 10 s. If
-calls stop returning, the supervisor stops the child before recovery, rebuilds
-exports from immutable commits and probes an owned local blank page. A healthy
-browser gets a new worker tab; two browser-level CDP failures allow restarting only
-the exact executable/profile/PID/creation-time identity. Recovery itself runs in a
-bounded subprocess. The profile, committed data, cooldowns and risk pauses remain.
-Two browser restarts without a successful commit stop automatic recovery. Local
-lock/window/browser failures without a completed page attempt do not increment
-item skip counts. A real page failure retains the existing skip thresholds.
-
-Storefront and keyword results support both traditional Next links and a main-list
-**Show more results** button. Each successful click is another logical page/batch;
-only new ASINs enter its commit. On restart, replay earlier clicks under normal
-traffic limits, then exclude all already visited ASINs. A disappearing control can
-end the source; a busy/disabled button or a click without confirmed new ASINs is a
-retryable failure, never proof of completeness. Keep an already identified control
-when its busy/disabled label changes to “Loading…”. Page limits count batches too.
-
-Use `verify-output --job outputs/<job_id> --live` for a committed snapshot while
-running; after the supervisor exits run it without `--live` to compare commits,
-JSONL and Excel, including duplicate/extra rows and source evidence. Only `passed`
-confirms extraction consistency; missing evidence is `not_evaluated`. Delivery also
-requires the existing quality and scope report. Do not change historical outputs.
-
-- `phase` `waiting` (rest/cooldown with a future `until`: 3–5, 10–12, 15–20 min), `retry_wait`,
+- `phase` `waiting` (rest/cooldown with a future `until`: 插件 1–1.5 / 2–3 min；旧类目 3–5 / 10–12 / 15–20 min), `retry_wait`,
   `plugin_wait` or `manual_wait` are planned waits. Do **not** report them as a stall or restart anything.
 - Healthy otherwise: `updated_at` changed within the last 5 minutes.
-- A normal interrupt during front-mode collection keeps committed pages, exports
-  them before exit, and leaves the unfinished page in its checkpoint. Verify the
-  final heartbeat and export result before resuming; interrupting early setup does
-  not certify an export.
 - Stalled: the pid is gone without `phase: exited`, or no update for > 5 minutes outside a wait.
   Then read the log tail and `state.json`, tell the user what the page is doing, and only then
   stop/restart.
-- Manual actions (CAPTCHA by day, delivery address, SellerSprite login): tell the user which
+- 关键词/店铺需要人工处理时保存断点并退出；处理后重跑原命令。不要为此创建 CONTINUE 文件。
+- Legacy category manual actions (CAPTCHA by day, delivery address, SellerSprite login): tell the user which
   visible Chrome page needs attention. The crawler re-checks the page by itself every few seconds;
   if the user says it is done and it has not continued, create the file `outputs/<job_id>/CONTINUE`.
 
 ## When a run ends: exit code → next step
 
 `outputs/<job_id>/run_summary.json` always holds `status`, `message`, `next_action`, `resume_at`
-and `skipped_items`. Front modes also hold `data_quality`, `scope_completion`, and `delivery_ready`. Explicit source N/A is valid; missing, invalid, unloaded and unconfirmed zeros are disclosed. Exit 0 alone does not certify completeness. Follow `next_action`:
+and `skipped_items`. Follow `next_action`; the table is the same rule:
 
 | Exit | status | Do this |
 |---|---|---|
-| 0 | completed | The queue ended. Deliver as complete only when `delivery_ready=true`; otherwise disclose and resolve quality/range gaps. |
-| 10 | completed_with_skips | Disclose `skipped_items`, their recorded reasons and unfinished scope; do not claim full delivery. The same job_id will not retry them; to try again later, run a new job with only those inputs. |
-| 20 | retry_later | Temporary failure, checkpoint saved. If `resume_at` is set (network/platform outage), wait until then; otherwise re-run the same command. Items that keep failing are skipped automatically, so this cannot loop. |
-| 21 | risk_pause | Amazon/SellerSprite risk signal. Do not re-run before `resume_at`. Afterwards ask the user to confirm the browser shows normal pages, then run once with `--resume-after-review`. Any pending item can serve as the review probe; the pause clears only when that page loads cleanly. |
+| 0 | completed | Deliver the workbook. |
+| 10 | completed_with_skips | Deliver; list `skipped_items` (明确无搜索结果的店铺直接跳过；其他旧流程为 bounded retries exhausted, new image sources may exhaust both cycles in one run). The same job_id will not retry them; to try again later, run a new job with only those inputs. |
+| 20 | retry_later | Temporary failure, checkpoint saved. If `resume_at` is set (network/platform outage), wait until then; otherwise re-run the same command. Legacy category items may be skipped after repeated item failures; plugin jobs preserve the current target. |
+| 21 | risk_pause | Amazon/SellerSprite risk signal. 店铺/关键词明确验证码在用户确认本次验证通过后，可立即加 `--resume-after-review` 提前复核；其他风险不得提前恢复。Otherwise do not re-run before `resume_at`. Afterwards ask the user to confirm the browser shows normal pages, then run once with `--resume-after-review`. Any pending item can serve as the review probe; the pause clears only when that page loads cleanly. |
 | 30 | needs_human | Tell the user the concrete action in `next_action` (CAPTCHA, delivery address, SellerSprite login, close/relaunch the dedicated Chrome, install-browser). Re-run after they confirm. |
 | 40 | config_error | Fix config/input, dry-run again. |
 | 50 | lock_held | Another crawl is running on this computer. Wait; do not start another. |
@@ -171,16 +141,24 @@ browser is fine (it never shortens an active one).
 
 ## Operation modes (fixed in code)
 
-- `supervised` (default): 20–30 s between navigations; rest 3–5 min after every 20, 10–12 min after
-  every 100; one retry after 60 s for a temporary page failure; plugin data waits 40 s (once
-  extended to 80 s on progress; storefront 40 s total); manual actions wait up to 15 min.
+新版找同款：`supervised` 间隔 4–6 秒，每 20 次休息 20–35 秒，每 100 次改为 1–2 分钟；`unattended` 间隔 8–15 秒，每 10 次休息 20–35 秒，每 100 次改为 2–3 分钟。共用持久化计数，百次休息不叠加短休息。普通错误自动恢复范围和停止条件见 `references/image-background.md`。
+
+关键词/店铺插件流程：远程操作间隔保持 supervised 20–30 秒、unattended 45–75 秒。supervised 每 20 次休息 1–1.5 分钟，每 100 次改为 2–3 分钟、不叠加；unattended 每 10 次休息 2–3 分钟，不另设百次长休息。计数与期限跨来源和重启持久化，插件稳定/重试/导出等待保持原规则，详见 references/plugin-collection.md。
+
+关键词/店铺明确验证码（Amazon 或卖家精灵的 captcha_or_robot_check）：两种模式均立即保存断点退出，默认风险暂停 24 小时。用户明确确认本次验证码已通过后，可立即用原命令加 --resume-after-review 提前复核恢复；仍有验证码则再次停止。其他风险仍遵守原暂停期限。旧类目与找同款不适用此提前恢复规则。
+
+以下原频率仅保留给旧类目流程（关键词/店铺普通故障等待仍使用下列同模式时间）：
+
+- `supervised` (default): 20–30 s between remote actions (navigation, plugin queries, loads, retries, exports); rest 3–5 min after every 20, 10–12 min after
+  every 100; one retry after 60 s for a temporary page failure; legacy plugin data waits 40 s (once
+  extended to 80 s on progress); new keyword/store panel waits up to 180 s without re-clicking. Legacy manual actions wait up to 15 min.
 - `unattended`: 45–75 s spacing; 15–20 min rest after every 10; retries after 2 and 5 min, then the
   item is deferred to the end of the queue; plugin waits up to 180 s; anything needing a human
   saves the checkpoint and exits (CAPTCHA at night always stops).
 - Risk signals (403/429, CAPTCHA, "too many requests", access denied, SellerSprite quota/rate/
   account messages) pause **all** crawls on this computer: a first rate limit for ≥30 min then one
   automatic probe; repeats, denial and account restriction for 24 h with manual review.
-- An item (page/category/image source) that fails in two different runs for an item-specific
+- A legacy item (page/category/old image source) that fails in two different runs for an item-specific
   reason (not found, broken page, unusable image) is skipped and recorded instead of blocking the
   job. Outage-type failures (network, timeouts, 5xx, plugin data not loading) do not count that way;
   see `references/configuration.md` "Amazon Page Availability And Retry".
@@ -188,17 +166,18 @@ browser is fine (it never shortens an active one).
 ## Outputs (`outputs/<job_id>/`)
 
 - Front modes: `records.jsonl`, `dedup_total.xlsx`, `quality_report.json`.
-- Verification stops: `block_evidence.jsonl` with visible-node evidence. Hidden DOM and buyer-account suggestions are not challenges. `CONTINUE` rechecks the page.
 - category-rank: `records.jsonl`, `total_<job_id>_merged.xlsx`.
 - image-competitor: `*_相似竞品数量.xlsx` (count mode) or the detail workbook; cascade columns are
   explained in `references/configuration.md#cascade-matching-semantics`.
-- Supervisor/verification: `supervisor.json`, `supervisor_events.jsonl`, `runtime_watchdog.json`, `verification_live.json`, `verification_final.json`.
 - Always: `state.json` (checkpoint), `run_summary.json`, `run_heartbeat.json`, optional `failures.jsonl`.
-- Storefront rows whose SellerSprite card did not finish loading (≤5 % of a page) are kept with
-  blank plugin fields and `插件字段未加载` in the plugin status column.
+- Image: `image_collection_report.json`，迁移时的 `migration_report.json`，明细模式包含来源状态页。
+- Keyword/store: `raw_exports/` 保留原生文件及校验报告；`dedup_total.xlsx` 使用原生下载表全部字段、图片和格式，不再输出固定字段简化表；审计信息仅写 JSON。数量/字段问题显式报告，不用旧卡片提取来补足。
 
 ## References
 
+- `references/image-background.md` — 找同款未登录确认、后台搜索、输入、模型与迁移。
+
+- `references/plugin-collection.md` — 关键词/店铺新流程、数量、节流、原生文件、恢复与迁移。
 - `references/configuration.md` — every config field, product filters, fulfillment parsing,
   delivery location, SellerSprite readiness, cascade semantics, browser/tab ownership, checkpoints.
 - `references/delivery-locations.md` — fixed postal codes per marketplace.
@@ -207,7 +186,7 @@ browser is fine (it never shortens an active one).
 
 ## Maintenance
 
-Update `scripts/`, `assets/config/` and this file together; run `python3 -m unittest discover -s tests` for offline regression. Run browser tests separately with `LC_RUN_BROWSER_TESTS=1`. A stability release also needs a new isolated job with ≥100 verified pages/batches and `save_page_evidence:true`, covering short and long rests; launching it alone is not acceptance. Confirm cached country/BSR evidence reaches records and final Excel, including recycled cards.
+Update `scripts/`, `assets/config/` and this file together; run `python3 tests/run_non_browser_tests.py` (isolates traffic state and excludes the real browser integration test).
 Build distributable zips only with `python3 scripts/package_skill.py` (excludes caches, local
 credentials, outputs and profiles, and refuses a populated `config.json` token). Never publish
 `config.local.json`, populated Doubao files, browser profiles, cookies or crawl outputs.

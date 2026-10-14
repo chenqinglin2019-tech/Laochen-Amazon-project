@@ -141,11 +141,9 @@ class DeliveryLocationConfigTests(unittest.TestCase):
         self.assertTrue(built["delivery_location_enabled"])
         self.assertEqual(built["delivery_location_timeout"], 20)
 
-    def test_all_five_crawler_templates_enable_delivery(self) -> None:
+    def test_legacy_crawler_templates_enable_delivery(self) -> None:
         names = [
             "amazon_front_bsr_category.json",
-            "amazon_front_keyword_search.json",
-            "amazon_front_storefront.json",
             "amazon_image_competitors.json",
             "category_rank_crawler.json",
         ]

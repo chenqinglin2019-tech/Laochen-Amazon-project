@@ -831,7 +831,7 @@ class LoopTests(IsolatedHomeTestCase):
         try:
             out = io.StringIO()
             with redirect_stdout(out), patch("sys.stderr", io.StringIO()):
-                code = image.main(["--config", str(config_path)])
+                code = image.legacy_main(["--config", str(config_path)])
         finally:
             for p in reversed(patches):
                 p.stop()
@@ -856,17 +856,17 @@ class LoopTests(IsolatedHomeTestCase):
 
     def test_main_config_errors_and_dry_run(self) -> None:
         with patch("sys.stderr", io.StringIO()), redirect_stdout(io.StringIO()):
-            self.assertEqual(image.main(["--config", str(self.root / "missing.json")]), run_outcome.EXIT_CONFIG_ERROR)
+            self.assertEqual(image.legacy_main(["--config", str(self.root / "missing.json")]), run_outcome.EXIT_CONFIG_ERROR)
             bad = self.root / "bad.json"
             bad.write_text("{not json", encoding="utf-8")
-            self.assertEqual(image.main(["--config", str(bad)]), run_outcome.EXIT_CONFIG_ERROR)
+            self.assertEqual(image.legacy_main(["--config", str(bad)]), run_outcome.EXIT_CONFIG_ERROR)
             products = self.write_products(["B012345678,,,,x"])
             config_path = self.root / "config.json"
             config_path.write_text(json.dumps(self.raw_config(products)), encoding="utf-8")
-            self.assertEqual(image.main(["--config", str(config_path), "--dry-run"]), 0)
+            self.assertEqual(image.legacy_main(["--config", str(config_path), "--dry-run"]), 0)
             self.mini_config.write_text(json.dumps({"api_key": ""}), encoding="utf-8")
             self.assertEqual(
-                image.main(["--config", str(config_path), "--dry-run"]),
+                image.legacy_main(["--config", str(config_path), "--dry-run"]),
                 run_outcome.EXIT_CONFIG_ERROR,
             )
         self.assertFalse((self.root / "outputs" / "round1-image" / "run_summary.json").exists())
