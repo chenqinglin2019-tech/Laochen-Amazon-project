@@ -1,0 +1,2 @@
+# Required only for .xlsx; single-product and CSV workflows use the standard library.
+openpyxl>=3.1,<4

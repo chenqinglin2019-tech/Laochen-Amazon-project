@@ -1,0 +1,224 @@
+{
+ "schema": "SKILL-DISTRIBUTION/1.0",
+ "package_name": "lc-amazon-compliance-screening",
+ "rulepack": "rulepack-2026.10.4",
+ "rulepack_digest": "3848136a9cb9642f5527709904f0e66566d03534836d43fe8df489e45caf194e",
+ "files": [
+  {
+   "path": "SKILL.md",
+   "bytes": 17124,
+   "sha256": "43682f7a8468e3a85845c3d6251c6729e0ffdf2fe9966a3d4929dd842cddb85b"
+  },
+  {
+   "path": "agents/openai.yaml",
+   "bytes": 748,
+   "sha256": "6a1914e99de1637369b2e29a29856c6da04d90a0d7a53b6ac8ed49f95ea1ef53"
+  },
+  {
+   "path": "data/business.json",
+   "bytes": 494537,
+   "sha256": "1a2dfaa079fd152a505d0531796adec45967741e3969ef5d1345d137d1742106"
+  },
+  {
+   "path": "data/rulepack.json",
+   "bytes": 4496907,
+   "sha256": "e261cfde73bcf3e8700470dd7770ca6b9c3c4bd4d60955709c4dfa15c191e049"
+  },
+  {
+   "path": "references/installation.md",
+   "bytes": 7307,
+   "sha256": "f51233b1215924d2fbeb59befec735d4dc0e7f2a36622697cd9006290a6e1ba2"
+  },
+  {
+   "path": "references/judgment-rules.md",
+   "bytes": 3535,
+   "sha256": "13307caa5bf1b091277d54686b1783ea5719380eb7cda8b9ca1355c407eec543"
+  },
+  {
+   "path": "references/profile-guide.md",
+   "bytes": 14648,
+   "sha256": "a835c25b343466219aaae554f6bcd154bd4ed66a47cad1a41f4154d1a9fbd0a9"
+  },
+  {
+   "path": "references/sites/AE.md",
+   "bytes": 75785,
+   "sha256": "6bf8934c0b889a6aac58c44ea7085f2c82f56b4ef948f8040dc5ccabc839e6b2"
+  },
+  {
+   "path": "references/sites/AU.md",
+   "bytes": 183736,
+   "sha256": "f46b40dab5d1c8ded5f4a5b9bbbfbd02995b2f77c92b47175adc27ee2a5e73dd"
+  },
+  {
+   "path": "references/sites/DE.md",
+   "bytes": 147496,
+   "sha256": "9c565a8b7ee1707e4dff86526609671a72bc6508decf4bb233b3fe309dc23775"
+  },
+  {
+   "path": "references/sites/ES.md",
+   "bytes": 141980,
+   "sha256": "e1604efe33c93a9d47ac9aa1eacf97ae1af6cbf4b11fba8dff9df2861134b517"
+  },
+  {
+   "path": "references/sites/FR.md",
+   "bytes": 146689,
+   "sha256": "7dec8c2234cd97dee5ac588d250a4209f19cefbe9848e8e652c9e3f218e9da40"
+  },
+  {
+   "path": "references/sites/IT.md",
+   "bytes": 143144,
+   "sha256": "af980605d2e2c45fbfc618c24c2e1904e70884d48a07d4f5e56d5b91cbcb7843"
+  },
+  {
+   "path": "references/sites/JP.md",
+   "bytes": 153305,
+   "sha256": "ed0ec95900b48b5133860d26586fd9159b0a0201bb2d7f93bbe221ee032abeee"
+  },
+  {
+   "path": "references/sites/README.md",
+   "bytes": 288,
+   "sha256": "c982cb27ae25717724e8ffafd9b0258dfa9373d4a561f11113648a62c06c4a61"
+  },
+  {
+   "path": "references/sites/SA.md",
+   "bytes": 67985,
+   "sha256": "52ae4ab99fe7474d805ebaed5afe12867ed3ad9fe2d50627d95644cae2f1e7f8"
+  },
+  {
+   "path": "references/sites/UK.md",
+   "bytes": 85399,
+   "sha256": "618cb3f789809b4aed9c99700df3975776a955bcd43998e9a32adac38577cbd8"
+  },
+  {
+   "path": "references/sites/US.md",
+   "bytes": 355532,
+   "sha256": "3ed589f6fad5dbac24398cb024ec07612d19025ea10612ecc9eadd01c70958a4"
+  },
+  {
+   "path": "requirements.txt",
+   "bytes": 103,
+   "sha256": "87cd275ea7283d5da76025862874abb8fc325af2c1d36fda5eb8e7118b79d233"
+  },
+  {
+   "path": "scripts/build_distribution.py",
+   "bytes": 3208,
+   "sha256": "48ef7625b0ccebe48b4ddead491dd43c8af15d3ba3218d43e60b7168349c2831"
+  },
+  {
+   "path": "scripts/compliance_engine/__init__.py",
+   "bytes": 2415,
+   "sha256": "171f5746fb61b8ff62c7149b54a7ba055c28af623a2f77f72882a0640999b7a6"
+  },
+  {
+   "path": "scripts/compliance_engine/common.py",
+   "bytes": 5635,
+   "sha256": "773ec519c2b97e1f6d04c28f6fa5c52906786a37ef398043c17f5fa60a224369"
+  },
+  {
+   "path": "scripts/compliance_engine/match.py",
+   "bytes": 9031,
+   "sha256": "49f1fc2e0ee03bf7a539c0f346561f2c709e2bfe5b80d8e5cda0d292eb259cbf"
+  },
+  {
+   "path": "scripts/compliance_engine/profile.py",
+   "bytes": 11012,
+   "sha256": "33ec4cd07a5f3306d6302d1e20416b83fb1cb8bf2477a131890b2537c2830d26"
+  },
+  {
+   "path": "scripts/compliance_engine/report.py",
+   "bytes": 14170,
+   "sha256": "004fbc129bd224bc1e7dc55aa18f2e66b4f55feceb529c673c108446b151ac15"
+  },
+  {
+   "path": "scripts/compliance_engine/review.py",
+   "bytes": 19835,
+   "sha256": "7eb402bb30ff09872403f5cdb56ebfe7f271e56347e8bb15652f3a7e9f7d8185"
+  },
+  {
+   "path": "scripts/compliance_engine/rulepack.py",
+   "bytes": 2587,
+   "sha256": "7661b04b94740c827c86795c583b6b575e24ff5cfa3a70b04161b6bf21d63e56"
+  },
+  {
+   "path": "scripts/csc.py",
+   "bytes": 42459,
+   "sha256": "621b46c74754e42f3c9e1687a28924775d15a8030eacbf63a4b0e64dac741c79"
+  },
+  {
+   "path": "scripts/csc_runtime.py",
+   "bytes": 6874,
+   "sha256": "21a7639525568de4e1c3855d589e6b0246c6e7d9ff37881d8e7d42a6ffe2df05"
+  },
+  {
+   "path": "scripts/csc_table.py",
+   "bytes": 41278,
+   "sha256": "5fb173c081b6ce0c3034e160e5ce795071ce7b6e764ff1e37d69f8558a1118d2"
+  },
+  {
+   "path": "tests/test_portability.py",
+   "bytes": 14887,
+   "sha256": "aed5cbef0d0ca7d5f9085d6e35cd3ea5af8633033e4d9facd63b495184d2dd82"
+  },
+  {
+   "path": "tests/test_screening.py",
+   "bytes": 16126,
+   "sha256": "6ca179ebd6782470f59b442c4d0b836e3fdc33ab2eb51fb093bf832a2a74c3c4"
+  },
+  {
+   "path": "INSTRUCTIONS.md",
+   "bytes": 2144,
+   "sha256": "116e4b3e6e1ca22bd1682b09a4a731a9c8dd200fac29cdb8b657e38c05aa30a8"
+  },
+  {
+   "path": "README.md",
+   "bytes": 2409,
+   "sha256": "4470fd566ef4864566461a1ed04933ec48c2fb14102d49580e4572ba3b785def"
+  },
+  {
+   "path": "config.json",
+   "bytes": 75,
+   "sha256": "30e7163d200fbde3c355197160bdfda8613e02122438a9f9059c66782df8e3f3"
+  },
+  {
+   "path": "scripts/auth_gate.py",
+   "bytes": 5198,
+   "sha256": "57aaec801f3973c45aa33c1169f73fba8aa4ab6078dcce7878eadb5981ac9534"
+  },
+  {
+   "path": "tests/auth_support.py",
+   "bytes": 1659,
+   "sha256": "e91d4ceb5c89681888d249605a1adcdf3d51b830d7268b75d6bb6463c7148261"
+  },
+  {
+   "path": "tests/test_auth.py",
+   "bytes": 17889,
+   "sha256": "8dca7f77bb45bdd3de32f69bb09f21982bf343d29c25468352bed054a46789f9"
+  },
+  {
+   "path": "tools/bin/lc-compliance-auth-check-darwin-amd64",
+   "bytes": 6877792,
+   "sha256": "252dfc3159586d4b459db4da00c4b5285e0f2fd6c51954de2d6e2b30cc14bdaf"
+  },
+  {
+   "path": "tools/bin/lc-compliance-auth-check-darwin-arm64",
+   "bytes": 6369762,
+   "sha256": "559555230c4bb3536bba0f80bb424f2369631db724e11b32b150d860c9b4d52b"
+  },
+  {
+   "path": "tools/bin/lc-compliance-auth-check-linux-amd64",
+   "bytes": 6729852,
+   "sha256": "79fa6acc1976ce2d1a4ca13057fe72bcfcd9d14167e31f403980db24baac7452"
+  },
+  {
+   "path": "tools/bin/lc-compliance-auth-check-windows-amd64.exe",
+   "bytes": 6926848,
+   "sha256": "23d80c9564734b60d19680f4b420d4b764290e8d9b47390e4e6ea3e5b2f9083a"
+  },
+  {
+   "path": "tools/auth.json",
+   "bytes": 509,
+   "sha256": "d14c53381b1386d0ff56f7287125b2170310340b5c9285ece63aa8f8d55ef3e2"
+  }
+ ],
+ "package_version": "1.2.4"
+}

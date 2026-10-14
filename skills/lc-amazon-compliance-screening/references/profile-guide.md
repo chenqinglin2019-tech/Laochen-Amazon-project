@@ -1,0 +1,213 @@
+# 画像指南（compliance-profile-v1）
+
+画像描述「这是什么产品、有哪些与合规相关的特征」。规则库只认这里列出的 ID。
+
+## 填写规则
+- `families`：至少一个产品族，可以多个（例如蓝牙音箱 = wireless_device + electronics_general）。每项带 evidence。
+- `attributes`：模板里列出的核心属性都要填。不适用写 false 或 []；看不出来写 `status: unknown, value: null`，不能猜成 false。
+  - `provided`：资料或图片直接写明；`inferred`：有依据的推断（在 note 里写推断过程，如 10000mAh×3.7V≈37Wh）。
+  - 其他属性按需添加，只加与规则判断有关的。
+- `claims`：只记录资料/包装里真实出现的功效说法，附原文 quote。
+- 证据引用：`title`、`bullet:N`、`description`、`notes`、`image:img-N`、`user:<字段>`。
+
+## 主体形态与物流业务口径
+
+- `substance.primary_form` 判断实际出售的主体，综合标题、全部亮点/卖点、描述和图片。`liquid` 为液体，`paste_gel` 为膏霜凝胶，`other` 为其他已识别形态。
+- 发泥、面霜、牙膏为膏状；精油、乳液、洗发水按实际资料判断；以液体或膏体为主要内容的套装也适用。空容器、工具、固体香皂、蜡烛、造型摆件及仅附带少量液体的器具填 `other`。
+- 已知形态须引用 `evidence`，在 `note` 保存原文或推断依据；有依据的推断用 `inferred`。资料无法识别主体时写 `unknown/null`，不要凭缺少“液体”关键词判断为 `other`。
+- `substance.liquid` 表示是否含液体，不能替代主体形态；例如器具附带少量液体可同时为 `substance.liquid=true`、`substance.primary_form=other`。
+- 主体为液体/膏体时增加「物流运输强限制」业务标记；不据此将易燃、气雾剂、危险品或 SDS 要求推断为真。原法规结论、FBA 状态和待补信息照常保留。
+
+## 核心属性（必须出现）
+
+- `power.source`（multi）供电方式：none / mains_ac / usb_dc / external_adapter_included / battery / solar / fuel_gas / manual
+- `battery.included`（bool）是否含电池
+- `radio.technologies`（multi）无线技术：bluetooth / wifi / cellular / zigbee_thread / nfc_rfid / rf_sub_ghz / rf_2_4ghz_proprietary / uwb / gnss_receiver / infrared_only
+- `connectivity.internet`（bool）能否接入互联网（含经 App/网关）
+- `laser.present`（bool）是否含激光
+- `user.primarily_children`（bool）是否主要供 12 岁及以下儿童使用
+- `user.infants_under_3`（bool）是否供 3 岁以下婴幼儿使用
+- `material.food_contact`（bool）是否接触食品/饮品
+- `material.skin_contact_prolonged`（bool）是否长时间接触皮肤
+- `substance.primary_form`（enum）实际销售商品主体形态：liquid / paste_gel / other；未知为 `value: null, status: unknown`
+- `substance.liquid`（bool）是否含液体/凝胶
+- `substance.aerosol`（bool）是否为气雾剂/压力罐
+- `substance.flammable`（bool）是否易燃
+- `substance.chemical_mixture`（bool）是否为化学品/混合物本身
+- `blade.present`（bool）是否有刀刃
+- `heating.element`（bool）是否有发热元件
+- `magnets.type`（enum）磁铁情况：none / enclosed / small_powerful_loose / magnet_set
+- `product.is_medical_use`（bool）是否用于诊断/治疗/预防疾病
+- `product.condition`（enum）新旧状态：new / used / refurbished
+- `origin.country`（text）原产国
+
+## 产品族
+
+- `electronics_general`：消费电子（通用）
+- `mains_appliance`：交流市电供电的家用电器
+- `power_adapter_charger`：电源适配器、充电器、充电线、插头转换器、排插
+- `battery_standalone`：单独销售的电池（含纽扣电池、18650 等电芯）
+- `power_bank`：移动电源/充电宝/便携储能电站
+- `wireless_device`：带无线射频功能的设备（蓝牙、Wi-Fi、遥控等）
+- `smart_connected`：可联网/智能设备（App 控制、联网摄像头、智能插座等）
+- `lighting`：灯具、LED 灯带、灯泡
+- `laser_product`：激光产品（激光笔、激光测距、激光投影、激光雕刻）
+- `drone_rc`：无人机、遥控航模/车/船
+- `personal_transporter`：电动平衡车、电动滑板车、电动自行车、电动独轮车
+- `power_tool`：电动工具
+- `outdoor_power_equipment`：户外动力设备（割草机、链锯、发电机等）
+- `heating_appliance`：取暖/加热器具（电暖器、电热毯、加热垫）
+- `gas_fuel_appliance`：燃气/燃油/酒精器具（炉具、取暖器、喷灯）
+- `av_media_player`：流媒体播放器、电视盒子、投影仪
+- `phone_computer_accessory`：手机/电脑配件（保护壳、支架、屏幕膜等）
+- `toy`：玩具（供 14 岁以下儿童玩耍）
+- `childcare_infant`：婴童护理用品（婴儿床、床围、推车、安全座椅、奶瓶、学步车、婴儿浴盆）
+- `children_apparel_footwear`：童装、童鞋
+- `children_product_general`：其他主要供 12 岁及以下儿童使用的产品（文具、书包、儿童家具等）
+- `children_jewelry`：儿童首饰
+- `food_contact`：食品接触材料（厨具、餐具、水杯、保鲜盒、食品级硅胶）
+- `food_beverage`：食品、饮料
+- `dietary_supplement`：膳食补充剂、保健食品
+- `infant_formula_food`：婴儿配方奶粉、婴幼儿食品
+- `alcohol`：酒类
+- `tobacco_vape`：烟草、电子烟及配件、烟油
+- `cbd_hemp`：CBD/大麻相关产品
+- `cosmetics`：化妆品、护肤品、洗护用品、香水、美甲
+- `oral_care`：口腔护理（牙膏、牙刷、牙齿美白）
+- `drug_otc`：药品、非处方药、外用药
+- `medical_device`：医疗器械（诊断、治疗、监测、矫正类）
+- `health_wellness_device`：个护健康电器（按摩仪、体温计、血压计、理疗仪、隐形眼镜相关）
+- `contact_lens_eyewear_rx`：隐形眼镜、处方眼镜
+- `sunglasses_eyewear`：太阳镜、平光眼镜、防蓝光眼镜
+- `ppe_safety`：个人防护装备（头盔、护目镜、口罩、防护手套、安全带、救生衣）
+- `sexual_wellness`：成人/两性用品
+- `pesticide_biocide`：杀虫剂、驱虫剂、消毒剂、杀菌剂、除草剂、灭鼠器
+- `chemical_product`：化学品/混合物（清洁剂、胶水、油漆、溶剂、润滑剂、电子烟油除外）
+- `aerosol_product`：气雾剂/喷罐产品
+- `fireworks_explosives`：烟花爆竹、爆炸物、烟雾弹
+- `lighters_matches`：打火机、火柴、点火器
+- `refrigerant`：制冷剂及含制冷剂产品
+- `knife_blade`：刀具/带刃工具（厨刀、折刀、匕首、斧、剑）
+- `weapon_firearm_related`：枪支相关（配件、仿真枪、气枪、BB 枪、瞄准镜、弹匣）
+- `weapon_other`：其他武器（弓弩、弹弓、指虎、甩棍、飞镖类）
+- `self_defense`：防身用品（防狼喷雾、电击器、报警器）
+- `lock_picking`：开锁工具、解码器、万能钥匙
+- `surveillance`：监控/偷拍设备（隐藏摄像头、窃听器、GPS 追踪器、信号干扰器）
+- `automotive_parts`：汽车/摩托车零配件及用品
+- `tires_wheels`：轮胎、轮毂
+- `furniture`：家具
+- `clothing_storage_unit`：储物柜类家具（衣柜、抽屉柜、斗柜等易倾倒家具）
+- `composite_wood_product`：含人造板（刨花板、中纤板、胶合板）的木制品
+- `upholstered_bedding`：软包家具、床垫、枕头、被子、填充物
+- `window_covering`：窗帘、百叶窗及其拉绳
+- `home_textile`：家纺（床单、毛巾、窗帘布）
+- `kitchen_appliance`：厨房电器
+- `bathroom_water`：卫浴、水龙头、净水器、饮水相关
+- `candles_home_fragrance`：蜡烛、香薰
+- `textile_apparel`：服装（成人）
+- `footwear`：鞋类
+- `jewelry_watch`：珠宝首饰、手表
+- `bags_luggage`：箱包
+- `leather_fur_products`：皮革、皮草、羽绒制品
+- `sports_outdoor`：运动户外用品
+- `bicycle`：自行车（非电动）及配件
+- `water_sports_flotation`：水上用品（游泳圈、浮具、救生衣、充气船）
+- `camping_stove_fuel`：野营炉具、燃料罐
+- `pet_supplies`：宠物用品
+- `pet_food_medicine`：宠物食品、宠物药品/驱虫
+- `plants_seeds_soil`：植物、种子、土壤、肥料
+- `animal_products`：动物及动物制品（活体、皮毛、象牙、贝壳、标本）
+- `media_software_games`：图书、音像、软件、视频游戏
+- `currency_giftcards`：货币、硬币、礼品卡、邮票
+- `art_collectibles`：艺术品、收藏品
+- `offensive_material`：冒犯性/争议性内容（仇恨、纳粹相关、恐怖主义）
+- `gambling_lottery`：赌博、彩票用品
+- `medical_cannabis_drug_paraphernalia`：吸毒用具、烟斗水烟（用于非法物质）
+- `recycled_electronics`：回收/翻新电子产品
+- `packaging_any`：（任何带包装的商品）—— 仅用于包装类规则
+
+## 全部属性
+
+- `power.source`（multi）供电方式：none / mains_ac / usb_dc / external_adapter_included / battery / solar / fuel_gas / manual
+- `power.plug_included`（bool）是否附带插头/适配器
+- `power.rated_voltage_v`（number）额定交流电压（V）
+- `power.rated_power_w`（number）额定功率（W）
+- `battery.included`（bool）是否含电池
+- `battery.chemistry`（multi）电池化学体系：li_ion / li_polymer / li_metal / lifepo4 / nimh / nicd / alkaline / lead_acid / button_coin_lithium / button_coin_other
+- `battery.configuration`（enum）电池与设备关系：contained_in_equipment / packed_with_equipment / standalone
+- `battery.cell_form`（multi）电芯形态：cylindrical_18650_21700 / pouch / prismatic / coin_button / aa_aaa
+- `battery.watt_hours`（number）电池能量（Wh）
+- `battery.removable`（bool）电池是否可拆卸
+- `battery.rechargeable`（bool）是否可充电
+- `radio.technologies`（multi）无线技术：bluetooth / wifi / cellular / zigbee_thread / nfc_rfid / rf_sub_ghz / rf_2_4ghz_proprietary / uwb / gnss_receiver / infrared_only
+- `connectivity.internet`（bool）能否接入互联网（含经 App/网关）
+- `connectivity.app_control`（bool）是否 App 控制
+- `sensor.camera`（bool）是否有摄像头
+- `sensor.microphone`（bool）是否有麦克风
+- `laser.present`（bool）是否含激光
+- `laser.class`（enum）激光等级：1 / 1M / 2 / 2M / 3R / 3B / 4
+- `laser.power_mw`（number）激光输出功率（mW）
+- `user.age_min_months`（number）适用最小年龄（月）
+- `user.age_max_years`（number）适用最大年龄（岁）
+- `user.primarily_children`（bool）是否主要供 12 岁及以下儿童使用
+- `user.infants_under_3`（bool）是否供 3 岁以下婴幼儿使用
+- `toy.small_parts`（bool）是否含小零件
+- `magnets.type`（enum）磁铁情况：none / enclosed / small_powerful_loose / magnet_set
+- `material.food_contact`（bool）是否接触食品/饮品
+- `material.skin_contact_prolonged`（bool）是否长时间接触皮肤
+- `material.list`（multi）主要材质：plastic / pvc / silicone / rubber_latex / wood_solid / wood_composite / bamboo / metal / stainless_steel / aluminum / glass / ceramic / textile_cotton / textile_synthetic / leather / fur / feathers_down / paper_cardboard / foam / stone / other
+- `material.contains_wood_or_rubber_or_leather`（bool）是否含木材/天然橡胶/皮革（EUDR 等）
+- `substance.primary_form`（enum）实际销售商品主体形态：liquid / paste_gel / other；未知为 `value: null, status: unknown`
+- `substance.liquid`（bool）是否含液体/凝胶
+- `substance.aerosol`（bool）是否为气雾剂/压力罐
+- `substance.flammable`（bool）是否易燃
+- `substance.corrosive`（bool）是否腐蚀性
+- `substance.chemical_mixture`（bool）是否为化学品/混合物本身
+- `substance.contains_nicotine`（bool）是否含尼古丁
+- `substance.contains_mercury`（bool）是否含汞
+- `substance.refrigerant`（bool）是否含制冷剂
+- `blade.present`（bool）是否有刀刃
+- `blade.length_cm`（number）刃长（cm）
+- `blade.mechanism`（enum）刀具开合方式：fixed / folding_manual / folding_locking / spring_assisted / automatic_switchblade / butterfly / gravity / not_applicable
+- `weapon.replica_firearm`（bool）是否仿真枪/外观似真枪
+- `weapon.projectile`（bool）是否发射弹丸/箭/水弹
+- `heating.element`（bool）是否有发热元件
+- `fuel.gas_or_liquid`（bool）是否使用燃气/燃油
+- `motor.present`（bool）是否有电机
+- `mobility.rideable`（bool）是否可骑乘/载人
+- `mobility.max_speed_kmh`（number）最高速度（km/h）
+- `furniture.height_cm`（number）家具高度（cm）
+- `furniture.tipover_risk`（bool）是否为可能倾倒的储物家具
+- `uv.emits_uv`（bool）是否发出紫外线（UV 灯、消毒灯、美甲灯）
+- `ozone.generator`（bool）是否产生臭氧
+- `product.condition`（enum）新旧状态：new / used / refurbished
+- `product.is_medical_use`（bool）是否用于诊断/治疗/预防疾病
+- `product.energy_label_category`（bool）是否属于能效标签产品（冰箱、洗衣机、电视、灯源、空调等）
+- `product.weee_in_scope`（bool）是否属于电子电气设备（WEEE 范围）
+- `product.textile_content_pct`（number）纺织纤维含量（%）
+- `product.sleep_infant`（bool）是否供婴儿睡眠使用
+- `product.water_flotation`（bool）是否为浮具/戏水用品
+- `product.emissions_related_auto`（bool）是否为影响排放的汽车部件（排气、ECU 调校）
+- `packaging.present`（bool）是否有销售包装
+- `origin.country`（text）原产国
+
+## 宣称
+
+- `antibacterial_antimicrobial`：抗菌/抑菌/防霉
+- `disinfect_kills_germs_virus`：消毒/杀菌/杀病毒（如“杀死 99.9% 细菌”）
+- `pest_repellent_insecticide`：驱虫/杀虫/驱蚊/灭鼠
+- `medical_therapeutic`：治疗/缓解疼痛/治愈疾病/医疗用途
+- `fda_approved_cleared`：FDA 批准/认证/注册
+- `ce_or_cert_claim`：宣称已获某认证（CE、FCC、UL 等）
+- `organic`：有机
+- `non_toxic_safe_for_kids`：无毒/对儿童安全
+- `uv_protection_spf`：防晒/UV400/SPF
+- `weight_loss_fat_burn`：减肥/燃脂
+- `immune_boost_health`：增强免疫/保健功效
+- `eco_biodegradable`：环保/可降解/可回收
+- `hypoallergenic_dermatologist`：低致敏/皮肤科测试
+- `covid_virus_protection`：防新冠/防病毒
+- `nicotine_free_or_contains`：尼古丁相关宣称
+- `hair_growth_skin_whitening`：生发/美白/祛斑等功效
+- `fire_resistant`：阻燃/防火
+- `energy_saving`：节能/能效等级
