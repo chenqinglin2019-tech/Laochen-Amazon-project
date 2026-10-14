@@ -50,6 +50,14 @@ Public repository for Laochen Amazon workflow skills.
   [Installation and platform validation](skills/lc-ipr-risk-screening-free/references/installation.md).
   [Download the credential-free ZIP](skills/lc-ipr-risk-screening-free.zip).
 
+- `skills/lc-amazon-compliance-screening/` - Screen single products and selection
+  spreadsheets across ten Amazon marketplaces using versioned compliance rules.
+  Version 1.2.4; requires the user's own token and skill authorization.
+  Includes four-platform authorization programs; macOS Apple Silicon validated,
+  other platforms await real-device validation. Last updated: 2026-10-14 (UTC+8).
+  [Installation and authorization](skills/lc-amazon-compliance-screening/README.md).
+  [Download the credential-free ZIP](skills/lc-amazon-compliance-screening.zip).
+
 ## Install Path
 
 Use this repository with the skill subpath you want:
@@ -73,6 +81,7 @@ https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc_amazon_niche
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-ipr-risk-screening
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-ipr-risk-screening-free
+https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-amazon-compliance-screening
 ```
 
 ## Security

@@ -1,0 +1,6 @@
+interface:
+  display_name: "易逊-禁限售合规排查"
+  short_description: "按站点排查禁售、审核、认证及液体膏体物流限制；支持标题、亮点、产品卖点和链接。"
+  default_prompt: "使用 $lc-amazon-compliance-screening 初判这些商品在亚马逊对应站点的禁限售情况：给出每个商品的标记（禁售/需平台审核/物流运输强限制/需要付费认证/需工厂提供证书/需单独描述）和原因或所需认证；综合标题、亮点、产品卖点判断实际商品主体形态；仅链接先读取页面。液体或膏体按物流筛查业务口径处理，并保留认证事项。如果是表格，在表格末尾追加结果列。"
+policy:
+  allow_implicit_invocation: false
