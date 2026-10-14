@@ -120,6 +120,24 @@ class CascadeEvaluationTests(unittest.TestCase):
             )
         return result, embed, mini
 
+    def test_partial_prescreen_never_finalizes_or_calls_mini_at_ten_or_less(self):
+        rt = self.runtime()
+        for count in (0, 1, 10):
+            with patch.object(image, 'resolve_source_embedding', return_value=[1.0, 0.0]), \
+                    patch.object(image, 'embed_cascade_candidate', return_value=([1.0, 0.0], '', 'https://example.com/x.jpg')), \
+                    patch.object(image, 'call_doubao_mini_verifier') as mini:
+                result = image.run_cascade_match(rt, self.source_image, '', [candidate(i) for i in range(1, count + 1)], prescreen_only=True)
+                self.assertIsNone(result)
+                mini.assert_not_called()
+
+    def test_partial_unscorable_ratio_waits_for_complete_collection(self):
+        rt = self.runtime()
+        with patch.object(image, 'resolve_source_embedding', return_value=[1.0, 0.0]), \
+                patch.object(image, 'embed_cascade_candidate', return_value=(None, 'unavailable', '')):
+            self.assertIsNone(image.run_cascade_match(rt, self.source_image, '', [candidate(1)], prescreen_only=True))
+            with self.assertRaises(image.CandidatesUnscorableError):
+                image.run_cascade_match(rt, self.source_image, '', [candidate(1)])
+
     def test_zero_prescreen_matches_is_verified_zero_without_mini(self) -> None:
         records = [candidate(index) for index in range(1, 5)]
         result, embed, mini = self.evaluate(
@@ -407,9 +425,6 @@ class CascadeConfigFingerprintAndOutputTests(unittest.TestCase):
         self.addCleanup(pacing.stop)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
-        safety_root = patch("safety_control.default_safety_root", return_value=self.root / "safety")
-        safety_root.start()
-        self.addCleanup(safety_root.stop)
         self.products = self.root / "products.csv"
         self.products.write_text(
             "ASIN,商品URL,主图URL,本地图片路径,备注\nB012345678,,,,fixture\n",

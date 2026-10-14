@@ -41,11 +41,13 @@ Usage:
   .\lc-amazon-data-crawl.cmd category-rank-dry-run [--config config/category_rank_crawler.json]
   .\lc-amazon-data-crawl.cmd category-rank-run [--config config/category_rank_crawler.json] [--operation-mode supervised|unattended]
   .\lc-amazon-data-crawl.cmd image-competitor-dry-run [--config config/amazon_image_competitors.json]
-  .\lc-amazon-data-crawl.cmd image-competitor-run [--config config/amazon_image_competitors.json] [--operation-mode supervised|unattended]
+  .\lc-amazon-data-crawl.cmd image-competitor-run [--config config/amazon_image_competitors.json] [--confirm-sellersprite-logged-out] [--rebind] [--migrate-from-job OLD_ID]
   .\lc-amazon-data-crawl.cmd cdp-browser-start --config <config-file>
   .\lc-amazon-data-crawl.cmd sellersprite-check --config <config-file>
   .\lc-amazon-data-crawl.cmd safety-status
   .\lc-amazon-data-crawl.cmd safety-clear --confirm-reviewed
+  .\lc-amazon-data-crawl.cmd plugin-export-review [--confirm-no-active-download]
+  # keyword/store recovery: amazon-front-run ... --rebind
 '@
     if ($ToStderr) { Write-Stderr $text } else { Write-Output $text }
 }
@@ -157,7 +159,7 @@ function Invoke-Doctor {
         Stop-OnFailure
         & $script:PythonBin -c "import selenium; print('selenium: ok')"
         Stop-OnFailure
-        & $script:PythonBin (Get-RunnerScript 'start_cdp_browser.py') --diagnose
+        & $script:PythonBin (Get-RunnerScript 'plugin_diagnostics.py')
         Stop-OnFailure
     } else {
         Write-Output 'python: missing .venv'
@@ -269,16 +271,6 @@ switch -Exact ($Command) {
         Start-ReuseBrowserIfNeeded 'config/amazon_front_crawler.json' $Rest
         Invoke-RunnerPython 'run_amazon_front_crawl.py' $Rest
     }
-    'amazon-front-supervise' {
-        Invoke-CloudAuth
-        Assert-Installed
-        Invoke-RunnerPython 'supervise_amazon_front.py' $Rest
-    }
-    'verify-output' {
-        Invoke-CloudAuth
-        Assert-Installed
-        Invoke-RunnerPython 'verify_front_output.py' $Rest
-    }
     'category-rank-dry-run' {
         Invoke-CloudAuth
         Assert-Installed
@@ -298,7 +290,8 @@ switch -Exact ($Command) {
     'image-competitor-run' {
         Invoke-CloudAuth
         Assert-Installed
-        Start-ReuseBrowserIfNeeded 'config/amazon_image_competitors.json' $Rest
+        & $script:PythonBin (Get-RunnerScript 'safety_cli.py') guard
+        Stop-OnFailure
         Invoke-RunnerPython 'run_amazon_image_competitor_crawl.py' $Rest
     }
     'cdp-browser-start' {
@@ -311,6 +304,11 @@ switch -Exact ($Command) {
         Assert-Installed
         Start-ReuseBrowserIfNeeded 'config/amazon_front_keyword_search.json' $Rest
         Invoke-RunnerPython 'run_sellersprite_check.py' $Rest
+    }
+    'plugin-export-review' {
+        Invoke-CloudAuth
+        Assert-Installed
+        Invoke-RunnerPython 'plugin_diagnostics.py' (@('--review-export') + $Rest)
     }
     'safety-status' {
         Assert-Installed

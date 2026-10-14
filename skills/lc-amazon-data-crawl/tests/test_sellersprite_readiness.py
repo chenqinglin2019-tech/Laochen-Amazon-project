@@ -244,12 +244,9 @@ class BrowserBackendTests(unittest.TestCase):
 
 
 class ConfigCompatibilityTests(unittest.TestCase):
-    def test_templates_default_to_cdp(self) -> None:
+    def test_legacy_templates_default_to_cdp(self) -> None:
         template_names = (
             "amazon_front_bsr_category.json",
-            "amazon_front_keyword_search.json",
-            "amazon_front_storefront.json",
-            "amazon_image_competitors.json",
             "category_rank_crawler.json",
         )
         for template_name in template_names:

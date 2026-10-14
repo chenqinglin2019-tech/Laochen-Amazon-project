@@ -40,9 +40,6 @@ class DoubaoEmbeddingTests(unittest.TestCase):
         image.EMBEDDING_CACHE.clear()
         self.temp_dir = tempfile.TemporaryDirectory()
         self.root = Path(self.temp_dir.name)
-        safety_root = patch("safety_control.default_safety_root", return_value=self.root / "safety")
-        safety_root.start()
-        self.addCleanup(safety_root.stop)
         self.products_file = self.root / "products.csv"
         self.products_file.write_text(
             "ASIN,商品URL,主图URL,本地图片路径,备注\nB012345678,,,,test\n",

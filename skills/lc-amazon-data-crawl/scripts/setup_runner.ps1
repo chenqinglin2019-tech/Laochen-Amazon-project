@@ -59,6 +59,8 @@ foreach ($authEntry in @('check_auth.sh', 'check_auth.ps1')) {
         Copy-Item -LiteralPath $source -Destination (Get-TargetPath @('scripts', $authEntry)) -Force
     }
 }
+Copy-Item -LiteralPath (Get-SkillPath @('scripts', 'sellersprite_panel.js')) -Destination (Get-TargetPath @('scripts', 'sellersprite_panel.js')) -Force
+Copy-Item -LiteralPath (Get-SkillPath @('scripts', 'image_background_dom.js')) -Destination (Get-TargetPath @('scripts', 'image_background_dom.js')) -Force
 Copy-Item -LiteralPath (Get-SkillPath @('assets', 'requirements.txt')) -Destination (Get-TargetPath @('requirements.txt')) -Force
 
 foreach ($configFile in @(Get-ChildItem -LiteralPath (Get-SkillPath @('assets', 'config')) -Filter '*.json' -File)) {

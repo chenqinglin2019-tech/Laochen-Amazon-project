@@ -18,8 +18,6 @@ from selenium.common.exceptions import (
 )
 from selenium.webdriver.common.by import By
 
-from runtime_watchdog import bounded_call, browser_call
-
 
 CRAWLER_WINDOW_NAME_PREFIX = "__lc_amazon_data_crawl_owned__:"
 _CRAWLER_WINDOW_MARKER_VERSION = "v1"
@@ -118,14 +116,12 @@ class CdpElement:
         self._locator = locator
 
     @property
-    @bounded_call("element_text")
     def text(self) -> str:
         try:
             return str(self._locator.inner_text() or "")
         except Exception as exc:  # pragma: no cover - translated at backend boundary
             raise WebDriverException(str(exc)) from exc
 
-    @bounded_call("element_input")
     def send_keys(self, value: str) -> None:
         try:
             if str(self._locator.get_attribute("type") or "").lower() == "file":
@@ -135,21 +131,18 @@ class CdpElement:
         except Exception as exc:  # pragma: no cover - translated at backend boundary
             raise WebDriverException(str(exc)) from exc
 
-    @bounded_call("element_clear")
     def clear(self) -> None:
         try:
             self._locator.fill("", timeout=1000)
         except Exception as exc:  # pragma: no cover - translated at backend boundary
             raise WebDriverException(str(exc)) from exc
 
-    @bounded_call("element_type")
     def type_text(self, value: str) -> None:
         try:
             self._locator.press_sequentially(value, delay=50)
         except Exception as exc:  # pragma: no cover - translated at backend boundary
             raise WebDriverException(str(exc)) from exc
 
-    @bounded_call("element_click")
     def click(self) -> None:
         try:
             self._locator.click(timeout=1000)
@@ -161,7 +154,6 @@ class CdpSwitchTo:
     def __init__(self, driver: "CdpWebDriver") -> None:
         self._driver = driver
 
-    @bounded_call("switch_window")
     def window(self, handle: str) -> None:
         pages = self._driver._page_map()
         page = pages.get(handle)
@@ -186,7 +178,6 @@ class CdpWebDriver:
     owned_page_close_interval_seconds = 0.1
     owned_page_close_stabilize_seconds = 1.25
 
-    @bounded_call("connect_browser", 120)
     def __init__(
         self,
         debugger_address: str,
@@ -260,13 +251,11 @@ class CdpWebDriver:
             self._disconnect_only()
             raise WebDriverException(f"CDP 连接失败：{exc}") from exc
 
-    @bounded_call("verify_profile", 15)
     def _verify_profile(self, user_data_dir: Path, profile_directory: str) -> None:
         expected = expected_profile_path(user_data_dir, profile_directory)
         probe = None
         try:
-            with browser_call("create_profile_probe"):
-                probe = self._context.new_page()
+            probe = self._context.new_page()
             probe.goto("chrome://version/", wait_until="domcontentloaded", timeout=self._page_timeout * 1000)
             profile_text = str(probe.locator("#profile_path").text_content(timeout=5000) or "").strip()
             if not profile_text:
@@ -287,8 +276,7 @@ class CdpWebDriver:
         finally:
             if probe is not None:
                 try:
-                    with browser_call("close_profile_probe"):
-                        probe.close()
+                    probe.close()
                 except Exception:
                     pass
 
@@ -332,14 +320,12 @@ class CdpWebDriver:
         )
 
     @staticmethod
-    @bounded_call("read_ownership_marker")
     def _read_window_name(page: Any) -> str:
         try:
             return str(page.evaluate("() => window.name || ''") or "")
         except Exception:
             return ""
 
-    @bounded_call("write_ownership_marker")
     def _mark_owned_page(self, page: Any, role: str) -> bool:
         marker = self._window_marker(role)
         try:
@@ -409,8 +395,7 @@ class CdpWebDriver:
         for candidates in self._action_page_captures.values():
             candidates[id(page)] = page
         try:
-            with browser_call("read_opener"):
-                opener = page.opener()
+            opener = page.opener()
         except Exception:
             opener = None
         if opener is not None and id(opener) in self._owned_pages:
@@ -454,8 +439,7 @@ class CdpWebDriver:
                         )
                     continue
                 try:
-                    with browser_call("read_opener"):
-                        opener = page.opener()
+                    opener = page.opener()
                 except Exception:
                     continue
                 if opener is not None and id(opener) in self._owned_pages:
@@ -477,8 +461,7 @@ class CdpWebDriver:
         worker = self._worker_page
         if worker is None or worker.is_closed():
             try:
-                with browser_call("create_worker_page"):
-                    worker = self._context.new_page()
+                worker = self._context.new_page()
             except Exception as exc:
                 raise self._translate(exc) from exc
             self._worker_page = worker
@@ -491,7 +474,6 @@ class CdpWebDriver:
             raise WebDriverException("无法取得 CDP 抓取标签页句柄。")
         return handle
 
-    @bounded_call("activate_worker")
     def restore_worker_page(self) -> str:
         """Make the dedicated worker current without selecting an unrelated tab."""
         handle = self.ensure_worker_page()
@@ -531,7 +513,6 @@ class CdpWebDriver:
         return str(self._require_page().url or "")
 
     @property
-    @bounded_call("title")
     def title(self) -> str:
         try:
             return str(self._require_page().title() or "")
@@ -539,7 +520,6 @@ class CdpWebDriver:
             raise self._translate(exc) from exc
 
     @property
-    @bounded_call("html")
     def page_source(self) -> str:
         try:
             return str(self._require_page().content() or "")
@@ -582,31 +562,6 @@ class CdpWebDriver:
         if self._page is not None:
             self._page.set_default_navigation_timeout(self._page_timeout * 1000)
 
-    def set_foreground_runtime(self, runtime, stop_event=None) -> None:
-        self._foreground_runtime = runtime
-        self._foreground_stop_event = stop_event
-
-    def prepare_foreground(self) -> None:
-        runtime = getattr(self, "_foreground_runtime", None)
-        if runtime is None or not getattr(runtime, "sellersprite_required", False):
-            return
-        from desktop_runtime import DesktopUnavailable, activate_browser, desktop_state, wait_for_desktop
-        stop = getattr(self, "_foreground_stop_event", None)
-        wait_for_desktop(runtime, stop)
-        if stop is not None and stop.is_set():
-            raise DesktopUnavailable("desktop_wait_cancelled")
-        if desktop_state() == "unlocked":
-            with browser_call("browser_process_info"):
-                processes = self._browser_cdp_session.send("SystemInfo.getProcessInfo").get("processInfo", [])
-            browser_pid = next((int(p["id"]) for p in processes if p.get("type") == "browser"), None)
-            if browser_pid is None or not activate_browser(browser_pid):
-                raise DesktopUnavailable("browser_activation_unavailable")
-        self.restore_worker_page()
-        visible = self.execute_script("return !document.hidden;")
-        if visible is not True:
-            raise DesktopUnavailable("browser_window_hidden")
-
-    @bounded_call("navigate", lambda self: self._page_timeout + 5)
     def get(self, url: str) -> None:
         self._ensure_ownership_state()
         self._last_http_status = None
@@ -628,7 +583,6 @@ class CdpWebDriver:
             self._last_navigation_error = str(exc)
             raise self._translate(exc) from exc
 
-    @bounded_call("refresh", lambda self: self._page_timeout + 5)
     def refresh(self) -> None:
         self._ensure_ownership_state()
         self._last_http_status = None
@@ -649,7 +603,6 @@ class CdpWebDriver:
             self._last_navigation_error = str(exc)
             raise self._translate(exc) from exc
 
-    @bounded_call("evaluate")
     def execute_script(self, script: str, *args: Any) -> Any:
         expression = (
             "(args) => { return (function() {\n"
@@ -661,14 +614,6 @@ class CdpWebDriver:
         except Exception as exc:
             raise self._translate(exc, javascript=True) from exc
 
-    @bounded_call("click_load_more")
-    def click_result_control(self, selector: str) -> None:
-        try:
-            self._require_page().locator(selector).click(timeout=10000)
-        except Exception as exc:
-            raise self._translate(exc) from exc
-
-    @bounded_call("find_element")
     def find_element(self, by: str = By.ID, value: Optional[str] = None) -> CdpElement:
         selector_value = value or ""
         if by == By.CSS_SELECTOR:
@@ -689,10 +634,9 @@ class CdpWebDriver:
         except Exception as exc:
             raise self._translate(exc) from exc
 
-    @bounded_call("screenshot", 3)
     def save_screenshot(self, path: str) -> bool:
         try:
-            self._require_page().screenshot(path=path, full_page=True, timeout=3000)
+            self._require_page().screenshot(path=path, full_page=True)
             return True
         except Exception as exc:
             raise self._translate(exc) from exc
@@ -786,7 +730,6 @@ class CdpWebDriver:
             f"handle={handle} attempt={attempt} error={type(exc).__name__}: {exc}"
         )
 
-    @bounded_call("close_page")
     def _close_page_with_retry(self, page: Any) -> bool:
         for attempt in (1, 2):
             try:
@@ -806,8 +749,7 @@ class CdpWebDriver:
         while id(current) not in seen:
             seen.add(id(current))
             try:
-                with browser_call("read_opener"):
-                    opener = current.opener()
+                opener = current.opener()
             except Exception:
                 break
             if opener is None or id(opener) not in candidates:
@@ -936,7 +878,6 @@ class CdpWebDriver:
                 closed += 1
         return closed
 
-    @bounded_call("disconnect_browser")
     def _disconnect_only(self) -> None:
         owner_id = getattr(self, "_owner_id", "")
         if owner_id:
@@ -959,7 +900,6 @@ class CdpWebDriver:
         self._action_page_captures = {}
         self._owned_process = None
 
-    @bounded_call("browser_cleanup", 15)
     def quit(self) -> None:
         if self._closed:
             return

@@ -348,6 +348,10 @@ class EmbeddingProviderError(UserFacingError):
     failure_reason = "embedding_provider_error"
 
 
+class ImageResolutionError(EmbeddingProviderError):
+    """Transient DNS failure; retry the source without excluding a candidate."""
+
+
 class FatalEmbeddingProviderError(EmbeddingProviderError):
     """A provider credential, model, or endpoint error that must stop the task."""
 
@@ -1664,11 +1668,11 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
     marketplace_domain = normalize_marketplace(marketplace)
 
     products_file = resolve_path(config_text(config, "products_file", "inputs/image_competitors.csv"))
-    if not products_file.exists():
+    if not products_file.exists() and config.get("entry_mode") != "current_tab":
         raise UserFacingError(f"没有找到产品清单：{products_file}")
 
     browser_backend = config_text(config, "browser_backend", "cdp").lower()
-    if browser_backend != "cdp":
+    if browser_backend not in {"cdp", "opencli"}:
         raise UserFacingError(
             "配置项 `browser_backend` 必须为 cdp；旧 Selenium 后端无法证明标签页归属，已停用。"
         )
@@ -1676,7 +1680,7 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
     if browser_mode not in {"launch", "attach", "reuse"}:
         raise UserFacingError("以图搜图 browser_mode 只支持 launch、attach 或 reuse。")
     extension_path_text = config_text(config, "extension_path")
-    extension_path = resolve_crawler_extension_path(extension_path_text, browser_mode)
+    extension_path = None if browser_backend == "opencli" else resolve_crawler_extension_path(extension_path_text, browser_mode)
 
     min_delay = config_float(config, "delay_seconds_min", 20)
     max_delay = config_float(config, "delay_seconds_max", 30)
@@ -1715,7 +1719,7 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
     match_mode = config_text(config, "match_mode", default_match_mode).lower() or default_match_mode
     if match_mode not in {"embedding", "chat", "cascade"}:
         raise UserFacingError("配置项 match_mode 只支持 embedding、chat 或 cascade。")
-    if match_mode == "cascade" and result_mode != "count_only":
+    if match_mode == "cascade" and result_mode != "count_only" and browser_backend != "opencli":
         raise UserFacingError(
             "cascade 当前只支持 result_mode=count_only；"
             "早停来源必须在数量表中保留明确状态，不能写成明细模式的静默空结果。"
@@ -1759,7 +1763,7 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
     mini_retry_backoff_seconds = config_float(config, "mini_retry_backoff_seconds", 1.0)
     if mini_retry_backoff_seconds < 0:
         raise UserFacingError("配置项 mini_retry_backoff_seconds 不能小于 0。")
-    max_candidates_per_source = config_int(config, "max_candidates_per_source", 24) or 24
+    max_candidates_per_source = config_int(config, "max_candidates_per_source", 48) or 48
     if match_mode == "cascade" and max_candidates_per_source <= prescreen_max_matches:
         raise UserFacingError(
             "cascade 模式要求 max_candidates_per_source 至少比 prescreen_max_matches 大 1，"
@@ -1801,7 +1805,7 @@ def build_image_runtime_config(config: Dict[str, Any], no_resume: bool) -> Image
         find_similar_timeout=config_int(config, "find_similar_timeout", 12) or 12,
         lens_results_timeout=config_int(config, "lens_results_timeout", 60) or 60,
         max_candidates_per_source=max_candidates_per_source,
-        max_competitors_per_source=config_int(config, "max_competitors_per_source", 12) or 12,
+        max_competitors_per_source=config_int(config, "max_competitors_per_source", 48) or 48,
         result_mode=result_mode,
         min_match_confidence=min_confidence,
         include_source_as_competitor=config_bool(config, "include_source_as_competitor", False),
@@ -2020,6 +2024,37 @@ def is_downloadable_image_url(value: str) -> bool:
     except (TypeError, ValueError):
         return False
     return parsed.scheme.lower() in {"http", "https"} and bool(parsed.netloc)
+
+
+# Bound base64 memory; images never enter the on-disk checkpoint.
+CANDIDATE_INLINE_CACHE_MAX_BYTES = 64 * 1024 * 1024
+CANDIDATE_INLINE_CACHE_MAX_ITEMS = 128
+
+
+def candidate_image_to_data_url(runtime: Any, url: str) -> str:
+    # Cache transport bytes, not verdicts. Embedding/Mini identities and their
+    # existing durable result caches are unchanged.
+    cache = getattr(runtime, "_candidate_inline_cache", None)
+    if cache is None:
+        cache = {}
+        runtime._candidate_inline_cache = cache
+    key = normalize_space(str(url))
+    if key in cache:
+        data_url = cache.pop(key)
+        cache[key] = data_url
+        add_provider_metric(runtime, "image_transcode_reused_from_memory")
+        return data_url
+    if getattr(runtime, "browser_backend", "") == "opencli":
+        from image_background_crawler import read_image_in_memory
+        data_url = read_image_in_memory(url)
+    else:
+        data_url = image_url_to_data_url(url, timeout=min(runtime.vision_timeout, 45))
+    if isinstance(data_url, str) and data_url.startswith("data:image/") and len(data_url) <= CANDIDATE_INLINE_CACHE_MAX_BYTES:
+        while cache and (len(cache) >= CANDIDATE_INLINE_CACHE_MAX_ITEMS or
+                         sum(len(value) for value in cache.values()) + len(data_url) > CANDIDATE_INLINE_CACHE_MAX_BYTES):
+            cache.pop(next(iter(cache)))
+        cache[key] = data_url
+    return data_url
 
 
 def image_url_to_data_url(url: str, timeout: int = 45) -> str:
@@ -3781,7 +3816,25 @@ def merge_lens_product_data(
     return records
 
 
+@dataclass
+class ImageReference:
+    url: str
+    data_url: str = ""
+    legacy_path: Optional[Path] = None
+
+    def in_memory(self) -> str:
+        if not self.data_url:
+            from image_background_crawler import read_image_in_memory
+            self.data_url = read_image_in_memory(self.url)
+        return self.data_url
+
+    def __str__(self) -> str:
+        return self.url
+
+
 def image_to_data_url(path: Path) -> str:
+    if isinstance(path, ImageReference):
+        return path.data_url or path.url
     mime = mimetypes.guess_type(str(path))[0] or "image/jpeg"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime};base64,{encoded}"
@@ -3994,6 +4047,7 @@ def call_multimodal_embedding_cached(runtime: ImageCompetitorRuntimeConfig, imag
     store = source_progress_store(runtime)
     progress_key = _sha256_text(cache_key)
     if cached is not None:
+        add_provider_metric(runtime, "embedding_reused_from_memory")
         if store is not None and store.get("emb", progress_key) is None:
             # Another source of this run paid for it: persist it for this
             # source too, so a restart of this source never pays again (P2-3a).
@@ -4037,6 +4091,31 @@ def resolve_source_embedding(
     source_image_path: Path,
     source_image_ref: str,
 ) -> List[float]:
+    if isinstance(source_image_path, ImageReference):
+        store = source_progress_store(runtime)
+        key = _sha256_text("image-url-v1:" + source_image_path.url)
+        saved = store.get("source-emb", key) if store else None
+        vector = _valid_vector(saved.get("vector")) if saved else None
+        if vector is not None:
+            add_provider_metric(runtime, "embedding_reused_from_checkpoint")
+            return vector
+        if source_image_path.legacy_path and source_image_path.legacy_path.is_file():
+            legacy_ref = image_to_data_url(source_image_path.legacy_path)
+            legacy_key = _sha256_text(embedding_cache_key(runtime, legacy_ref))
+            legacy = store.get("emb", legacy_key) if store else None
+            vector = _valid_vector(legacy.get("vector")) if legacy else None
+        if vector is None:
+            try:
+                vector = call_multimodal_embedding_cached(runtime, source_image_path.url)
+            except FatalEmbeddingProviderError:
+                raise
+            except EmbeddingProviderError as exc:
+                if not isinstance(exc, EmbeddingInputRejected):
+                    raise
+                vector = call_multimodal_embedding_cached(runtime, source_image_path.in_memory())
+        if store:
+            store.put("source-emb", key, {"vector": vector})
+        return vector
     source_refs = [image_to_data_url(source_image_path)]
     if source_image_ref and source_image_ref not in source_refs:
         source_refs.append(source_image_ref)
@@ -4066,7 +4145,7 @@ def resolve_candidate_embedding(
     except EmbeddingProviderError as exc:
         first_error = str(exc)[:180]
     try:
-        data_url = image_url_to_data_url(image_url, timeout=min(runtime.vision_timeout, 45))
+        data_url = candidate_image_to_data_url(runtime, image_url)
         return (
             asin,
             call_multimodal_embedding_cached(runtime, data_url),
@@ -4148,7 +4227,10 @@ def embed_cascade_candidate(
                     {"image_url": image_url[:500], "error": first_error},
                 )
     try:
-        data_url = image_url_to_data_url(image_url, timeout=min(runtime.vision_timeout, 45))
+        data_url = candidate_image_to_data_url(runtime, image_url)
+    except ImageResolutionError:
+        # A transient lookup failure does not prove this image is unscorable.
+        raise
     except (UserFacingError, requests.RequestException) as exc:
         return exclude(
             f"候选图片无法识别（{first_error}），本地下载也失败（{redact_sensitive_text(exc)[:160]}），"
@@ -4295,6 +4377,9 @@ def call_openai_vision(
         safe_message = redact_sensitive_text(exc, (api_key,))[:300]
         raise EmbeddingProviderError(f"视觉模型请求失败：{safe_message}") from exc
     if response.status_code >= 400:
+        if response.status_code in {400, 413, 415, 422} and "image" in str(getattr(response, "text", "")).lower() and isinstance(source_image_path, ImageReference) and not source_image_path.data_url:
+            source_image_path.in_memory()
+            return call_openai_vision(runtime, source_image_path, candidates)
         raise EmbeddingProviderError(f"视觉模型调用失败：HTTP {response.status_code}。")
     try:
         data = response.json()
@@ -4515,6 +4600,8 @@ def call_doubao_mini_verifier(
                 raise FatalMiniProviderError(
                     f"豆包 Mini 模型或端点配置错误（HTTP {status}）。"
                 )
+            if status in {400, 413, 415, 422} and "image" in str(getattr(response, "text", "")).lower():
+                raise EmbeddingInputRejected("Mini 无法读取图片输入。")
             retryable = status in {408, 429} or 500 <= status < 600
             last_error = f"HTTP {status}"
             transport_failures += 1
@@ -4554,10 +4641,13 @@ def mini_batch_progress_key(
 ) -> str:
     """Identity of one Mini verdict: model + endpoint + semantics + exact inputs."""
 
-    try:
-        source_digest = hashlib.sha256(Path(source_image_path).read_bytes()).hexdigest()
-    except OSError:
-        source_digest = _sha256_text(str(source_image_path))
+    if isinstance(source_image_path, ImageReference):
+        source_digest = _sha256_text("image-url-v1:" + source_image_path.url)
+    else:
+        try:
+            source_digest = hashlib.sha256(Path(source_image_path).read_bytes()).hexdigest()
+        except OSError:
+            source_digest = _sha256_text(str(source_image_path))
     identity = {
         "semantics": MINI_RESPONSE_SEMANTICS,
         "model": str(getattr(runtime, "mini_model", "")),
@@ -4593,8 +4683,22 @@ def verify_mini_batch_with_checkpoint(
         ):
             add_provider_metric(runtime, "mini_reused_from_checkpoint")
             return [dict(item) for item in matches]
+    if store is not None and isinstance(source_image_path, ImageReference) and source_image_path.legacy_path:
+        legacy_key = mini_batch_progress_key(runtime, source_image_path.legacy_path, batch)
+        saved = store.get("mini", legacy_key)
+        matches = saved.get("matches") if saved else None
+        if isinstance(matches, list) and all(isinstance(row, dict) for row in matches) and {str(row.get("asin") or "").upper() for row in matches} == {str(row.get("asin") or "").upper() for row in batch}:
+            store.put("mini", key, {"matches": matches})
+            add_provider_metric(runtime, "mini_reused_from_checkpoint")
+            return matches
     runtime_heartbeat(runtime, "provider_calls", f"Mini 复核 {len(batch)} 个候选")
-    matches = call_doubao_mini_verifier(runtime, source_image_path, batch)
+    try:
+        matches = call_doubao_mini_verifier(runtime, source_image_path, batch)
+    except EmbeddingInputRejected:
+        if not isinstance(source_image_path, ImageReference) or source_image_path.data_url:
+            raise
+        source_image_path.in_memory()
+        matches = call_doubao_mini_verifier(runtime, source_image_path, batch)
     if store is not None:
         store.put("mini", key, {"matches": [dict(item) for item in matches]})
     return matches
@@ -4605,7 +4709,10 @@ def run_cascade_match(
     source_image_path: Path,
     source_image_ref: str,
     records: Sequence[Dict[str, Any]],
-) -> MatchEvaluation:
+    *,
+    prescreen_only: bool = False,
+) -> Optional[MatchEvaluation]:
+    """Partial batches may exclude early, but never produce a final count or call Mini."""
     before_metrics = provider_metric_snapshot(runtime)
     decisions: Dict[str, Dict[str, Any]] = {}
     source_asin = next(
@@ -4630,6 +4737,8 @@ def run_cascade_match(
         candidates.append(candidate)
 
     if not candidates:
+        if prescreen_only:
+            return None
         return MatchEvaluation(
             accepted_records=[],
             decisions=decisions,
@@ -4713,6 +4822,9 @@ def run_cascade_match(
                     provider_metric_snapshot(runtime),
                 ),
             )
+
+    if prescreen_only:
+        return None
 
     if unscorable and len(unscorable) > len(candidates) * UNSCORABLE_FAIL_RATIO:
         # P1-6: a count computed from a minority of the candidates (or from
@@ -5235,7 +5347,15 @@ def write_workbook(
     candidates = read_jsonl(candidates_path)
     failures = read_jsonl(failures_path)
 
-    wb = load_workbook(source_workbook_path)
+    if source_workbook_path.suffix.lower() in {".xlsx", ".xlsm"}:
+        wb = load_workbook(source_workbook_path)
+    else:
+        wb = Workbook()
+        rows = read_product_rows(source_workbook_path)
+        headers = list(rows[0]) if rows else []
+        wb.active.append(headers)
+        for row in rows:
+            wb.active.append([row.get(h, "") for h in headers])
     ws = replace_sheet(wb, "同款竞品结果")
     write_sheet(ws, IMAGE_COMPETITOR_HEADERS, records, IMAGE_COMPETITOR_FIELD_TO_HEADER)
 
@@ -5809,6 +5929,10 @@ def load_saved_lens_collection(
 
 
 def run_image_competitor_crawl(runtime: ImageCompetitorRuntimeConfig, dry_run: bool) -> int:
+    if runtime.browser_backend == "opencli":
+        from image_background_crawler import run
+        run(runtime, dry_run=dry_run)
+        return 0
     prepare_vision_provider(runtime)
     initial_queue = load_products(runtime.products_file, runtime.marketplace_domain, dedupe=not runtime.is_count_only)
     job_dir = ensure_dir(runtime.outputs_root / runtime.job_id)
@@ -6829,7 +6953,7 @@ def classify_crawl_exception(exc: BaseException, *, dry_run: bool = False) -> Ba
     return exc
 
 
-def main(argv: Optional[Sequence[str]] = None) -> int:
+def legacy_main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="Amazon image-search competitor crawler (Lens / Find Similar + Doubao cascade).")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="配置文件路径")
     parser.add_argument("--dry-run", action="store_true", help="只检查配置，不打开浏览器")
@@ -6868,6 +6992,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not args.dry_run and candidate_job_dir is not None and candidate_job_dir.exists():
             job_dir = candidate_job_dir
     return run_outcome.exit_with(outcome_exc, job_dir, skipped_count=_skipped_count(job_dir))
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    from image_background_crawler import main as background_main
+    return background_main(argv)
 
 
 if __name__ == "__main__":

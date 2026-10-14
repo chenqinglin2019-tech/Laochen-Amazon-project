@@ -706,17 +706,6 @@ def browser_settings(config: Dict[str, Any]) -> Tuple[Path, str, str, int]:
     return user_data_dir, profile_directory, address, page_timeout
 
 
-def launch_with_diagnostics(command, user_data_dir):
-    stderr_path = user_data_dir / "lc-crawler-browser-stderr.log"
-    fd = os.open(str(stderr_path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-    with os.fdopen(fd, "a", encoding="utf-8") as stderr_log:
-        if not IS_WINDOWS:
-            os.chmod(stderr_path, 0o600)
-        kwargs = launch_popen_kwargs()
-        kwargs["stderr"] = stderr_log
-        return subprocess.Popen(command, **kwargs)
-
-
 def start_browser(config: Dict[str, Any]) -> None:
     if str(config.get("browser_backend") or "cdp").strip().lower() != "cdp":
         raise BrowserStartError("cdp-browser-start 只支持 browser_backend=cdp。", EXIT_CONFIG_ERROR)
@@ -769,7 +758,6 @@ def start_browser(config: Dict[str, Any]) -> None:
         f"--user-data-dir={user_data_dir}",
         f"--profile-directory={profile_directory}",
         "--no-first-run",
-        "--enable-logging=stderr",
         "--new-window",
         "about:blank",
     ]
@@ -777,9 +765,7 @@ def start_browser(config: Dict[str, Any]) -> None:
         command.insert(-2, f"--load-extension={extension_path}")
 
     try:
-        # Keep browser errors locally; DEVNULL erased evidence of renderer/GPU
-        # failures. Parent closes its handle; the detached child keeps its copy.
-        process = launch_with_diagnostics(command, user_data_dir)
+        process = subprocess.Popen(command, **launch_popen_kwargs())
     except OSError as exc:
         raise BrowserStartError(f"无法启动 Chrome（{chrome_binary}）：{exc}") from exc
     state = wait_for_launched_debugger(address, process)
@@ -814,6 +800,9 @@ def start_browser(config: Dict[str, Any]) -> None:
 
 
 def should_auto_start(config: Dict[str, Any]) -> bool:
+    if config.get("mode") in {"keyword_search", "storefront", "image_competitor"} or "products_file" in config:
+        # Never start a testing browser, even before rejecting an old front config.
+        return False
     backend = str(config.get("browser_backend") or "cdp").strip().lower()
     mode = str(config.get("browser_mode") or "launch").strip().lower()
     return backend == "cdp" and mode == "reuse"
@@ -863,16 +852,7 @@ def main() -> int:
         config = load_config(config_path)
         if args.if_needed and not should_auto_start(config):
             return 0
-        from safety_control import LocalSafetyController, SafetyPausedError
-        safety = LocalSafetyController()
-        try:
-            safety.acquire()
-            start_browser(config)
-        except SafetyPausedError as exc:
-            print(str(exc), file=sys.stderr)
-            return 50
-        finally:
-            safety.release()
+        start_browser(config)
     except BrowserStartError as exc:
         print(str(exc), file=sys.stderr)
         return exc.exit_code

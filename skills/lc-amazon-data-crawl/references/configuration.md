@@ -1,5 +1,7 @@
 # Lc amazon Data Crawl Configuration
 
+关键词和店铺自 2026-10-12 起使用 [插件采集流程](plugin-collection.md)。本文件的 CDP、专用 Profile、当前页卡片、配送地址设置、手动等待及页重试说明仅适用于类目与历史任务，不得用于新版关键词/店铺/找同款入口；找同款参见 [image-background.md](image-background.md)。业务筛选纯函数继续复用。
+
 ## Runner Layout
 
 `setup_runner.sh` creates this structure:
@@ -34,7 +36,7 @@ supported, and never overwrites either one.
   automatically starts it before real runs and `sellersprite-check` when the
   endpoint is not already available.
 
-The five production modes reject Selenium and AppleScript backend values during
+The legacy category mode rejects Selenium and AppleScript backend values during
 dry-run validation. Those backends cannot prove popup ownership strongly enough
 for the crawler's cleanup contract. `reuse` is the default mode for a newly
 created runner.
@@ -460,11 +462,7 @@ still keep unrelated card fields such as a standalone `FBA费用`, `配送时长
 and labelled card evidence are considered in that source order; any recognized
 canonical value is stronger than an unknown raw value.
 
-Storefront and keyword results prefer real Next links, then detect the single visible main-result Show more results control (never a product/cart/carousel/extension button). Each click has the same safety spacing/rest, foreground and risk checks as navigation. Confirm new main-result ASINs before extraction, retain only ASINs not visited in preceding batches, and apply the existing plugin gate. Later-arriving new cards join the current batch.
-
-A batch checkpoint stores `continuation_kind`, `load_more_root_url`, `load_more_step` and `seen_load_asins`; its page number gives the immutable commit a distinct key even when its URL does not change. The next batch stays at the front of the queue to reuse the owned tab. After a restart, replay from the root under existing traffic limits and exclude visited ASINs. Sorting/delivery reloads force reconstruction of the uncommitted batch. Disabled/busy/ambiguous controls and no-growth clicks must not certify natural completion.
-
-Pagination stops on: no Next or load-more control, the page/batch cap, an empty page, a repeated
+Pagination stops on: no next link, the page cap, an empty page, a repeated
 URL or repeated ASIN set, or a next link that is not a results page (product
 `/dp/` links, another host, or leaving the search list are rejected as
 `invalid_next_url`).
@@ -559,9 +557,10 @@ Important fields:
 
 - `mode`: `keyword_search`
 - `keywords_file`: CSV/XLSX path.
-- `max_pages_per_keyword`: page limit per keyword and sort.
+- `keyword_max_records`: 默认 2000；正整数或 `"all"`，同一关键词不同排序共用。
+- `entry_mode`: `current_tab` 或 `batch`；`browser_backend`: `opencli`。
 - `keyword_sort_orders`: one or more supported sort labels.
-- `include_sponsored`: false unless sponsored products should be included.
+- `include_sponsored`: 默认 true；设为 false 时导出必须包含可识别广告标识。
 
 ## Storefront Crawl
 
@@ -577,7 +576,9 @@ Important fields:
 - `mode`: `storefront`
 - `store_urls_file`: CSV/XLSX path.
 - `store_sort_orders`: one or more supported sort labels.
-- `store_page_limit`: integer 1–20, or explicit string `"all"` for all publicly reachable pages along real Next links or main-result Show more controls. Missing/null prompts for a choice; it never silently means unlimited. Natural end, page limit, and abnormal pagination are reported separately.
+- `store_max_records`: 默认 1008；正整数或 `"all"`，同一店铺不同排序共用。
+- `entry_mode`: `current_tab` 或 `batch`；`browser_backend`: `opencli`。
+- 旧分页参数与断点不能直接复用，参见 [迁移说明](plugin-collection.md)。
 
 ## BSR/New Releases Category URL (recursive)
 
@@ -621,82 +622,9 @@ Important fields:
 
 ## Image Competitor Crawl
 
-Use `config/amazon_image_competitors.json`.
+找同款已改为日常 Chrome + OpenCLI，在固定标签使用图片网址搜索。启动前必须确认退出卖家精灵登录，不使用旧 CDP／上传流程。配置、输入、数量、后台约束及旧任务迁移以 [image-background.md](image-background.md) 为准。
 
-Input file columns:
-
-- `ASIN`
-- `商品URL`
-- `主图URL`
-- `本地图片路径`
-
-If Amazon explicitly shows `Page Not Found` for a source product, the image
-crawler checks its canonical `/dp/ASIN` URL before skipping that source. A
-confirmed unavailable source is recorded with `processing_status` set to
-`source_unavailable`; the same-product count stays blank. This also applies
-when the Page Not Found appears inside the Find Similar path (source rows with a
-pre-filled `主图URL`); other transient Find Similar failures fall back to Lens
-upload with the already-downloaded image. Temporary page failures follow the
-operation mode's retry policy.
-
-Per-source behaviour:
-
-- Search order: SellerSprite Find Similar first when its control is present
-  (checked before any counted navigation), otherwise Amazon Lens upload. After
-  Find Similar fails for a source it is not retried for that source; after
-  three failures in a run it is switched off for the rest of the run.
-- Time budget per source: 8 minutes supervised, 15 minutes unattended
-  (throttle rests, manual waits and the paid model evaluation are not
-  counted). An overrun counts as a failed cycle.
-- Failed cycles (page retries exhausted, budget overrun, transient provider
-  errors after their built-in retries, image download problems) follow the
-  shared rule: first cycle → supervised exit 20 / unattended defer to the end;
-  second consecutive cycle → the source is skipped (`processing_status:
-  skipped`, blank count, listed in `skipped_items`). Authentication or
-  model-access errors from Ark stop the run with exit 30 and point to
-  `config/doubao_*.json`.
-- A `主图URL` that fails to download or is not an image
-  (`source_image_download_failed`) falls back to opening the product page to
-  read the main image.
-- A candidate image that the embedding API rejects is marked `unscorable`,
-  noted in the source record, and excluded from the prescreen; it does not fail
-  the source.
-- Duplicate input ASINs in count-only mode are processed once; the duplicates
-  copy the result and carry `duplicate_of_input_row`.
-- Ark 429 responses back off for at least 10 seconds (growing, honouring
-  `Retry-After`); a malformed Mini reply is re-asked at most once with a repair
-  instruction, and fenced/wrapped JSON is accepted.
-- The workbook is written on every exit that has at least one completed
-  source, not only after a clean finish.
-
-Important fields:
-
-- `marketplace`: for example `美国站`.
-- `result_mode`: `count_only` for competitor counts, `detail` for detailed rows.
-- `match_mode`: `cascade`, `embedding`, or `chat`. The recommended
-  same-product count workflow uses `cascade`; the two older modes preserve
-  their existing behavior.
-- `doubao_embedding_config_file`: default
-  `config/doubao_embedding_vision.json` for embedding prescreening.
-- `prescreen_min_similarity`: default `0.70`; visual-near-match threshold used
-  only by the cascade prescreen.
-- `prescreen_max_matches`: default `10`; the 11th match triggers early
-  exclusion.
-- `doubao_mini_config_file`: default
-  `config/doubao_same_product_mini.json` for the final same-product review.
-- `mini_batch_size`: default `6` candidates per Mini request.
-- `mini_retry_attempts`: default `3`, including retries for malformed
-  structured JSON.
-- `mini_retry_backoff_seconds`: default `1` (HTTP 429 always waits at least 10 seconds).
-- `vision_timeout`: HTTP timeout in seconds for each Doubao embedding/Mini call
-  (default 120).
-- Not used by `cascade`: `min_match_confidence`, `max_competitors_per_source`
-  and `vision_batch_size` (legacy `embedding`/`chat` modes only).
-  `max_candidates_per_source` (template 48; 24 when the key is absent) limits how many result cards are
-  read per source in every mode.
-
-`cascade` currently requires `result_mode: "count_only"`. Use the legacy
-`embedding` or `chat` modes when a detailed competitor workbook is required.
+默认 `entry_mode=batch`、`result_mode=count_only`、`match_mode=cascade`、每来源最多 48 个候选。支持 ASIN、商品链接、当前商品页或公开图片网址；仅本地图片须补充链接。detail 也可用 cascade，并保留来源状态页。模型阈值、最多 10 个粗筛命中和第 11 个命中早停的规则保持下文语义。
 
 Bind the user's own Volcengine Ark API key in both dedicated local files. The
 embedding file is:
@@ -823,54 +751,13 @@ and [Ark multimodal embeddings API](https://api.volcengine.com/api-docs/view?act
 Plugin waits, retries and manual-action windows are fixed by `operation_mode`
 (see "Safety Pause"). Supervised list pages wait 40 seconds for SellerSprite
 data, extended once to 80 seconds when new cards or required fields appear in
-the last 10 seconds; storefront pages and keyword load-more batches have a
-40-second total budget; unattended waits up to 180 seconds. For storefront and
-keyword long jobs, `amazon-front-supervise` resumes retryable exits at `resume_at`
-and applies bounded recovery after stopping the collection child. Only confirmed
-browser-wide failure permits restarting the exact dedicated browser identity;
-hidden pages or missing frame callbacks alone do not permit a browser restart.
+the last 10 seconds; storefront pages have a 40-second total budget;
+unattended waits up to 180 seconds. The workflow never refreshes the page or
+relaunches Chrome automatically.
 
 To judge whether a run is stuck, read `outputs/<job_id>/run_heartbeat.json`:
 `phase` `waiting` (with a future `until`), `retry_wait`, `plugin_wait` or
 `manual_wait` is a planned wait; otherwise an
 `updated_at` older than 5 minutes, or a dead `pid` without `phase: exited`, is a
-stall. Inspect the log, `state.json`, `supervisor.json`, the visible Chrome page
-and `failures.jsonl` before a manual restart. The supervisor's state is authoritative
-for recovery stops; do not start a second supervisor while one is active.
-
-
-## Storefront quality and runtime evidence (2026-10-04)
-
-Keep sellersprite_required=true when SellerSprite fields are requested, including when ignoring the Amazon buyer-login recommendation. Amazon buyer sign-in, SellerSprite sign-in and optional buyer-account recommendations are separate states.
-
-Verification, plugin risk and plugin login share extension-owned visible DOM evidence. Hidden challenge components, hidden ancestors, the body class and Amazon sprite navigation are excluded. Real visible challenges still pause; CONTINUE requests another check, never bypasses it. Verification stops append block_evidence.jsonl.
-
-Provider N/A / NA / -- / - / — / – / 暂无 / 无 / 无数据 map to explicit_unavailable; unloaded or absent fields map to missing; contaminated delivery text maps to invalid; ambiguous sales/keyword zeros remain zero_unconfirmed. English delivery dates come from delivery DOM nodes, not arbitrary card-text tails.
-
-Brand text parsing requires an explicit brand label and preserves line boundaries; a missing seller label must not make the brand consume plugin buttons or sales fields. Amazon delivery fallback excludes stock/shipping-status tails. Normal delivery and Prime delivery are distinct labels in both extraction and independent acceptance.
-
-Quality report schema 2 preserves legacy counts and adds raw and Excel-equivalent unique-ASIN coverage including subcategory ranks. Missing historical statuses are recomputed from values. Final summaries retain exit codes and add data_quality, scope_completion and delivery_ready. Complete delivery requires quality passed, requested scope completed, no skips and successful export; otherwise disclose missing fields and actual source reasons.
-
-Storefront readiness observes cards before scrolling and retains confirmed per-ASIN values and visible text within the same URL, page epoch and result batch. SellerSprite may recycle offscreen containers; their disappearance does not erase a completed observation. A visible loading indicator or missing required field invalidates that ASIN's cached observation, and navigation clears all observations. The original 40-second budget, 95% threshold and stable window still apply. Export reads the confirmed card text as well as the final DOM, so offscreen fields are not lost.
-
-For all pagination, ASIN-set fingerprints are carried in next tasks and atomic checkpoints to detect nonadjacent loops. Only a healthy result with neither Next nor a main-list load-more control, or a verified empty page, is natural completion; cycles, bad links and unexpected empty extraction are abnormal. A known busy/disabled load-more control remains pending when its label changes to “Loading…”. Record contract v3 prevents old incomplete jobs from silently mixing with corrected data; use a new job_id after this update.
-
-Live acceptance follow-up: search/storefront ASIN discovery is restricted to the main result list, excluding cart and recommendation widgets. Duplicate quick-view containers are selected by visibility. Revisit the first pending ASIN's plugin container or placeholder; only fall back to its Amazon result card when no plugin host exists. This triggers lazy loading below tall product content without changing the plugin deadline, navigation spacing or stability window. A precheck with all cards missing reports that fact rather than claiming product cards were injected.
-
-Front config diagnostic option save_page_evidence defaults false. With save_debug_snapshots=true, enabling it saves HTML and a screenshot for each verified product page; use it for sample acceptance. Failed plugin waits also save page evidence. Raw records retain bounded _source_card_text and _source_delivery_text for field audits. Empty records have quality status not_evaluated, never an automatic passed result.
-
-Storefront inspection and merging share the same URL/epoch/batch cache identity; confirmed offscreen country and BSR evidence must reach the record. With `save_page_evidence:true`, records also retain per-card `_source_plugin_html`. `verify-output` compares its country flag classes with `_source_country_flag_code`; a missing extracted flag is `not_evaluated`, and conflicting flags fail. Missing country source evidence is counted separately from other field checks.
-
-Sample evidence also retains each confirmed card's _source_plugin_html because the final page may have recycled all plugin containers. Country flags are captured in the same DOM observation as required values. Country text fallback requires an explicit label with a colon; product titles such as Country House are not country evidence.
-
-Diagnostic CDP connections must use connect_over_cdp(..., no_defaults=True), as the production browser driver does. Playwright's default connection enables focus emulation, so document.hidden / document.hasFocus() from such a connection do not prove real foreground visibility. Prefer the running crawler's readiness evidence and native browser UI; avoid attaching another diagnostic CDP session during collection. A rendered extension toolbar or one completed card does not establish page readiness. Distinguish missing product-card containers from missing values in an existing card, and record uncertain causes without declaring them fixed after one successful retry.
-
-Storefront readiness records page_render evidence from the same production page: visibility, focus, single queued requestAnimationFrame callbacks and callback age. It never changes readiness, timing, risk decisions or submission. No callback during a wait is evidence of a stalled or inactive render path, not by itself proof of a GPU crash or memory shortage. If the browser recovers before inspection and no hang dump was captured, preserve the uncertainty; reopening a window can recreate renderers without restarting Chrome's main or GPU process.
-
-After navigation spacing/rest, the front worker reactivates its dedicated owned tab before opening the next page. During a single-tab storefront wait, a hidden page with pending cards gets one reactivation attempt. Neither attempt resets the deadline or stability window. Subsequent visibility/frame observations determine whether rendering actually resumed; this does not activate arbitrary user tabs or relaunch Chrome.
-
-The same safe page_render evidence records reactivation_hidden / reactivation_focused immediately after that attempt, so a failed activation can be distinguished from a later transition back to hidden. These booleans never affect the original gate or extend its deadline.
-
-Debug snapshots also append safe readiness evidence to debug_snapshots/render_evidence.jsonl before attempting a screenshot, since screenshot capture itself can wait on a stalled compositor. A local macOS sample of the dedicated Chrome process stacks can preserve the failure before the worker closes; this is diagnostic only and must not close, relaunch or alter the browser automatically.
-
-New dedicated-browser launches preserve Chromium stderr in the profile's lc-crawler-browser-stderr.log (POSIX mode 600) with logging directed to stderr. Do not print raw browser logs into chat; inspect bounded error evidence and exclude sensitive URLs or credentials. A running browser keeps its existing redirection until the user completely exits it and the normal launcher starts a new process. Closing a macOS window alone may leave the browser/GPU processes alive; distinguish window recreation from full process restart during hang recovery.
+stall. Then inspect the log, `state.json`, the visible Chrome page and
+`failures.jsonl` before restarting anything.

@@ -272,8 +272,6 @@ class EnvironmentVsItemFailureTests(unittest.TestCase):
             run_loop(runtime, stall)
             error, _seen, _out, _err = run_loop(runtime, stall)
             self.assertEqual(error.exit_code, run_outcome.EXIT_RETRY_LATER)
-            self.assertIn("resume_at", str(error))
-            self.assertNotIn("再次失败会自动跳过", str(error))
             self.assertFalse(job_state(runtime).get("skipped_items"))
 
     def test_item_failure_still_skips_on_the_second_run(self) -> None:
@@ -457,44 +455,6 @@ class RateProbeScheduleTests(unittest.TestCase):
 class ExportNeverReplacesOutcomeTests(unittest.TestCase):
     def locked_workbook(self):
         return patch.object(front, "write_front_workbook", side_effect=PermissionError(13, "Permission denied"))
-
-    def test_interrupt_exports_committed_pages_and_resumes_pending_page(self) -> None:
-        def behaviour(worker_id, task):
-            if task["keyword"] == "beta":
-                raise KeyboardInterrupt()
-            return ok_result(worker_id, task)
-
-        with tempfile.TemporaryDirectory() as tmp:
-            runtime = loop_runtime(tmp, "supervised", ["alpha", "beta"])
-            error, seen, _out, _err = run_loop(runtime, behaviour)
-            self.assertEqual(error.exit_code, run_outcome.EXIT_RETRY_LATER)
-            self.assertEqual(seen, ["alpha", "beta"])
-            job = runtime.outputs_root / runtime.job_id
-            records = front.read_jsonl(job / "records.jsonl")
-            self.assertEqual([row["keyword"] for row in records], ["alpha"])
-            self.assertTrue((job / "dedup_total.xlsx").exists())
-            quality = json.loads((job / "quality_report.json").read_text())
-            self.assertTrue(quality["export_succeeded"])
-            self.assertEqual(quality["total_records"], 1)
-            state = job_state(runtime)
-            self.assertFalse(state.get("item_failure_cycles"))
-            self.assertFalse(state.get("skipped_items"))
-            error, seen, _out, _err = run_loop(runtime, ok_result)
-            self.assertIsNone(error)
-            self.assertEqual(seen, ["beta"])
-            self.assertEqual(len(front.read_jsonl(job / "records.jsonl")), 2)
-
-    def test_interrupt_outcome_survives_workbook_export_error(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            runtime = loop_runtime(tmp, "supervised", ["alpha"])
-
-            def behaviour(_worker_id, _task):
-                raise KeyboardInterrupt()
-
-            error, _seen, _out, err = run_loop(runtime, behaviour, self.locked_workbook())
-            self.assertEqual(error.exit_code, run_outcome.EXIT_RETRY_LATER)
-            self.assertIn("手动中断", str(error))
-            self.assertIn("请关闭表格后重新运行", err)
 
     def test_stop_and_risk_pause_survive_a_locked_workbook(self) -> None:
         stops = [

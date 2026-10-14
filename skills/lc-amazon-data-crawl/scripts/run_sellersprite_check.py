@@ -125,9 +125,6 @@ def emit_report(status: str, report: Optional[Dict[str, Any]] = None, *, message
     payload["status"] = status
     payload["exit_code"] = exit_code
     payload["next_action"] = next_action
-    pending = payload.get("pending_asins") or {}
-    if status == "timeout" and pending and all(reason == "plugin_box_missing" for reason in pending.values()):
-        payload["next_action"] = "未找到逐商品插件卡片；检查商品信息展示与视口加载，再运行预检。插件字段门禁保持启用。"
     if message:
         payload["message"] = message
     print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
@@ -146,6 +143,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raw = load_json(config_path)
         if not isinstance(raw, dict):
             raise UserFacingError("配置文件必须是 JSON 对象。")
+        if raw.get("mode") in {"keyword_search", "storefront"}:
+            from amazon_plugin_crawler import main as plugin_main
+            return plugin_main(["--config", str(config_path), "--check-only"])
+        if raw.get("mode") == "image_competitor" or "products_file" in raw:
+            from image_background_crawler import main as image_main
+            # Image diagnostics are local preflight only: never open a plugin login panel.
+            return image_main(["--config", str(config_path), "--dry-run"])
         runtime, target_url, current = resolve_check_target(raw, config_path)
     except (UserFacingError, OSError, ValueError, TypeError) as exc:
         return emit_report("config_error", message=str(exc))

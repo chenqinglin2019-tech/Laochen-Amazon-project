@@ -17,6 +17,7 @@ for script_file in "$SKILL_DIR"/scripts/*.py; do
   esac
   cp "$script_file" "$TARGET_DIR/scripts/"
 done
+cp "$SKILL_DIR/scripts/sellersprite_panel.js" "$SKILL_DIR/scripts/image_background_dom.js" "$TARGET_DIR/scripts/"
 cp "$SKILL_DIR/scripts/check_auth.sh" "$TARGET_DIR/scripts/check_auth.sh"
 # Windows entry points travel with every runner so it works on either OS.
 if [[ -f "$SKILL_DIR/scripts/check_auth.ps1" ]]; then
@@ -129,16 +130,16 @@ Usage:
   ./lc-amazon-data-crawl.sh doctor
   ./lc-amazon-data-crawl.sh amazon-front-dry-run [--config config/amazon_front_keyword_search.json] [--operation-mode supervised|unattended]
   ./lc-amazon-data-crawl.sh amazon-front-run [--config config/amazon_front_storefront.json] [--operation-mode supervised|unattended]
-  ./lc-amazon-data-crawl.sh amazon-front-supervise --config config/<job>.json
-  ./lc-amazon-data-crawl.sh verify-output --job outputs/<job> [--live]
   ./lc-amazon-data-crawl.sh category-rank-dry-run [--config config/category_rank_crawler.json]
   ./lc-amazon-data-crawl.sh category-rank-run [--config config/category_rank_crawler.json] [--operation-mode supervised|unattended]
   ./lc-amazon-data-crawl.sh image-competitor-dry-run [--config config/amazon_image_competitors.json]
-  ./lc-amazon-data-crawl.sh image-competitor-run [--config config/amazon_image_competitors.json] [--operation-mode supervised|unattended]
+  ./lc-amazon-data-crawl.sh image-competitor-run [--config config/amazon_image_competitors.json] [--confirm-sellersprite-logged-out] [--rebind] [--migrate-from-job OLD_ID]
   ./lc-amazon-data-crawl.sh cdp-browser-start --config <config-file>
   ./lc-amazon-data-crawl.sh sellersprite-check --config <config-file>
   ./lc-amazon-data-crawl.sh safety-status
   ./lc-amazon-data-crawl.sh safety-clear --confirm-reviewed
+  ./lc-amazon-data-crawl.sh plugin-export-review [--confirm-no-active-download]
+  # keyword/store recovery: amazon-front-run ... --rebind
 USAGE
 }
 
@@ -196,7 +197,7 @@ doctor() {
     echo "python: ok ($PYTHON_BIN)"
     "$PYTHON_BIN" -c "import playwright; print('playwright: ok')"
     "$PYTHON_BIN" -c "import selenium; print('selenium: ok')"
-    "$PYTHON_BIN" "$ROOT_DIR/scripts/start_cdp_browser.py" --diagnose
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/plugin_diagnostics.py"
   else
     echo "python: missing .venv"
   fi
@@ -323,16 +324,6 @@ case "$COMMAND" in
     auto_start_reuse_browser "config/amazon_front_crawler.json" "$@"
     exec "$PYTHON_BIN" "$ROOT_DIR/scripts/run_amazon_front_crawl.py" "$@"
     ;;
-  amazon-front-supervise)
-    require_cloud_auth
-    ensure_installed
-    exec "$PYTHON_BIN" "$ROOT_DIR/scripts/supervise_amazon_front.py" "$@"
-    ;;
-  verify-output)
-    require_cloud_auth
-    ensure_installed
-    exec "$PYTHON_BIN" "$ROOT_DIR/scripts/verify_front_output.py" "$@"
-    ;;
   category-rank-dry-run)
     require_cloud_auth
     ensure_installed
@@ -352,7 +343,7 @@ case "$COMMAND" in
   image-competitor-run)
     require_cloud_auth
     ensure_installed
-    auto_start_reuse_browser "config/amazon_image_competitors.json" "$@"
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/safety_cli.py" guard
     exec "$PYTHON_BIN" "$ROOT_DIR/scripts/run_amazon_image_competitor_crawl.py" "$@"
     ;;
   cdp-browser-start)
@@ -373,6 +364,11 @@ case "$COMMAND" in
   safety-clear)
     ensure_installed
     exec "$PYTHON_BIN" "$ROOT_DIR/scripts/safety_cli.py" clear "$@"
+    ;;
+  plugin-export-review)
+    require_cloud_auth
+    ensure_installed
+    exec "$PYTHON_BIN" "$ROOT_DIR/scripts/plugin_diagnostics.py" --review-export "$@"
     ;;
   help|-h|--help)
     usage

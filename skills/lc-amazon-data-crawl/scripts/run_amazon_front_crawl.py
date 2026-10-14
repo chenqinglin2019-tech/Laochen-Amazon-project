@@ -56,11 +56,15 @@ def build_command(
     no_resume: bool,
     resume_after_review: bool = False,
     operation_mode: str = "",
+    rebind: bool = False,
 ) -> List[str]:
+    raw = load_json(config_path)
+    crawler = (ROOT_DIR / "scripts" / "amazon_plugin_crawler.py"
+               if raw.get("mode") in {"keyword_search", "storefront"} else CRAWLER)
     command = [
         pick_python(),
         "-u",
-        str(CRAWLER),
+        str(crawler),
         "--config",
         str(config_path),
     ]
@@ -72,6 +76,8 @@ def build_command(
         command.append("--resume-after-review")
     if operation_mode:
         command.extend(("--operation-mode", operation_mode))
+    if rebind:
+        command.append("--rebind")
     return command
 
 
@@ -80,6 +86,7 @@ def main() -> int:
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="本地配置文件路径")
     parser.add_argument("--dry-run", action="store_true", help="只检查配置，不打开浏览器")
     parser.add_argument("--no-resume", action="store_true", help="忽略已有断点，重新开始任务")
+    parser.add_argument("--rebind", action="store_true", help="用户选好工作页后显式重新绑定 OpenCLI")
     parser.add_argument("--operation-mode", choices=("supervised", "unattended"))
     parser.add_argument(
         "--resume-after-review",
@@ -98,6 +105,7 @@ def main() -> int:
         args.no_resume,
         args.resume_after_review,
         args.operation_mode or "",
+        args.rebind,
     )
     print(f"配置文件：{config_path}", flush=True)
     return run_child(command)
