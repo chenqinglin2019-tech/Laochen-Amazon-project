@@ -1,5 +1,5 @@
 ﻿# Create or refresh a runner on Windows; mirrors scripts/setup_runner.sh.
-# Keeps existing configs, inputs, outputs and credentials. The runner gets both
+# Keeps task configs, inputs, outputs and model API keys; syncs verified cloud credentials. The runner gets both
 # launchers (lc-amazon-data-crawl.cmd/.ps1 and lc-amazon-data-crawl.sh).
 param([string]$TargetDir = '')
 
@@ -53,7 +53,7 @@ foreach ($scriptFile in @(Get-ChildItem -LiteralPath (Get-SkillPath @('scripts')
     if (@('migrate_unique_runner.py', 'package_skill.py') -contains $scriptFile.Name) { continue }
     Copy-Item -LiteralPath $scriptFile.FullName -Destination (Get-TargetPath @('scripts', $scriptFile.Name)) -Force
 }
-foreach ($authEntry in @('check_auth.sh', 'check_auth.ps1')) {
+foreach ($authEntry in @('check_auth.sh', 'check_auth.ps1', 'auth_python.ps1')) {
     $source = Get-SkillPath @('scripts', $authEntry)
     if (Test-Path -LiteralPath $source -PathType Leaf) {
         Copy-Item -LiteralPath $source -Destination (Get-TargetPath @('scripts', $authEntry)) -Force
@@ -92,10 +92,15 @@ foreach ($ignored in @('outputs/', 'chrome_profiles/', '_archive/', '.venv/', '.
 $runnerConfig = Get-TargetPath @('config.json')
 Copy-IfMissing (Get-SkillPath @('config.json')) $runnerConfig
 Protect-UserFile $runnerConfig
-$skillLocalConfig = Get-SkillPath @('config.local.json')
+# Synchronize the cloud credential verified above; retain task/model settings.
+try {
+    . (Get-SkillPath @('scripts', 'auth_python.ps1'))
+    $syncStatus = Invoke-AuthRuntime -Root $SkillDir -Arguments @('sync-runner', '--root', $SkillDir, '--target', $TargetDir)
+} catch { Write-Stderr '鉴权程序启动准备失败：无法启动云端凭据同步。'; exit 3 }
+if ($syncStatus -ne 0) { exit $syncStatus }
 $runnerLocalConfig = Get-TargetPath @('config.local.json')
-if (Test-Path -LiteralPath $skillLocalConfig -PathType Leaf) { Copy-IfMissing $skillLocalConfig $runnerLocalConfig }
-if (Test-Path -LiteralPath $runnerLocalConfig -PathType Leaf) { Protect-UserFile $runnerLocalConfig }
+Protect-UserFile $runnerConfig
+Protect-UserFile $runnerLocalConfig
 Add-IgnoreLine 'config.json'
 
 $skillTools = Get-SkillPath @('tools', 'bin')

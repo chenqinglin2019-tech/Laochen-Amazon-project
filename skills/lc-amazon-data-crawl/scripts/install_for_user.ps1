@@ -1,7 +1,7 @@
 ﻿# One-step Windows installer; mirrors scripts/install_for_user.sh.
 # The user runs it in their own terminal (the token prompt is hidden):
 #   powershell -ExecutionPolicy Bypass -File <skill>\scripts\install_for_user.ps1 [runner-dir]
-param([string]$TargetDir = '')
+param([string]$TargetDir = '', [switch]$ReplaceToken)
 
 $ErrorActionPreference = 'Stop'
 $SkillDir = Split-Path -Parent $PSScriptRoot
@@ -25,43 +25,9 @@ function Protect-UserFile([string]$Path) {
     } catch { }
 }
 
-function Test-ConfiguredToken([string]$Path) {
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
-    try {
-        $data = [IO.File]::ReadAllText($Path, [Text.Encoding]::UTF8) | ConvertFrom-Json
-    } catch {
-        return $false
-    }
-    if (-not ($data -is [System.Management.Automation.PSCustomObject])) { return $false }
-    $token = $data.backend_token
-    return ($null -ne $token -and -not [string]::IsNullOrWhiteSpace([string]$token))
-}
-
-# Atomic write: temp file in the same folder, restricted, then replace.
-function Write-LocalConfig([string]$Token) {
-    $config = [IO.File]::ReadAllText($PublicConfig, [Text.Encoding]::UTF8) | ConvertFrom-Json
-    if (-not ($config -is [System.Management.Automation.PSCustomObject]) -or [string]::IsNullOrWhiteSpace([string]$config.backend_url)) {
-        throw '公开配置缺少 backend_url。'
-    }
-    if ($config.PSObject.Properties.Name -contains 'backend_token') {
-        $config.backend_token = $Token
-    } else {
-        $config | Add-Member -NotePropertyName 'backend_token' -NotePropertyValue $Token
-    }
-    $json = ($config | ConvertTo-Json -Depth 20) + "`n"
-    $temporary = Join-Path $SkillDir ('.config.local.' + [Guid]::NewGuid().ToString('N') + '.tmp')
-    try {
-        [IO.File]::WriteAllText($temporary, $json, (New-Object System.Text.UTF8Encoding($false)))
-        Protect-UserFile $temporary
-        if (Test-Path -LiteralPath $LocalConfig -PathType Leaf) {
-            [IO.File]::Replace($temporary, $LocalConfig, $null)
-        } else {
-            [IO.File]::Move($temporary, $LocalConfig)
-        }
-        Protect-UserFile $LocalConfig
-    } finally {
-        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
-    }
+try { . (Join-Path $PSScriptRoot 'auth_python.ps1') } catch {
+    Write-Stderr '鉴权程序启动准备失败：共享鉴权入口缺失。'
+    exit 3
 }
 
 if (-not (Test-Path -LiteralPath $PublicConfig -PathType Leaf)) {
@@ -69,7 +35,13 @@ if (-not (Test-Path -LiteralPath $PublicConfig -PathType Leaf)) {
     exit 2
 }
 
-if (-not (Test-ConfiguredToken $LocalConfig) -and -not (Test-ConfiguredToken $PublicConfig)) {
+$configured = 1
+if (-not $ReplaceToken) {
+    try { $configured = Invoke-AuthRuntime -Root $SkillDir -Arguments @('configured', '--root', $SkillDir) }
+    catch { Write-Stderr '鉴权程序启动准备失败：请安装 Python 3.8+ 并使用完整 Skill。'; exit 3 }
+    if ($configured -ne 0 -and $configured -ne 1) { exit $configured }
+}
+if ($configured -eq 1) {
     $secureToken = $null
     $inputRedirected = $false
     try { $inputRedirected = [Console]::IsInputRedirected } catch { $inputRedirected = $false }
@@ -95,9 +67,12 @@ if (-not (Test-ConfiguredToken $LocalConfig) -and -not (Test-ConfiguredToken $Pu
         exit 2
     }
     try {
-        Write-LocalConfig $token.Trim()
+        $saved = Invoke-AuthRuntime -Root $SkillDir -Arguments @('configure', '--root', $SkillDir, '--token-stdin') -HasInput -InputText $token.Trim()
+        if ($saved -ne 0) { exit $saved }
+        Protect-UserFile $LocalConfig
+        Protect-UserFile $PublicConfig
     } catch {
-        Write-Stderr ('写入 config.local.json 失败，安装已停止：' + $_.Exception.Message)
+        Write-Stderr '写入 config.local.json 失败，安装已停止；请检查当前用户的目录权限。'
         exit 2
     } finally {
         $token = $null
@@ -111,6 +86,7 @@ $global:LASTEXITCODE = 3
 & ([IO.Path]::Combine($SkillDir, 'scripts', 'check_auth.ps1'))
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $env:LC_AUTH_VERIFIED_AT = [string][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+$env:LC_AUTH_VERIFIED_CONFIG = Get-AuthFingerprint $SkillDir
 
 $global:LASTEXITCODE = 3
 & ([IO.Path]::Combine($SkillDir, 'scripts', 'setup_runner.ps1')) $TargetDir

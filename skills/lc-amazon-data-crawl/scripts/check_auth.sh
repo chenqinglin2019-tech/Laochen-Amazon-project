@@ -7,16 +7,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # --allow-recent is passed ONLY by setup_runner.sh and the launcher's
 # install/doctor commands: inside one installation (install_for_user.sh), a
 # successful check exported as LC_AUTH_VERIFIED_AT (epoch seconds) is reused
-# for at most 10 minutes. Crawl commands never pass it and always re-check.
-if [[ "${1:-}" == "--allow-recent" ]]; then
-  verified_at="${LC_AUTH_VERIFIED_AT:-}"
-  if [[ "$verified_at" =~ ^[0-9]{1,12}$ ]]; then
-    auth_age=$(( $(date +%s) - 10#$verified_at ))
-    if (( auth_age >= 0 && auth_age <= 600 )); then
-      exit 0
-    fi
-  fi
-fi
+# for at most 10 minutes and only for the same credential fingerprint.
+# Crawl commands never pass it and always re-check.
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m | tr '[:upper:]' '[:lower:]')"
 ext=""
@@ -74,21 +66,26 @@ if [[ ! -x "$auth_bin" ]]; then
   fi
 fi
 
-# A published Skill keeps config.json empty. Each installation stores its own
-# token in the ignored local override, while existing installs still work.
-auth_config="$ROOT_DIR/config.json"
-if [[ -f "$ROOT_DIR/config.local.json" ]]; then
-  auth_config="$ROOT_DIR/config.local.json"
-fi
-
-# Keep credentials and backend responses out of terminal output.
-if "$auth_bin" --config "$auth_config" >/dev/null 2>&1; then
-  exit 0
-else
-  auth_status=$?
-  if [[ "$auth_status" -eq 126 || "$auth_status" -eq 127 || "$auth_status" -ge 128 ]]; then
-    startup_failed "鉴权程序无法执行或被系统终止（退出码 $auth_status）"
+# Credential selection, conflict detection and safe backend diagnostics are
+# shared by both platforms. Python is already required by the runner installer.
+auth_python=""
+for candidate in python3 python "$ROOT_DIR/.venv-scrapling/bin/python" "$ROOT_DIR/.venv/bin/python"; do
+  if command -v "$candidate" >/dev/null 2>&1 && \
+     "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 8))' >/dev/null 2>&1; then
+    auth_python="$candidate"
+    break
   fi
-  echo "云端鉴权未通过，本轮不继续执行。" >&2
-  exit 4
+done
+if [[ -z "$auth_python" ]]; then
+  startup_failed "没有找到 Python 3.8+；请安装 Python 后重试"
+fi
+if [[ ! -f "$ROOT_DIR/scripts/auth_runtime.py" ]]; then
+  startup_failed "共享鉴权入口缺失，请更新完整 Skill 或 runner"
+fi
+# config.local.json is selected per value, never merely because it exists.
+# Raw output and credentials are captured inside auth_runtime.py, not echoed.
+if [[ "${1:-}" == "--allow-recent" ]]; then
+  "$auth_python" "$ROOT_DIR/scripts/auth_runtime.py" check --root "$ROOT_DIR" --binary "$auth_bin" --allow-recent
+else
+  "$auth_python" "$ROOT_DIR/scripts/auth_runtime.py" check --root "$ROOT_DIR" --binary "$auth_bin"
 fi

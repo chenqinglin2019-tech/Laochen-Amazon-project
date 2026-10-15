@@ -35,6 +35,7 @@ for entry in (SCRIPTS_DIR, TESTS_DIR):
     if str(entry) not in sys.path:
         sys.path.insert(0, str(entry))
 
+import auth_runtime  # noqa: E402
 import browser_runtime  # noqa: E402
 import package_skill  # noqa: E402
 import start_cdp_browser as scb  # noqa: E402
@@ -673,7 +674,7 @@ class BashRunnerTests(unittest.TestCase):
             self.assertNotIn("migrate_unique_runner", path.read_text(encoding="utf-8"), path.name)
 
     def test_install_for_user_calls_cloud_auth_once(self) -> None:
-        (self.skill / "config.json").write_text(json.dumps({"backend_url": "fixture", "backend_token": "t"}), encoding="utf-8")
+        (self.skill / "config.json").write_text(json.dumps({"backend_url": "https://example.invalid", "backend_token": "t"}), encoding="utf-8")
         counting_auth(self.skill / "tools" / "bin" / auth_binary_name(), self.counter)
         env = dict(self.env, LC_AMAZON_INSTALL_SETUP_ONLY="1")
         subprocess.run(["bash", str(self.skill / "scripts" / "install_for_user.sh"), str(self.runner)],
@@ -683,7 +684,8 @@ class BashRunnerTests(unittest.TestCase):
     def test_recent_auth_is_honored_only_by_setup_install_doctor(self) -> None:
         self.setup_runner()
         counting_auth(self.runner / "tools" / "bin" / auth_binary_name(), self.counter)
-        fresh = dict(self.env, LC_AUTH_VERIFIED_AT=str(int(time.time())))
+        fresh = dict(self.env, LC_AUTH_VERIFIED_AT=str(int(time.time())),
+                     LC_AUTH_VERIFIED_CONFIG=auth_runtime.credential_fingerprint(self.runner))
         launcher = str(self.runner / "lc-amazon-data-crawl.sh")
         subprocess.run(["bash", launcher, "doctor"], env=fresh, text=True, capture_output=True, check=True)
         self.assertEqual(self.auth_calls(), 0)
@@ -789,27 +791,26 @@ class WindowsStaticTests(unittest.TestCase):
         ps1 = (SCRIPTS_DIR / "check_auth.ps1").read_text(encoding="utf-8-sig")
         sh = (SCRIPTS_DIR / "check_auth.sh").read_text(encoding="utf-8")
         self.assertIn(WINDOWS_AUTH, ps1)
-        for message in (AUTH_DENIED, "云端鉴权工具缺失，本轮不继续执行。", "鉴权程序启动准备失败："):
-            self.assertIn(message, ps1)
-            self.assertIn(message.rstrip("："), sh)
-        for code in ("exit 2", "exit 3", "exit 4"):
-            self.assertIn(code, ps1)
-        self.assertIn("config.local.json", ps1)
+        for entry in (ps1, sh):
+            self.assertTrue("auth_runtime.py" in entry or "auth_python.ps1" in entry)
+            self.assertIn("config.local.json", entry)
+            self.assertIn("鉴权程序启动准备失败", entry)
         self.assertIn("LC_AUTH_VERIFIED_AT", ps1)
-        self.assertIn("-le 600", ps1)
+        self.assertIn("age <= 600", (SCRIPTS_DIR / "auth_runtime.py").read_text())
 
     def test_install_ps1_hides_token_and_writes_atomically(self) -> None:
         text = (SCRIPTS_DIR / "install_for_user.ps1").read_text(encoding="utf-8-sig")
+        runtime = (SCRIPTS_DIR / "auth_runtime.py").read_text(encoding="utf-8")
         self.assertIn("Read-Host -AsSecureString", text)
         self.assertIn("ZeroFreeBSTR", text)
-        self.assertIn("[IO.File]::Replace($temporary, $LocalConfig, $null)", text)
+        self.assertIn("os.replace(temporary, path)", runtime)
         self.assertIn("Protect-UserFile", text)
         self.assertIn("LC_AUTH_VERIFIED_AT", text)
         self.assertNotIn("Write-Output $token", text)
 
     def test_setup_ps1_copies_both_launchers(self) -> None:
         text = (SCRIPTS_DIR / "setup_runner.ps1").read_text(encoding="utf-8-sig")
-        for needle in ("'check_auth.sh', 'check_auth.ps1'", "lc-amazon-data-crawl.sh", "'lc-amazon-data-crawl.ps1', 'lc-amazon-data-crawl.cmd'",
+        for needle in ("'check_auth.sh', 'check_auth.ps1', 'auth_python.ps1'", "lc-amazon-data-crawl.sh", "'lc-amazon-data-crawl.ps1', 'lc-amazon-data-crawl.cmd'",
                        "'migrate_unique_runner.py', 'package_skill.py'", "migrate_operation_config.py", "-AllowRecent"):
             self.assertIn(needle, text)
 
@@ -845,9 +846,11 @@ class WindowsBehaviourTests(unittest.TestCase):
         counting_auth(self.skill / "tools" / "bin" / WINDOWS_AUTH, self.counter, status=1)
         result = self.ps(script)
         self.assertEqual(result.returncode, 4)
-        self.assertEqual(result.stderr.strip(), AUTH_DENIED)
+        self.assertEqual(result.stderr.splitlines()[0], AUTH_DENIED)
+        self.assertEqual(len(result.stderr.splitlines()), 2)
         before = self.auth_calls()
-        fresh = dict(self.env, LC_AUTH_VERIFIED_AT=str(int(time.time())))
+        fresh = dict(self.env, LC_AUTH_VERIFIED_AT=str(int(time.time())),
+                     LC_AUTH_VERIFIED_CONFIG=auth_runtime.credential_fingerprint(self.skill))
         self.assertEqual(self.ps(script, "-AllowRecent", env=fresh).returncode, 0)
         self.assertEqual(self.auth_calls(), before)
         self.assertEqual(self.ps(script, env=fresh).returncode, 4)
@@ -881,7 +884,8 @@ class WindowsBehaviourTests(unittest.TestCase):
         counting_auth(self.skill / "tools" / "bin" / WINDOWS_AUTH, self.counter, status=1)
         result = self.ps(self.skill / "scripts" / "setup_runner.ps1", str(self.runner))
         self.assertEqual(result.returncode, 4)
-        self.assertEqual(result.stderr.strip(), AUTH_DENIED)
+        self.assertEqual(result.stderr.splitlines()[0], AUTH_DENIED)
+        self.assertEqual(len(result.stderr.splitlines()), 2)
         self.assertEqual(sorted(p.name for p in self.runner.iterdir()), [".gitignore"])
 
     def make_runner(self) -> Path:
@@ -908,7 +912,8 @@ class WindowsBehaviourTests(unittest.TestCase):
             with self.subTest(command=command):
                 result = self.ps(self.runner / "lc-amazon-data-crawl.ps1", command)
                 self.assertEqual(result.returncode, 4, result.stderr)
-                self.assertEqual(result.stderr.strip(), AUTH_DENIED)
+                self.assertEqual(result.stderr.splitlines()[0], AUTH_DENIED)
+                self.assertEqual(len(result.stderr.splitlines()), 2)
                 self.assertFalse(log.exists())
 
     def test_guard_start_run_order_and_exit_codes(self) -> None:
@@ -927,8 +932,10 @@ class WindowsBehaviourTests(unittest.TestCase):
         self.assertEqual(len(log.read_text().splitlines()), 1)
         log.unlink()
         self.assertEqual(self.ps(launcher, "image-competitor-run", "--config=config/y.json",
-                                 env=dict(self.env, FAKE_START_EXIT="30")).returncode, 30)
-        self.assertTrue(log.read_text().splitlines()[1].endswith("--if-needed --config config/y.json"))
+                                 env=dict(self.env, FAKE_START_EXIT="30")).returncode, 0)
+        self.assertEqual(len(log.read_text().splitlines()), 2)
+        self.assertTrue(log.read_text().splitlines()[1].endswith("run_amazon_image_competitor_crawl.py --config=config/y.json"))
+        self.assertNotIn("start_cdp_browser", log.read_text())
         log.unlink()
         for code in ("10", "20", "40"):
             self.assertEqual(self.ps(launcher, "category-rank-dry-run", env=dict(self.env, FAKE_RUN_EXIT=code)).returncode, int(code))
@@ -953,7 +960,8 @@ class WindowsBehaviourTests(unittest.TestCase):
         (self.runner / "config" / "doubao_embedding_vision.json").write_text(json.dumps({
             "api_key": "secret-key-not-logged", "model": "m", "base_url": "u", "api_path": "p", "encoding_format": "float"}),
             encoding="utf-8")
-        fresh = dict(self.env, LC_AUTH_VERIFIED_AT=str(int(time.time())))
+        fresh = dict(self.env, LC_AUTH_VERIFIED_AT=str(int(time.time())),
+                     LC_AUTH_VERIFIED_CONFIG=auth_runtime.credential_fingerprint(self.runner))
         result = self.ps(self.runner / "lc-amazon-data-crawl.ps1", "doctor", env=fresh)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.auth_calls(), 1)  # only the setup call; doctor honored the recent check
@@ -963,7 +971,8 @@ class WindowsBehaviourTests(unittest.TestCase):
         self.assertNotIn("secret-key-not-logged", result.stdout + result.stderr)
 
     def test_installer_uses_one_auth_call_and_existing_token(self) -> None:
-        (self.skill / "config.local.json").write_text(json.dumps({"backend_url": "fixture", "backend_token": "tok"}), encoding="utf-8")
+        (self.skill / "config.json").write_text(json.dumps({"backend_url": "https://example.invalid", "backend_token": ""}), encoding="utf-8")
+        (self.skill / "config.local.json").write_text(json.dumps({"backend_url": "https://example.invalid", "backend_token": "tok"}), encoding="utf-8")
         env = dict(self.env, LC_AMAZON_INSTALL_SETUP_ONLY="1")
         result = self.ps(self.skill / "scripts" / "install_for_user.ps1", str(self.runner), env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -972,7 +981,7 @@ class WindowsBehaviourTests(unittest.TestCase):
         self.assertEqual(json.loads((self.runner / "config.local.json").read_text(encoding="utf-8"))["backend_token"], "tok")
 
     def test_installer_refuses_without_token_input(self) -> None:
-        (self.skill / "config.json").write_text(json.dumps({"backend_url": "fixture", "backend_token": ""}), encoding="utf-8")
+        (self.skill / "config.json").write_text(json.dumps({"backend_url": "https://example.invalid", "backend_token": ""}), encoding="utf-8")
         env = dict(self.env, LC_AMAZON_INSTALL_SETUP_ONLY="1")
         script = self.skill / "scripts" / "install_for_user.ps1"
         noninteractive = self.ps(script, str(self.runner), env=env)
@@ -993,7 +1002,7 @@ class WindowsBehaviourTests(unittest.TestCase):
         import pty
         import select
 
-        (self.skill / "config.json").write_text(json.dumps({"backend_url": "fixture", "backend_token": ""}), encoding="utf-8")
+        (self.skill / "config.json").write_text(json.dumps({"backend_url": "https://example.invalid", "backend_token": ""}), encoding="utf-8")
         master, slave = pty.openpty()
         process = subprocess.Popen(
             [PWSH, "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
