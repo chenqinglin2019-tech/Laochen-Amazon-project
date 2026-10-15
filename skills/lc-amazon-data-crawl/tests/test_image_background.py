@@ -136,7 +136,7 @@ class BackgroundTests(unittest.TestCase):
         rt = self.runtime()
         rt.safety = MagicMock()
         state, clock, bridge = State(), Clock(), Bridge(snapshots)
-        page = bg.BackgroundPage(rt, state, bridge=bridge, clock=clock.now, sleep=clock.sleep)
+        page = bg.BackgroundPage(rt, state, bridge=bridge, clock=clock.now, sleep=clock.sleep, wall_clock=clock.now)
         return page, bridge, state, clock
 
     def test_closed_changed_refreshed_tabs_stop(self):
@@ -240,10 +240,15 @@ class BackgroundTests(unittest.TestCase):
     def test_transient_read_recovery_is_bounded_and_writes_never_replayed(self):
         page, bridge, _, clock = self.page([snapshot()])
         page.attach()
-        for action, count in [('snapshot', 3), ('scroll', 1), ('navigate', 1), ('mark', 1)]:
+        from opencli_read_recovery import BridgeReadRecoveryExhausted
+        with patch.object(bridge, 'dom', side_effect=bg.BridgeTransientError('cdp_timeout')) as dom:
+            with self.assertRaises(BridgeReadRecoveryExhausted): page.raw()
+            self.assertEqual(clock.t, 1800)
+            self.assertGreater(dom.call_count, 3)
+        for action in ['scroll', 'navigate', 'mark']:
             with patch.object(bridge, 'dom', side_effect=bg.BridgeTransientError('cdp_timeout')) as dom:
                 with self.assertRaises(bg.BridgeTransientError): page.raw(action)
-                self.assertEqual(dom.call_count, count)
+                self.assertEqual(dom.call_count, 1)
 
     def test_coded_read_retry_does_not_ignore_tab_closure_or_document_change(self):
         page, bridge, _, _ = self.page([snapshot()])
@@ -774,7 +779,7 @@ class BackgroundTests(unittest.TestCase):
         self.assertEqual(caught.exception.exit_code, 20)
         self.assertEqual(bridge.actions.count('navigate'), 1)
         self.assertIn('pending_navigation_reload', state.data)
-        restarted = bg.BackgroundPage(page.runtime, state, bridge=bridge, clock=clock.now, sleep=clock.sleep)
+        restarted = bg.BackgroundPage(page.runtime, state, bridge=bridge, clock=clock.now, sleep=clock.sleep, wall_clock=clock.now)
         with self.assertRaises(run_outcome.CrawlStop) as caught: restarted.attach()
         self.assertEqual(caught.exception.exit_code, 20)
         self.assertEqual(bridge.actions.count('navigate'), 1)

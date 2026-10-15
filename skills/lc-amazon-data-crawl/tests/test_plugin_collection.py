@@ -46,11 +46,14 @@ class FakeSafety:
 
 class FakeBridge:
     def __init__(self, count=16, increments=None):
+        self.session, self.target = "test", "fixed"
         self.count = count
         self.increments = list(increments or [])
         self.document_id = "doc"
         self.actions = []
         self.url = "https://www.amazon.com/s?me=SELLER1"
+    def validate_target(self):
+        return {"page": self.target, "url": self.url}
     def panel(self, action="snapshot", **kwargs):
         if action == "snapshot":
             return {"count": self.count, "busy": False, "panel": True, "more": bool(self.increments),

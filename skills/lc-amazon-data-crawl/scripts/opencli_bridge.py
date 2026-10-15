@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -45,6 +46,16 @@ class BridgeTransientError(CrawlStop):
         super().__init__(f"OpenCLI 暂时无法读取原工作标签（{code}）。", exit_code=30)
 
 
+TRANSIENT_CODES = {"client_timeout", "target_navigated", "detached_mid_command", "cdp_timeout", "attach_failed"}
+
+
+def raise_transient(result):
+    error = result.get("error") if isinstance(result, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+    if isinstance(code, str) and code in TRANSIENT_CODES:
+        raise BridgeTransientError(code)
+
+
 class OpenCliBridge:
     def __init__(self, session: str, target: str = "", *, command: Optional[list[str]] = None):
         self.session = session
@@ -62,6 +73,9 @@ class OpenCliBridge:
         if targeted:
             argv += ["--tab", self.target]
         env = dict(os.environ, OPENCLI_WINDOW="background", NO_COLOR="1")
+        deadline = getattr(self, "read_deadline", None)
+        if deadline is not None:
+            timeout = min(timeout, max(0.001, deadline - time.monotonic()))
         try:
             process = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8",
                                      env=env, timeout=timeout, check=False)
@@ -71,6 +85,7 @@ class OpenCliBridge:
         except (OSError, ValueError) as exc:
             raise needs_human("OpenCLI 连接中断或响应无法识别；未自动重新绑定、建页或切换窗口。") from exc
         if process.returncode or (isinstance(result, dict) and result.get("error")):
+            raise_transient(result)
             if allow_error:
                 return result
             # Avoid printing arbitrary page content / provider responses as an error.
@@ -112,8 +127,7 @@ class OpenCliBridge:
             error = result.get("error") if isinstance(result, dict) else None
             known = {"工作页网址已变化", "工作页已刷新或被替换", "卖家精灵容器不唯一"}
             code = error.get("code", "") if isinstance(error, dict) else ""
-            if code in {"target_navigated", "detached_mid_command", "cdp_timeout", "attach_failed"}:
-                raise BridgeTransientError(code)
+            raise_transient(result)
             safe_code = code if isinstance(code, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", code) else ""
             detail = error if isinstance(error, str) and error in known else (safe_code or "Bridge 返回值异常")
             stop = needs_human(f"工作标签 DOM 检查失败（{detail}，action={arguments.get('action', 'unknown')}）；请核对原页面，未切换或重新绑定其他标签。")
@@ -132,7 +146,11 @@ class OpenCliBridge:
         if not isinstance(result, dict):
             raise needs_human("卖家精灵 DOM 返回值无法识别。")
         if result.get("error"):
-            raise needs_human("卖家精灵界面检查失败：" + str(result["error"]))
+            raise_transient(result)
+            error = result["error"]
+            known = {"工作页网址已变化", "工作页已刷新或被替换", "卖家精灵容器不唯一"}
+            detail = error if isinstance(error, str) and error in known else "Bridge 返回值异常"
+            raise needs_human(f"卖家精灵界面检查失败：{detail}（action={action}）")
         return result
 
     def navigate(self, url: str) -> None:

@@ -2,7 +2,7 @@
 name: lc-amazon-data-crawl
 description: 采集 Amazon 关键词搜索、类目榜单、店铺和图片相似竞品数据，并可结合卖家精灵字段与筛选条件导出。
 metadata:
-  last_updated: 2026-10-14
+  last_updated: 2026-10-15
 ---
 
 # 易逊-亚马逊数据采集
@@ -85,7 +85,7 @@ options for *-run: --operation-mode supervised|unattended, --resume-after-review
 ## 关键词与店铺约束
 
 - 默认每店铺 `store_max_records: 1008`、每关键词 `keyword_max_records: 2000`。明确数量覆盖默认；明确全部才设 `"all"`。先按导出顺序截取，再去重筛选，不补抓。
-- `entry_mode=current_tab|batch`；batch 也只导航同一绑定标签。标签关闭、连接断开、网址被改就停；人工选好替代页后用 `--rebind`，未完成目标重采并替换快照。
+- `entry_mode=current_tab|batch`；batch 也只导航同一绑定标签。明确标签关闭、网址或文档被改就停；读取超时按下述只读恢复规则处理；人工选好替代页后用 `--rebind`，未完成目标重采并替换快照。
 - 每轮一次加载，等上一轮完成、数据稳定、间隔与休息到期。远程操作共享下述持久化调度，跨来源与重启不清零；DOM 每 2 秒只读检查。
 - 店铺商品页在 Amazon 主搜索区明确显示无搜索结果且连续稳定 10 秒时，视为店铺消失或暂无可售商品，记录 `store_no_results` 和 `skipped_items`，直接跳过并继续下一店铺；不操作缺失的插件控件，不导出空文件。验证码、加载超时、仅插件无数据不能据此跳过。
 - 默认结束时导出一次；每 100 次成功加载做中间导出，恰好结束合并最终导出。全局导出间隔至少 60 秒；未确认下载不得重点击，明确失败只重试一次。
@@ -103,13 +103,19 @@ options for *-run: --operation-mode supervised|unattended, --resume-after-review
 - 模型优先使用图片网址，必要时仅在内存转码并有界缓存复用；已有候选和成功模型结果必须复用。普通阶段失败自动恢复一次，连续失败留空并继续后续来源；风险、身份变化与凭据错误不自动重试。未完成导航先核对原标签；已确认到达目标且有主图／候选但文档持续加载时，按原节流规则仅重新加载一次，预算跨重启保留；未知导航不重放，标签丢失仍需人工 `--rebind`。同文档且 DOM ASIN 一致的商品页允许 `th=1` 规范化改写；身份校验异常保存脱敏差异，详见 image-background.md。
 - 旧任务用新配置、新 job_id 和 `--migrate-from-job` 显式迁移，原输出保持不动。不得把旧上传／CDP 配置静默继续执行。
 
+## OpenCLI 只读自动恢复
+
+关键词、店铺、找同款共用 `scripts/opencli_read_recovery.py`。已绑定原标签的读取暂态故障先等 2、2 秒，再等 30、60、120 秒，之后每 300 秒复核；从首次失败调用开始累计最多 30 分钟，含命令耗时，跨进程保留期限。只重试原标签状态、公开 DOM 快照和下载状态读取，不自动重放加载、导出、导航、滚动或绑定。具体保护、例外和测试见 [references/opencli-read-recovery.md](references/opencli-read-recovery.md)。
+
+恢复时复核原标签身份及页面风险；断线时间不消耗业务观察预算，连续稳定计时重新开始。现有判断、远程操作计数、间隔与休息不变。到期返回 `retry_later`（20），保留当前来源与待确认操作，不跳过、不写零、不转成普通加载重试。人工修复后重跑原命令可做只读复核，失败即退出，不重新获得 30 分钟预算。
+
 ## Supervising a run
 
 Check every few minutes, not continuously. Read `outputs/<job_id>/run_heartbeat.json`
 (`pid`, `phase`, `updated_at`, optional `until`, `detail`) and the log tail.
 
 - `phase` `waiting` (rest/cooldown with a future `until`: 插件 1–1.5 / 2–3 min；旧类目 3–5 / 10–12 / 15–20 min), `retry_wait`,
-  `plugin_wait` or `manual_wait` are planned waits. Do **not** report them as a stall or restart anything.
+  `plugin_wait`, `bridge_retry_wait` or `manual_wait` are planned waits. Do **not** report them as a stall or restart anything.
 - Healthy otherwise: `updated_at` changed within the last 5 minutes.
 - Stalled: the pid is gone without `phase: exited`, or no update for > 5 minutes outside a wait.
   Then read the log tail and `state.json`, tell the user what the page is doing, and only then

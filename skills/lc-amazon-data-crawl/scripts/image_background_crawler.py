@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, quote, urlsplit, urlunsplit
 import requests
 import amazon_image_competitor_crawler as core
 from opencli_bridge import OpenCliBridge, BridgeTransientError, cli_command
+from opencli_read_recovery import ReadRecovery
 from run_outcome import config_error, needs_human, retry_later, _atomic_write_json
 from safety_control import LocalSafetyController, RiskSignal, classify_amazon_risk, classify_sellersprite_risk
 
@@ -233,7 +234,7 @@ def confirm_logout(confirmed: bool, operation_mode: str) -> str:
 
 
 class BackgroundPage:
-    def __init__(self, runtime, state, *, bridge=None, clock=time.monotonic, sleep=time.sleep):
+    def __init__(self, runtime, state, *, bridge=None, clock=time.monotonic, sleep=time.sleep, wall_clock=time.time):
         self.runtime, self.state = runtime, state
         self.clock, self.sleep = clock, sleep
         binding = state.data.get('browser') or {}
@@ -241,37 +242,43 @@ class BackgroundPage:
         self.bridge.target = binding.get('target', '')
         self.url, self.document = binding.get('url', ''), binding.get('document_id', '')
         self.attached = False
+        self.read_recovery = ReadRecovery(self.bridge, state.data, state.flush, runtime.safety,
+                                          now=wall_clock, sleep=sleep)
+
+    def observation_clock(self):
+        return self.clock() - self.read_recovery.blocked_seconds
+
+    def validate_target(self):
+        return self.read_recovery.read('target', self.bridge.validate_target)
 
     def raw(self, action='snapshot', *, guarded=True, **kwargs):
         arguments = dict(action=action, expectedUrl=self.url if guarded else '',
                          documentId=self.document if guarded else '', **kwargs)
-        # Only reads can be repeated: a timed-out write may already have executed.
-        for attempt in range(3):
-            try:
-                result = self.bridge.dom(DOM, arguments)
-                if guarded and action == 'snapshot' and result.get('adopted_url_rewrite'):
-                    if not self.document or result.get('document_id') != self.document:
-                        raise needs_human('页面文档身份已变化，不能采用改写后的网址。')
-                    self.check_host(result['url'])
-                    self.health(result)
-                    self.url = result['url']
-                    self.save_binding()
-                    print('已核对同一文档与同一目标，采用页面规范化后的网址。', flush=True)
-                return result
-            except BridgeTransientError as exc:
-                if action != 'snapshot' or attempt == 2:
-                    raise
-                print(f'OpenCLI 原标签只读恢复：{exc.bridge_code}，第 {attempt + 1}/2 次复核。', flush=True)
-                self.wait('原标签只读复核：' + exc.bridge_code)
-                self.bridge.validate_target()
-            except core.run_outcome.CrawlStop as exc:
-                identity = getattr(exc, 'page_identity', None)
-                if isinstance(identity, dict):
-                    self.state.data['last_page_identity_error'] = dict(
-                        identity, time=core.now_iso(), action=action, target=self.bridge.target)
-                    self.state.flush()
-                    print('页面身份校验差异已保存到 state.json: last_page_identity_error。', flush=True)
-                raise
+        # Keep writes outside read recovery; unknown replies must never replay them.
+        def read_once():
+            result = self.bridge.dom(DOM, arguments)
+            if guarded and result.get('adopted_url_rewrite'):
+                if not self.document or result.get('document_id') != self.document:
+                    raise needs_human('页面文档身份已变化，不能采用改写后的网址。')
+                self.check_host(result['url'])
+                self.health(result)
+                self.url = result['url']
+                self.save_binding()
+                print('已核对同一文档与同一目标，采用页面规范化后的网址。', flush=True)
+            self.health(result)
+            return result
+        try:
+            if action == 'snapshot':
+                return self.read_recovery.read('image_snapshot', read_once)
+            return self.bridge.dom(DOM, arguments)
+        except core.run_outcome.CrawlStop as exc:
+            identity = getattr(exc, 'page_identity', None)
+            if isinstance(identity, dict):
+                self.state.data['last_page_identity_error'] = dict(
+                    identity, time=core.now_iso(), action=action, target=self.bridge.target)
+                self.state.flush()
+                print('页面身份校验差异已保存到 state.json: last_page_identity_error。', flush=True)
+            raise
 
     def save_binding(self):
         self.state.data['browser'] = dict(session=self.bridge.session, target=self.bridge.target, url=self.url, document_id=self.document)
@@ -283,10 +290,13 @@ class BackgroundPage:
         if self.state.data.get('pending_navigation') and not self.bridge.target and not self.runtime.rebind:
             raise needs_human('导航断点缺少原工作标签身份，请人工核对后 --rebind。')
         if not self.bridge.target or self.runtime.rebind:
+            if self.runtime.rebind:
+                self.state.data.pop(ReadRecovery.KEY, None)
             self.bridge.bind()
             self.url, self.document = '', ''
             self.runtime.rebind = False
-        self.bridge.validate_target()
+            self.save_binding()
+        self.validate_target()
         if self.state.data.get('pending_navigation'):
             self.recover_navigation()
         snap = self.raw()
@@ -320,7 +330,7 @@ class BackgroundPage:
         self.document = mark['document_id']
         self.save_binding()
         self.runtime.safety.before_remote_action('已确认目标页面加载超时，重新加载一次')
-        self.bridge.validate_target()
+        self.validate_target()
         latest = self.raw()
         self.health(latest)
         if latest.get('ready'):
@@ -339,9 +349,9 @@ class BackgroundPage:
     def recover_navigation(self):
         """Resolve intent on the original target; reload only a known destination."""
         destination = self.state.data['pending_navigation']
-        deadline = self.clock() + self.runtime.page_timeout
+        deadline = self.observation_clock() + self.runtime.page_timeout
         while True:
-            self.bridge.validate_target()
+            self.validate_target()
             snap = self.raw(guarded=False)
             self.health(snap)
             same_origin = snap.get('url') == self.url and snap.get('document_id') == self.document
@@ -362,9 +372,9 @@ class BackgroundPage:
                 self.state.data.pop('pending_navigation_reload', None)
                 self.save_binding()
                 return
-            if self.clock() >= deadline:
+            if self.observation_clock() >= deadline:
                 if self.reload_stalled_destination(destination, snap):
-                    deadline = self.clock() + self.runtime.page_timeout
+                    deadline = self.observation_clock() + self.runtime.page_timeout
                     continue
                 raise retry_later('原标签仍未完成导航，保留断点；仅对已确认目标允许一次重新加载，不重复未知状态操作。')
             self.wait('等待导航文档根节点' if root_loading else '自动核对未完成的导航')
@@ -394,7 +404,7 @@ class BackgroundPage:
 
     def snapshot(self):
         self.attach()
-        self.bridge.validate_target()
+        self.validate_target()
         snap = self.raw()
         self.health(snap)
         return snap
@@ -427,9 +437,9 @@ class BackgroundPage:
             if not self.destination_matches(url, snap):
                 raise exc
             return snap
-        deadline = self.clock() + self.runtime.page_timeout
-        while self.clock() < deadline:
-            self.bridge.validate_target()
+        deadline = self.observation_clock() + self.runtime.page_timeout
+        while self.observation_clock() < deadline:
+            self.validate_target()
             snap = self.raw(guarded=False)
             self.health(snap)
             actual = snap.get('url', '')
@@ -467,10 +477,13 @@ class BackgroundPage:
             raise needs_human('无法确认 Amazon 配送地与配置一致。请手动设置配置邮编后 --rebind；不会使用旧地址缓存。')
 
     def stable(self, kind):
-        deadline = self.clock() + self.runtime.page_timeout
-        signature, since = None, self.clock()
-        while self.clock() < deadline:
+        deadline = self.observation_clock() + self.runtime.page_timeout
+        signature, since = None, self.observation_clock()
+        while self.observation_clock() < deadline:
+            generation = self.read_recovery.generation
             snap = self.snapshot()
+            if generation != self.read_recovery.generation:
+                signature, since = None, self.observation_clock()
             if snap.get('not_found'):
                 return snap
             ready = snap.get('ready') and not snap.get('busy')
@@ -485,8 +498,8 @@ class BackgroundPage:
                                                      for card in snap.get('cards', []))))
             new = (bool(ready), content)
             if not ready or new != signature:
-                signature, since = new, self.clock()
-            if ready and self.clock() - since >= 4:
+                signature, since = new, self.observation_clock()
+            if ready and self.observation_clock() - since >= 4:
                 self.delivery(snap)
                 return snap
             self.wait('等待图片／候选稳定')
