@@ -85,4 +85,32 @@ function fixture() {
   f.product.querySelectorAll = s => s === '.vxe-table--empty-block' ? [node('暂无数据')] : [];
   assert.equal(f.run().amazon_no_results, false);
 }
-console.log('DOM fixtures: 7 groups passed');
+{
+  const f = fixture(), b = node('加载中'); f.more.push(b);
+  assert.equal(f.run().busy, false); // Original storefront contract unchanged.
+  assert.equal(f.run().keyword_busy, undefined);
+  assert.equal(f.run({keyword: true}).keyword_busy, true);
+  assert.equal(f.run({action: 'load', keyword: true, expectedCount: 48}).not_clicked, true);
+  assert.equal(b.clicked, undefined);
+}
+{
+  const f = fixture(), b = node('加载更多'); f.more.push(b);
+  assert.equal(f.run({action: 'load', keyword: true, expectedCount: 40}).not_clicked, true);
+  assert.equal(b.clicked, undefined);
+  f.run({action: 'load', keyword: true, expectedCount: 48, loadAttempt: 'attempt-1'});
+  assert.equal(b.clicked, 1);
+  assert.equal(f.run({keyword: true}).keyword_load_attempt, 'attempt-1');
+  f.more.push(node('加载更多'));
+  assert.equal(f.run({action: 'load', keyword: true, expectedCount: 48}).not_clicked, true);
+  assert.equal(b.clicked, 1);
+}
+{
+  const f = fixture(), original = f.product.querySelectorAll;
+  const errors = [node('网络繁忙'), node('加载失败，请重试')];
+  f.product.querySelectorAll = s => s === '.error-box,.el-alert' ? errors : original(s);
+  assert.equal(f.run().keyword_load_error, undefined);
+  assert.equal(f.run({keyword: true}).keyword_load_error, '加载失败，请重试');
+  errors.pop();
+  assert.equal(f.run({keyword: true}).keyword_load_error, '');
+}
+console.log('DOM fixtures: 10 groups passed');

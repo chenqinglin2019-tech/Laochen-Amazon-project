@@ -40,6 +40,14 @@ function sellerSpritePanel(args) {
     const exportButtons = footer ? all(footer, '[data-button-key="btn-export"] button').filter(visible) : [];
     const busy = more.some(e => e.disabled || e.getAttribute("aria-disabled") === "true" || e.classList.contains("is-loading")) ||
       (product && all(product, ".vxe-table--loading,.el-loading-mask").some(visible));
+    // Keyword-only observations: keep the storefront's original DOM contract.
+    const keywordButtons = args.keyword && footer ? all(footer, ".layout-center button").filter(visible) : [];
+    const keywordBusy = !!busy || keywordButtons.some(e =>
+      /加载中|正在加载|^Loading(?:\b|\.{0,3}$)/i.test(text(e)) ||
+      e.disabled || e.getAttribute("aria-disabled") === "true" || e.classList.contains("is-loading"));
+    const keywordError = args.keyword && product ? all(product, '.error-box,.el-alert').filter(visible).map(text)
+      .find(t => /^(?:加载(?:更多)?(?:数据)?失败|Load(?:ing)?(?: more)?(?: data)? failed|Failed to load(?: more)?(?: data)?)(?:[，,。.!！:：\s]|$)/i.test(t)
+        && /重试|try again|retry/i.test(t)) || "" : "";
     const empty = !!product && all(product, '.vxe-table--empty-block').some(e => visible(e) && /暂无数据|No data/i.test(text(e)));
     const messages = root ? [...all(root, ".el-message,.el-alert,.el-message-box,.error-box,.guest-span-btn"),
       ...all(document, '.el-message[class*="ext-"],.el-message-box__wrapper[class*="ext-"]')].filter(visible).map(text).join("\n") : "";
@@ -60,6 +68,8 @@ function sellerSpritePanel(args) {
       guest: /游客|未登录|guest|sign in/i.test(text(root?.querySelector(".guest-span-btn"))),
       captcha: !!root && all(root, '.robot-card-container').some(visible),
       empty, amazon_no_results: noResults,
+      ...(args.keyword ? {keyword_busy: keywordBusy, keyword_load_error: keywordError,
+        keyword_load_attempt: document.documentElement.dataset.lcKeywordLoadAttempt || ""} : {}),
       amazon_error: document.querySelector('#captchacharacters,form[action*="validateCaptcha"]') ? "captcha" :
         (/robot check|sorry! something went wrong!|access denied/i.test(document.title) ? text(document.body).slice(0, 2000) : ""),
       signin: location.pathname.startsWith("/ap/signin"), rows,
@@ -84,6 +94,14 @@ function sellerSpritePanel(args) {
         .filter(e => visible(e) && (root.contains(e) || scopes.some(n => e.hasAttribute(n))));
     };
     if (args.action === "load") {
+      if (args.keyword) {
+        // Count, state, and click are checked in ONE synchronous DOM evaluation,
+        // including after the scheduler's spacing/rest and retry cooldown.
+        const count = countMatch ? Number((countMatch[1] || countMatch[2]).replace(/,/g, "")) : null;
+        if (count !== args.expectedCount || keywordBusy || more.filter(visible).length !== 1)
+          return {not_clicked: true};
+        document.documentElement.dataset.lcKeywordLoadAttempt = args.loadAttempt;
+      }
       if (busy) throw Error("上一轮仍在加载");
       return click(unique(more.filter(visible), "加载更多"), "加载更多");
     }

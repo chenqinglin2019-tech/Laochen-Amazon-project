@@ -97,6 +97,7 @@ options for *-run: --operation-mode supervised|unattended, --resume-after-review
 - 默认每店铺 `store_max_records: 1008`、每关键词 `keyword_max_records: 2000`。明确数量覆盖默认；明确全部才设 `"all"`。先按导出顺序截取，再去重筛选，不补抓。
 - `entry_mode=current_tab|batch`；batch 也只导航同一绑定标签。明确标签关闭、网址或文档被改就停；读取超时按下述只读恢复规则处理；人工选好替代页后用 `--rebind`，未完成目标重采并替换快照。
 - 每轮一次加载，等上一轮完成、数据稳定、间隔与休息到期。远程操作共享下述持久化调度，跨来源与重启不清零；DOM 每 2 秒只读检查。
+- **仅关键词异常恢复**：正常流程不增加等待、读取或结束复核。关键词已发出的加载先观察 180 秒，异常才延长至单次累计 600 秒有效观察；条数不增且按钮消失、点击回复丢失均保留待确认，不能判完成或盲目补点。明确的本轮失败/确认未点击才按原 60 秒一次（有人值守）或 120、300 秒两次（无人值守）重试。断点先确认旧加载，预算跨重启保留，连接不可观察时间排除；到期返回 20。详见 plugin-collection.md“仅关键词加载恢复”；店铺原行为保持不变。
 - 店铺商品页在 Amazon 主搜索区明确显示无搜索结果且连续稳定 10 秒时，视为店铺消失或暂无可售商品，记录 `store_no_results` 和 `skipped_items`，直接跳过并继续下一店铺；不操作缺失的插件控件，不导出空文件。验证码、加载超时、仅插件无数据不能据此跳过。
 - 默认结束时导出一次；每 100 次成功加载做中间导出，恰好结束合并最终导出。全局导出间隔至少 60 秒；未确认下载不得重点击，明确失败只重试一次。
 - 区分 `limit_reached` 和 `source_exhausted`；数量不符保留原文件并报告部分完成。插件显示“2000 条上限”须以真实文件核对，不能假定不存在截断。
@@ -167,7 +168,7 @@ browser is fine (it never shortens an active one).
 
 - `supervised` (default): 20–30 s between remote actions (navigation, plugin queries, loads, retries, exports); rest 3–5 min after every 20, 10–12 min after
   every 100; one retry after 60 s for a temporary page failure; legacy plugin data waits 40 s (once
-  extended to 80 s on progress); new keyword/store panel waits up to 180 s without re-clicking. Legacy manual actions wait up to 15 min.
+  extended to 80 s on progress); store panels wait up to 180 s without re-clicking; keyword load exceptions use the keyword-only recovery above. Legacy manual actions wait up to 15 min.
 - `unattended`: 45–75 s spacing; 15–20 min rest after every 10; retries after 2 and 5 min, then the
   item is deferred to the end of the queue; plugin waits up to 180 s; anything needing a human
   saves the checkpoint and exits (CAPTCHA at night always stops).
