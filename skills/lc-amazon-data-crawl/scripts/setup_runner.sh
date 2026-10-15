@@ -23,6 +23,9 @@ cp "$SKILL_DIR/scripts/check_auth.sh" "$TARGET_DIR/scripts/check_auth.sh"
 if [[ -f "$SKILL_DIR/scripts/check_auth.ps1" ]]; then
   cp "$SKILL_DIR/scripts/check_auth.ps1" "$TARGET_DIR/scripts/check_auth.ps1"
 fi
+if [[ -f "$SKILL_DIR/scripts/auth_python.ps1" ]]; then
+  cp "$SKILL_DIR/scripts/auth_python.ps1" "$TARGET_DIR/scripts/"
+fi
 for launcher_file in lc-amazon-data-crawl.ps1 lc-amazon-data-crawl.cmd; do
   if [[ -f "$SKILL_DIR/scripts/runner/$launcher_file" ]]; then
     cp "$SKILL_DIR/scripts/runner/$launcher_file" "$TARGET_DIR/$launcher_file"
@@ -76,12 +79,9 @@ if [[ ! -f "$TARGET_DIR/config.json" ]]; then
   cp "$SKILL_DIR/config.json" "$TARGET_DIR/config.json"
 fi
 chmod 600 "$TARGET_DIR/config.json" 2>/dev/null || true
-if [[ -f "$SKILL_DIR/config.local.json" && ! -f "$TARGET_DIR/config.local.json" ]]; then
-  (umask 077; cp "$SKILL_DIR/config.local.json" "$TARGET_DIR/config.local.json")
-fi
-if [[ -f "$TARGET_DIR/config.local.json" ]]; then
-  chmod 600 "$TARGET_DIR/config.local.json" 2>/dev/null || true
-fi
+# The explicitly refreshed runner follows the Skill credential that passed the
+# gate above. Cloud token rotation must not retain a stale runner override.
+python3 "$SKILL_DIR/scripts/auth_runtime.py" sync-runner --root "$SKILL_DIR" --target "$TARGET_DIR"
 if ! grep -Fqx 'config.json' "$RUNNER_GITIGNORE"; then
   printf 'config.json\n' >> "$RUNNER_GITIGNORE"
 fi

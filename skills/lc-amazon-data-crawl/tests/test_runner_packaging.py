@@ -53,7 +53,7 @@ class RunnerPackagingTests(unittest.TestCase):
         ):
             directory.mkdir(parents=True)
 
-        for script in ("setup_runner.sh", "check_auth.sh", "migrate_operation_config.py", "install_for_user.sh", "sellersprite_panel.js", "image_background_dom.js"):
+        for script in ("setup_runner.sh", "check_auth.sh", "auth_runtime.py", "configure_credentials.py", "auth_python.ps1", "migrate_operation_config.py", "install_for_user.sh", "sellersprite_panel.js", "image_background_dom.js"):
             shutil.copy2(SKILL_ROOT / "scripts" / script, skill / "scripts" / script)
         (skill / "scripts" / "stub.py").write_text("# fixture\n", encoding="utf-8")
         (skill / "assets" / "requirements.txt").write_text("", encoding="utf-8")
@@ -101,7 +101,7 @@ class RunnerPackagingTests(unittest.TestCase):
             encoding="utf-8",
         )
         (skill / "config.json").write_text(
-            json.dumps({"backend_url": "fixture", "backend_token": "fixture"}),
+            json.dumps({"backend_url": "https://example.invalid", "backend_token": "fixture"}),
             encoding="utf-8",
         )
         auth_binary = skill / "tools" / "bin" / auth_binary_name()
@@ -133,7 +133,7 @@ class RunnerPackagingTests(unittest.TestCase):
             skill, runner = self.make_fixture(Path(temp_dir))
             public_config = skill / "config.json"
             public_config.write_text(
-                json.dumps({"backend_url": "fixture", "backend_token": ""}),
+                json.dumps({"backend_url": "https://example.invalid", "backend_token": ""}),
                 encoding="utf-8",
             )
             env = dict(os.environ, LC_AMAZON_INSTALL_SETUP_ONLY="1")
@@ -160,8 +160,9 @@ class RunnerPackagingTests(unittest.TestCase):
     def test_auth_prefers_local_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             skill, _runner = self.make_fixture(Path(temp_dir))
+            (skill / "config.json").write_text(json.dumps({"backend_url": "https://example.invalid", "backend_token": ""}))
             (skill / "config.local.json").write_text(
-                json.dumps({"backend_url": "fixture", "backend_token": "recipient-token"}),
+                json.dumps({"backend_url": "https://example.invalid", "backend_token": "recipient-token"}),
                 encoding="utf-8",
             )
             capture = Path(temp_dir) / "auth-config-path.txt"
@@ -248,7 +249,7 @@ class RunnerPackagingTests(unittest.TestCase):
             mini_credential.chmod(0o644)
             task_config.write_text(json.dumps({"custom": "user"}), encoding="utf-8")
             auth_config.write_text(
-                json.dumps({"backend_url": "fixture", "backend_token": "user-token"}),
+                json.dumps({"backend_url": "https://example.invalid", "backend_token": "user-token"}),
                 encoding="utf-8",
             )
             # Simulate a runner generated before the shared entry point existed.
@@ -261,8 +262,9 @@ class RunnerPackagingTests(unittest.TestCase):
             self.assertTrue((runner / "scripts" / "check_auth.sh").is_file())
             self.assertEqual(
                 json.loads(auth_config.read_text(encoding="utf-8"))["backend_token"],
-                "user-token",
+                "",
             )
+            self.assertEqual(json.loads((runner / "config.local.json").read_text())["backend_token"], "fixture")
             self.assertNotIn(
                 embedding_dummy_key, second_setup.stdout + second_setup.stderr
             )
@@ -388,7 +390,8 @@ class RunnerPackagingTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 4)
             self.assertEqual(result.stdout, "")
-            self.assertEqual(result.stderr.strip(), "云端鉴权未通过，本轮不继续执行。")
+            self.assertEqual(result.stderr.splitlines()[0], "云端鉴权未通过，本轮不继续执行。")
+            self.assertEqual(len(result.stderr.splitlines()), 2)
             self.assertEqual(before, sorted(p.relative_to(runner) for p in runner.rglob("*")))
 
     def test_every_runner_command_stops_on_auth_failure(self) -> None:
@@ -417,7 +420,8 @@ class RunnerPackagingTests(unittest.TestCase):
                     )
                     self.assertEqual(result.returncode, 4, result.stderr)
                     self.assertEqual(result.stdout, "")
-                    self.assertEqual(result.stderr.strip(), "云端鉴权未通过，本轮不继续执行。")
+                    self.assertEqual(result.stderr.splitlines()[0], "云端鉴权未通过，本轮不继续执行。")
+                    self.assertEqual(len(result.stderr.splitlines()), 2)
                     self.assertFalse(Path(str(python) + ".called").exists())
 
     def test_missing_auth_binary_stops(self) -> None:
@@ -497,7 +501,8 @@ class RunnerPackagingTests(unittest.TestCase):
                 text=True, capture_output=True, timeout=15,
             )
             self.assertEqual(result.returncode, 4, result.stderr)
-            self.assertEqual(result.stderr.strip(), "云端鉴权未通过，本轮不继续执行。")
+            self.assertEqual(result.stderr.splitlines()[0], "云端鉴权未通过，本轮不继续执行。")
+            self.assertEqual(len(result.stderr.splitlines()), 2)
             self.assertNotIn("com.apple.quarantine", self.mac_xattr(auth_bin).splitlines())
             self.assertTrue(os.access(auth_bin, os.X_OK))
 

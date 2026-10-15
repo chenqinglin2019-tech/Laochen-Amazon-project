@@ -22,13 +22,15 @@ metadata:
 1. **Cloud auth gate first.** Before editing configs, installing, opening Chrome,
    dry-run or crawling, run `bash "<runner or skill dir>/scripts/check_auth.sh"`
    (Windows: `powershell -ExecutionPolicy Bypass -File "<dir>\scripts\check_auth.ps1"`). Never run
-   `tools/bin/lc-auth-check-*` directly. On failure stop and say only:
-   `云端鉴权未通过，本轮不继续执行。` (A "启动准备失败" message is a local setup problem,
-   not an invalid token — report it as such.) Runner commands re-check auth themselves.
+   `tools/bin/lc-auth-check-*` directly. On failure stop and preserve the entry's safe output: the first line is
+   `云端鉴权未通过，本轮不继续执行。`, followed by a fixed redacted reason.
+   Configuration conflicts, network/service failures and account rejection are distinct;
+   network failure does not prove an invalid token. A "启动准备失败" message is a local setup problem.
+   Never print native stdout/stderr or backend bodies. Runner commands re-check auth themselves.
 2. **Never log in to Amazon.** If Amazon shows a sign-in page the run stops; say exactly:
    `Amazon 弹出了登录页；本工具不使用也不需要 Amazon 买家账号，本条采集已停止。请稍后重试，不要登录买家账号。`
    SellerSprite login (in the extension) is separate and may be needed.
-3. **Secrets stay in files.** Cloud token: `config.local.json` (written by the installer).
+3. **Secrets stay in files.** Cloud token: `config.local.json` (written by the installer or `configure_credentials.py`; legacy nonempty `config.json` is supported).
    Ark keys: `config/doubao_embedding_vision.json` and `config/doubao_same_product_mini.json`.
    Never ask the user to paste a key into chat, never print one.
 4. **One crawl per computer.** Never start a second crawl command while one runs
@@ -46,7 +48,7 @@ The installer reads the token from a hidden prompt, so **the user runs it in the
 
 It creates `lc-amazon-data-crawl-runner` beside the skill, installs Python deps and runs `doctor`.
 关键词/店铺需要 OpenCLI CLI、日常 Chrome 中的 Browser Bridge 和卖家精灵，不需要测试浏览器。只有类目旧流程缺少专用浏览器时才使用 `install-browser`。
-After updating the skill, refresh an existing runner (keeps configs, inputs, outputs, credentials):
+After updating the skill, refresh an existing runner (keeps task configs, inputs, outputs and model API keys; synchronizes the verified cloud token):
 `bash "$SKILL_DIR/scripts/setup_runner.sh" <runner>` (Windows: `powershell -ExecutionPolicy Bypass -File scripts\setup_runner.ps1 <runner>`).
 
 All commands below run inside the runner (`./lc-amazon-data-crawl.sh …` on macOS/Linux,
@@ -64,6 +66,14 @@ front/image: --rebind
 image: --confirm-sellersprite-logged-out, --migrate-from-job OLD_JOB_ID
 options for *-run: --operation-mode supervised|unattended, --resume-after-review, --no-resume
 ```
+
+## 云端 token 配置与替换
+
+- 鉴权入口使用现有原生程序和 `/public/account` 协议，具体规则见 [references/authentication.md](references/authentication.md)。鉴权准备使用 Python 3.8+ 标准库；采集运行时仍按原要求使用 Python 3.10+。
+- 空的本地 token 不覆盖可用的旧 `config.json`；本地 token 可继承公开配置的 backend_url。两个非空 token 不同时明确报告配置冲突，不静默尝试另一个账户。显式替换统一写私有 `config.local.json` 并清空旧公开 token，保留其他字段。
+- 用户主动提供本 Skill 的新鉴权 token 时，自动用 `scripts/configure_credentials.py` 接收标准输入 JSON（`backend_token` 字段，可选 `backend_url`）；不回显、不嵌入 shell 命令文本／参数／临时脚本，不把第三方 API key 当作云端 token。随后运行原 `check_auth` 门禁，通过后对本次已知 runner 执行 `setup_runner` 并复核 runner 的门禁，再继续原任务。不要只写 Skill 却继续使用 runner 的旧凭据。
+- 用户在自己的终端替换：macOS/Linux 为 `bash scripts/install_for_user.sh <runner> --replace-token`；Windows 为 `powershell -ExecutionPolicy Bypass -File scripts\install_for_user.ps1 <runner> -ReplaceToken`。输入保持隐藏，更新流程验证后同步已有 runner。
+- 安装内 10 分钟复用只适用于相同 backend_url/token 的已验证凭据；换 token 必须重验。正式采集每次重新鉴权，无自动鉴权重试。网络、配置与账户失败均先停止，按脱敏原因恢复；不得绕过门禁。
 
 ## Task workflow
 
