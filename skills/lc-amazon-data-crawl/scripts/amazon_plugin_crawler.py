@@ -17,6 +17,7 @@ from typing import Any, Callable
 from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from opencli_bridge import OpenCliBridge, cli_command
+from opencli_read_recovery import ReadRecovery, BridgeReadRecoveryExhausted
 from run_outcome import (CrawlStop, _atomic_write_json, classify_exception, completed_outcome,
                          config_error, finalize_run, needs_human, retry_later, start_new_run)
 from safety_control import LocalSafetyController, RiskSignal, classify_amazon_risk, classify_sellersprite_risk
@@ -206,6 +207,7 @@ class PluginCrawler:
                  *, now: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep):
         self.cfg, self.state, self.bridge, self.safety = cfg, state, bridge, safety
         self.now, self.sleep = now, sleep
+        self.read_recovery = ReadRecovery(bridge, state.data, state.save, safety, now=now, sleep=sleep)
         self.job_dir = cfg["job_dir"]
         self.export_state_path = safety.storage_root / "plugin-export-state.json"
         self.safety.status_path = self.job_dir / "run_heartbeat.json"
@@ -216,7 +218,13 @@ class PluginCrawler:
             self.safety.heartbeat(phase, until=dt.datetime.fromtimestamp(deadline).isoformat(), detail=detail)
             self.sleep(min(2, max(deadline - self.now(), 0)))
 
+    def observation_now(self):
+        return self.now() - self.read_recovery.blocked_seconds
+
     def snapshot(self) -> dict:
+        return self.read_recovery.read("panel_snapshot", self._snapshot_once)
+
+    def _snapshot_once(self) -> dict:
         snap = self.bridge.panel()
         if snap.get("signin"):
             raise needs_human("Amazon 弹出了登录页；本工具不使用也不需要 Amazon 买家账号，本条采集已停止。请稍后重试，不要登录买家账号。")
@@ -239,17 +247,20 @@ class PluginCrawler:
 
     def stable(self, *, after_count: int | None = None) -> dict:
         duration = 180  # Background Chrome can delay extension timers; keep waiting without re-clicking.
-        deadline = self.now() + duration
-        previous, stable_since = None, self.now()
-        while self.now() < deadline:
+        deadline = self.observation_now() + duration
+        previous, stable_since = None, self.observation_now()
+        while self.observation_now() < deadline:
+            generation = self.read_recovery.generation
             snap = self.snapshot()
+            if generation != self.read_recovery.generation:
+                previous, stable_since = None, self.observation_now()
             signature = (snap.get("count"), snap.get("busy"), snap.get("more"), snap.get("amazon_no_results"),
                          tuple(row.get("text", "") for row in snap.get("rows", [])))
             if signature != previous:
-                previous, stable_since = signature, self.now()
-            if self.cfg["mode"] == "storefront" and snap.get("amazon_no_results") and self.now() - stable_since >= 10:
+                previous, stable_since = signature, self.observation_now()
+            if self.cfg["mode"] == "storefront" and snap.get("amazon_no_results") and self.observation_now() - stable_since >= 10:
                 return snap
-            if snap.get("panel") and snap.get("count") is not None and not snap.get("busy") and self.now() - stable_since >= 10:
+            if snap.get("panel") and snap.get("count") is not None and not snap.get("busy") and self.observation_now() - stable_since >= 10:
                 if after_count is None or snap["count"] > after_count or not snap.get("more"):
                     return snap
             self.wait(2, "plugin_wait", "等待插件计数与可观察字段稳定")
@@ -265,8 +276,8 @@ class PluginCrawler:
         snap = self.snapshot()
         if self.cfg["mode"] == "storefront" and snap.get("amazon_no_results"):
             return self.stable()
-        injection_deadline = self.now() + 20
-        while snap.get("installed") is False and self.now() < injection_deadline:
+        injection_deadline = self.observation_now() + 20
+        while snap.get("installed") is False and self.observation_now() < injection_deadline:
             self.wait(2, "plugin_wait", "等待插件注入公开 DOM")
             snap = self.snapshot()
         if not snap.get("panel"):
@@ -342,13 +353,13 @@ class PluginCrawler:
                 export_state.update(pending=pending, next_allowed_at=started + 60)
                 _atomic_write_json(self.export_state_path, export_state)
                 self.bridge.panel("export")
-            deadline, seen_interrupted = self.now() + 120, None
-            while self.now() < deadline:
+            deadline, seen_interrupted = self.observation_now() + 120, None
+            while self.observation_now() < deadline:
                 self.wait(2, "plugin_wait", "核验下载状态")
                 self.snapshot()
                 self.safety.heartbeat("plugin_wait", detail="等待本次原生导出下载完成")
-                result = pending.get("download") or self.bridge.wait_download(
-                    pattern, max(5000, int((self.now() - started + 5) * 1000)))
+                result = pending.get("download") or self.read_recovery.read(
+                    "download_status", lambda: self.download_status(pattern, started))
                 filename = result.get("filename")
                 if not filename or result.get("id") is None:
                     continue
@@ -398,6 +409,11 @@ class PluginCrawler:
             if attempt == 0:
                 self.wait(max(export_state["next_allowed_at"] - self.now(), 0), detail="失败导出冷却后仅重试一次")
         raise retry_later("原生导出明确失败两次，已停止。")
+
+    def download_status(self, pattern, started):
+        # Recheck URL, document, login and risk before each download-status retry.
+        self._snapshot_once()
+        return self.bridge.wait_download(pattern, max(5000, int((self.now() - started + 5) * 1000)))
 
     def acknowledge_export(self, task: dict, report: dict) -> None:
         ledger = self._read_export_state()
@@ -473,7 +489,7 @@ class PluginCrawler:
             try:
                 snap = self.stable(after_count=before)
             except CrawlStop as exc:
-                if exc.exit_code != 20:
+                if exc.exit_code != 20 or isinstance(exc, BridgeReadRecoveryExhausted):
                     raise
                 schedule = [60] if self.cfg["operation_mode"] == "supervised" else [120, 300]
                 for delay in schedule:
@@ -489,7 +505,7 @@ class PluginCrawler:
                         snap = self.stable(after_count=before)
                         break
                     except CrawlStop as retry_error:
-                        if retry_error.exit_code != 20:
+                        if retry_error.exit_code != 20 or isinstance(retry_error, BridgeReadRecoveryExhausted):
                             raise
                 else:
                     raise exc
@@ -521,18 +537,20 @@ def connect_work_page(crawler: PluginCrawler) -> dict:
     saved = crawler.state.data.get("browser") or {}
     if saved.get("target"):
         crawler.bridge.target = saved["target"]
-        try:
-            page = crawler.bridge.validate_target()
-            if canonical_url(page["url"]) != saved.get("url"):
-                raise needs_human("原工作页网址已被修改，停止操作。")
-        except CrawlStop:
-            # Stop this run. A separate, explicit --rebind on a subsequent run is required.
-            raise needs_human("原工作标签不可用；请选好新工作页后加 --rebind 恢复。不会自动切换或重建标签。")
+        page = crawler.read_recovery.read("target", crawler.bridge.validate_target)
+        if canonical_url(page["url"]) != saved.get("url"):
+            raise needs_human("原工作页网址已被修改，停止操作。")
     else:
         page = crawler.bridge.bind()
     source_identity(page["url"])
     crawler.bridge.expected_url = canonical_url(page["url"])
-    doc = crawler.bridge.panel().get("document_id", "")
+    crawler.bridge.document_id = saved.get("document_id", "")
+    # Persist the lease before the first snapshot can time out.
+    crawler.state.data["browser"] = {"session": crawler.bridge.session, "target": crawler.bridge.target,
+                                      "url": crawler.bridge.expected_url,
+                                      "document_id": crawler.bridge.document_id}
+    crawler.state.save()
+    doc = crawler.snapshot().get("document_id", "")
     active = crawler.state.data.get("current_task") or {}
     if doc and doc == active.get("document_id"):
         crawler.bridge.document_id = doc
@@ -561,6 +579,7 @@ def run(cfg: dict, tasks: list[dict], *, resume_after_review: bool = False, rebi
         safety.acquire()
         safety.begin(resume_after_review=resume_after_review)
         if rebind:
+            state.data.pop(ReadRecovery.KEY, None)
             state.data["browser"] = {}
             state.data["current_task"] = None
         if state.data.get("finished") and not check_only:
@@ -605,7 +624,7 @@ def run(cfg: dict, tasks: list[dict], *, resume_after_review: bool = False, rebi
                 crawler.snapshot()
                 bridge.navigate(task["url"])
                 crawler.wait(2, "plugin_wait", "等待工作页导航")
-                deadline = crawler.now() + 90
+                deadline = crawler.observation_now() + 90
                 while True:
                     snap = crawler.snapshot()
                     try:
@@ -614,7 +633,7 @@ def run(cfg: dict, tasks: list[dict], *, resume_after_review: bool = False, rebi
                         matched = False
                     if matched:
                         break
-                    if crawler.now() >= deadline:
+                    if crawler.observation_now() >= deadline:
                         raise retry_later("工作页导航未到达指定目标。")
                     crawler.wait(2, "plugin_wait")
                 bridge.expected_url = canonical_url(snap["url"])
