@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
 
 from opencli_bridge import OpenCliBridge, cli_command
 from opencli_read_recovery import ReadRecovery, BridgeReadRecoveryExhausted
+from keyword_load_recovery import KeywordLoadRecovery, keyword_busy
 from run_outcome import (CrawlStop, _atomic_write_json, classify_exception, completed_outcome,
                          config_error, finalize_run, needs_human, retry_later, start_new_run)
 from safety_control import LocalSafetyController, RiskSignal, classify_amazon_risk, classify_sellersprite_risk
@@ -225,7 +226,7 @@ class PluginCrawler:
         return self.read_recovery.read("panel_snapshot", self._snapshot_once)
 
     def _snapshot_once(self) -> dict:
-        snap = self.bridge.panel()
+        snap = self.bridge.panel(keyword=True) if self.cfg["mode"] == "keyword_search" else self.bridge.panel()
         if snap.get("signin"):
             raise needs_human("Amazon 弹出了登录页；本工具不使用也不需要 Amazon 买家账号，本条采集已停止。请稍后重试，不要登录买家账号。")
         risk = classify_amazon_risk(http_status=None, title=snap.get("title", ""), body_text=snap.get("amazon_error", ""))
@@ -252,15 +253,16 @@ class PluginCrawler:
         while self.observation_now() < deadline:
             generation = self.read_recovery.generation
             snap = self.snapshot()
+            busy = keyword_busy(snap) if self.cfg["mode"] == "keyword_search" else snap.get("busy")
             if generation != self.read_recovery.generation:
                 previous, stable_since = None, self.observation_now()
-            signature = (snap.get("count"), snap.get("busy"), snap.get("more"), snap.get("amazon_no_results"),
+            signature = (snap.get("count"), busy, snap.get("more"), snap.get("amazon_no_results"),
                          tuple(row.get("text", "") for row in snap.get("rows", [])))
             if signature != previous:
                 previous, stable_since = signature, self.observation_now()
             if self.cfg["mode"] == "storefront" and snap.get("amazon_no_results") and self.observation_now() - stable_since >= 10:
                 return snap
-            if snap.get("panel") and snap.get("count") is not None and not snap.get("busy") and self.observation_now() - stable_since >= 10:
+            if snap.get("panel") and snap.get("count") is not None and not busy and self.observation_now() - stable_since >= 10:
                 if after_count is None or snap["count"] > after_count or not snap.get("more"):
                     return snap
             self.wait(2, "plugin_wait", "等待插件计数与可观察字段稳定")
@@ -452,7 +454,8 @@ class PluginCrawler:
         active = self.state.data.get("current_task") or {}
         loads = self.state.data["sources"].get(task["source"], {}).get("loads_since_export",
                     active.get("loads_since_export", 0) if active.get("key") == task["key"] else 0)
-        snap = self.stable() if prepared else self.prepare()
+        keyword_pending = (self.cfg["mode"] == "keyword_search" and prepared and active.get("load_pending"))
+        snap = KeywordLoadRecovery(self).resume() if keyword_pending else (self.stable() if prepared else self.prepare())
         if self.skip_missing_store(task, snap):
             return
         if prepared and active.get("load_pending") and snap["count"] > active.get("plugin_count", 0):
@@ -483,6 +486,14 @@ class PluginCrawler:
                     self.state.save()
                     return
             before = snap["count"]
+            if self.cfg["mode"] == "keyword_search":
+                snap = KeywordLoadRecovery(self).start(before)
+                loads += 1  # The keyword reconciler returns only confirmed growth.
+                self.state.data["sources"].setdefault(task["source"], {})["loads_since_export"] = loads
+                self.state.data["current_task"].update(loads_since_export=loads, plugin_count=snap["count"], load_pending=False)
+                self.state.data["current_task"].pop("keyword_load", None)
+                self.state.save()
+                continue
             self.state.data["current_task"]["load_pending"] = True
             self.state.save()
             self.remote("load")
