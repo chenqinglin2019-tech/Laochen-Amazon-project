@@ -29,6 +29,9 @@ from source_policy import enabled as account_capacity_enabled, dynamic_max_age_h
 OFFICIAL_BASE_URL = "https://serpapi.com"
 TEST_CREDENTIAL = "lc-ipr-serpapi-loopback-fixture"
 ZERO_RESULT_MESSAGE = "Google hasn't returned any results for this query."
+# The google_patents engine names itself in the same sentence (observed on a real DESIGN search).
+ZERO_RESULT_MESSAGES = frozenset({ZERO_RESULT_MESSAGE,
+                                  "Google Patents hasn't returned any results for this query."})
 FREE_PLAN_NAMES = frozenset({"free", "free plan"})
 LOCAL_LIMIT_CODE = "SERPAPI_TASK_QUERY_LIMIT_REACHED"
 RECORDED_STOP_CODES = {
@@ -261,6 +264,12 @@ def search(
     }
     if item.get("type") == "DESIGN":
         params["type"] = "DESIGN"
+    elif item.get("type") == "PATENT":
+        params["type"] = "PATENT"        # r5d20 recall tasks: utility discovery without design documents
+    if item.get("after"):
+        params["after"] = item["after"]  # r5d20 recall tasks: only rights that can still be in force
+    if item.get("sort") == "new":
+        params["sort"] = "new"           # r5d20 recall tasks: the broad design group, newest first
     payload, headers, body = http_json(
         f"{base}/search.json?{urlencode(params)}", timeout=timeout, retries=0,
     )
@@ -268,7 +277,7 @@ def search(
     if error:
         lowered = error.casefold()
         metadata = payload.get("search_metadata")
-        if (error == ZERO_RESULT_MESSAGE and isinstance(metadata, dict)
+        if (error in ZERO_RESULT_MESSAGES and isinstance(metadata, dict)
                 and metadata.get("status") == "Success"
                 and payload.get("organic_results", []) == []):
             normalized = {**payload, "organic_results": []}

@@ -1,0 +1,142 @@
+{
+  "revision": "jurisdiction-rights-v1",
+  "purpose": "Institution statements for rights that do or do not exist in a target country. Cited by reviewers for scope_applicability=not_applicable; never a search result and never a statement about a particular right.",
+  "verification_levels": {
+    "page_read": "the official page was opened and the quoted statement read on 2026-10-11",
+    "listed_by_search": "the official page exists (listed by a search of the official domain) but could not be opened by the fetcher on 2026-10-11; statement from the official page as summarised by the search index"
+  },
+  "entries": [
+    {
+      "jurisdiction": "US", "right_type": "utility_model", "applicable": false,
+      "statement_zh": "美国专利商标局只授予三种专利：发明（utility）、外观（design）和植物（plant）专利；美国没有实用新型（utility model）制度。",
+      "statement_en": "The USPTO grants three types of patents: utility, design and plant patents. There is no utility model system in the United States.",
+      "source_title": "USPTO - Patent essentials: Types of patents",
+      "source_url": "https://www.uspto.gov/patents/basics/essentials",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "US", "right_type": "unregistered_design", "applicable": false,
+      "statement_zh": "美国没有一般性的未注册外观设计权：产品外观通过申请并获得外观专利保护（USPTO 外观专利说明）；唯一的未经专利的外观保护是船体设计，且须向版权局登记。未注册产品外观在美国只能作为商业外观主张，本任务另列商业外观范围。",
+      "statement_en": "The United States has no general unregistered design right: the appearance of an article is protected by applying for and obtaining a design patent; the only non-patent design protection (vessel hull designs) requires registration with the Copyright Office. Unregistered product appearance is addressed under trade dress, a separate scope of this task.",
+      "source_title": "USPTO - Design patent application guide; U.S. Copyright Office - Registration of vessel designs",
+      "source_url": "https://www.uspto.gov/patents/basics/apply/design-patent",
+      "secondary_source_url": "https://www.copyright.gov/vessels/",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "EU", "right_type": "utility_model", "applicable": false,
+      "statement_zh": "欧盟层面没有统一的实用新型制度（实用新型只在部分国家由国家法律设立，WIPO 说明）；本任务中的 FR/DE/IT/ES 实用新型分别按各自国家条目处理。",
+      "statement_en": "There is no EU-wide utility model: utility model protection exists only in some countries under national law (WIPO). In this task the FR/DE/IT/ES utility model scopes are handled by their national entries.",
+      "source_title": "WIPO - Utility models",
+      "source_url": "https://www.wipo.int/patents/en/topics/utility_models.html",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "EU", "right_type": "unregistered_design", "applicable": true,
+      "statement_zh": "欧盟设有未注册欧盟外观：符合条件的外观自在欧盟境内首次公开之日起受保护三年（Regulation (EU) 2026/715 第 12 条；其前身 Council Regulation (EC) No 6/2002 第 11 条，已于 2026-06-30 失效）。",
+      "statement_en": "The EU provides an unregistered EU design: a qualifying design is protected for three years from the date it was first made available to the public within the Union (Regulation (EU) 2026/715, Article 12; formerly Regulation (EC) No 6/2002, Article 11, repealed 30 June 2026).",
+      "source_title": "EUR-Lex - Regulation (EU) 2026/715 on European Union designs (codification)",
+      "source_url": "https://eur-lex.europa.eu/eli/reg/2026/715/oj",
+      "secondary_source_url": "https://eur-lex.europa.eu/eli/reg/2002/6/oj",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "FR", "right_type": "utility_model", "applicable": true,
+      "statement_zh": "法国设有实用证书（certificat d'utilité），保护期最长 10 年（专利为 20 年）。",
+      "statement_en": "France grants the certificat d'utilité, which protects an invention for a maximum of 10 years (20 years for a patent).",
+      "source_title": "INPI - Le certificat d'utilité",
+      "source_url": "https://www.inpi.fr/node/6168",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "FR", "right_type": "unregistered_design", "applicable": true,
+      "statement_zh": "法国作为欧盟成员国适用未注册欧盟外观（自首次在欧盟境内公开起三年）。",
+      "statement_en": "As an EU member state, France is covered by the unregistered EU design (three years from first disclosure within the Union).",
+      "source_title": "EUR-Lex - Regulation (EU) 2026/715 on European Union designs (codification)",
+      "source_url": "https://eur-lex.europa.eu/eli/reg/2026/715/oj",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "DE", "right_type": "utility_model", "applicable": true,
+      "statement_zh": "德国设有实用新型（Gebrauchsmuster），由德国专利商标局登记，登记后在德国境内生效并赋予与专利相同的权利。",
+      "statement_en": "Germany grants utility models (Gebrauchsmuster), registered by the DPMA; protection takes effect in Germany upon registration and gives the holder the same rights as a patent.",
+      "source_title": "DPMA - Utility models",
+      "source_url": "https://www.dpma.de/english/utility_models/index.html",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "DE", "right_type": "unregistered_design", "applicable": true,
+      "statement_zh": "德国作为欧盟成员国适用未注册欧盟外观（自首次在欧盟境内公开起三年）。",
+      "statement_en": "As an EU member state, Germany is covered by the unregistered EU design (three years from first disclosure within the Union).",
+      "source_title": "EUR-Lex - Regulation (EU) 2026/715 on European Union designs (codification)",
+      "source_url": "https://eur-lex.europa.eu/eli/reg/2026/715/oj",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "IT", "right_type": "utility_model", "applicable": true,
+      "statement_zh": "意大利设有实用新型专利（brevetto per modello di utilità），保护期自申请日起 10 年（意大利工业产权法典第 82 条）。",
+      "statement_en": "Italy grants the brevetto per modello di utilità; the term is 10 years from the filing date (Article 82 of the Industrial Property Code).",
+      "source_title": "UIBM - Brevetto per modello di utilità",
+      "source_url": "https://uibm.mise.gov.it/index.php/it/brevetti/brevetto-per-modello-di-utilita",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "IT", "right_type": "unregistered_design", "applicable": true,
+      "statement_zh": "意大利作为欧盟成员国适用未注册欧盟外观（自首次在欧盟境内公开起三年）。",
+      "statement_en": "As an EU member state, Italy is covered by the unregistered EU design (three years from first disclosure within the Union).",
+      "source_title": "EUR-Lex - Regulation (EU) 2026/715 on European Union designs (codification)",
+      "source_url": "https://eur-lex.europa.eu/eli/reg/2026/715/oj",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "ES", "right_type": "utility_model", "applicable": true,
+      "statement_zh": "西班牙设有实用新型（modelo de utilidad），是对发明授予专有权的工业产权，在西班牙保护 10 年。",
+      "statement_en": "Spain grants the modelo de utilidad, an industrial property title that confers an exclusive right over an invention for 10 years in Spain.",
+      "source_title": "OEPM - ¿Qué es un modelo de utilidad?",
+      "source_url": "https://www.oepm.es/es/invenciones/como-proteger-las-invenciones/conceptos-basicos/que-es-un-modelo-de-utilidad/",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "ES", "right_type": "unregistered_design", "applicable": true,
+      "statement_zh": "西班牙作为欧盟成员国适用未注册欧盟外观（自首次在欧盟境内公开起三年）。",
+      "statement_en": "As an EU member state, Spain is covered by the unregistered EU design (three years from first disclosure within the Union).",
+      "source_title": "EUR-Lex - Regulation (EU) 2026/715 on European Union designs (codification)",
+      "source_url": "https://eur-lex.europa.eu/eli/reg/2026/715/oj",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "GB", "right_type": "utility_model", "applicable": false,
+      "statement_zh": "英国的知识产权保护类型为版权、专利、外观和商标（UK IPO 概览）；英国没有实用新型制度。",
+      "statement_en": "The UK's forms of intellectual property protection are copyright, patents, designs and trade marks (UK IPO overview); the UK has no utility model system.",
+      "source_title": "GOV.UK - Intellectual property: an overview",
+      "source_url": "https://www.gov.uk/intellectual-property-an-overview",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "GB", "right_type": "unregistered_design", "applicable": true,
+      "statement_zh": "英国的未注册外观保护自动产生，无需申请或缴费：补充未注册外观（SUD）自设计公开之日起保护产品外观 3 年；英国未注册设计权保护三维物品的形状与构造，以首次销售年末起 10 年或创作年末起 15 年先到者为准。",
+      "statement_en": "UK unregistered design protection arises automatically without application or fee: the supplementary unregistered design protects the appearance of a product for 3 years from the date the design is made public; UK unregistered design right protects the shape and configuration of 3D objects for 10 years from the end of the year of first sale or 15 years from the end of the year of creation, whichever is first.",
+      "source_title": "GOV.UK - How your unregistered designs are protected",
+      "source_url": "https://www.gov.uk/unregistered-designs",
+      "retrieved": "2026-10-11", "verification": "page_read"
+    },
+    {
+      "jurisdiction": "JP", "right_type": "utility_model", "applicable": true,
+      "statement_zh": "日本设有实用新案（実用新案）制度，由日本特许厅登记（仅作形式审查）。",
+      "statement_en": "Japan has a utility model (実用新案) system registered by the Japan Patent Office (formality examination only).",
+      "source_title": "JPO - Utility model: examination (Systems/Procedures)",
+      "source_url": "https://www.jpo.go.jp/e/system/utility/shinsa/index.html",
+      "retrieved": "2026-10-11", "verification": "listed_by_search",
+      "note": "jpo.go.jp refused the automated fetch (HTTP 403); the page is listed by the official site's search index."
+    },
+    {
+      "jurisdiction": "JP", "right_type": "unregistered_design", "applicable": true,
+      "statement_zh": "日本没有未注册外观设计权，但《不正当竞争防止法》第 2 条第 1 款第 3 项禁止转让模仿他人商品形态的商品，自该商品在日本首次销售之日起 3 年内适用（第 19 条第 1 款）；本范围按该形态模仿规则审查。",
+      "statement_en": "Japan has no unregistered design right, but the Unfair Competition Prevention Act, Article 2(1)(iii), prohibits assigning goods that imitate the configuration of another person's goods, for three years from the first sale of those goods in Japan (Article 19(1)); this scope is reviewed under that dead-copy rule.",
+      "source_title": "Japanese Law Translation - Unfair Competition Prevention Act (Act No. 47 of 1993)",
+      "source_url": "https://www.japaneselawtranslation.go.jp/en/laws/view/2803/en",
+      "retrieved": "2026-10-11", "verification": "listed_by_search",
+      "note": "japaneselawtranslation.go.jp refused the automated fetch (HTTP 403); the Act's English text is listed by the official site."
+    }
+  ]
+}

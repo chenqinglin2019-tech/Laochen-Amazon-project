@@ -11,7 +11,7 @@ import io
 import json
 import re
 from copy import deepcopy
-from pathlib import Path
+from runtime_compat import GeneratedTextPath as Path
 from urllib.parse import urlsplit
 
 REVISION = "operator-report-v1"
@@ -155,6 +155,97 @@ def _display_progress(data, fallback):
     return progress
 
 
+def _v2(task):
+    from assessment_estimate import best_estimate_v2
+    return best_estimate_v2(task)
+
+
+RESULT_LABELS = {"supports_risk": "对应", "excludes_risk": "不对应", "unknown": "图片未直接显示（按假设）"}
+
+
+def _add_years(value, years):
+    match = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", str(value or ""))
+    if not match:
+        return ""
+    year, month, day = int(match.group(1)) + years, match.group(2), match.group(3)
+    return "%04d-%s-%s" % (year, month, "28" if month == "02" and day == "29" else day)
+
+
+def _evidence_block(task, evidence, candidate, related, figures):
+    """v2 high-risk basis for one candidate: identity and status from the exact trusted API record, the listing's
+    patent marking, the independent-claim element table, the right's figures, and the stated assumptions."""
+    graded = [row for row in related if row.get("risk") in {"高", "极高"}]
+    if not graded:
+        return None
+    row = max(graded, key=lambda item: RISKS.index(item["risk"]))
+    detail = next((entry for entry in (evidence.get("collections") or {}).get("patents", [])
+                   if entry.get("provider") == "serpapi_google_patents" and entry.get("operation") == "candidate_detail"
+                   and isinstance(entry.get("payload"), dict)
+                   and entry["payload"].get("candidate_id") == candidate.get("candidate_id")), None)
+    payload = (detail or {}).get("payload") or {}
+    number = candidate.get("publication_number") or payload.get("publication_number") or ""
+    identity = []
+    def add(label, value):
+        value = human(value, 240) if not isinstance(value, str) or not value.startswith("https://") else value
+        if value:
+            identity.append({"label": label, "value": value})
+    add("权利号码", number)
+    add("名称", payload.get("title") or candidate.get("title"))
+    add("申请号", payload.get("application_number"))
+    add("申请日", payload.get("filing_date"))
+    add("优先权日", payload.get("priority_date"))
+    add("授权／公开日", payload.get("publication_date"))
+    status = payload.get("legal_status") or payload.get("status")
+    fees = [event for event in payload.get("legal_events") or [] if isinstance(event, dict)
+            and ("maintenance fee" in str(event.get("title", "")).lower() or str(event.get("code", "")).startswith("MAFP"))]
+    latest_fee = max(fees, key=lambda event: str(event.get("date", "")), default=None)
+    if status:
+        add("现行状态", str(status) + ("（可信 API 记录；最近维持费事件 " + str(latest_fee.get("date")) + "）" if latest_fee
+                                     else "（可信 API 记录）"))
+    if payload.get("filing_date") and candidate.get("right_type") in {"patent", "utility_model"}:
+        add("预计到期", _add_years(payload["filing_date"], 20) + "（按申请日加 20 年推算，未计期限调整与维持费）")
+    owners = [str(item) for item in payload.get("assignees") or [] if str(item).strip()]
+    inventors = "、".join(item.get("name", "") for item in payload.get("inventors") or [] if isinstance(item, dict))
+    if owners and not all(owner.lower() == "individual" for owner in owners):
+        add("权利人", "、".join(owners))
+    elif owners or inventors:
+        add("权利人", "记录为个人申请人，未具名" + ("；发明人 " + inventors if inventors else ""))
+    links = []
+    if number:
+        links.append({"label": "Google Patents 原文", "url": "https://patents.google.com/patent/" + number + "/en"})
+    if isinstance(payload.get("pdf"), str) and payload["pdf"].startswith("https://"):
+        links.append({"label": "授权文本 PDF", "url": payload["pdf"]})
+    product = task.get("product") or {}
+    marking = []
+    for text in [product.get("title"), *(product.get("bullets") or []), *(product.get("visible_ip_claims") or [])]:
+        text = text if isinstance(text, str) else ""
+        found = re.search(r"\bpatent(?:ed|s)?\b|\b(?:US|U\.S\.)\s*(?:pat\w*\s*)?(?:no\.?\s*)?[\dD][\d,]{5,}", text, re.I)
+        if found:
+            start = max(0, found.start() - 60)
+            marking.append(text[start:found.end() + 80].strip())
+    comparison = row.get("comparison") or {}
+    titles = {str(item.get("implementation_id")): human(item.get("title") or item.get("description"), 80)
+              for item in comparison.get("implementations", []) if isinstance(item, dict)}
+    claims = []
+    for claim in comparison.get("claims", []):
+        if not isinstance(claim, dict) or claim.get("claim_type") not in (None, "independent"):
+            continue
+        elements = [{"element": human(element.get("claim_element") or element.get("claim_quote"), 200),
+                     "product": human(element.get("product_feature"), 200),
+                     "result": RESULT_LABELS.get(element.get("result"), human(element.get("result")))}
+                    for element in claim.get("elements", []) if isinstance(element, dict)]
+        if elements:
+            claims.append({"claim": str(claim.get("claim_id") or ""), "implementation": titles.get(str(claim.get("implementation_id")), ""),
+                           "elements": elements})
+    drawings = [item for item in figures if item.get("visual_role") == "patent_drawings"]
+    missing_figure = "" if drawings else ("附图未取得；可在原文链接查看。" + (" 公开附图：" + payload["images"][0]
+                                          if isinstance(payload.get("images"), list) and payload["images"] else ""))
+    return {"risk": row["risk"], "confidence": row.get("evidence_confidence"), "identity": identity, "links": links,
+            "marking": unique(marking, 2), "claims": claims[:3], "figures": drawings[:3], "missing_figure": missing_figure,
+            "assumptions": unique(row.get("assumptions") or [], 6), "lower_if": unique(row.get("lower_if") or [], 6),
+            "human_checks": unique(row.get("human_checks") or [], 4)}
+
+
 def build(task, evidence, assessment, candidates, data):
     if not enabled(task):
         return None
@@ -177,6 +268,14 @@ def build(task, evidence, assessment, candidates, data):
               for item in group if isinstance(item, dict) and item.get("candidate_id")}
     pending = []
     modules = []
+    # v2: an attempt whose response was retained as evidence (exact detail reads, local reads of retained public
+    # originals) is a successful read even when the trace keeps an older or superseded status for its query.
+    recorded_runs = ({entry.get("source_run_id") for group in (evidence.get("collections") or {}).values()
+                      if isinstance(group, list) for entry in group if isinstance(entry, dict) and entry.get("source_run_id")}
+                     if _v2(task) else set())
+    def effective_attempt(attempt):
+        return bool(attempt.get("effective") or (attempt.get("run_id") in recorded_runs
+                    and (attempt.get("source_query_performed") or attempt.get("status") == "not_run")))
     for right, label in RIGHTS:
         rows = [row for row in judgments if _scope(row).get("right_type") == right and _primary(row, scenario)]
         entries = [q for q in trace.get("queries", []) if q.get("right_type") == right and _primary(q, scenario)
@@ -186,7 +285,7 @@ def build(task, evidence, assessment, candidates, data):
         completed = sum(p.get("completed", 0) for p in counts)
         local = [a for q in entries for a in q.get("attempts", []) if a.get("local_investigation_performed")]
         effective = {a.get("physical_source_run_id") or a.get("run_id"): a for q in entries
-                     for a in q.get("attempts", []) if a.get("effective")}
+                     for a in q.get("attempts", []) if effective_attempt(a)}
         performed = [q for q in entries if any(a.get("source_query_performed") or a.get("physical_response_reused")
                      or a.get("local_investigation_performed") for a in q.get("attempts", []))]
         scope_results = [k for k in known if isinstance(k, dict) and _scope(k).get("right_type") == right and _primary(k, scenario)]
@@ -216,21 +315,29 @@ def build(task, evidence, assessment, candidates, data):
         if not_applicable:
             risk = None
         positive = risk in {"中", "高", "极高"}
-        unresolved = [] if not_applicable else [r for r in rows if r.get("assessment_status") == "pending" or r.get("pending_reasoning")]
+        decided = [r for r in rows if _v2(task) and _scope(r).get("candidate_id") and r.get("risk") in {"中", "高", "极高"}
+                   and r.get("assessment_status") != "pending"]
+        def subsumed(r):
+            # v2: a pending whole-scope row of a scope already decided by a graded candidate is not open work
+            return bool(decided) and not _scope(r).get("candidate_id") and r.get("assessment_status") == "pending" and \
+                (r.get("assessment_object") or "product") == "product" and \
+                any(_scope(d).get("jurisdiction") == _scope(r).get("jurisdiction") for d in decided)
+        unresolved = [] if not_applicable else [r for r in rows if (r.get("assessment_status") == "pending" or r.get("pending_reasoning"))
+                                                and not subsumed(r)]
         finding = "已查明具体风险" if positive else "存在待判断线索" if unresolved else "本轮已查结果未发现已证实的具体风险" if performed or completed or not_applicable else "尚无本模块查询结果"
         done = []
         if planned:
             done.append("已完成 %s/%s 个去重查询或资料核查项；该比例表示查询工作完成度。" % (completed, planned))
         if effective:
             names = unique(SOURCE_NAMES.get(q.get("provider"), q.get("provider")) for q in entries
-                           if any(a.get("effective") for a in q.get("attempts", [])))
+                           if any(effective_attempt(a) for a in q.get("attempts", [])))
             done.append("实际使用：" + "、".join(names) + "。有效响应按原记录及其范围使用。")
             retrieved = sum(a.get("retrieved_hits") or 0 for a in effective.values())
             if retrieved:
                 done.append("有效响应共载有 %s 条结果；重复响应按一次计算，结果条数不等于权利件数，处理范围以查询完成记录为准。" % retrieved)
         if local:
             done.append("完成留存公开材料的本地阅读、来源调查或比较；此动作无需向远程接口提交。")
-        completed_steps = unique(_step(q) for q in entries if any(a.get("effective") or a.get("local_investigation_performed") for a in q.get("attempts", [])))
+        completed_steps = unique(_step(q) for q in entries if any(effective_attempt(a) or a.get("local_investigation_performed") for a in q.get("attempts", [])))
         if completed_steps:
             done.append("已执行步骤：" + "、".join(completed_steps) + "。")
         related_candidates = {item.get("candidate_id"): item for item in inventory if
@@ -247,8 +354,14 @@ def build(task, evidence, assessment, candidates, data):
             done.append(data["product"]["brand_name_query"]["display"] + "；该参考名称无需查询。")
         if not done:
             done.append("未登记有效查询或已完成调查步骤。")
-        facts = unique(k.get("query_not_required_reason") or k.get("reasoning") for k in scope_results) if not_applicable else unique(
-            r.get("reviewed_reasoning") or r.get("pending_reasoning") or r.get("product_link") or r.get("reasoning") for r in rows)
+        if not_applicable:
+            facts = unique(k.get("query_not_required_reason") or k.get("reasoning") for k in scope_results)
+        elif decided:
+            facts = unique([r.get("reasoning") for r in sorted(decided, key=lambda r: -RISKS.index(r["risk"]))]
+                           + [r.get("reviewed_reasoning") or r.get("pending_reasoning") or r.get("product_link") or r.get("reasoning")
+                              for r in rows if r not in decided and not subsumed(r)])
+        else:
+            facts = unique(r.get("reviewed_reasoning") or r.get("pending_reasoning") or r.get("product_link") or r.get("reasoning") for r in rows)
         missing = []
         pending_records = []
         def add_missing(text, origin, kind):
@@ -265,6 +378,9 @@ def build(task, evidence, assessment, candidates, data):
             last = q.get("attempts", [])[-1] if q.get("attempts") else {}
             if q.get("status") == "not_run" and planned and completed == planned:
                 continue  # Optional directions do not reopen an accepted unique-work plan.
+            if (_v2(task) and planned and completed == planned and q.get("status") == "unknown"
+                    and q.get("operation") == "candidate_detail"):
+                continue  # v2: a detail read superseded by a later triage is not open work once the plan is accepted.
             if q.get("status") in {"failed", "access_limited", "submission_unknown", "not_run", "unknown"}:
                 add_missing(SOURCE_NAMES.get(q.get("provider"), human(q.get("provider"))) + "：" +
                     q.get("status_label", "状态未知") + ("；" + human(last.get("reason")) if last.get("reason") else ""),
@@ -324,7 +440,9 @@ def build(task, evidence, assessment, candidates, data):
         images = (figures or images)[:2]
         scope_notes = unique([candidate.get("missing_information"), candidate.get("triage_reasoning"),
             *[r.get("pending_reasoning") or r.get("product_link") or r.get("reasoning") for r in related]])
-        focus.append({"candidate_id": candidate.get("candidate_id"), "title": human(next((r.get("title") for r in related if r.get("title")), None) or candidate.get("title"), 220),
+        block = _evidence_block(task, evidence, candidate, related, figures) if _v2(task) else None
+        focus.append({"candidate_id": candidate.get("candidate_id"), "evidence_block": block,
+            "title": human(next((r.get("title") for r in related if r.get("title")), None) or candidate.get("title"), 220),
             "number": candidate.get("publication_number") or candidate.get("registration_number") or "",
             "jurisdiction": candidate.get("jurisdiction"), "right_type": candidate.get("right_type"),
             "status": ("待重新判断" if candidate.get("triage_status") == "pending_recheck" else
@@ -376,8 +494,9 @@ def build(task, evidence, assessment, candidates, data):
             "operations": [], "valid_responses": 0, "unsuccessful": 0, "boundaries": []})
         group["date"].append(str(attempt.get("checked_at") or "")[:10])
         group["operations"].append(_step(q))
-        group["valid_responses"] += int(bool(attempt.get("effective") or attempt.get("local_investigation_performed")))
-        group["unsuccessful"] += int(not (attempt.get("effective") or attempt.get("local_investigation_performed")))
+        ok = bool(effective_attempt(attempt) or attempt.get("local_investigation_performed"))
+        group["valid_responses"] += int(ok)
+        group["unsuccessful"] += int(not ok)
         if attempt.get("total_hits") is not None and attempt.get("retrieved_hits") is not None and attempt["total_hits"] > attempt["retrieved_hits"]:
             group["boundaries"].append("一份响应取得 %s/%s 条，剩余结果未读取" % (attempt["retrieved_hits"], attempt["total_hits"]))
     for group in grouped.values():
@@ -479,6 +598,32 @@ def _query_basis(value):
     return human(value)
 
 
+def _evidence_html(block, output_dir):
+    def rows(items):
+        return "".join('<tr><th>' + _e(row["label"]) + '</th><td>' + _e(row["value"]) + '</td></tr>' for row in items)
+    html_text = '<div class="evidence-block"><h4>' + _e(block["risk"]) + '风险依据</h4>'
+    html_text += '<table class="fact-table">' + rows(block["identity"]) + '</table>'
+    if block["links"]:
+        html_text += '<p class="small">' + ' · '.join('<a href="' + html.escape(link["url"], quote=True) + '">' + _e(link["label"]) + '</a>'
+                                                for link in block["links"]) + '</p>'
+    if block["marking"]:
+        html_text += '<h4>商品页面专利标注</h4>' + ''.join('<p class="quote">' + _e(text) + '</p>' for text in block["marking"])
+    for claim in block["claims"]:
+        html_text += ('<h4>权利要求 ' + _e(claim["claim"]) + ' 逐要素对照' + ('（' + _e(claim["implementation"]) + '）' if claim["implementation"] else '')
+                      + '</h4><table class="claims-table"><tr><th>权利要求要素</th><th>产品对应</th><th>结果</th></tr>'
+                      + ''.join('<tr><td>' + _e(element["element"]) + '</td><td>' + _e(element["product"]) + '</td><td>'
+                                + _e(element["result"]) + '</td></tr>' for element in claim["elements"]) + '</table>')
+    if len(block["figures"]) > 1:
+        # the card's comparison shows the first figure beside the product; further figures are shown here
+        html_text += '<div class="compare">' + ''.join('<div>' + _figure(figure, Path(output_dir)) + '</div>' for figure in block["figures"][1:3]) + '</div>'
+    elif block["missing_figure"]:
+        html_text += '<p class="empty">' + _e(block["missing_figure"]) + '</p>'
+    for key, label in (("assumptions", "等级依赖的假设"), ("lower_if", "出现以下情况可降低风险"), ("human_checks", "建议核实")):
+        if block[key]:
+            html_text += '<h4>' + label + '</h4><ul>' + ''.join('<li>' + _e(text) + '</li>' for text in block[key]) + '</ul>'
+    return html_text + '</div>'
+
+
 def render(data, output_dir):
     view, product = data["operator_view"], data["product"]
     overall, progress = view["overall"], view["progress"]
@@ -510,6 +655,8 @@ def render(data, output_dir):
     for item in view["focus_candidates"]:
         body += '<article class="candidate"><h3>' + _e(item["number"] or item["title"]) + '</h3><p>' + _e(item["title"]) + ' · ' + _e(COUNTRIES.get(item["jurisdiction"], item["jurisdiction"])) + ' · ' + _e(item["status"]) + '</p>'
         body += _paragraphs(item["notes"], 2)
+        if item.get("evidence_block"):
+            body += _evidence_html(item["evidence_block"], output_dir)
         if item["images"]:
             body += '<div class="compare"><div><h4>目标产品</h4>' + image + '</div><div><h4>候选相关图证</h4>' + _figure(item["images"][0], Path(output_dir)) + '</div></div>'
             body += '<p class="small">图样用于说明比较对象；相似图片本身不单独证明权利、状态或侵权。</p>'

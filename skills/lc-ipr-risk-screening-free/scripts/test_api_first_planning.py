@@ -250,6 +250,7 @@ class ApiFirstPlanningTests(unittest.TestCase):
 
     def test_shared_reserve_does_not_silently_promote_backup(self):
         self.task["serpapi_free_enhancement"] = serpapi_free_enhancement(True, REVISION)
+        self.task.pop("discovery_refinement_revision", None)  # pre-r5d routing: Serper patents still planned
         self.task["query_terms"] += [{"kind": "structural_feature", "value": f"bounded clue {i}",
             "derived_from": "product.structure[0]", "language": "en"} for i in range(35)]
         self.regenerate()

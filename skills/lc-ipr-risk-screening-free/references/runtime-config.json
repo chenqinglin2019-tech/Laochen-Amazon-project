@@ -48,9 +48,9 @@
   },
   "api_first": {
     "serper_max_requests": 30,
-    "serpapi_max_requests": 10,
+    "serpapi_max_requests": 20,
     "signa_max_requests": 3,
-    "discovery_results_per_query": 10,
+    "discovery_results_per_query": 100,
     "max_refinement_rounds": 2,
     "max_pages_per_query": 8,
     "browser_fallback_max_candidates": 50,

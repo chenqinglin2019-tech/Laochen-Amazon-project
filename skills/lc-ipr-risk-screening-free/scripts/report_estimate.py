@@ -21,7 +21,7 @@ from typing import Any
 from copy import deepcopy
 from urllib.parse import quote, unquote, urlsplit
 
-from common import atomic_write_bytes, atomic_write_json, recall_integrity_enabled, RECALL_INTEGRITY_REVISION
+from common import load_json, atomic_write_bytes, atomic_write_json, recall_integrity_enabled, RECALL_INTEGRITY_REVISION
 
 POLICY = "evidence-estimate-v1"
 REPORT_SCHEMA = "IPR-EVIDENCE-ESTIMATE-REPORT/1.0"
@@ -37,7 +37,8 @@ RIGHT_MODULES = {"design": "appearance_patent", "unregistered_design": "appearan
 RISKS = ["极低", "低", "中", "高", "极高"]
 CONFIDENCES = ["低", "中", "高"]
 RISK_CLASS = dict(zip(RISKS, ["very_low", "low", "medium", "high", "critical"]))
-CSS_PATH = Path(__file__).resolve().parent.parent / "assets" / "evidence-estimate-template.css"
+from runtime_compat import GeneratedTextPath
+CSS_PATH = GeneratedTextPath(__file__).resolve().parent.parent / "assets" / "evidence-estimate-template.css"
 EXPLANATION_FIELDS = [("supporting_evidence", "支持风险的事实"), ("counter_evidence", "降低风险的事实"), ("reasoning", "主审推论"), ("assumptions", "假设与范围"), ("confidence_reasoning", "置信度理由"), ("human_checks", "人工核查"), ("raise_if", "上调条件"), ("lower_if", "下调条件")]
 CSV_FIELDS = ["row_type", "jurisdiction", "right_type", "candidate_id", "title", "scope", "risk", "confidence", "aggregation_included", "supporting_evidence", "counter_evidence", "reasoning", "assumptions", "confidence_reasoning", "human_checks", "raise_if", "lower_if", "evidence_refs", "evidence_sources"]
 BASIS_LABELS = {"official_verified": "已由官方记录核验", "source_observed": "来源所载，未经官方核验",
@@ -823,6 +824,27 @@ def _visual_failed(record: Any) -> bool:
     return any(_visual_failed(value) for value in record.values() if isinstance(value, (dict, list)))
 
 
+def _trusted_api_visuals_enabled(task) -> bool:
+    from assessment_estimate import best_estimate_v2
+    return best_estimate_v2(task)
+
+
+def _same_publication(payload: dict, row: dict, candidate: dict) -> bool:
+    """The detail record belongs to this candidate: exact candidate binding or the same full publication number."""
+    if payload.get("candidate_id") and payload.get("candidate_id") == row.get("candidate_id"):
+        return True
+    actual, expected = payload.get("publication_number"), candidate.get("publication_number")
+    if not actual or not expected:
+        return False
+    if row.get("jurisdiction") == "US":
+        from record_candidate_lead import publication_number
+        try:
+            return publication_number(actual) == publication_number(expected)
+        except ValueError:
+            return False
+    return str(actual).replace(" ", "").upper() == str(expected).replace(" ", "").upper()
+
+
 def _core_visuals(rows: list[dict], registry: dict, root: Path, out: Path,
                   bindings: dict[str, dict], failed_queries: set | None = None,
                   failed_runs: set | None = None, candidate_index: dict | None = None,
@@ -938,7 +960,12 @@ def _core_visuals(rows: list[dict], registry: dict, root: Path, out: Path,
             source = record.get("path") or record.get("source_document") or record.get("local_path") or record.get("file_path")
             if source and Path(source).suffix.lower() == ".pdf":
                 if not document_matches(record):
-                    gap_reasons.append("引用文献未精确绑定当前候选公开号与范围：" + identifier)
+                    if not (_trusted_api_visuals_enabled(task) and record.get("provider") == "public_source"
+                            and record.get("jurisdiction") == row.get("jurisdiction")
+                            and record.get("right_type") == row.get("right_type")
+                            and _same_publication({"publication_number": record.get("publication_number")}, row, candidate)):
+                        gap_reasons.append("引用文献未精确绑定当前候选公开号与范围：" + identifier)
+                    # v2: the candidate's own retained text is cited; identity comes from the trusted API record
                     continue
                 document = _local_info(root, out, record, bindings=bindings)
                 derived = derivatives.get((document["source_path"], document["sha256"]), [])
@@ -979,6 +1006,27 @@ def _core_visuals(rows: list[dict], registry: dict, root: Path, out: Path,
                   or any(item.get("role") in ("main", "product_view", "product_comparison")
                          or item["sha256"] in comparison_hashes for item in _declared_images(record))):
                 append_record(identifier, record, comparison=True)
+        if structural_right and _trusted_api_visuals_enabled(task):
+            # best-estimate-risk-v2: the exact candidate's trusted API detail record establishes the document identity
+            # and its claims; drawings retained from that record's own image list (bound to the candidate at
+            # registration) are the right's figures. No page rendering and no title/family matching.
+            for identifier, record in registry.items():
+                if not isinstance(record, dict) or failed(record):
+                    continue
+                payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
+                if (record.get("provider") == "serpapi_google_patents" and record.get("operation") == "candidate_detail"
+                        and record.get("right_type") == row.get("right_type")
+                        and record.get("jurisdiction") == row.get("jurisdiction")
+                        and _same_publication(payload, row, candidate)):
+                    roles.add("document_identity")
+                    if row.get("right_type") not in ("patent", "utility_model", "utility_patent") or payload.get("claims"):
+                        roles.add("patent_claims")
+                elif (record.get("provider") == "public_source" and payload.get("visual_role") == "patent_drawings"
+                        and payload.get("candidate_id") == row.get("candidate_id")
+                        and payload.get("right_type") == row.get("right_type")
+                        and record.get("jurisdiction") == row.get("jurisdiction")):
+                    append_record(identifier, {**record, "visual_role": "patent_drawings",
+                        "visual_reason": "权利文献附图（" + _text(payload.get("figure_label") or "附图") + "，取自该候选可信 API 详情所列官方附图）；其支持与限制见逐项推论。"})
         required = ({"document_identity", "patent_claims", "patent_drawings"} if row.get("right_type") in ("patent", "utility_model", "utility_patent")
                     else {"patent_drawings"} if row.get("right_type") in ("design", "unregistered_design")
                     else {"copyright_work"} if row.get("right_type") == "copyright"
@@ -1152,7 +1200,10 @@ def _build_report_data(task_dir: Path, task: dict, evidence: dict, assessment: d
     if visual_policy_revision:
         latest_runs = {item.get("query_id"): item for item in evidence.get("source_runs", []) if item.get("query_id")}
         failed_queries = {key for key, item in latest_runs.items() if _visual_failed(item)}
-        failed_runs = {item.get("run_id") for item in evidence.get("source_runs", []) if item.get("run_id") and _visual_failed(item)}
+        failed_runs = {item.get("run_id") for item in evidence.get("source_runs", []) if item.get("run_id") and _visual_failed(item)
+                       # v2: a retained public original is never submitted anywhere; its run is local and successful.
+                       and not (_trusted_api_visuals_enabled(task) and item.get("provider") == "public_source"
+                                and item.get("status") == "success")}
         candidate_index = {item["candidate_id"]: item for group in candidates.values() if isinstance(group, list)
                            for item in group if isinstance(item, dict) and item.get("candidate_id")}
         core_sections, visual_gaps = _core_visuals(rows, registry, root, out, bindings, failed_queries, failed_runs, candidate_index,
@@ -1994,7 +2045,7 @@ def _write_delivery_bundle(data: dict, out: Path, *, task_dir: Path, task: dict,
     if not evidence_delivery_enabled(task):
         return _write_bundle(data, out)
     assessment_path = out / "assessment.json"
-    if assessment_path.is_file() and json.loads(assessment_path.read_text()) != assessment:
+    if assessment_path.is_file() and load_json(assessment_path) != assessment:
         raise ValueError("REPORT_ASSESSMENT_CHANGED_BEFORE_DELIVERY")
     out.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".ipr-report-validation-", dir=out.parent) as temporary:
@@ -2055,8 +2106,8 @@ def validate_run(task_dir: Path, task: dict, *, output_dir: Path | None = None) 
     task_dir, out = Path(task_dir).resolve(), Path(output_dir or task_dir).resolve()
     errors = []
     try:
-        data = json.loads((out / 'report-data.json').read_text())
-        manifest = json.loads((out / 'report-manifest.json').read_text())
+        data = load_json(out / 'report-data.json')
+        manifest = load_json(out / 'report-manifest.json')
         actual_rendered = {name: (out / name).read_bytes() for name in ('report.html', 'report.md', 'report-findings.csv', 'operator-appendix.html', 'technical-audit.html') if (out / name).is_file()}
         security = _security_errors({'task': task, 'report_data': data, 'manifest': manifest}, actual_rendered)
         if security:
@@ -2085,7 +2136,7 @@ def validate_run(task_dir: Path, task: dict, *, output_dir: Path | None = None) 
         if source.resolve() != Path(task.get('outputs', {}).get('assessment_input_dir') or task_dir).resolve():
             return list(dict.fromkeys(errors + ['REPORT_CANONICAL_SOURCE_MISMATCH']))
         from delivery_inspection_stage_d import enabled as inspection_enabled, source_task_errors
-        current_task = json.loads((source / 'task.json').read_text()) if (source / 'task.json').is_file() else {}
+        current_task = load_json(source / 'task.json') if (source / 'task.json').is_file() else {}
         if inspection_enabled(task) or inspection_enabled(current_task):
             errors.extend(source_task_errors(source, task))
         inputs = {}
@@ -2099,7 +2150,7 @@ def validate_run(task_dir: Path, task: dict, *, output_dir: Path | None = None) 
                 errors.append('REPORT_INPUT_MISSING: ' + filename)
                 continue
             else:
-                value = json.loads(path.read_text())
+                value = load_json(path)
             inputs[key] = value
             if _digest(value) != data['trace']['input_digests'][key]:
                 errors.append('REPORT_INPUT_STALE: ' + filename)

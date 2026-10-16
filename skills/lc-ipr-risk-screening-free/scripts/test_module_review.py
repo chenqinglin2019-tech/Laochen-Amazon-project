@@ -100,12 +100,16 @@ class ModuleReviewTests(unittest.TestCase):
             'packet_sha256': audit['packet_sha256'], 'judgment': raw,
             'host_audit': {'path': str(audit_path), 'sha256': sha256_file(audit_path)}}
 
-    def review(self, chain='1'):
+    def review(self, chain='1', rollup=False):
         frozen = {'task': self.task, 'evidence_digest': self.digest, 'candidates': {}}
         modules = []
         for group, rights in mod.GROUPS.items():
             rows = [{'scenario_id': 'S', 'jurisdiction': 'US', 'right_type': right,
                 'assessment_object': 'product', 'reasoning': 'Synthetic unchanged judgment'} for right in sorted(rights)]
+            if rollup and group == 'technical':
+                # cited in a nested field, forgotten in the row's own roll-up list
+                rows[0]['evidence_refs'] = ['E']
+                rows[0]['confidence_basis'] = {'scope': {'satisfied': True, 'reasoning': 'r', 'evidence_refs': ['E2', 'E']}}
             raw = {'assessments': rows, 'future_applications': [], 'enforcement_signals': []}
             modules.append(self.record(chain, group, raw, mod.module_packet(frozen, group)))
         statement = {'overall': 'No established medium or high finding.', 'scope': 'All three synthetic modules.',
@@ -116,14 +120,17 @@ class ModuleReviewTests(unittest.TestCase):
         summary = self.record(chain, 'summary', raw, {'task': self.task, 'evidence_digest': self.digest,
             'chain_id': chain, 'modules': modules})
         rows = [deepcopy(row) for module in modules for row in module['judgment']['assessments']]
+        rows, added = mod.derive_rows(rows)
         rows, receipt = final_review.prepare_rows({'final_review_statement': statement}, rows, self.material)
+        derivation = {'row_derivation': mod.row_derivation_record(added)} if added else {}
         return {'reviewer': chain, 'assessments': rows, 'future_applications': [], 'enforcement_signals': [],
             'coverage_confidence_cap': '低', 'coverage_confidence_reasoning': 'Synthetic only',
             'review_context': {'session_id': summary['session_id'], 'evidence_digest': self.digest,
                 'first_review_visible': False, 'final_review': receipt,
                 'execution': {'agent_id': summary['agent_id'], 'run_id': summary['run_id'], 'input_digest': self.digest,
                     'assessment_digest': sha256_json(rows), 'final_review_digest': sha256_json(receipt),
-                    'module_execution': {'revision': mod.REVISION, 'chain_id': chain, 'modules': modules, 'summary': summary}}}}
+                    'module_execution': {'revision': mod.REVISION, 'chain_id': chain, 'modules': modules,
+                                         'summary': summary, **derivation}}}}
 
     def test_six_module_and_two_summary_sessions_keep_truthful_origins(self):
         first, second = self.review('1'), self.review('2')
@@ -135,6 +142,75 @@ class ModuleReviewTests(unittest.TestCase):
         key = final_review.unit_id(first['assessments'][0])
         self.assertEqual(mod.unit_origins(first, key), {'1-technical'})
         self.assertNotEqual(mod.unit_origins(first, key), {first['review_context']['session_id']})
+
+    # --- evidence roll-up derivation (row-evidence-ref-rollup-v1) --------------------------------------
+    def test_rollup_derivation_is_pure_ordered_idempotent_and_leaves_malformed_rows(self):
+        row = {'evidence_refs': ['E1'], 'supporting_evidence': [{'reasoning': 'r', 'evidence_refs': ['E2', 'E1']}],
+               'confidence_basis': {'scope': {'evidence_refs': ['E3']}}, 'right_state_evidence_refs': ['E2', 'E4']}
+        original = deepcopy(row)
+        self.assertEqual(mod.row_evidence_ref_additions(row), ['E2', 'E3', 'E4'])
+        self.assertEqual(row, original)
+        for malformed in ({'supporting_evidence': [{'evidence_refs': 'E2'}], 'evidence_refs': ['E1']},
+                          {'supporting_evidence': [{'evidence_refs': [7]}], 'evidence_refs': ['E1']},
+                          {'supporting_evidence': [{'evidence_refs': ['E2']}]},
+                          {'supporting_evidence': [{'evidence_refs': ['E2']}], 'evidence_refs': 'E1'}):
+            with self.subTest(row=malformed):
+                self.assertEqual(mod.row_evidence_ref_additions(malformed), [])
+        full = {'scenario_id': 'S', 'jurisdiction': 'US', 'right_type': 'patent', 'assessment_object': 'product', **row}
+        rows, added = mod.derive_rows([full])
+        self.assertEqual(rows[0]['evidence_refs'], ['E1', 'E2', 'E3', 'E4'])
+        self.assertEqual(full['evidence_refs'], ['E1'])
+        again, nothing = mod.derive_rows(rows)
+        self.assertEqual(again, rows)
+        self.assertEqual(nothing, {})
+        self.assertEqual(list(added.values()), [['E2', 'E3', 'E4']])
+
+    def test_completed_rollup_validates_while_the_receipt_keeps_raw_rows(self):
+        review = self.review(rollup=True)
+        execution = review['review_context']['execution']
+        self.assertEqual(execution['module_execution']['row_derivation']['revision'], mod.ROW_DERIVATION_REVISION)
+        mod.validate_execution(review, required=True)
+        technical = execution['module_execution']['modules'][0]['judgment']['assessments'][0]
+        self.assertEqual(technical['evidence_refs'], ['E'])
+        self.assertEqual(review['assessments'][0]['evidence_refs'], ['E', 'E2'])
+        # a chain that needed no completion carries no marker at all (its receipt is unchanged)
+        plain = self.review('2')
+        self.assertNotIn('row_derivation', plain['review_context']['execution']['module_execution'])
+        mod.validate_execution(plain, required=True)
+
+    def test_unrecorded_wrong_or_hand_edited_rollup_is_rejected(self):
+        review = self.review(rollup=True)
+        missing = deepcopy(review)
+        missing['review_context']['execution']['module_execution'].pop('row_derivation')
+        with self.assertRaisesRegex(ValueError, 'ROW_DERIVATION_MISMATCH'):
+            mod.validate_execution(missing, required=True)
+        wrong = deepcopy(review)
+        unit = next(iter(wrong['review_context']['execution']['module_execution']['row_derivation']['added_evidence_refs']))
+        wrong['review_context']['execution']['module_execution']['row_derivation']['added_evidence_refs'][unit] = ['E9']
+        with self.assertRaisesRegex(ValueError, 'ROW_DERIVATION_MISMATCH'):
+            mod.validate_execution(wrong, required=True)
+        revision = deepcopy(review)
+        revision['review_context']['execution']['module_execution']['row_derivation']['revision'] = 'other'
+        with self.assertRaisesRegex(ValueError, 'ROW_DERIVATION_INVALID'):
+            mod.validate_execution(revision, required=True)
+        edited = deepcopy(review)
+        edited['assessments'][0]['evidence_refs'] = ['E', 'E2', 'E-INVENTED']
+        with self.assertRaisesRegex(ValueError, 'ROWS_REWRITTEN'):
+            mod.validate_execution(edited, required=True)
+        raw_in_review = deepcopy(review)
+        raw_in_review['assessments'][0]['evidence_refs'] = ['E']
+        with self.assertRaisesRegex(ValueError, 'ROWS_REWRITTEN'):
+            mod.validate_execution(raw_in_review, required=True)
+
+    def test_module_judgment_with_unlisted_nested_refs_passes_the_module_validator_only_after_derivation(self):
+        record = self.legal_record()
+        row = record['judgment']['assessments'][0]
+        row['supporting_evidence'] = [{'reasoning': 'Cited here only', 'evidence_refs': ['E2']}]
+        # E2 is not part of the known registry: derivation adds it, ordinary validation still rejects it
+        with self.assertRaises(mod.ModuleJudgmentError):
+            mod._validate_module_judgment(record, self.task, {'E'}, {}, {})
+        mod._validate_module_judgment(record, self.task, {'E', 'E2'}, {}, {})
+        self.assertEqual(row['evidence_refs'], ['E'])
 
     def test_changed_native_trace_or_rows_rejected_even_if_top_hash_rebuilt(self):
         review = self.review()
@@ -217,6 +293,56 @@ class ModuleReviewTests(unittest.TestCase):
         self.assertTrue(expression['candidates']['assets'])
         self.assertFalse(mod.module_packet(frozen, 'technical')['candidates']['assets'])
 
+    # --- one file referenced by two rights keeps its public-source binding (field patch 7) --------------
+    def shared_frozen(self, *, public=True):
+        record = {'evidence_id': 'EV-PUB-US1B2', 'kind': 'patent_document', 'path': '/retained/US1B2.pdf',
+            'sha256': 'H' * 64, 'bytes': 10, 'jurisdiction': 'US', 'right_type': 'patent',
+            'publication_number': 'US1B2', 'checked_at': '2026-10-11T02:32:12Z',
+            'authority_scope': 'published_document_only', 'pages': 7,
+            'publication_relations': [{'publication_number': 'US0A1', 'relation': 'prior_publication'}]}
+        if public:
+            record['source_url'] = 'https://patentimages.example/US1B2.pdf'
+        return {'task': self.task, 'evidence_digest': self.digest, 'candidates': {},
+            'evidence': {'collections': {'asset_provenance': [{'evidence_id': 'EV-ASSET', 'right_type': 'copyright',
+                'payload': {'artifacts': [{'path': '/retained/US1B2.pdf', 'sha256': 'H' * 64}]}}]}},
+            'supplement': {'evidence': [record]}}
+
+    def test_cross_right_public_original_binding_is_shared_not_dropped(self):
+        frozen = self.shared_frozen()
+        technical, expression = mod.module_packet(frozen, 'technical'), mod.module_packet(frozen, 'expression')
+        self.assertNotIn('shared_public_originals', technical)
+        self.assertEqual(technical['supplement']['evidence'][0]['source_url'], 'https://patentimages.example/US1B2.pdf')
+        self.assertEqual(expression['supplement']['evidence'], [])
+        shared = expression['shared_public_originals']
+        self.assertEqual(len(shared), 1)
+        self.assertEqual(list(shared[0]), list(mod.SHARED_ORIGINAL_FIELDS[:3]) + ['source_url', 'evidence_id', 'kind',
+            'publication_number', 'jurisdiction', 'right_type', 'checked_at', 'authority_scope'])
+        self.assertNotIn('pages', shared[0])
+        self.assertNotIn('publication_relations', shared[0])
+        from review_material_policy import file_inventory
+        row = next(item for item in file_inventory(expression) if item['path'] == '/retained/US1B2.pdf')
+        self.assertTrue(row['public'])
+        self.assertIn('EV-ASSET', row['source_refs'])
+        self.assertIn('EV-PUB-US1B2', row['source_refs'])
+        # the shared key sits before module_scope so the original is read after every module-local material
+        keys = list(expression)
+        self.assertLess(keys.index('shared_public_originals'), keys.index('module_scope'))
+
+    def test_private_or_unreferenced_files_are_never_promoted_to_public(self):
+        private = self.shared_frozen(public=False)
+        self.assertNotIn('shared_public_originals', mod.module_packet(private, 'expression'))
+        frozen = self.shared_frozen()
+        frozen['evidence']['collections']['asset_provenance'][0]['payload']['artifacts'][0]['sha256'] = 'X' * 64
+        self.assertNotIn('shared_public_originals', mod.module_packet(frozen, 'expression'))
+        frozen['evidence']['collections'].pop('asset_provenance')
+        self.assertNotIn('shared_public_originals', mod.module_packet(frozen, 'expression'))
+
+    def test_shared_binding_is_omitted_when_the_module_keeps_the_public_record(self):
+        frozen = self.shared_frozen()
+        packet = mod.module_packet(frozen, 'technical')
+        self.assertNotIn('shared_public_originals', packet)
+        self.assertEqual(mod.shared_public_originals(frozen, packet), [])
+
     def test_public_original_complete_text_is_read_once_and_never_truncated(self):
         original = self.root / 'original.txt'
         original.write_text('Actual independent claim 1\n' + 'all content ' * 20000)
@@ -256,6 +382,20 @@ class ModuleReviewTests(unittest.TestCase):
         self.assertEqual(len(calls), 4)
         with self.assertRaisesRegex(ValueError, 'MAX_PARALLEL_INVALID'):
             mod.run_jobs(jobs, 30, 7)
+
+    def test_native_scheduler_starts_longest_prompt_first_and_keeps_result_order(self):
+        started = []
+        sizes = [10, 500, 50, 900]
+        jobs = [{'command': [str(i)], 'prompt': 'x' * size, 'workspace': self.root,
+            'trace_path': self.root / str(i), 'stderr_path': self.root / ('e' + str(i))}
+            for i, size in enumerate(sizes)]
+        def run(command, *args):
+            started.append(command[0])
+            return 'out-' + command[0]
+        with patch('report_review_host.run_native_logged', side_effect=run):
+            result = mod.run_jobs(jobs, 30, 1)
+        self.assertEqual(started, ['3', '1', '2', '0'])
+        self.assertEqual(result, ['out-0', 'out-1', 'out-2', 'out-3'])
 
     def test_completed_retained_trace_recovers_without_invented_process_metadata(self):
         directory = self.root / '1' / 'technical'

@@ -164,6 +164,34 @@ def task_limit_no_retry_proof(task, evidence, provider, row, task_dir):
     return audit
 
 
+RECORD_ABSENT_CODES = frozenset({"PROVIDER_RECORD_NOT_FOUND"})
+
+
+def record_absent_no_retry_proof(task, evidence, provider, row, task_dir):
+    """r5d4 tasks: the exact-record source answered that the record does not exist (a definitive answer, not an
+    outage), the failure was closed out without a retry and its receipt fully processed. Same audit shape as the
+    request-limit proof; the constraint names the source's own answer."""
+    from pipeline_robust import enabled as robust_enabled
+    if not robust_enabled(task):
+        return None
+    audit = no_retry_audit(task, evidence, provider, row, task_dir)
+    if not audit or task_dir is None:
+        return None
+    run = next((item for item in evidence.get('source_runs', []) if item.get('run_id') == audit['source_run_id']), None)
+    code = str((run or {}).get('error_code') or '')
+    constraint = {'kind': 'source_record_absent', 'provider': provider, 'plan_entry_sha256': sha256_json(row),
+                  'error_code': code}
+    if code not in RECORD_ABSENT_CODES or audit.get('retry_constraint') != constraint:
+        return None
+    return audit
+
+
+def no_retry_limit_proof(task, evidence, provider, row, task_dir):
+    """A disclosed no-retry limitation: the task's request limit is used up, or (r5d4) the record is absent."""
+    return (task_limit_no_retry_proof(task, evidence, provider, row, task_dir)
+            or record_absent_no_retry_proof(task, evidence, provider, row, task_dir))
+
+
 def recovery_state(task: dict, evidence: dict, provider: str, row: dict) -> dict | None:
     if not enabled(task):
         return None

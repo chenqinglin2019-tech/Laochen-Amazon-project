@@ -6,7 +6,7 @@ from unittest.mock import patch
 import test_recovery_stage_b as recovery_tests
 from common import sha256_json
 from recovery_stage_b import no_retry_audit, task_limit_no_retry_proof, recovery_state
-from trusted_api import _registered_original_protection
+from trusted_api import _registered_original_protection, _registered_original_fact, accepted_verification
 
 
 class NoRetryTests(unittest.TestCase):
@@ -116,5 +116,67 @@ class OriginalCreditTests(unittest.TestCase):
             batch['processed_material_event_ids']=[];self.assertIsNone(credit());batch['processed_material_event_ids']=['M']
             retained.side_effect=ValueError('original bytes changed');self.assertIsNone(credit())
             scope['jurisdiction']='GB';self.assertIsNone(credit())
+
+class OriginalIdentityCreditTests(unittest.TestCase):
+    """An exactly-read registered original supports identity and protection content - never status/owner/territory."""
+    def setUp(self):
+        self.task={'retrieval_workflow_revision':'api-first-v3','host_triage_revision':'host-triage-v1'}
+        self.candidate={'candidate_id':'C','publication_number':'US123B1','right_type':'patent','jurisdiction':'US'}
+        self.scope={'candidate_id':'C','scenario_id':'product_entry','jurisdiction':'US','right_type':'patent'}
+        self.lead={'evidence_id':'LEAD','provider':'external_document_lead','right_type':'patent',
+            'lead':{'publication_number':'US123B1'},'source_registration':{'evidence_id':'EV'},
+            'document':{'sha256':'abc','source_url':'https://example.test/exact'}}
+        self.evidence={'collections':{'candidate_leads':[self.lead]}}
+        base={**self.scope,'intake_event_id':'I'}
+        self.material={**base,'kind':'material','event_id':'M','source_form':'original_document','document_id':'US123B1',
+            'document_version':'v1','status':'sufficient_for_listed_purposes',
+            'supported_facts':['identity','protection','current_status','rights_holder','territory'],'evidence_refs':['EV']}
+        def fact(kind,event):
+            return {**base,'kind':'fact','event_id':event,'fact_kind':kind,'outcome':'supported','material_event_ids':['M'],
+                'document_version':'v1','evidence_refs':['EV'],'raw_statement':'Read ' + kind,'recorded_at':'2026-10-11'}
+        self.history=[self.material,fact('protection','FP'),fact('identity','FI'),fact('current_status','FS'),
+            fact('rights_holder','FR'),fact('territory','FT'),
+            {**base,'kind':'batch','processed_material_event_ids':['M'],'received_evidence_refs':['EV']}]
+    def patched(self):
+        from contextlib import ExitStack
+        stack=ExitStack()
+        for target,kwargs in (('specialty_analysis._current',{'return_value':{'annotation':{'annotation_id':'A'}}}),
+                ('specialty_analysis._intake',{'return_value':{'annotation_id':'A','event_id':'I'}}),
+                ('specialty_analysis._validate_intake',{}),('specialty_analysis.events',{'return_value':self.history}),
+                ('specialty_analysis._fact',{}),('specialty_analysis._material',{}),('specialty_analysis._batch',{}),
+                ('decision_workflow.evidence_index',{'return_value':{}}),
+                ('record_candidate_lead.validated_candidate_lead_entries',{'return_value':[self.lead]})):
+            stack.enter_context(patch(target,**kwargs))
+        return stack
+    def credit(self,name):
+        return _registered_original_fact(name,self.task,self.evidence,self.candidate,'US','patent',scope=self.scope,
+            candidates={},ledger={},supplement={},task_dir='/unused')
+    def test_reviewed_original_credits_identity_and_protection_only(self):
+        with self.patched():
+            identity=self.credit('identity');protection=self.credit('protection_content')
+            self.assertEqual(identity['source_field'],'current_M06_identity_fact')
+            self.assertEqual(protection['source_field'],'current_M06_protection_fact')
+            self.assertEqual(identity['source_form'],'reviewed_original_document')
+            for name in ('current_status','rights_holder','territory','goods_services'):
+                with self.subTest(name=name):self.assertIsNone(self.credit(name))
+    def test_unsupported_or_other_version_identity_is_not_credited(self):
+        with self.patched():
+            identity=next(r for r in self.history if r.get('fact_kind')=='identity')
+            identity['outcome']='unknown';self.assertIsNone(self.credit('identity'));identity['outcome']='supported'
+            identity['document_version']='v2';self.assertIsNone(self.credit('identity'));identity['document_version']='v1'
+            self.material['supported_facts']=['protection'];self.assertIsNone(self.credit('identity'))
+            self.assertIsNotNone(self.credit('protection_content'))
+    def test_accepted_verification_credits_identity_only_for_the_host_triage_family(self):
+        def verification(task):
+            with patch('trusted_api.accepted_candidate_facts',return_value={}), \
+                 patch('trusted_api._registered_original_fact',side_effect=lambda name,*a,**k:
+                    {'value':name,'source_form':'reviewed_original_document','evidence_refs':['EV']}):
+                return accepted_verification(task,self.evidence,self.candidate,'US','patent',scope=self.scope,task_dir='/unused')
+        new=verification(self.task)
+        self.assertIn('identity',new['supported']);self.assertIn('protection_content',new['supported'])
+        for fact in ('current_status','rights_holder','territory'):self.assertIn(fact,new['missing'])
+        old=verification({k:v for k,v in self.task.items() if k!='host_triage_revision'})
+        self.assertNotIn('identity',old['supported']);self.assertIn('identity',old['missing'])
+        self.assertIn('protection_content',old['supported'])
 
 if __name__=='__main__':unittest.main()

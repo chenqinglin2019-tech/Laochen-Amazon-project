@@ -22,7 +22,7 @@ def record(task_dir: Path, input_path: Path, *, migrate=False):
         if not task.get('product_scope_required') and not ps.enabled(task) and not migrate:
             raise ValueError('EXPLICIT_SCOPE_MIGRATION_REQUIRED')
         payload=load_json(input_path)
-        if not isinstance(payload,dict) or set(payload)-{'schema_version','expected_scope_sha256','sources','scope','query_terms'} or payload.get('schema_version') not in {'product-scope-input-v1','product-scope-input-v2'}:
+        if not isinstance(payload,dict) or set(payload)-{'schema_version','expected_scope_sha256','sources','scope','query_terms','investigation_profile'} or payload.get('schema_version') not in {'product-scope-input-v1','product-scope-input-v2'}:
             raise ValueError('PRODUCT_SCOPE_INPUT_INVALID')
         from product_delivery import REVISION as DELIVERY_REVISION, enabled as delivery_enabled, validate_scope as validate_delivery, validate_fact_origins
         if delivery_enabled(task) and payload['schema_version']!='product-scope-input-v2':
@@ -146,6 +146,15 @@ def record(task_dir: Path, input_path: Path, *, migrate=False):
             task['query_terms']=deepcopy(payload['query_terms'])
         digest=sha256_json(ps.content(data)); eid=stable_id('EV','product_scope',task['task_id'],request_hash)
         task['product_scope']={**data,'scope_sha256':digest,'evidence_id':eid}
+        if 'investigation_profile' in payload:
+            from investigation_policy import bind_profile
+            profile = deepcopy(payload['investigation_profile'])
+            if isinstance(profile, list):
+                for row in profile:
+                    if isinstance(row, dict) and isinstance(row.get('evidence_refs'), list):
+                        row['evidence_refs'] = [aliases.get(ref, ref) if isinstance(ref, str) else ref
+                                                for ref in row['evidence_refs']]
+            task['investigation_profile'] = bind_profile(task, profile)
         if payload['schema_version']=='product-scope-input-v2':
             from product_delivery import project as delivery_project
             task['product_delivery']=delivery_project(task)

@@ -1001,6 +1001,8 @@ def make_annotation(task: dict, collection: str, candidate: dict, decision: dict
                basis_sha256=basis_evidence_sha256(refs, evidence, supplement, candidate=candidate, task=task))
     if correction_enabled(task):
         row["workflow_correction_revision"] = CORRECTION_REVISION
+    from followup_identity import bind_action_contents
+    row = bind_action_contents(task, row, candidate, evidence, supplement)
     errors = annotation_errors(row, known_evidence=set(evidence_index(evidence, supplement)), task=task)
     if errors:
         raise ValueError("INVALID_TRIAGE_DECISION: " + "; ".join(errors))

@@ -22,8 +22,10 @@ class PlatformRuntimeTests(unittest.TestCase):
             self.assertFalse(row["compatible"])
             self.assertIsNone(row["auth_binary_name"])
 
-    def test_windows_exact_build_matrix(self):
-        for build, release in ((19045, "10 22H2"), (26100, "11 24H2"), (26200, "11 25H2")):
+    def test_windows_x64_builds_from_10_2004_are_compatible_pending_native_validation(self):
+        for build, release in ((19041, "10 2004"), (19044, "10 21H2"), (19045, "10 22H2"), (22000, "11 21H2"),
+                               (22621, "11 22H2"), (22631, "11 23H2"), (26100, "11 24H2"), (26200, "11 25H2"),
+                               (26300, "build 26300")):
             row = runtime.classify_platform(system="Windows", os_version=f"10.0.{build}", os_build=build,
                 host_arch="x64", process_arch="x64", process_bits=64)
             self.assertTrue(row["compatible"])
@@ -33,7 +35,8 @@ class PlatformRuntimeTests(unittest.TestCase):
     def test_windows_arm_emulation_32bit_and_unknown_are_not_x64(self):
         cases = [("arm64", "arm64", 64, "none", 26100), ("arm64", "x64", 64, "emulated", 26100),
                  ("x64", "x86", 32, "emulated", 19045), ("x86", "x86", 32, "none", 19045),
-                 ("unknown", "unknown", 64, "unknown", 26100), ("x64", "x64", 64, "none", 22631)]
+                 ("unknown", "unknown", 64, "unknown", 26100), ("x64", "x64", 64, "none", 18363),
+                 ("x64", "x64", 64, "none", None)]
         for host, process, bits, mode, build in cases:
             row = runtime.classify_platform(system="Windows", host_arch=host, process_arch=process,
                 process_bits=bits, translation=mode, os_build=build)

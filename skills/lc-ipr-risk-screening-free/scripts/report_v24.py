@@ -219,7 +219,7 @@ def validate_run(task_dir: Path, task: dict[str, Any]) -> list[str]:
         errors.append("Manifest formal status mismatch")
     if task.get("outputs", {}).get("report_manifest_sha256") != sha256_file(task_dir / "report-manifest.json"):
         errors.append("Manifest file digest mismatch")
-    html = (task_dir / "report.html").read_text()
+    html = (task_dir / "report.html").read_text(encoding="utf-8")
     if re.findall(r'<section\b[^>]*\bid="([^"]+)"', html) != base.SECTION_ORDER:
         errors.append("HTML must contain exactly eight ordered sections")
     if re.search(r"<script\b|<iframe\b|<link\b|\son\w+\s*=|url\(\s*['\"]?https?", html, re.I):
@@ -265,7 +265,7 @@ def validate_run(task_dir: Path, task: dict[str, Any]) -> list[str]:
     payloads = {"task": task, "evidence": evidence, "assessment": assessment, "plan": plan, "candidates": candidates, "manifest": manifest, "report_data": data, "journal": journal}
     if forbidden_browser_paths(payloads):
         errors.append("Forbidden browser session fields in artifacts")
-    combined = json.dumps(payloads, ensure_ascii=False) + html + (task_dir / "report.md").read_text() + (task_dir / "report-findings.csv").read_text(encoding="utf-8-sig")
+    combined = json.dumps(payloads, ensure_ascii=False) + html + (task_dir / "report.md").read_text(encoding="utf-8") + (task_dir / "report-findings.csv").read_text(encoding="utf-8-sig")
     if any(secret in combined for secret in configured_secrets(load_skill_config())):
         errors.append("Configured secret in artifacts")
     return sorted(set(errors))

@@ -8,8 +8,15 @@
 |---|---|
 | `limited_delivery_revision=failure-limits-v1` | 失败／停止的动作在已有精确记录时可作为有据限制进入受限（evidence）报告 |
 | `review_conflict_revision=structured-conflicts-v1` | 两条独立审阅链只在结论性字段上算冲突 |
+| `best_estimate_revision=best-estimate-risk-v1` | 每个适用范围给出最佳估计等级，待定仅限既无检索收据、无材料也无制度依据的范围；制度不适用范围引用随技能发布的制度表（[jurisdiction-rights.md](jurisdiction-rights.md)，`evidence.collections.institution_references`）；维权信号参与总体；未提供的自有品牌不锁上架建议。规则见 [risk-estimate-rules.md](risk-estimate-rules.md) |
 
-两个标记都进入最终审阅的输入摘要，变更即需要重新审阅。
+以上标记都进入最终审阅的输入摘要，变更即需要重新审阅。
+
+## 核心优先顺序与跨进程备忘（best-estimate-risk-v1 新任务）
+
+- `advance_work.py` 的 `source`／`agent` 动作卡按核心优先稳定排序：`PATENT_MARKING_RESOLUTION_REQUIRED`（页面标注 patent／patented 时由 `product_scope.work_entries` 生成，`patent_claim_followup` 完成后消失）→ 其他产品分析 → 入选候选的核验／补证（`professional_review`、带 `candidate_id` 的条目；来源行中 `discovery_role=marking_resolution` 与核验阶段行先于发现行）→ 原件阅读 → 发现检索。预算受限时先执行排在前面的来源行。等待项、条目内容与历史任务的顺序不变。
+- `work_view_memo.py`：工作视图与审阅输入摘要的跨进程备忘，以任务目录内全部文件（≤8 MB 按内容哈希，其余按大小＋修改时间）、脚本与配置文件的大小／修改时间、调用选项为键，存于系统临时目录 `lc-ipr-work-view-memo/`；任何文件变化即失效，不改变视图语义，不读取凭据；`LC_IPR_WORK_VIEW_MEMO=0` 关闭。
+- `mechanical_ledger.py` 程序默认收尾（`STEPS` 末尾的 `operation_reviews`、`bounded_stop`，默认步骤已包含，须在 `discovery_review_host.py` 之前运行）：`operation_reviews` 只对公开单页路线（serper_web、serper_images、serpapi_google_patents、epo_ops）中计划行冻结为单页有界、留存请求回显与计划行一致、且有精确 03C 验收证明（持久化的 `evidence.operation_acceptances` 仍被 `current_operation_acceptance` 接受，或同一已验收操作对本次响应重算仍通过）的运行写 `accepted` 操作审阅（`checks.pagination=single_page`，`reviewer=program:operation_reviews`）；HTTP 成功本身不算。`bounded_stop` 对同类单元在有方向审阅、有效 before 审阅且尚无 after 审阅时，先在内存中组装 after 语义事件（`problem_covered=false`、`next_action=awaiting_capability`、`uncovered_clues`＝before 未覆盖线索 ∪ 方向线索）与 `stop_bounded_discovery` 后续审阅，通过 `discovery_semantics` 的有界范围证明后才落盘并从磁盘重证，失败则逐字节回滚（`reviewer=program:bounded_stop`）。多页行、lens 路线、凭据或适配器已变化、卡片／分流／处理证明不成立、已有 `refine` after 审阅的单元一律留给 Agent；程序默认不是覆盖声明，Agent 可事后改判。
 
 ## 有据限制：failure-limits-v1
 

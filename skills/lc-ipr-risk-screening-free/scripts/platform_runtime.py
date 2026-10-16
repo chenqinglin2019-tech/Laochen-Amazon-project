@@ -7,6 +7,9 @@ import struct
 import subprocess
 import sys
 
+WINDOWS_MINIMUM_BUILD = 19041
+WINDOWS_RELEASES = {19041: "10 2004", 19042: "10 20H2", 19043: "10 21H1", 19044: "10 21H2", 19045: "10 22H2",
+                    22000: "11 21H2", 22621: "11 22H2", 22631: "11 23H2", 26100: "11 24H2", 26200: "11 25H2"}
 _ARCH = {"arm64": "arm64", "aarch64": "arm64", "amd64": "x64", "x86_64": "x64", "x86": "x86", "i386": "x86", "i686": "x86"}
 
 
@@ -65,12 +68,14 @@ def classify_platform(*, system, os_version="", os_build=None, host_arch="unknow
     elif name == "windows":
         if host_arch != "x64" or process_arch != "x64" or translation != "none":
             result["reasons"].append("WINDOWS_NATIVE_X64_REQUIRED")
-        elif os_build not in {19045, 26100, 26200}:
+        elif type(os_build) is not int or os_build < WINDOWS_MINIMUM_BUILD:
             result["reasons"].append("WINDOWS_VERSION_NOT_IN_VALIDATED_TARGETS")
         else:
+            # Diagnostic only (never the cloud authorization gate): any native x64 Windows 10 2004+/11
+            # build can run the Python workflow and the auth component; native validation stays not_run.
             result.update(compatible=True, status="compatible_pending_native_validation",
                           auth_binary_name="lc-ipr-auth-check-windows-amd64.exe")
-            result["windows_release"] = {19045: "10 22H2", 26100: "11 24H2", 26200: "11 25H2"}[os_build]
+            result["windows_release"] = WINDOWS_RELEASES.get(os_build, "build " + str(os_build))
     else:
         result["reasons"].append("FULL_WORKFLOW_PLATFORM_NOT_SUPPORTED")
     return result

@@ -24,6 +24,7 @@ test("five-level report keeps eight sections, seven modules, original images and
   }
   const directory = path.dirname(path.resolve(reportPath));
   const data = JSON.parse(fs.readFileSync(path.join(directory, "report-data.json"), "utf8"));
+  if (process.env.REPORT_EXPECTED_POLICY) assert.equal(data.presentation_policy_revision, process.env.REPORT_EXPECTED_POLICY, "required report policy must match");
   const stageA = Boolean(data.presentation_stage_a);
   const operator = data.presentation_policy_revision === "operator-report-v1";
   if (required) assert.equal(data.visual_policy_revision, "core-risk-evidence-v2", "release must exercise the new default visual policy");

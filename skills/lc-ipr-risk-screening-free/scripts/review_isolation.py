@@ -13,7 +13,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import shutil
 import subprocess
 import sys
 
@@ -24,7 +23,6 @@ METHOD_MACOS = "macos_sandbox_exec"
 METHOD_TOOL_FREE = "tool_free_process"
 POLICY_SCHEMA = "IPR-REVIEW-ISOLATION-POLICY/1.0"
 SETTINGS_FILE = Path(__file__).resolve().parent.parent / "references" / "review-host.json"
-MACOS_DEFAULT_BINARY = Path("/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex")
 SANDBOX_EXEC = Path("/usr/bin/sandbox-exec")
 # Every feature the review command turns off; the policy file records them and the validator requires them.
 DISABLED_FEATURES = ("shell_snapshot", "shell_tool", "unified_exec", "code_mode_host", "code_mode",
@@ -37,8 +35,8 @@ _DEFAULT_SETTINGS = {"model": "gpt-6-astra", "model_context_window": 872000,
 # Only consulted by tool-free-process. If a Windows Codex build rejects read-only at startup the
 # smoke test may switch it; every tool stays disabled and the trace check still applies.
 TOOL_FREE_SANDBOX_MODES = ("read-only", "danger-full-access")
-_WRAPPER_SUFFIXES = {".cmd", ".bat", ".ps1"}
 _hash_cache: dict[tuple[str, int, int], str] = {}
+_capability_cache = {}
 
 
 def macos_sandbox_available() -> bool:
@@ -79,20 +77,24 @@ def review_settings() -> dict:
 
 
 def resolve_codex_binary(explicit, backend: str) -> Path:
-    """--codex-binary, then LC_IPR_CODEX_BINARY, then (off macOS) a native codex on PATH."""
-    candidate = explicit or os.environ.get("LC_IPR_CODEX_BINARY")
-    if not candidate:
-        if backend == MACOS or sys.platform == "darwin":
-            candidate = MACOS_DEFAULT_BINARY
-        else:
-            candidate = shutil.which("codex.exe" if os.name == "nt" else "codex")
-    if not candidate:
-        raise ValueError("REPORT_REVIEW_HOST_NATIVE_CLI_REQUIRED: pass --codex-binary or set LC_IPR_CODEX_BINARY")
-    path = Path(candidate)
-    if path.suffix.lower() in _WRAPPER_SUFFIXES:
-        # cmd.exe/PowerShell re-parse the -c settings; only a native executable is accepted.
-        raise ValueError("REPORT_REVIEW_HOST_NATIVE_CLI_REQUIRED: a script wrapper is not accepted")
-    return path
+    """Preserve explicit override priority; discover a recipient-native desktop CLI."""
+    from native_runtime_discovery import discover_binary
+    from setup_skill import _environment, _probe
+    return discover_binary(explicit, environment=_environment(), probe=_probe,
+                           capability=lambda path: inspect_native_capability(path, backend))
+
+
+def inspect_native_capability(binary, backend):
+    """Reuse only same-process, same-file read-only capability probes."""
+    from native_runtime_discovery import inspect_capability
+    from setup_skill import _probe
+    binary = Path(binary)
+    info = binary.stat()
+    key = (str(binary.resolve()), info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+           backend, DISABLED_FEATURES, id(_probe))
+    if key not in _capability_cache:
+        _capability_cache[key] = inspect_capability(binary, _probe, DISABLED_FEATURES, backend)
+    return dict(_capability_cache[key])
 
 
 def _binary_sha256(binary: Path) -> str:

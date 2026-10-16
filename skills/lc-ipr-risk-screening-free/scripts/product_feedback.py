@@ -270,6 +270,12 @@ def affected_candidate_ids(task):
 
 def assessment_gate(task, assessments):
     affected = affected_candidate_ids(task)
+    if task.get('best_estimate_revision'):
+        # best-estimate-risk-v1: a structural fact the user cannot provide is a permanent, disclosed limitation
+        # (assumptions / unknown elements / confidence), not a comparison still waiting for an answer.
+        from assessment_estimate import best_estimate_enabled
+        if best_estimate_enabled(task):
+            affected = {row['candidate_id'] for row in pending(task) if row.get('candidate_id')}
     if any(row.get('candidate_id') in affected and row.get('risk') in {'极低','低','中','高','极高'}
            and not row.get('out_of_scope') for row in assessments):
         raise ValueError('PRODUCT_FEEDBACK_COMPARISON_PENDING')

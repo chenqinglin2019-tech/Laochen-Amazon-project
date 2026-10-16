@@ -215,6 +215,23 @@ def retain_figures(task_dir: Path, result: dict, item: dict, evidence: dict, con
     return result
 
 
+NOT_FOUND_MESSAGE = "Google Patents Details hasn't returned any results for this query."
+
+
+def _payload_error(payload):
+    """Classify an error envelope; only an exact "no such document" under a Success envelope is a not-found.
+
+    The call worked and the index has no such document: the candidate still
+    needs another route, but the operation is not shown to be broken for other
+    candidates. Anything else stays a provider error.
+    """
+    message = str(payload.get("error") or "")
+    metadata = payload.get("search_metadata")
+    if message == NOT_FOUND_MESSAGE and isinstance(metadata, dict) and metadata.get("status") == "Success":
+        return ProviderError("PROVIDER_RECORD_NOT_FOUND", "failed", message)
+    return ProviderError("PROVIDER_HTTP_ERROR", "failed", message)
+
+
 def authorize_detail_retry(task_dir, task, item, evidence, attempt_id, retry_reason):
     if attempt_id == "initial":
         return
@@ -279,7 +296,7 @@ def execute(task_dir: Path, query_id: str, *, attempt_id="initial", retry_reason
             attempted = True
             payload, headers, body = http_json(base + "/search.json?" + urlencode(params), timeout=timeout, retries=0)
             if payload.get("error"):
-                raise ProviderError("PROVIDER_HTTP_ERROR", "failed", str(payload["error"]))
+                raise _payload_error(payload)
             normalized = _normalize(payload, item, retrieval_workflow_revision=task.get("retrieval_workflow_revision"))
             if task.get("retrieval_workflow_revision") == "api-first-v3":
                 normalized = retain_figures(task_dir, normalized, item, evidence, config)

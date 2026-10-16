@@ -40,6 +40,12 @@ def events(task: dict) -> list[dict]:
     rows = task.get(EVENTS, [])
     if not isinstance(rows, list):
         raise ValueError("TRIAGE_STAGE_EVENTS_INVALID")
+    # r5d21: inside one read-only derivation the same unchanged chain is verified once (derivation_memo)
+    import derivation_memo
+    memo = derivation_memo.cache('triage_stage_chain')
+    key = derivation_memo.chain_key(task, rows) if memo is not None else None
+    if key is not None and key in memo:
+        return rows
     previous = ""
     for row in rows:
         if (not isinstance(row, dict) or row.get("kind") not in KINDS
@@ -50,6 +56,8 @@ def events(task: dict) -> list[dict]:
         if row.get("event_id") != expected:
             raise ValueError("TRIAGE_STAGE_EVENTS_CHANGED")
         previous = expected
+    if key is not None:
+        memo[key] = True
     return rows
 
 

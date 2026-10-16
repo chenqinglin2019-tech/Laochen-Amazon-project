@@ -26,7 +26,10 @@ def definition(home=None):
     scripts = Path(__file__).resolve().parent
     revision = script_revision()
     # Preserve the venv interpreter path: resolving its symlink loses dependencies.
-    argv = [os.path.abspath(sys.executable), "-B", str(scripts / "codex_guard.py"), "hook", "--revision", revision]
+    # r9: on Windows the hook reads Codex's JSON and prints Chinese paths in UTF-8 mode (a Chinese code page broke it);
+    # the macOS command is unchanged.
+    argv = [os.path.abspath(sys.executable), *(["-X", "utf8"] if os.name == "nt" else []), "-B",
+            str(scripts / "codex_guard.py"), "hook", "--revision", revision]
     if home is not None:
         argv += ["--runtime-root", str(Path(home).expanduser().resolve() / "lc-ipr-guard")]
     command = subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)

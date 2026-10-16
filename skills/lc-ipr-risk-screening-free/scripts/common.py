@@ -41,7 +41,10 @@ def api_first_scenario_revision_enabled(value: object) -> bool:
     """Revisions using scenario-bound row identity; v1 IDs remain frozen."""
     return value in {API_FIRST_REVISION, API_FIRST_V3_REVISION}
 SERPER_API_FIRST_MAX_QUERIES_PER_TASK = 30
-SERPAPI_API_FIRST_MAX_QUERIES_PER_TASK = 10
+# r5d16 (owner decision 2026-10-13): 20 per new task; B0GLNPC6K8 needed 12 (1 search, 8 selected rights, 3 later
+# found dead) and two selected patents went without their record at 10. A task keeps the cap it was created with;
+# older tasks hold 10, which stays valid under this ceiling.
+SERPAPI_API_FIRST_MAX_QUERIES_PER_TASK = 20
 API_FIRST_PLAN_META_KEYS = {
     "retrieval_workflow_revision", "discovery_intent_id", "discovery_role",
     "refinement_round", "parent_query_id", "parent_plan_entry_sha256",
@@ -210,10 +213,51 @@ def load_json(path: Path) -> Any:
         return json.load(handle)
 
 
+_SHARED_JSON: dict = {}
+
+
+def load_json_shared(path: Path) -> Any:
+    """Parsed JSON shared within this process, for read-only callers that look up the same large file many times
+    in one computation (a work view re-read task.json ~1,250 times). The file is parsed again whenever its
+    inode, size or modification time changes (every writer replaces the file atomically). Never mutate the result."""
+    path = Path(path)
+    try:
+        stat = path.stat()
+    except OSError:
+        return load_json(path)
+    key = (str(path), stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    if key not in _SHARED_JSON:
+        if len(_SHARED_JSON) >= 16:
+            _SHARED_JSON.clear()
+        _SHARED_JSON[key] = load_json(path)
+    return _SHARED_JSON[key]
+
+
 def ensure_object(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be a JSON object")
     return value
+
+
+REPLACE_RETRY_SECONDS = (0.05, 0.1, 0.2, 0.4, 0.8, 1.6)
+
+
+def replace_file(source, target) -> None:
+    """os.replace; on Windows a target another process holds open for reading refuses the swap for a moment
+    (WinError 5 / 32 - r9: review hosts read each other's session records every 5 s while they are rewritten), so
+    the swap is retried briefly there. POSIX behaviour is unchanged."""
+    if os.name != "nt":
+        os.replace(source, target)
+        return
+    import time
+    for pause in (*REPLACE_RETRY_SECONDS, None):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if pause is None:
+                raise
+            time.sleep(pause)
 
 
 def atomic_write_json(path: Path, payload: Any) -> None:
@@ -223,7 +267,7 @@ def atomic_write_json(path: Path, payload: Any) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
-        os.replace(temp_name, path)
+        replace_file(temp_name, path)
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
@@ -235,7 +279,7 @@ def atomic_write_bytes(path: Path, data: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
-        os.replace(temp_name, path)
+        replace_file(temp_name, path)
     finally:
         if os.path.exists(temp_name):
             os.unlink(temp_name)
@@ -283,6 +327,34 @@ def resolve_retained_path(task_dir: Path, value: str | Path, *, expected_sha256:
     if expected_bytes is not None and candidate.stat().st_size != expected_bytes:
         raise ValueError("RETAINED_PATH_BYTES_MISMATCH")
     return candidate
+
+
+_US_DOCDB_APPLICATION = re.compile(r"US(20\d{2})(\d{6})(A\d)")
+_US_DOCDB_DESIGN = re.compile(r"USD0*(\d+)S")
+# Google Patents (and SerpApi, which reads it) name US design patents granted from 2001 on with the kind code S1
+# (USD887770S1); EPO docdb writes the same documents with S (USD887770S). Older designs keep S on both sides.
+US_DESIGN_S1_FROM = 435000
+
+
+def canonical_patent_number(value: Any) -> str:
+    """Upper-case alphanumerics of a patent number, in the one spelling USPTO and Google Patents use.
+
+    EPO docdb writes a US application publication as year plus six digits
+    (US2018201441A1) while USPTO, PPS and Google Patents use the 11-digit form
+    (US20180201441A1). Both name the same document, but a request in the docdb
+    spelling is answered "no result". The same holds for a US design patent:
+    docdb USD1110120S is Google's USD1110120S1 (r5d4 real run: five SerpApi
+    detail reads answered "no result" in the docdb spelling). Every other
+    number is returned unchanged.
+    """
+    text = re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
+    match = _US_DOCDB_APPLICATION.fullmatch(text)
+    if match:
+        return "US%s0%s%s" % match.groups()
+    design = _US_DOCDB_DESIGN.fullmatch(text)
+    if design and int(design.group(1)) >= US_DESIGN_S1_FROM:
+        return "USD%sS1" % int(design.group(1))
+    return text
 
 
 def sha256_json(payload: Any) -> str:
@@ -491,11 +563,18 @@ def _backend_config() -> dict[str, Any]:
     return result
 
 
-def _local_env_values() -> tuple[dict[str, str], dict[str, str]]:
+# r8 (owner request 2026-10-16): an optional second SerpApi account in .env. It is not one of the 12 credential fields;
+# a task's capacity check selects it (search_guard.check_capacity), and the pipeline marks that choice for every script
+# it starts with this variable. The SerpApi clients then read the backup value as SERPAPI_API_KEY.
+SERPAPI_BACKUP_FIELD = "SERPAPI_API_KEY_BACKUP"
+SERPAPI_KEY_SLOT_ENV = "LC_IPR_SERPAPI_KEY_SLOT"
+
+
+def _local_env_values(*, slot_aware: bool = True) -> tuple[dict[str, str], dict[str, str]]:
     """Parse literal NAME=value rows; no shell execution or interpolation."""
     values: dict[str, str] = {}
     errors: dict[str, str] = {}
-    allowed = {ENV_CREDENTIALS[name] for name in LOCAL_ENV_CREDENTIALS}
+    allowed = {ENV_CREDENTIALS[name] for name in LOCAL_ENV_CREDENTIALS} | {SERPAPI_BACKUP_FIELD}
     for raw_line in _private_credential_text(".env").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
@@ -519,7 +598,39 @@ def _local_env_values() -> tuple[dict[str, str], dict[str, str]]:
             errors[key] = ".env:INVALID_VALUE"
             continue
         values[key] = value
+    backup = values.pop(SERPAPI_BACKUP_FIELD, "")
+    errors.pop(SERPAPI_BACKUP_FIELD, None)
+    if slot_aware and os.environ.get(SERPAPI_KEY_SLOT_ENV) == "backup" and backup.strip():
+        values["SERPAPI_API_KEY"] = backup
+        errors.pop("SERPAPI_API_KEY", None)
     return values, errors
+
+
+def serpapi_slot_key(slot: str) -> str:
+    """The SerpApi key of one account slot ('primary' or 'backup'), whatever slot this process selected."""
+    if offline_credentials_disabled():
+        return ""
+    try:
+        if slot != "backup":
+            values, errors = _local_env_values(slot_aware=False)
+            value = "" if "SERPAPI_API_KEY" in errors else values.get("SERPAPI_API_KEY", "")
+            return value if value.strip() else ""
+        text = _private_credential_text(".env")
+    except CredentialFileError:
+        return ""
+    found = ""
+    for raw_line in text.splitlines():
+        match = re.fullmatch(r"([A-Z][A-Z0-9_]*)\s*=\s*(.*)", raw_line.strip())
+        if match and match.group(1) == SERPAPI_BACKUP_FIELD:
+            if found:
+                return ""   # a duplicate assignment is ambiguous, as for the 12 fields
+            value = match.group(2)
+            if value[:1] in {"'", '"'}:
+                if len(value) < 2 or value[-1:] != value[:1]:
+                    return ""
+                value = value[1:-1]
+            found = value if "\x00" not in value else ""
+    return found if found.strip() else ""
 
 
 def _credential_result(name: str) -> tuple[str, str]:
@@ -558,7 +669,8 @@ def credential_issue(name: str) -> str:
 
 def configured_credential_values() -> list[str]:
     """Known local secrets for leak detection; disabled during offline checks."""
-    return list(dict.fromkeys(value for name in ENV_CREDENTIALS if (value := credential({}, name))))
+    return list(dict.fromkeys([*(value for name in ENV_CREDENTIALS if (value := credential({}, name))),
+                               *(value for slot in ("primary", "backup") if (value := serpapi_slot_key(slot)))]))
 
 
 def schema_of(task_or_schema: dict[str, Any] | str) -> str:
@@ -1427,6 +1539,11 @@ def authorize_serpapi_free_plan_entry(
         allowed_keys |= API_FIRST_PLAN_META_KEYS | {"provider_role", "source_upstream"}
     if task.get("product_delivery_revision") == "image-fact-v1":
         allowed_keys |= {"product_delivery_revision", "product_fact_refs"}
+    import recall
+    recall_task = recall.enabled(task)
+    if recall_task:
+        # r5d20 (owner authorization): a recall task's request names the document type and the earliest priority date
+        allowed_keys |= {"after", "sort"}
     if set(item) - allowed_keys:
         raise ValueError("SERPAPI_PLAN_PARAMETERS_INVALID")
     query = str(item.get("q") or "").strip()
@@ -1439,8 +1556,11 @@ def authorize_serpapi_free_plan_entry(
         or not 1 <= result_count <= 100
         or not re.fullmatch(r"[A-Z]{2}", country)
         or str(item.get("right_type") or "") not in {"patent", "design"}
-        or (item.get("type") not in (None, "", "DESIGN"))
+        or (item.get("type") not in ((None, "", "DESIGN", "PATENT") if recall_task else (None, "", "DESIGN")))
         or (item.get("type") == "DESIGN" and item.get("right_type") != "design")
+        or (item.get("type") == "PATENT" and item.get("right_type") != "patent")
+        or ("after" in item and not recall.AFTER_PATTERN.fullmatch(str(item.get("after") or "")))
+        or ("sort" in item and item.get("sort") != "new")
     ):
         raise ValueError("SERPAPI_REQUEST_BOUNDS_INVALID")
     if query_id != _serpapi_expected_query_id(item):

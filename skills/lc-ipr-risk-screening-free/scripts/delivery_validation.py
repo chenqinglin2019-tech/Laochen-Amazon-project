@@ -23,13 +23,13 @@ def _implementation():
     paths = list((root / 'scripts').glob('*.py'))
     paths += list((root / 'assets').glob('*.css')) + list((root / 'assets').glob('*.html'))
     paths.append(root / 'references' / 'report-format-lock.json')
-    return {str(path.relative_to(root)): sha256_file(path) for path in paths
+    return {path.relative_to(root).as_posix(): sha256_file(path) for path in paths
             if path.is_file() and not path.name.startswith('test_')}
 
 
 class DeliveryValidationContext:
     __slots__ = ('_source', '_reviews', '_snapshot', '_implementation', '_files',
-                 '_model', '_checks', '_token')
+                 '_model', '_checks', '_token', '_views', '_controls', '_review_dependencies', '_dependency_failed')
 
     def __init__(self, token, source, reviews):
         if token is not _TOKEN:
@@ -43,7 +43,15 @@ class DeliveryValidationContext:
         self._files = None
         self._model = None
         self._checks = 0
+        self._views = {}
+        self._review_dependencies = {}
+        self._dependency_failed = False
+        self._controls = self._control_state()
         self._token = token
+
+    def _control_state(self):
+        names = ('execution-budget.json',)
+        return {name: sha256_file(self._source / name) if (self._source / name).is_file() else None for name in names}
 
     @property
     def semantic_checks(self):
@@ -60,8 +68,16 @@ class DeliveryValidationContext:
                 errors.append('DELIVERY_VALIDATION_CONTEXT_REVIEWS_MISMATCH')
         if _snapshot(self._source, self._reviews) != self._snapshot:
             errors.append('DELIVERY_VALIDATION_CONTEXT_INPUT_CHANGED')
+        if self._control_state() != self._controls:
+            errors.append('DELIVERY_VALIDATION_CONTEXT_CONTROL_CHANGED')
         if _implementation() != self._implementation:
             errors.append('DELIVERY_VALIDATION_CONTEXT_IMPLEMENTATION_CHANGED')
+        from review_dependencies import errors as dependency_errors
+        changed = dependency_errors(self._review_dependencies)
+        if changed:
+            self._dependency_failed = True
+        if self._dependency_failed:
+            errors.append('DELIVERY_REVIEW_DEPENDENCY_CHANGED')
         return errors
 
     def validate_staged(self, directory):
@@ -80,8 +96,12 @@ class DeliveryValidationContext:
             model['visual_evidence'] + model['evidence_index'] + model['linked_files'])]
         before = {name: sha256_file(_resolve(out, name)) for name in dict.fromkeys(names)}
         self._checks += 1
-        with timed_step(self._source, 'independent_semantic_check'):
+        from execution_efficiency import collect_work_views
+        from review_dependencies import collect as collect_review_dependencies
+        with collect_review_dependencies() as dependencies, collect_work_views() as views, timed_step(self._source, 'independent_semantic_check'):
             errors = validate_run(self._source, load_json(out / 'task.json'), output_dir=out)
+        self._review_dependencies = dict(dependencies) if not errors else {}
+        self._views = views if not errors else {}
         errors += self._input_errors()
         if errors:
             return list(dict.fromkeys(errors))
@@ -108,6 +128,17 @@ class DeliveryValidationContext:
             errors += _file_errors(Path(directory).resolve(), self._files)
         errors += self._input_errors(source, reviews)
         return list(dict.fromkeys(errors))
+
+    def work_view(self, directory, *, source, first_review, second_review, reviews):
+        from execution_efficiency import enabled, view_key
+        if not enabled(load_json(Path(source) / 'task.json')):
+            return None
+        errors = self.verify(directory, source=source, reviews=reviews)
+        if errors:
+            raise ValueError(';'.join(errors))
+        options = dict(browser_status=None, source_capabilities=None,
+                       first_review=first_review, second_review=second_review)
+        return deepcopy(self._views.get(view_key(source, options)))
 
     def audit(self):
         if self._files is None:

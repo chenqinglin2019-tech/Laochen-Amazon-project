@@ -234,5 +234,105 @@ class ExecutionBudgetTests(unittest.TestCase):
         self.assertGreater(timeouts[0], timeouts[1]); self.assertGreater(timeouts[1], timeouts[2])
 
 
+class BudgetV2Tests(unittest.TestCase):
+    """bounded-execution-v2: room for one failed module and its summaries, still a real cap."""
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.task = {'task_id': 'OFFLINE-BUDGET-V2', 'execution_budget_revision': budget.REVISION_V2,
+                     'execution_budget': budget.v2_limits(1)}
+        atomic_write_json(self.root / 'task.json', self.task)
+        atomic_write_json(self.root / 'evidence.json', {'task_id': self.task['task_id'], 'progress_events': []})
+
+    def test_v2_defaults_scale_with_jurisdictions_and_keep_source_allowance(self):
+        one, two, seven = budget.v2_limits(1), budget.v2_limits(2), budget.v2_limits(7)
+        self.assertEqual((one['review_seconds'], two['review_seconds'], seven['review_seconds']), (1200, 1800, 3600))
+        for limits in (one, two, seven):
+            self.assertEqual(limits['active_seconds'] - limits['review_reserve_seconds'], 1200)
+            self.assertGreaterEqual(limits['review_reserve_seconds'], limits['review_seconds'])
+            budget.policy({'execution_budget_revision': budget.REVISION_V2, 'execution_budget': limits})
+        self.assertEqual(budget.policy({'execution_budget_revision': budget.REVISION, 'execution_budget': {}}),
+                         budget.DEFAULTS)
+
+    def test_review_reserve_must_cover_the_review_allowance(self):
+        bad = {**budget.v2_limits(1), 'review_reserve_seconds': 1000}
+        with self.assertRaisesRegex(ValueError, 'REVIEW_RESERVE_TOO_SMALL'):
+            budget.policy({'execution_budget_revision': budget.REVISION_V2, 'execution_budget': bad})
+        with self.assertRaisesRegex(ValueError, 'POLICY_INVALID'):
+            budget.policy({'execution_budget_revision': budget.REVISION_V2,
+                           'execution_budget': {**budget.v2_limits(1), 'unknown_limit': 1}})
+        with self.assertRaisesRegex(ValueError, 'REVISION_INVALID'):
+            budget.policy({'execution_budget_revision': 'bounded-execution-v9', 'execution_budget': {}})
+
+    def test_one_failed_module_pass_and_a_retry_fit_inside_the_v2_review_allowance(self):
+        clock = {'now': 1000}
+        with patch('execution_budget.time.time', side_effect=lambda: clock['now']):
+            with budget.execution_budget(self.root, 'review') as deadline:
+                self.assertEqual(deadline, 1000 + 1200)
+                clock['now'] += 533     # the measured pass of the real run that failed validation
+            with budget.execution_budget(self.root, 'review') as deadline:
+                self.assertGreaterEqual(deadline - clock['now'], 600)
+                clock['now'] += 330
+        data = load_json(self.root / budget.JOURNAL)
+        self.assertEqual((data['review_invocations'], data['review_used_seconds']), (2, 863))
+
+    def test_review_invocation_count_is_a_loop_guard_not_a_reset(self):
+        clock = {'now': 1000}
+        with patch('execution_budget.time.time', side_effect=lambda: clock['now']):
+            for _ in range(3):
+                with budget.execution_budget(self.root, 'review'):
+                    clock['now'] += 5
+            with self.assertRaisesRegex(ValueError, 'REVIEW_INVOCATIONS_EXHAUSTED'):
+                with budget.execution_budget(self.root, 'review'):
+                    self.fail('a fourth review invocation needs an owner decision')
+            # source work is not a review invocation
+            with budget.execution_budget(self.root, 'sources'):
+                pass
+
+    def test_owner_extension_adds_allowance_and_keeps_every_counter(self):
+        clock = {'now': 1000}
+        with patch('execution_budget.time.time', side_effect=lambda: clock['now']):
+            with budget.execution_budget(self.root, 'review'):
+                clock['now'] += 1200
+            with self.assertRaisesRegex(ValueError, 'TIME_BUDGET_EXHAUSTED'):
+                with budget.execution_budget(self.root, 'review'):
+                    self.fail('allowance is spent')
+            data = load_json(self.root / budget.JOURNAL)
+            data['review_extensions'] = [{'seconds': 600, 'reason': 'owner decision', 'at': '2026-10-11T00:00:00Z'}]
+            atomic_write_json(self.root / budget.JOURNAL, data)
+            snapshot = budget.snapshot(self.root)
+            self.assertEqual(snapshot['review_extension_seconds'], 600)
+            self.assertEqual(snapshot['review_remaining_seconds'], 600)
+            with budget.execution_budget(self.root, 'review') as deadline:
+                self.assertEqual(deadline, clock['now'] + 600)
+        after = load_json(self.root / budget.JOURNAL)
+        self.assertEqual(after['review_used_seconds'], 1200)
+        self.assertEqual(after['policy_sha256'], data['policy_sha256'])
+
+    def test_extension_records_are_bounded_and_validated(self):
+        limits = budget.policy(self.task)
+        data = budget._read(self.root, self.task, limits)
+        for rows in ([{'seconds': 1900}], [{'seconds': 600}] * 4, [{'seconds': 0}], ['text']):
+            with self.subTest(rows=rows):
+                atomic_write_json(self.root / budget.JOURNAL, {**data, 'review_extensions': rows})
+                with self.assertRaisesRegex(ValueError, 'EXTENSION_INVALID'):
+                    budget.snapshot(self.root)
+
+    def test_v1_journal_and_defaults_are_unchanged(self):
+        task = {'task_id': 'OFFLINE-V1', 'execution_budget_revision': budget.REVISION,
+                'execution_budget': dict(budget.DEFAULTS)}
+        atomic_write_json(self.root / 'task.json', task)
+        snapshot = budget.snapshot(self.root)
+        self.assertEqual(snapshot['revision'], budget.REVISION)
+        self.assertEqual(snapshot['limits'], budget.DEFAULTS)
+        self.assertNotIn('review_extension_seconds', snapshot)
+        clock = {'now': 1000}
+        with patch('execution_budget.time.time', side_effect=lambda: clock['now']):
+            for _ in range(5):          # v1 has no invocation cap
+                with budget.execution_budget(self.root, 'review'):
+                    clock['now'] += 1
+
+
 if __name__ == '__main__':
     unittest.main()

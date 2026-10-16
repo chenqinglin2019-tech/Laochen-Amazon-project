@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from collections import defaultdict
@@ -24,7 +25,11 @@ def phase_for(row: dict[str, Any], browser: bool) -> str:
     phase = str(row.get("execution_phase") or "")
     if browser:
         return "fallback" if phase == "discovery_fallback" else "verification"
-    return "discovery" if phase.startswith("discovery") else "verification"
+    # The API runner's own phase test (retrieval_execution.in_phase): an ``expansion`` row (a reviewed refinement
+    # or fallback) belongs to the discovery batch. Sending it as verification made the runner reject the whole
+    # batch with SELECTED_QUERY_PHASE_MISMATCH, including the exact detail reads sharing it (r5d rehearsal).
+    from retrieval_execution import in_phase
+    return "discovery" if phase.startswith("discovery") or in_phase(row, "discovery") else "verification"
 
 
 def plan_rows(plan: dict[str, Any]) -> dict[str, tuple[str, dict[str, Any]]]:
@@ -36,7 +41,43 @@ def plan_rows(plan: dict[str, Any]) -> dict[str, tuple[str, dict[str, Any]]]:
     return result
 
 
-def actionable_packet(view: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+def _core_first_rank(entry: dict[str, Any], plan_index: dict[str, tuple[str, dict[str, Any]]]) -> int:
+    kind, reason = entry.get("kind"), entry.get("reason")
+    if kind == "source_lookup":
+        found = plan_index.get(str(entry.get("query_id") or ""))
+        row = found[1] if found else {}
+        if row.get("discovery_role") == "marking_resolution":
+            return 0
+        if entry.get("candidate_id") or not str(row.get("execution_phase") or "").startswith("discovery"):
+            return 1
+        return 2
+    if reason == "PATENT_MARKING_RESOLUTION_REQUIRED":
+        return 0
+    if kind == "product_analysis":
+        return 1
+    if kind == "professional_review" or entry.get("candidate_id"):
+        return 2
+    if kind == "agent_read":
+        return 3
+    return 4
+
+
+def core_first_order(packet: dict[str, list[dict[str, Any]]], task=None, plan=None) -> dict[str, list[dict[str, Any]]]:
+    """best-estimate-risk-v1 tasks: marking resolution → selected-candidate work → original reading → discovery.
+
+    A stable sort inside the ``source`` and ``agent`` buckets only; the entries themselves, the waiting items and
+    historical tasks are untouched. Under a limited budget the first source rows are the ones dispatched, so the
+    core candidate's detail retrieval precedes broad discovery.
+    """
+    if not (task or {}).get("best_estimate_revision"):
+        return packet
+    index = plan_rows(plan or {})
+    for bucket in ("source", "agent"):
+        packet[bucket] = sorted(packet[bucket], key=lambda entry: _core_first_rank(entry, index))
+    return packet
+
+
+def actionable_packet(view: dict[str, Any], *, task=None, plan=None) -> dict[str, list[dict[str, Any]]]:
     """Project every current next-work obligation into one dispatcher packet.
 
     ``review_work`` is deliberately a separate projection in ``next_work``.
@@ -69,24 +110,147 @@ def actionable_packet(view: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
             packet["waiting"].append(entry)
         else:
             raise ValueError("UNKNOWN_SCOPE_REVIEW_STATE: " + str(entry.get("state")))
-    return packet
+    return core_first_order(packet, task, plan)
 
 
-def source_entries_after_triage_priority(task: dict, view: dict) -> tuple[list[dict], bool]:
+def source_entries_after_triage_priority(task: dict, view: dict, plan=None, task_dir=None) -> tuple[list[dict], bool]:
     from candidate_triage_stage import light_triage_pending
-    deferred = bool(task.get("triage_stage_revision") and light_triage_pending(view))
-    return ([] if deferred else actionable_packet(view)["source"], deferred)
+    import pipeline_robust
+    if task_dir is not None and pipeline_robust.enabled(task):
+        # r5d4: cards the hosts refused before any judgment (e.g. no picture of the card) stay open triage work,
+        # but no longer hold back every new source (B0FSJBDTF2: the decisive EPO queries were never sent).
+        pending = pipeline_robust.light_triage_pending(view, task_dir)
+    else:
+        pending = light_triage_pending(view)
+    deferred = bool(task.get("triage_stage_revision") and pending)
+    return ([] if deferred else actionable_packet(view, task=task, plan=plan)["source"], deferred)
 
 
 def action_card(task_dir: Path, entry: dict[str, Any]) -> dict[str, Any]:
     """Describe one Agent action; supported review cards also name the input-template generator."""
     card = _action_card(task_dir, entry)
+    if entry.get('investigation_policy'):
+        # Compact output is the normal Agent entrypoint. Do not hide factual
+        # investigation questions in the full internal work view only.
+        work_policy = entry['investigation_policy']
+        card['investigation_policy'] = {key: work_policy[key] for key in
+            ('intensity', 'questions', 'missing_facts', 'profile_revision_required',
+             'initial_material', 'detail_material', 'completion_rule') if key in work_policy}
+        for key in ('minimum_information', 'action_hint'):
+            if key in entry:
+                card[key] = entry[key]
     from input_template import supported as template_supported
     if template_supported(entry):
         # The tool prefills every derivable field and leaves each judgment null (never recordable unfilled).
         card["input_template"] = {"tool": str(Path(__file__).resolve().parent / "input_template.py"),
             "args": ["--task-dir", str(task_dir), "--work-id", entry["work_id"], "--output-dir", "<new-directory>"]}
+    # A public web lead without any image of its own (host-triage tasks) is judged from its card text: the visual
+    # host leaves it alone, so its card must point at the text host, not the picture one.
+    text_only = (entry.get('kind') == 'triage' and entry.get('candidate_id') is not None
+                 and _text_host_available(task_dir) and entry.get('candidate_id') in _text_only_ids(task_dir))
+    if (entry.get('kind') == 'triage' and entry.get('investigation_policy') and not text_only
+            and entry.get('right_type') in {
+            'design', 'unregistered_design', 'copyright', 'trade_dress', 'trademark_figurative', 'unknown'}):
+        card['batch_visual_triage'] = {'tool': str(Path(__file__).resolve().parent / 'visual_triage_host.py'),
+            'args': ['--task-dir', str(task_dir)],
+            'scope': 'all currently pending visual candidates; successful decisions are recorded directly'}
+    if (entry.get('kind') == 'triage' and entry.get('candidate_id') and (text_only or entry.get('right_type') not in {
+            'design', 'unregistered_design', 'copyright', 'trade_dress', 'trademark_figurative', 'unknown'})):
+        if _text_host_available(task_dir):
+            card['batch_text_triage'] = {'tool': str(Path(__file__).resolve().parent / 'text_triage_host.py'),
+                'args': ['--task-dir', str(task_dir)],
+                'scope': 'all currently pending text candidates; compact judgments are expanded and recorded through the ordinary triage recorder'}
+    if _text_host_available(task_dir):
+        scripts = Path(__file__).resolve().parent
+        reason = entry.get('reason')
+        if reason in _DISCOVERY_REVIEW_REASONS:
+            card['batch_discovery_review'] = {'tool': str(scripts / 'discovery_review_host.py'),
+                'args': ['--task-dir', str(task_dir)],
+                'scope': 'all pending direction/before/after reviews; compact judgments are written through the 03B recorder'}
+        if reason in _MECHANICAL_STEPS:
+            card['mechanical_ledger'] = {'tool': str(scripts / 'mechanical_ledger.py'),
+                'args': ['--task-dir', str(task_dir), '--steps', _MECHANICAL_STEPS[reason]],
+                'scope': 'program-written ledger entries that carry no judgment; anything not bound exactly is left for the Agent'}
     return card
+
+
+_DISCOVERY_REVIEW_REASONS = frozenset({'DISCOVERY_DIRECTION_REVIEW_REQUIRED', 'DISCOVERY_EXPRESSION_REVIEW_REQUIRED',
+                                       'DISCOVERY_RESULT_SEMANTIC_REVIEW_REQUIRED'})
+_MECHANICAL_STEPS = {'REVIEW_PROGRESS_QUERY_NOT_PLANNED': 'progress',
+                     'SOURCE_RESULTS_PENDING_PROCESSING': 'dispositions',
+                     'CANDIDATE_OBJECT_SCOPE_REVIEW_REQUIRED': 'links',
+                     'CANDIDATE_HANDOFF_READY': 'handoff',
+                     'TRIAGE_SELECTED_HANDOFF_REQUIRED': 'selected_handoff'}
+
+
+_TEXT_HOST_MEMO: dict = {}
+_TEXT_ONLY_MEMO: dict = {}
+
+
+def _text_only_ids(task_dir) -> frozenset:
+    """Candidate IDs of the task's imageless public web leads (routing hint; cached per candidate file revision)."""
+    path = Path(task_dir) / 'normalized-candidates.json'
+    try:
+        stat = path.stat()
+    except OSError:
+        return frozenset()
+    stamp = (str(path), stat.st_mtime_ns, stat.st_size)
+    if stamp not in _TEXT_ONLY_MEMO:
+        from host_triage import text_only_candidate_ids
+        _TEXT_ONLY_MEMO.clear()
+        try:
+            _TEXT_ONLY_MEMO[stamp] = frozenset(text_only_candidate_ids(task_dir))
+        except (OSError, ValueError, KeyError, TypeError):
+            _TEXT_ONLY_MEMO[stamp] = frozenset()
+    return _TEXT_ONLY_MEMO[stamp]
+
+
+def _text_host_available(task_dir) -> bool:
+    """Whether this task froze the batch-host marker (cached per task file revision)."""
+    path = Path(task_dir) / 'task.json'
+    try:
+        stamp = (str(path), path.stat().st_mtime_ns)
+        if stamp not in _TEXT_HOST_MEMO:
+            from common import load_json as _load
+            from host_triage import enabled as _host_enabled
+            _TEXT_HOST_MEMO.clear()
+            _TEXT_HOST_MEMO[stamp] = bool(_host_enabled(_load(path)))
+        return _TEXT_HOST_MEMO[stamp]
+    except (OSError, ValueError, KeyError, TypeError):
+        return False
+
+
+def _identity_route(task_dir: Path, entry: dict[str, Any]):
+    """Name the identity routes that exist for this lead.
+
+    record_public_identity.py binds a Google Lens visual/exact match that
+    carries no right identifier. A seller page from another source (for
+    example a Serper image result) has no such bounded recorder; pointing the
+    Agent at it only produces PUBLIC_IDENTITY_NOT_PUBLIC_SALES_LEAD.
+    """
+    try:
+        from common import load_json
+        from public_identity import public_sales_lead
+        task = load_json(task_dir / "task.json")
+        candidates = load_json(task_dir / "normalized-candidates.json")
+    except (OSError, ValueError, KeyError):
+        return None
+    cid = entry.get("candidate_id")
+    candidate = next((row for rows in candidates.values() if isinstance(rows, list) for row in rows
+                      if isinstance(row, dict) and row.get("candidate_id") == cid), None)
+    if candidate is None:
+        return None
+    if public_sales_lead(task, candidate):
+        return {"public_identity": "applicable"}
+    providers = sorted({str(ref.get("provider")) for ref in candidate.get("sources", []) if isinstance(ref, dict)})
+    return {"public_identity": "not_applicable", "source_providers": providers,
+        "why": "record_public_identity.py accepts only Google Lens visual/exact matches without a right identifier.",
+        "routes": [
+            "A retained source that actually shows a registration/publication number: record_candidate_identity_correction.py.",
+            "Only the user can supply the missing fact (authorship, licence, rights holder): re-record this scope as needs_info "
+            "with one user_information action; it then waits for the user instead of staying in this queue.",
+            "The page only offers the reference product for sale and shows no right: re-record this scope as not_selected "
+            "with the visible difference or applicability limit."]}
 
 
 def _action_card(task_dir: Path, entry: dict[str, Any]) -> dict[str, Any]:
@@ -135,6 +299,20 @@ def _action_card(task_dir: Path, entry: dict[str, Any]) -> dict[str, Any]:
                 "source-backed identity correction only when identity is unresolved",
                 "current scenario/country/right decision with reading basis and evidence references"],
             "validation": "Review retained cards, merge if needed, then record current scoped decisions. Re-run next_work; this card neither submits a request nor proves triage or coverage complete."}
+    if kind == 'product_analysis' and reason == 'PATENT_MARKING_RESOLUTION_REQUIRED':
+        return {**card, 'action': 'resolve_patent_marking_before_discovery',
+            'steps': ['① 品牌官网／产品页的虚拟标记（virtual patent marking）或"patent"说明页：在 public_web_browser 允许域名内读取，用 record_public_source.py 留存原件；',
+                      '② 在 Google Patents 有界检索：品牌／制造商名只能找到以公司名义申请的专利，个人持有的专利（权利人显示 Individual 或发明人姓名）用品牌永远搜不到；'
+                      '因此同时用产品结构的通用名词检索（2-3个词，不用 universal、reusable 等宣传词，例如 lid securing strap、strap openings knob），'
+                      '找到近似专利后再看其页面 Similar documents／Cited by；返回卡片按原流程分流；',
+                      '③ 解析出具体号码：record_candidate_lead.py 登记线索（自动预留详情额度并进入入选交接）；解析不出：进入④如实记录；',
+                      '④ record_product_analysis.py --revise，payload 带现有 query_terms、analysis{reviewer,reasoning} 与 product.patent_claim_followup={status:"completed", findings:"<号码及来源，或无法解析及已尝试的途径>", evidence_ids:[①②③的证据 ID]}。'],
+            'recorder': str(scripts / 'record_product_analysis.py'),
+            'lead_recorder': str(scripts / 'record_candidate_lead.py'),
+            'source_recorder': str(scripts / 'record_public_source.py'),
+            'required_input': ['页面标注原文及其位置', '官网虚拟标记页或一次品牌检索的真实回执',
+                               '解析出的号码（或无法解析的说明）', 'patent_claim_followup 的实质证据 ID'],
+            'validation': 'evidence_ids 必须是成功运行或留存原件的实质证据，失败／零结果运行不算；无法解析也要引用实际尝试的证据。该条目在 patent_claim_followup 完成前始终排在动作卡最前，广泛发现检索在其后。'}
     if kind == 'product_analysis':
         return {**card,'action':'review_product_scope_or_generate_plan','recorder':str(scripts/'record_product_scope.py'),
             'reason':'Record sourced scope/fact dependencies. For changed dependencies with an unchanged valid request, record query_revalidations with a new review_id, query_id, plan_entry_sha256, source_refs and reason; otherwise expand with justified terms. Preserve auth and identity.'}
@@ -216,8 +394,11 @@ def _action_card(task_dir: Path, entry: dict[str, Any]) -> dict[str, Any]:
                                "missing result position/disposition", "smallest correction action"],
             "validation": "Repair source/result processing and rerun next_work; a handoff cannot use an unreviewed or missing source."}
     if kind == "agent_investigation" and reason == "CANDIDATE_IDENTITY_DIRECTION_PENDING":
+        route = _identity_route(task_dir, entry)
         return {**card, "action": "locate_candidate_identity_and_direction",
-            "bounded_public_recorder": str(scripts / "record_public_identity.py"),
+            "bounded_public_recorder": (None if route and route["public_identity"] == "not_applicable"
+                                        else str(scripts / "record_public_identity.py")),
+            **({"identity_route": route} if route else {}),
             "candidate_id": entry.get("candidate_id"),
             "identity_gaps": entry.get("identity_gaps", []),
             "identity_location": entry.get("identity_location", {}),
@@ -444,20 +625,26 @@ def _execute_sources(task_dir, plan, entries, *, deadline=None):
         # that safe cross-provider concurrency.  Browser routes remain split
         # because their interactive sessions are intentionally serialized.
         batch_provider = provider if runner == "browser" else "*"
-        batches[(runner, batch_provider, phase)].append(row["query_id"])
+        # Several work entries can share one planned query (one per scope or requirement it serves); the runners
+        # accept each exact row once and reject the whole batch on a repeated id, which left every row unsubmitted.
+        if row["query_id"] not in batches[(runner, batch_provider, phase)]:
+            batches[(runner, batch_provider, phase)].append(row["query_id"])
     root = Path(__file__).resolve().parent
     for (runner, provider, phase), ids in sorted(batches.items()):
         script = root / ("run_api_plan.py" if runner == "api" else "run_browser_plan.py")
         command = [sys.executable, str(script), "--task-dir", str(task_dir), "--query-ids", *ids, "--phase", phase,
                    *(["--skip-final-view"] if runner == "api" else [])]
+        # r9: PYTHONUTF8 puts the runners in UTF-8 mode on every platform (an Agent running this script directly on a
+        # Chinese Windows code page got undecodable output); the pipeline already ran them this way
         if deadline is None:
-            completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", check=False)
+            completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", check=False,
+                                       env={**os.environ, "PYTHONUTF8": "1"})
         else:
             from execution_budget import run_bounded, child_environment, remaining
             try:
                 remaining(deadline, 1800)
                 completed = run_bounded(command, deadline=deadline, timeout=1800,
-                    text=True, encoding='utf-8', env=child_environment(task_dir, deadline))
+                    text=True, encoding='utf-8', env={**child_environment(task_dir, deadline), 'PYTHONUTF8': '1'})
             except (subprocess.TimeoutExpired, ValueError) as exc:
                 results.append({'runner': runner, 'provider': provider, 'phase': phase, 'query_ids': ids,
                     'returncode': 2, 'error_code': 'EXECUTION_TIME_BUDGET_EXHAUSTED',
@@ -509,9 +696,30 @@ def main() -> None:
     before = work_view_from_dir(task_dir, first_review=first, second_review=second)
     from execution_budget import snapshot as budget_snapshot
     runtime_budget = budget_snapshot(task_dir)
-    source_entries, defer_sources = source_entries_after_triage_priority(task, before)
+    source_entries, defer_sources = source_entries_after_triage_priority(task, before, plan, task_dir)
     if runtime_budget and runtime_budget['stop_reason']:
         source_entries = []
+    from auto_refine import enabled as answered_rows_skipped
+    if answered_rows_skipped(task):
+        # A query whose exact row already returned (success or zero) is reused by the runner, never sent again:
+        # dispatching it only records a no-progress round, and twelve of those cancel every planned query
+        # (r5d rehearsal: answered parents re-dispatched beside their refinements). Its open obligation is its
+        # result review or follow-up, which is not a source action.
+        answered = {(run.get('provider'), run.get('query_id'), run.get('plan_entry_sha256'))
+                    for run in load_json(task_dir / 'evidence.json').get('source_runs', [])
+                    if run.get('status') in {'success', 'no_result'} and run.get('submission_state') != 'not_submitted'}
+        rows = plan_rows(plan)
+        def answered_row(entry):
+            found = rows.get(str(entry.get('query_id') or ''))
+            return bool(found) and (found[0], found[1]['query_id'], sha256_json(found[1])) in answered
+        source_entries = [entry for entry in source_entries if not answered_row(entry)]
+    gated_sources = {}
+    import pipeline_robust
+    if pipeline_robust.enabled(task) and source_entries:
+        # r5d4: a row the runner's own gate holds (no direction or expression review yet, a pending recovery
+        # review, ...) is not sent: the runner would only record a deferral, booked as a no-progress round, and
+        # eleven such rounds capped every later dispatch at one query (B0FSJBDTF2 real run).
+        source_entries, gated_sources = pipeline_robust.dispatchable(task_dir, plan, source_entries)
     from execution_budget import policy as budget_policy
     limits = budget_policy(task)
     if limits and task.get('continuous_progress_revision'):
@@ -550,7 +758,7 @@ def main() -> None:
     # Reuse the frozen view instead of loading and deriving the full workflow a
     # second time.  Executed batches are always followed by a fresh derivation.
     after = work_view_from_dir(task_dir, first_review=first, second_review=second) if source_results else before
-    packet = actionable_packet(after)
+    packet = actionable_packet(after, task=task, plan=plan)
     packet["action_cards"] = [action_card(task_dir, entry) for entry in action_card_entries(packet)]
     stage = workflow_stage(after, packet, first_review=args.first_review, second_review=args.second_review,
                            adjudication=args.adjudication, output_dir=args.output_dir, task_dir=task_dir)
@@ -609,6 +817,8 @@ def main() -> None:
         status["stage_risk"] = after.get("stage_risk")
     if defer_sources:
         status["source_dispatch_deferred"] = "ACQUIRED_CANDIDATE_LIGHT_TRIAGE_FIRST"
+    if gated_sources:
+        status["source_dispatch_gated"] = dict(sorted(gated_sources.items()))
     if not task.get("continuous_progress_revision") and unchanged >= 2 and (packet["source"] or packet["agent"] or packet["repair"] or packet["review"]):
         status["no_progress_diagnosis"] = {
             "kind": "internal_follow_up_required",
@@ -663,6 +873,15 @@ def main() -> None:
     # Auxiliary progress is only a CLI projection. It is never saved to the
     # canonical work view, status digest, evidence or review inputs.
     output = {**printable, "runtime_progress": progress_view(task_dir, after, stage_hint=stage)}
+    try:
+        from legacy_task import notice as legacy_notice
+        legacy = legacy_notice(load_json(task_dir / "task.json"))
+    except (OSError, ValueError):
+        legacy = None
+    if legacy:
+        # Shown first so the Agent tells the user before continuing an old-policy task.
+        output = {"legacy_task": legacy, **output}
+        print(legacy["code"] + ": " + legacy["message"], file=sys.stderr)
     print(json.dumps(output, ensure_ascii=False, indent=2) if args.output_format == "full"
           else json.dumps(output, ensure_ascii=False, separators=(",", ":")))
     if args.require_complete and stage not in {"complete", "limited_round_closed"}:

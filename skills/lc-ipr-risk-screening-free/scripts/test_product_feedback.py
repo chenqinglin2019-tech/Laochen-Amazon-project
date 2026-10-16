@@ -90,8 +90,11 @@ class ProductFeedbackTests(unittest.TestCase):
         self.assertEqual(task['product_scope']['facts'][1], before)
         self.assertEqual(before['nature'], 'user_statement')
         self.assertEqual(before['verification'], 'claim_only')
+        # best-estimate-risk-v1 (new tasks): a structure the user cannot provide is a disclosed limitation, not a
+        # pending comparison; the historical policy still refuses the grade.
+        assessment_gate(task, [{'candidate_id':'CAND-feedback', 'risk':'低'}])
         with self.assertRaisesRegex(ValueError, 'COMPARISON_PENDING'):
-            assessment_gate(task, [{'candidate_id':'CAND-feedback', 'risk':'低'}])
+            assessment_gate({**task, 'best_estimate_revision': None}, [{'candidate_id':'CAND-feedback', 'risk':'低'}])
 
     def test_historical_request_becomes_unavailable_without_rewriting_receipt(self):
         self.save_request()

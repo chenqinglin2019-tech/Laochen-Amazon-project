@@ -65,13 +65,21 @@ def api_record_gap_entry(task, evidence, candidates, ledger, plan, capabilities,
     if regenerated != matches:
         return None
     aliases = {"current_status": "status", "protection_content": "protection", "representative_figures": "protection"}
+    import core_focus
+    originals = {row["event_id"] for row in history if row.get("kind") == "material"
+                 and row.get("source_form") == "original_document"}
     facts = []
     for needed in matches[0]["required_facts"]:
         fact = next((row for row in reversed(history) if row.get("kind") == "fact" and
             (row.get("fact_kind") == aliases.get(needed, needed) if module is specialty else row.get("api_fact") == needed)), None)
+        if (fact is not None and fact.get("outcome") == "supported" and core_focus.enabled(task)
+                and set(fact.get("material_event_ids") or []) & originals):
+            continue    # core-focus: a retained published text supplies this fact; only the unknown ones are limited
         if fact is None or fact.get("outcome") != "unknown":
             return None
         facts.append(fact)
+    if not facts:
+        return None
     fact_ids = {row["event_id"] for row in facts}
     materials = {row["event_id"]: row for row in history if row.get("kind") == "material"}
     material_ids = {ref for row in facts for ref in row.get("material_event_ids", [])}
@@ -164,7 +172,7 @@ def _reviewed_api_gap_queries(task,evidence,plan,gap,scope,task_dir):
 
 
 def _failed_api_gap_limits(task,evidence,plan,gap,scope,task_dir):
-    from recovery_stage_b import task_limit_no_retry_proof
+    from recovery_stage_b import no_retry_limit_proof as task_limit_no_retry_proof
     proofs = {}
     for provider,rows in plan.get('queries',{}).items():
         for row in rows:
@@ -1321,6 +1329,12 @@ def refine_work_view(task, view, plan, capabilities, *, evidence=None, candidate
                         supplement, task_dir, entry, row, fault=(reason == "SOURCE_FAULT_UNVERIFIED")):
                 if reason == 'BOUNDED_PUBLIC_DISCOVERY_SCOPE_LIMITED':
                     reviewed_public_limits.add((*_scope(entry), entry.get('provider'), entry.get('query_id')))
+                elif reason == 'BOUNDED_DISCOVERY_OFFICIAL_COVERAGE_UNVERIFIED':
+                    from auto_refine import enabled as refinement_closure
+                    if refinement_closure(task):
+                        # The same validated bounded stop also ends the response's truncated-scope review: the
+                        # unretrieved rows stay an explicit limitation of this entry (auto-refine tasks).
+                        reviewed_public_limits.add((*_scope(entry), entry.get('provider'), entry.get('query_id')))
                 continue
             # A receipt audit preserves uncertainty and forbids another
             # request. Its exact proof was validated by the API projection;
@@ -1389,10 +1403,18 @@ def refine_work_view(task, view, plan, capabilities, *, evidence=None, candidate
                 if limited:
                     finished_queries = _reviewed_api_gap_queries(task,evidence,plan,gap,scope,task_dir)
                     failures = _failed_api_gap_limits(task,evidence,plan,gap,scope,task_dir)
+                    import pipeline_robust
+                    robust = pipeline_robust.enabled(task)
                     for pending in view['entries']:
+                        # r5d8 (B0GLNPC6K8): a "no such record" read whose plan action was then cancelled is still
+                        # listed as cancelled here; the recovery projection that runs after this step names it
+                        # SOURCE_RETRY_NOT_REQUESTED, so the limitation is attached under that name now
+                        cancelled = (robust and pending.get('reason') == 'SCENARIO_ACTION_CANCELLED'
+                                     and pending.get('state') == 'blocked')
                         if (pending.get('kind') == 'source_lookup' and pending.get('query_id') in failures
                                 and all(pending.get(k) == scope.get(k) for k in keys)
-                                and pending.get('reason') == 'SOURCE_RETRY_NOT_REQUESTED'):
+                                and (pending.get('reason') == 'SOURCE_RETRY_NOT_REQUESTED' or cancelled)):
+                            pending.update(reason='SOURCE_RETRY_NOT_REQUESTED')
                             pending.update(state='blocked', coverage_status='unknown', official_verification='not_verified',
                                 resume_condition=limited['resume_condition'],
                                 delivery_limit={'kind':'source_failure_no_retry', 'audit':failures[pending['query_id']],
@@ -1593,8 +1615,8 @@ def _delivery_limit_valid(entry, task, evidence, plan, capabilities, *, candidat
             entry,supplement=supplement,task_dir=task_dir)
         row = next((r for r in plan.get('queries',{}).get(entry.get('provider'), [])
             if r.get('query_id') == entry.get('query_id')), None)
-        from recovery_stage_b import task_limit_no_retry_proof
-        audit = task_limit_no_retry_proof(task,evidence,entry.get('provider'),row,task_dir) if row else None
+        from recovery_stage_b import no_retry_limit_proof
+        audit = no_retry_limit_proof(task,evidence,entry.get('provider'),row,task_dir) if row else None
         return bool(expected and audit and proof == {'kind':'source_failure_no_retry',
             'audit':audit,'field_gap':expected['delivery_limit']}
             and entry.get('kind') == 'source_lookup' and entry.get('state') == 'blocked'
@@ -1816,6 +1838,51 @@ def _route_absence_proof(task, entry, plan, capabilities, evidence, candidates, 
     return {"kind": "no_qualified_route", "planning_gap_sha256": sha256_json(gap), "term_sha256": sha256_json(term),
         "requirements_sha256": sha256_json(requirements), "policy_sha256": sha256_json(policy),
         "source_capabilities_sha256": sha256_json(capabilities), "qualified_providers": [], "official_verification": "not_verified"}
+
+
+def _cancelled_discovery_limits(task, plan, evidence, scopes, view, limited):
+    """r8 (report-always-v1 tasks; r7 runs B0GLNPC6K8 / B0H16FDSD8): a scope whose only gaps are search obligations
+    whose every planned query was cancelled before it was sent is disclosed as unsearched, so the report still comes
+    out; it never counts as a search result or a clearance. Any other gap keeps the existing refusal."""
+    import report_always
+    if not report_always.enabled(task):
+        return []
+    from workflow_v24 import plan_row_index, validated_query_cancellation
+    index = plan_row_index(plan)
+    sent = {(run.get("provider"), run.get("query_id")) for run in evidence.get("source_runs", [])
+            if isinstance(run, dict) and run.get("submission_state") != "not_submitted"}
+    unresolved = {_scope(row) for row in view.get("unresolved_scopes", [])}
+    result = []
+    for group in scopes:
+        key = _scope(group)
+        gaps = group.get("gaps") or []
+        if key in limited or key not in unresolved or not gaps or any(
+                not str(gap).startswith("OBLIGATION_INCOMPLETE:") for gap in gaps):
+            continue
+        cancelled = []
+        for obligation in group.get("obligations", []):
+            if obligation.get("complete"):
+                continue
+            for query_id in obligation.get("query_ids", []):
+                matches = index.get(query_id, [])
+                record = validated_query_cancellation(task, plan, matches[0][1]) if len(matches) == 1 else None
+                if record is None or (matches[0][0], query_id) in sent:
+                    cancelled = None
+                    break
+                cancelled.append({"provider": matches[0][0], "query_id": query_id, "reason": record["reason"]})
+            if cancelled is None:
+                break
+        if not cancelled:
+            continue
+        identity = {"scenario_id": key[0], "jurisdiction": key[1], "right_type": key[2]}
+        reasons = "、".join(sorted({row["reason"] for row in cancelled}))
+        result.append({**identity, "work_id": "LIMIT-" + sha256_json({**identity, "kind": "cancelled_discovery"})[:24],
+            "kind": "cancelled_discovery", "reason": "DISCOVERY_CANCELLED_BEFORE_SUBMISSION",
+            "coverage_status": "unknown", "state": "blocked", "official_verification": "not_verified",
+            "cancelled_queries": cancelled, "evidence_refs": [], "source_run_refs": [],
+            "reasoning": "本范围计划的检索在发送前被程序撤销（%s），没有取得检索结果；本报告不含该范围的检索结论，"
+                         "不能据此认为不存在相关权利。" % reasons})
+    return result
 
 
 def _reviewed_fact_limitations(assessment, evidence, *, evidence_root=None, task=None):
@@ -2223,6 +2290,8 @@ def _publication_context(task, evidence, candidates, plan, ledger, assessment, *
         # These are disclosed assessment facts, not a second execution queue.
         # All executable/review work has already been rejected above.
         limitations.extend(_reviewed_fact_limitations(assessment, evidence, evidence_root=evidence_root, task=task))
+        limited_scopes = {_scope(entry) for entry in limitations}
+        limitations.extend(_cancelled_discovery_limits(task, plan, evidence, scopes, view, limited_scopes))
         limited_scopes = {_scope(entry) for entry in limitations}
         if any(_scope(scope) not in limited_scopes for scope in view.get("unresolved_scopes", [])):
             reject("EVIDENCE_UNRESOLVED_SCOPE_WITHOUT_LIMITATION")

@@ -125,7 +125,9 @@ def build_review(task_dir: Path, payload: dict, execution: dict, *, prepared_con
                           **({"host_audit": deepcopy(execution["host_audit"])}
                              if isinstance(execution.get("host_audit"), dict) else {}),
                           **({"module_execution": deepcopy(execution["module_execution"])}
-                             if isinstance(execution.get("module_execution"), dict) else {})}},
+                             if isinstance(execution.get("module_execution"), dict) else {}),
+                          **({"integrated_execution": deepcopy(execution["integrated_execution"])}
+                             if isinstance(execution.get("integrated_execution"), dict) else {})}},
         "coverage_confidence_cap": payload.get("coverage_confidence_cap"),
         "coverage_confidence_reasoning": payload.get("coverage_confidence_reasoning"),
         "assessments": assessments,
@@ -144,7 +146,7 @@ def build_review(task_dir: Path, payload: dict, execution: dict, *, prepared_con
     if errors:
         raise ValueError("INVALID_CANDIDATES:" + ";".join(errors))
     from module_review import enabled as modules_enabled
-    if modules_enabled(task) and not isinstance(execution.get('module_execution'), dict):
+    if modules_enabled(task) and not any(isinstance(execution.get(k), dict) for k in ('module_execution', 'integrated_execution')):
         raise ValueError('FINAL_REVIEW_MODULE_EXECUTION_REQUIRED')
     _validate_review(review, digest, known, index,
                      {str(value).upper() for value in task.get("target_jurisdictions", [])},

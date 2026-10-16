@@ -693,10 +693,20 @@ def record_review(task_dir: Path, request: dict) -> dict:
             binding["material_resolution"] = resolution
         if not _text(binding["reviewer"]) or not _text(binding["reason"]):
             raise ValueError("FOLLOWUP_REVIEWER_REASON_REQUIRED")
-        for prior in events(task):
-            if prior.get("kind") == "result_review" and all(prior.get(key) == binding.get(key)
-                    for key in ("annotation_id", "action_id", "run_id", "run_sha256", "outcome", "material_resolution")):
+        from execution_efficiency import revised
+        if revised(task):
+            # Only the current result can make this request idempotent. An old
+            # continue must not swallow a later waiting -> continue transition.
+            prior = latest_event(task, "result_review", annotation_id, action["action_id"])
+            administrative = {"recorded_at", "event_id", "previous_event_id"}
+            if prior is not None and {k: v for k, v in prior.items() if k not in administrative} == {
+                    k: v for k, v in binding.items() if k not in administrative}:
                 return prior
+        else:
+            for prior in events(task):
+                if prior.get("kind") == "result_review" and all(prior.get(key) == binding.get(key)
+                        for key in ("annotation_id", "action_id", "run_id", "run_sha256", "outcome", "material_resolution")):
+                    return prior
         event = _append(task, binding)
         atomic_write_json(task_dir / "task.json", task)
         return event

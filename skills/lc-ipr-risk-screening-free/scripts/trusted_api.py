@@ -38,7 +38,8 @@ def country(value):
 
 
 def identifier(value):
-    return re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
+    from common import canonical_patent_number
+    return canonical_patent_number(value)
 
 
 def records(payload):
@@ -305,7 +306,7 @@ def _exact_detail_candidate(task, entry, candidate, evidence=None):
         return candidate
     try:
         from pathlib import Path
-        from common import load_json, sha256_json
+        from common import load_json_shared as load_json, sha256_json     # read-only lookups
         from source_result_processing import detail_record_binding
         paths = entry.get(FORM,{}).get('raw_paths',[])
         if len(paths) != 1 or not Path(paths[0]).is_absolute():
@@ -396,10 +397,29 @@ def required_facts_for(candidate):
 
 
 
+# Facts a reviewed, exactly-read registered original may support, and the M06 fact kind that records each.
+# Status, rights holder and territory are deliberately absent: a published document never proves them, even
+# when its reading purposes list them.
+ORIGINAL_CREDIT_FACTS = {'protection_content': 'protection', 'identity': 'identity'}
+
+
+def original_identity_credit_enabled(task):
+    """Tasks of the host-triage family credit an exactly-read original's identity fact (older tasks keep the old rule)."""
+    return task.get('host_triage_revision') is not None
+
+
 def _registered_original_protection(task, evidence, candidate, jurisdiction, right, *,
                                     scope=None, candidates=None, ledger=None, supplement=None, task_dir=None):
     """Credit a current M06 reading of this exact registered original; no API status is invented."""
-    if (not enabled(task) or right != 'patent' or country(jurisdiction) != 'US' or task_dir is None
+    return _registered_original_fact('protection_content', task, evidence, candidate, jurisdiction, right,
+        scope=scope, candidates=candidates, ledger=ledger, supplement=supplement, task_dir=task_dir)
+
+
+def _registered_original_fact(fact_name, task, evidence, candidate, jurisdiction, right, *,
+                              scope=None, candidates=None, ledger=None, supplement=None, task_dir=None):
+    """The shared reading proof: one current, supported M06 fact bound to one exactly-read original document."""
+    kind = ORIGINAL_CREDIT_FACTS.get(fact_name)
+    if (kind is None or not enabled(task) or right != 'patent' or country(jurisdiction) != 'US' or task_dir is None
             or not isinstance(scope, dict) or scope.get('candidate_id') != candidate.get('candidate_id')
             or not scope.get('scenario_id') or scope.get('jurisdiction') != jurisdiction
             or scope.get('right_type') != right):
@@ -426,7 +446,7 @@ def _registered_original_protection(task, evidence, candidate, jurisdiction, rig
         specialty._validate_intake(task, evidence, candidates, ledger, supplement, intake)
         history = [row for row in specialty.events(task) if specialty._scope(row) == specialty._scope(scope)
             and row.get('intake_event_id') == intake['event_id']]
-        fact = next((row for row in reversed(history) if row.get('kind') == 'fact' and row.get('fact_kind') == 'protection'), None)
+        fact = next((row for row in reversed(history) if row.get('kind') == 'fact' and row.get('fact_kind') == kind), None)
         if not fact or fact.get('outcome') != 'supported':
             return None
         for change in (row for row in history if row.get('kind') in {'change','impact'}):
@@ -448,7 +468,7 @@ def _registered_original_protection(task, evidence, candidate, jurisdiction, rig
                         or identifier(material.get('document_id')) != number
                         or material.get('document_version') != fact.get('document_version')
                         or material.get('status') != 'sufficient_for_listed_purposes'
-                        or 'protection' not in material.get('supported_facts', [])
+                        or kind not in material.get('supported_facts', [])
                         or source_ref not in material.get('evidence_refs', [])
                         or source_ref not in fact.get('evidence_refs', [])):
                     continue
@@ -460,7 +480,7 @@ def _registered_original_protection(task, evidence, candidate, jurisdiction, rig
                     continue
                 for batch in batches:
                     specialty._batch(task, batch, evidence, indexed)
-                return {'value':fact['raw_statement'], 'source_field':'current_M06_protection_fact',
+                return {'value':fact['raw_statement'], 'source_field':'current_M06_%s_fact' % kind,
                     'source_form':'reviewed_original_document', 'provider':lead['provider'],
                     'source_upstream':document['source_url'], 'evidence_refs':sorted(set(fact['evidence_refs'])),
                     'source_run_ids':[], 'checked_at':fact['recorded_at'], 'source_updated_at':'',
@@ -482,12 +502,16 @@ def accepted_verification(task, evidence, candidate, jurisdiction=None, right_ty
     scope = {**candidate, **({"right_type": right_type} if right_type else {})}
     facts = accepted_candidate_facts(task, evidence, candidate, jurisdiction, right_type, assessment_at)
     required = required_facts_for(scope)
-    if 'protection_content' in required and 'protection_content' not in facts:
-        original = _registered_original_protection(task, evidence, candidate,
+    for fact_name in ('protection_content', 'identity'):
+        if fact_name not in required or fact_name in facts:
+            continue
+        if fact_name == 'identity' and not original_identity_credit_enabled(task):
+            continue
+        original = _registered_original_fact(fact_name, task, evidence, candidate,
             jurisdiction or candidate.get('jurisdiction'), right_type or candidate.get('right_type'),
             scope=reading_scope, candidates=candidates, ledger=ledger, supplement=supplement, task_dir=task_dir)
         if original:
-            facts['protection_content'] = original
+            facts[fact_name] = original
     return {"complete": bool(required) and required <= set(facts), "supported": facts,
             "missing": sorted(required - set(facts)), "basis": ("accepted_api_and_reviewed_original_records"
                 if any(value.get("source_form") == "reviewed_original_document" for value in facts.values()) else FORM),

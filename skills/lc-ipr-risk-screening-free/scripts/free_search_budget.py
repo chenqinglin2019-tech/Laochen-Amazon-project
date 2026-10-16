@@ -14,7 +14,7 @@ import tempfile
 from datetime import date
 from pathlib import Path
 
-from common import atomic_write_json
+from common import atomic_write_json, load_json
 from provider_utils import ProviderError, file_lock, redact_sensitive_text
 
 
@@ -32,6 +32,38 @@ def _root(base: str) -> Path:
     if platform.system() == "Windows":
         return home / "AppData/Local/lc-ipr-risk-screening-free/free-search-quota"
     return home / ".local/state/lc-ipr-risk-screening-free/free-search-quota"
+
+
+def peek(provider: str, credential: str, base: str, *, account_identity: str = '', renewal_date: str = '',
+         today: str | None = None, ledger_dir: Path | None = None) -> int | None:
+    """Read-only: the local running balance a reservation would start from, or None when unknown or about to reset.
+
+    r7 (search-guard-v1, run B0GFNWR8FW): the account still showed 2 searches while this ledger was at 0, so 9 detail
+    requests were refused one by one. The pre-run check reads both. Nothing is written or locked here; a later
+    renewal date that would reset the ledger on the next reservation (same rule as ``reserve_search``) reads as None."""
+    if not credential or not provider:
+        return None
+    account = _digest("lc-ipr-free-search\0" + provider + "\0" + base + "\0" + (account_identity or credential))
+    path = (ledger_dir or _root(base)).expanduser() / (account + ".json")
+    try:
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 1024 * 1024:
+            return None
+        state = load_json(path)
+    except (OSError, ValueError):
+        return None
+    if not isinstance(state, dict) or state.get("schema") != "FREE-SEARCH-BUDGET/1.0":
+        return None
+    remaining, cycle = state.get("remaining"), str(state.get("cycle") or "")
+    if isinstance(remaining, bool) or not isinstance(remaining, int) or remaining < 0:
+        return None
+    current = today or date.today().isoformat()
+    try:
+        renewal = date.fromisoformat(renewal_date).isoformat() if renewal_date else ""
+    except ValueError:
+        renewal = ""
+    if cycle and renewal and renewal > cycle and current >= cycle and renewal > current:
+        return None
+    return remaining
 
 
 def attempt_context(attempt_id: str, retry_reason: str) -> dict:
@@ -97,7 +129,7 @@ def reserve_search(provider: str, credential: str, base: str, *, remaining: int 
             if path.exists():
                 if path.stat().st_size > 1024 * 1024:
                     raise ValueError("oversized ledger")
-                state = json.loads(path.read_text())
+                state = load_json(path)
                 if (not isinstance(state, dict) or state.get("schema") != "FREE-SEARCH-BUDGET/1.0"
                     or state.get("account") != account or not isinstance(state.get("reservations"), list)
                     or not isinstance(state.get("task_usage"), dict)
@@ -142,7 +174,9 @@ def reserve_search(provider: str, credential: str, base: str, *, remaining: int 
             state['task_usage'][task_fingerprint] = task_used + 1
             atomic_write_json(path, state)
             path.chmod(0o600)
-            with path.open('rb') as handle:
+            # r9: Windows flushes only a handle opened for writing (FlushFileBuffers); a read-only handle made this
+            # fsync fail after the reservation was written, so every SerpApi / Serper / Signa request was refused there
+            with path.open('r+b') as handle:
                 os.fsync(handle.fileno())
             if os.name == 'posix':
                 descriptor = os.open(root, os.O_RDONLY)

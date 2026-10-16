@@ -26,6 +26,33 @@ RECEIPT_OUTCOMES = {"non_result_error"}
 NON_SUCCESS_STATUSES = {"failed", "access_limited", "blocked", "error", "unavailable"}
 
 
+_PURE_MEMO: dict = {}
+_PURE_MEMO_LIMIT = 128
+_MISSING = object()
+
+
+def _bytes_memo(name, body, extra, compute):
+    """Answer a pure function of response bytes once per distinct content.
+
+    The progress view re-reads every retained receipt dozens of times in one computation (once per candidate,
+    per stage). Parsing and re-serializing the same XML each time dominated it. The key is the SHA-256 of the
+    exact bytes, so a changed receipt can never reuse an answer; values are copied in and out because callers
+    own what they get. Nothing here is a cache of a file: the bytes are always read and hashed by the caller.
+    """
+    key = (name, sha256_bytes(body), extra)
+    hit = _PURE_MEMO.get(key, _MISSING)
+    if hit is not _MISSING:
+        return copy.deepcopy(hit)
+    value = compute()
+    if len(_PURE_MEMO) >= _PURE_MEMO_LIMIT:
+        try:
+            _PURE_MEMO.pop(next(iter(_PURE_MEMO)), None)
+        except (RuntimeError, StopIteration):
+            pass            # another thread changed the memo meanwhile; the bound is advisory
+    _PURE_MEMO[key] = copy.deepcopy(value)
+    return value
+
+
 def enabled(task: dict) -> bool:
     value = task.get("result_processing_revision")
     if value is None:
@@ -110,6 +137,12 @@ def _unbound_cua_rows(body: bytes, provider: str) -> bool:
 
 def _ops_images_metadata(body):
     """Recognize one OPS document-inquiry, with both exact publication identifiers."""
+    if not isinstance(body, (bytes, bytearray)):
+        return _ops_images_metadata_uncached(body)
+    return _bytes_memo('ops_images', bytes(body), (), lambda: _ops_images_metadata_uncached(body))
+
+
+def _ops_images_metadata_uncached(body):
     ops, exchange = '{http://ops.epo.org}', '{http://www.epo.org/exchange}'
     try:
         root = ElementTree.fromstring(body)
@@ -165,6 +198,10 @@ def _ops_images_metadata(body):
 def _raw_rows(body: bytes, suffix: str, provider: str) -> list[dict] | None:
     if not body:
         return None
+    return _bytes_memo("raw_rows", body, (suffix, provider), lambda: _raw_rows_uncached(body, suffix, provider))
+
+
+def _raw_rows_uncached(body: bytes, suffix: str, provider: str) -> list[dict] | None:
     if suffix == "xml" and provider in {"epo_ops", "inpi_api"}:
         try:
             root = ElementTree.fromstring(body)
@@ -206,6 +243,10 @@ def _raw_rows(body: bytes, suffix: str, provider: str) -> list[dict] | None:
 def _recognized_fault(body: bytes, suffix: str, provider: str) -> bool:
     if suffix != "xml" or provider not in {"epo_ops", "inpi_api"}:
         return False
+    return _bytes_memo("fault", body, (suffix, provider), lambda: _recognized_fault_uncached(body))
+
+
+def _recognized_fault_uncached(body: bytes) -> bool:
     try:
         root = ElementTree.fromstring(body)
     except (ElementTree.ParseError, ValueError):
@@ -219,6 +260,10 @@ def _ops_empty_search_fault(body: bytes, suffix: str, provider: str) -> bool:
     """Identify the exact retained OPS no-results envelope, never generic faults."""
     if suffix != "xml" or provider != "epo_ops":
         return False
+    return _bytes_memo("ops_empty", body, (suffix, provider), lambda: _ops_empty_search_fault_uncached(body))
+
+
+def _ops_empty_search_fault_uncached(body: bytes) -> bool:
     try:
         root = ElementTree.fromstring(body)
     except (ElementTree.ParseError, ValueError):
@@ -235,6 +280,45 @@ def _ops_empty_search_fault(body: bytes, suffix: str, provider: str) -> bool:
     code = " ".join((root.findtext(namespace + "code") or "").split())
     message = " ".join((root.findtext(namespace + "message") or "").split())
     return code == "SERVER.EntityNotFound" and message == "No results found"
+
+
+# The exact sentences the SerpApi Google Patents adapter already accepts as a successful zero-result search.
+SERPAPI_ZERO_MESSAGES = frozenset({"Google hasn't returned any results for this query.",
+                                   "Google Patents hasn't returned any results for this query."})
+
+
+def _serpapi_empty_search(body: bytes, suffix: str, provider: str) -> bool:
+    """Identify the exact retained SerpApi Google Patents zero-result envelope, never other errors.
+
+    SerpApi omits ``organic_results`` altogether when a search finds nothing, so the receipt has no result list
+    to count; without this the zero was never proven and the query stayed pending forever (B0GLNPC6K8 real run).
+    """
+    if suffix != "json" or provider != "serpapi_google_patents" or not body:
+        return False
+    return _bytes_memo("serpapi_empty", body, (suffix, provider), lambda: _serpapi_empty_search_uncached(body))
+
+
+def _serpapi_empty_search_uncached(body: bytes) -> bool:
+    try:
+        raw = json.loads(body)
+    except (ValueError, UnicodeError):
+        return False
+    if not isinstance(raw, dict) or raw.get("error") not in SERPAPI_ZERO_MESSAGES:
+        return False
+    if not set(raw) <= {"error", "search_information", "search_metadata", "search_parameters", "organic_results"}:
+        return False
+    metadata, parameters = raw.get("search_metadata"), raw.get("search_parameters")
+    information = raw.get("search_information", {})
+    return (isinstance(metadata, dict) and metadata.get("status") == "Success"
+            and isinstance(parameters, dict) and parameters.get("engine") == "google_patents"
+            and raw.get("organic_results", []) == []
+            and isinstance(information, dict)
+            and type(information.get("total_results", 0)) is int and information.get("total_results", 0) == 0
+            and information.get("organic_results_state", "Fully empty") == "Fully empty")
+
+
+def _empty_search_receipt(body: bytes, suffix: str, provider: str) -> bool:
+    return _ops_empty_search_fault(body, suffix, provider) or _serpapi_empty_search(body, suffix, provider)
 
 
 def locate_one_to_one(task: dict, provider: str, evidence_type: str,
@@ -312,7 +396,7 @@ def make_index(task: dict, *, provider: str, evidence_type: str, status: str,
     metadata = coverage if isinstance(coverage, dict) else {}
     if (rows is None and status == "no_result" and submission_state == "submitted"
             and metadata.get("schema_valid") is True and not parsed
-            and _ops_empty_search_fault(raw_body, raw_suffix, provider)):
+            and _empty_search_receipt(raw_body, raw_suffix, provider)):
         rows = []
     acquired = metadata.get("retrieved_hits")
     if type(acquired) is not int or acquired < 0:
@@ -501,7 +585,52 @@ def append_xml_derivation(task_dir: Path, source_run_id: str, item: dict) -> dic
         return progress(task_dir, run, evidence)
 
 
+def _task_field(task_dir: Path, key: str):
+    """One top-level task.json value, parsed once per distinct file content (the task is large)."""
+    path = Path(task_dir) / 'task.json'
+    # r5d21: inside one read-only derivation the unchanged task file is read and hashed once (derivation_memo)
+    import derivation_memo
+    memo = derivation_memo.cache('task_field')
+    if memo is not None:
+        info = path.stat()
+        stamp = (str(path), info.st_size, info.st_mtime_ns, info.st_ino, key)
+        if stamp not in memo:
+            raw = path.read_bytes()
+            memo[stamp] = _bytes_memo('task_field', raw, (key,), lambda: load_json(path).get(key))
+        return copy.deepcopy(memo[stamp])
+    raw = path.read_bytes()
+    return _bytes_memo('task_field', raw, (key,), lambda: load_json(path).get(key))
+
+
 def _retained_run(task_dir: Path, run: dict, evidence: dict | None = None) -> tuple[dict, bytes]:
+    # r5d21: inside one read-only derivation (derivation_memo) one archived run is verified and projected once; its
+    # receipt file is keyed by size, mtime and inode as well as by the run's payload digest
+    import derivation_memo
+    memo = derivation_memo.cache('retained_run')
+    key = None
+    if memo is not None:
+        paths = run.get("raw_paths", [])
+        stamp = None
+        if isinstance(paths, list) and len(paths) == 1 and isinstance(paths[0], str):
+            candidate = Path(paths[0]) if Path(paths[0]).is_absolute() else Path(task_dir) / paths[0]
+            try:
+                info = candidate.stat()
+                stamp = (str(candidate), info.st_size, info.st_mtime_ns, info.st_ino)
+            except OSError:
+                stamp = None
+        if stamp is not None:
+            key = (str(task_dir), str(run.get("run_id") or ""), str(run.get("payload_digest") or ""),
+                   sha256_json(run.get("result_processing")), id(evidence), stamp)
+            if key in memo:
+                index, body = memo[key]
+                return copy.deepcopy(index), body
+    value = _retained_run_uncached(task_dir, run, evidence)
+    if key is not None:
+        memo[key] = (copy.deepcopy(value[0]), value[1])
+    return value
+
+
+def _retained_run_uncached(task_dir: Path, run: dict, evidence: dict | None = None) -> tuple[dict, bytes]:
     index = run.get("result_processing")
     if not isinstance(index, dict) or index.get("revision") != REVISION \
             or index.get("payload_digest") != run.get("payload_digest"):
@@ -516,11 +645,11 @@ def _retained_run(task_dir: Path, run: dict, evidence: dict | None = None) -> tu
     body = path.read_bytes()
     suffix = path.suffix.lstrip(".")
     actual = _raw_rows(body, suffix, str(run.get("provider") or ""))
-    task = load_json(task_dir / 'task.json')
-    if actual and actual[0]['collection'] == WHOLE_RECORD and task.get('retrieval_workflow_revision') != 'api-first-v3':
+    workflow_revision = _task_field(task_dir, 'retrieval_workflow_revision')
+    if actual and actual[0]['collection'] == WHOLE_RECORD and workflow_revision != 'api-first-v3':
         actual = None
-    empty_ops_fault = _ops_empty_search_fault(body, suffix, str(run.get("provider") or ""))
-    if (actual is None and empty_ops_fault
+    empty_search = _empty_search_receipt(body, suffix, str(run.get("provider") or ""))
+    if (actual is None and empty_search
             and index.get("returned_count_basis") == "retained_rows"):
         actual = []
     if index["returned_count_basis"] == "retained_rows" and actual != index["rows"]:
@@ -538,10 +667,10 @@ def _retained_run(task_dir: Path, run: dict, evidence: dict | None = None) -> tu
             and acquired not in {len(actual), index.get("parsed_count")})
     if evidence is None:
         evidence = load_json(task_dir / "evidence.json") if (task_dir / "evidence.json").is_file() else {}
-    # Older indexes missed OPS' exact zero-result fault. Re-read the immutable
+    # Older indexes missed OPS' exact zero-result fault and SerpApi's zero envelope. Re-read the immutable
     # receipt and project its zero rows without rewriting the archived run.
     coverage = run.get("metadata", {}).get("search_coverage", {})
-    if (empty_ops_fault and run.get("operation") == "search"
+    if (empty_search and run.get("operation") == "search"
             and run.get("status") == "no_result" and run.get("submission_state") == "submitted"
             and isinstance(coverage, dict) and coverage.get("schema_valid") is True
             and index.get("returned_count_basis") == "response_count_only"
@@ -570,8 +699,9 @@ def detail_record_binding(task_dir, run, evidence, body=None):
     """Bind an exact detail to its known candidate; aliases need read original text."""
     from decision_workflow import candidate_content_sha256
     from workflow_v24 import scenario_supplement
+    from common import load_json_shared     # read-only lookups, repeated for every detail record in one view
     task_dir = Path(task_dir)
-    task = load_json(task_dir / 'task.json')
+    task = load_json_shared(task_dir / 'task.json')
     if (task.get('retrieval_workflow_revision') != 'api-first-v3'
             or run.get('provider') != 'serpapi_google_patents'
             or run.get('operation') != 'candidate_detail' or run.get('status') != 'success'
@@ -593,7 +723,7 @@ def detail_record_binding(task_dir, run, evidence, body=None):
             or run.get('jurisdiction') != pub[:2]):
         raise ValueError('RESULT_PROCESSING_DETAIL_IDENTITY_MISMATCH')
     cid = params.get('candidate_id')
-    candidates = load_json(task_dir / 'normalized-candidates.json')
+    candidates = load_json_shared(task_dir / 'normalized-candidates.json')
     matches = [c for c in candidates.get('patents', []) if c.get('candidate_id') == cid]
     if len(matches) != 1 or matches[0].get('jurisdiction') != run['jurisdiction']:
         raise ValueError('RESULT_PROCESSING_DETAIL_CANDIDATE_MISMATCH')
@@ -606,7 +736,14 @@ def detail_record_binding(task_dir, run, evidence, body=None):
         raise ValueError('RESULT_PROCESSING_DETAIL_ENTRY_MISMATCH')
     supplement = scenario_supplement(task_dir, task=task, evidence=evidence)
     locator_proof = []
-    if candidate.get('publication_number') != pub:
+    candidate_number = candidate.get('publication_number')
+    # EPO docdb spells a US application publication without its leading zero (US2014020569A1); the request this
+    # task itself planned (and the response) use the 11-digit form. They name one document: no locator is needed.
+    from common import canonical_patent_number
+    same_number = candidate_number == pub or (
+        isinstance(candidate_number, str) and candidate_number.strip().upper().startswith('US')
+        and canonical_patent_number(candidate_number) == canonical_patent_number(pub))
+    if not same_number:
         ledger = load_json(task_dir / 'materiality-annotations.json')
         meta = run.get('metadata', {})
         annotations = [a for a in ledger.get('annotations', [])

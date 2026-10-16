@@ -13,6 +13,20 @@ import package_skill as package
 
 
 class PackageSkillTests(unittest.TestCase):
+    def test_history_redaction_is_idempotent_across_recipient_repackaging(self):
+        prefix = '> 分发说明：以下保留发送者历史记录；本机路径及恢复命令已脱敏，不提供接收者可执行的历史恢复命令。\n\n'
+        sender_root = '/' + 'Users/sender'
+        body = ('# History\n[old](' + sender_root + '/private/file)\n'
+                '```sh\npython ' + sender_root + '/restore.py\n```\n')
+        for count in (0, 1, 3):
+            with self.subTest(existing_prefixes=count):
+                once = package._transform(package.HISTORY_PATH, (prefix * count + body).encode(), package.HISTORY_TRANSFORM)
+                twice = package._transform(package.HISTORY_PATH, once, package.HISTORY_TRANSFORM)
+                self.assertEqual(once, twice)
+                self.assertEqual(once.decode().count(prefix), 1)
+                self.assertNotIn(sender_root.encode(), once)
+                self.assertNotIn(b'python ', once)
+
     def setUp(self):
         environment = patch.dict(package.os.environ, {}, clear=True)
         environment.start(); self.addCleanup(environment.stop)

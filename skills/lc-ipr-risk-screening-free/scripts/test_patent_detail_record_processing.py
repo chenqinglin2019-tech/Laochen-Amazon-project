@@ -15,12 +15,12 @@ class DetailRecordTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
         self.root=Path(self.tmp.name)
         self.task={'task_id':'DETAIL-TEST','retrieval_workflow_revision':'api-first-v3','result_processing_revision':'source-result-processing-v1'}
-        self.candidate={'candidate_id':'C1','publication_number':'USD1127104S','application_number':'US202429934258F','jurisdiction':'US','right_type':'design'}
+        self.candidate={'candidate_id':'C1','publication_number':'USD1127104','application_number':'US202429934258F','jurisdiction':'US','right_type':'design'}
         self.raw={'search_metadata':{'status':'Success'},'search_parameters':{'engine':'google_patents_details','patent_id':'patent/USD1127104S1/en'},
             'publication_number':'USD1127104S1','title':'Toy','claims':['The ornamental design as shown.'],'images':['https://example.test/figure.png'],
             'similar_documents':[{'publication_number':'USD999S1'}],'patent_citations':[{'publication_number':'US999A1'}]}
         self.annotation={'annotation_id':'A1','candidate_id':'C1','next_actions':[{'action_id':'ACT1','target_locator':{'kind':'publication_number','value':'USD1127104S1','evidence_refs':['EV-ORIGINAL'],'unique_reason':'Read exact full original and application.'}}]}
-        path=self.root/'original.txt';path.write_text('Publication number USD1127104S1\nUSD1127104S\nUS202429934258F',encoding='utf-8')
+        path=self.root/'original.txt';path.write_text('Publication number USD1127104S1\nUSD1127104\nUS202429934258F',encoding='utf-8')
         self.original={'evidence_id':'EV-ORIGINAL','candidate_id':'C1','publication_number':'USD1127104S1','jurisdiction':'US','path':str(path),'sha256':sha256_file(path)}
         self.payload={'candidate_id':'C1','publication_number':'USD1127104S1','jurisdiction':'US','right_type':'design','claims':self.raw['claims'],'images':self.raw['images']}
         self.save()
@@ -47,15 +47,23 @@ class DetailRecordTests(unittest.TestCase):
         self.assertEqual(len(_json_result_values(json.dumps(self.raw).encode(),'serpapi_google_patents')),1)
     def test_explicit_original_identity_and_consumer_same_projection(self):
         proof=detail_record_binding(self.root,self.run,self.evidence);self.assertTrue(proof['locator_proof'])
-        clone=_exact_detail_candidate(self.task,self.entry,self.candidate,self.evidence);self.assertEqual(clone['publication_number'],'USD1127104S1');self.assertEqual(self.candidate['publication_number'],'USD1127104S')
+        clone=_exact_detail_candidate(self.task,self.entry,self.candidate,self.evidence);self.assertEqual(clone['publication_number'],'USD1127104S1');self.assertEqual(self.candidate['publication_number'],'USD1127104')
         self.original['publication_number']='USD999S1';atomic_write_json(self.root/'supplemental-evidence.json',{'evidence':[self.original]})
         with self.assertRaisesRegex(ValueError,'ORIGINAL_IDENTITY'):detail_record_binding(self.root,self.run,self.evidence)
         self.assertEqual(_exact_detail_candidate(self.task,self.entry,self.candidate,self.evidence),self.candidate)
+    def test_docdb_design_spelling_is_the_same_number_without_a_locator(self):
+        # r5d4: EPO docdb USD1127104S is Google's USD1127104S1 (one design patent); no locator proof is needed
+        self.candidate['publication_number']='USD1127104S';atomic_write_json(self.root/'normalized-candidates.json',{'patents':[self.candidate]})
+        self.run['metadata']['triage_decision_id']='wrong'
+        self.assertEqual(detail_record_binding(self.root,self.run,self.evidence)['locator_proof'],[])
+        self.candidate['publication_number']='USD1127105S';atomic_write_json(self.root/'normalized-candidates.json',{'patents':[self.candidate]})
+        with self.assertRaisesRegex(ValueError,'EXPLICIT_LOCATOR'):detail_record_binding(self.root,self.run,self.evidence)
     def test_explicit_candidate_id_mismatch_rejects_before_file_reads(self):
         other={**self.candidate,'candidate_id':'OTHER'}
         with patch('common.load_json',side_effect=AssertionError('No I/O for explicit different candidate')):
             self.assertEqual(_exact_detail_candidate(self.task,self.entry,other,self.evidence),other)
         for candidate in (self.candidate,{k:v for k,v in self.candidate.items() if k != 'candidate_id'}):
+            import common; common._SHARED_JSON.clear()   # r5d2: read-only lookups share a parse within a process
             with patch('common.load_json',wraps=load_json) as read:
                 _exact_detail_candidate(self.task,self.entry,candidate,self.evidence)
                 self.assertGreater(read.call_count,0)
@@ -100,6 +108,34 @@ class DetailRecordTests(unittest.TestCase):
         self.raw['claims_truncated']=True;self.payload['claims_truncated']=True;self.save();state=self.review()
         self.assertIn('claims_truncated',state['record_content_review']['limitations'])
         facts=record_facts(self.payload,self.entry);self.assertNotIn('protection_content',facts);self.assertNotIn('representative_figures',facts)
+    def docdb_case(self, candidate_number):
+        """A utility application whose candidate carries the EPO docdb spelling of a US publication."""
+        self.candidate.update(publication_number=candidate_number,right_type='patent',application_number='US2014020569')
+        self.raw.update(publication_number='US20140020569A1',title='Strap',claims=['A strap.'],images=['https://example.test/f.png'])
+        self.raw['search_parameters']['patent_id']='patent/US20140020569A1/en'
+        self.payload.update(publication_number='US20140020569A1',right_type='patent',claims=self.raw['claims'],images=self.raw['images'])
+        self.run['request_params']['patent_id']='patent/US20140020569A1/en'
+        self.annotation['next_actions']=[]
+        self.save()
+        self.run['request_params']['patent_id']='patent/US20140020569A1/en'
+        self.run['metadata']['triage_decision_sha256']=sha256_json(self.annotation)
+        self.evidence['source_runs']=[self.run]
+        atomic_write_json(self.root/'evidence.json',self.evidence)
+        atomic_write_json(self.root/'normalized-candidates.json',{'patents':[self.candidate]})
+        atomic_write_json(self.root/'materiality-annotations.json',{'annotations':[self.annotation]})
+    def test_us_docdb_spelling_binds_detail_without_locator(self):
+        self.docdb_case('US2014020569A1')
+        proof=detail_record_binding(self.root,self.run,self.evidence)
+        self.assertEqual(proof['locator_proof'],[]);self.assertEqual(proof['publication_number'],'US20140020569A1')
+        state=progress(self.root,self.run,self.evidence);self.assertIsNotNone(state)
+    def test_canonical_match_rejects_other_number_kind_or_country(self):
+        for number in ('US2014020570A1','US2014020569B1','EP2014020569A1','US2014020569'):
+            with self.subTest(number=number):
+                self.docdb_case(number)
+                with self.assertRaisesRegex(ValueError,'EXPLICIT_LOCATOR'):detail_record_binding(self.root,self.run,self.evidence)
+    def test_exact_equal_number_still_needs_no_locator(self):
+        self.docdb_case('US20140020569A1')
+        self.assertEqual(detail_record_binding(self.root,self.run,self.evidence)['locator_proof'],[])
     def test_legacy_not_upgraded(self):
         self.task['retrieval_workflow_revision']='api-first-v2';atomic_write_json(self.root/'task.json',self.task)
         self.assertIsNone(progress(self.root,self.run,self.evidence)['returned_count'])

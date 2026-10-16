@@ -9,7 +9,7 @@
 - Signa 保留权限、目标 office、数据新鲜度、真实 usage/credit 字段及请求后检查。新任务不因现有付费套餐、非零积分或 billing_preview 字段而拒绝，但未知／负值容量、权限缺失、非 live office 或配额耗尽仍停止。搜索、详情和媒体共用任务预算，未知提交不重复请求。
 - `cost_ceiling_usd=null` 表示没有零费用承诺，不表示费用已核实；实际费用未知时记录 `cost_verified=false`。任何报告不得仅凭来源成功宣称本轮零费用。
 
-创建任务时冻结 `api_first` 的调用预算和 `performance.dynamic_evidence_max_age_hours` 到 `task.retrieval_policy`。有效期必须为正的有限数；后续调度、响应复用及动态事实采信读取同一冻结值。Signa 配置允许 1—3 次，搜索、详情、媒体一起计数；SerpApi 默认 10 次，由搜索、详情、Lens 共享。全局配置变更不扩大已创建任务预算。
+创建任务时冻结 `api_first` 的调用预算和 `performance.dynamic_evidence_max_age_hours` 到 `task.retrieval_policy`。有效期必须为正的有限数；后续调度、响应复用及动态事实采信读取同一冻结值。Signa 配置允许 1—3 次，搜索、详情、媒体一起计数；SerpApi 默认 10 次（r5d16 起的新任务 20 次），由搜索、详情、Lens 共享；r5d20 起的新任务每次 Google Patents 发现检索取 100 条结果，仍计一次。全局配置变更不扩大已创建任务预算。
 
 v3 Signa 操作配置采用 `v3_supported_operations`，完整集合为 `trademark_search/candidate_detail/trademark_media`。图形、组合、三维类型筛选属于文字及字段查询，不代表图片相似检索。旧 `supported_operations` 保持历史搜索契约。
 

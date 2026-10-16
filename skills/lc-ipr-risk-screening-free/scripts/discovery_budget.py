@@ -145,6 +145,17 @@ def dispatch_block(task, plan, evidence, provider, row):
     if row.get('discovery_intent_id') != expected:
         return 'DISCOVERY_PURPOSE_ID_MISMATCH'
     previous = basis.get('different_from_purpose_id')
+    import recall
+    if previous and recall.enabled(task) and recall.program_group(basis):
+        # r5d20: a concept group the program composed (article names, head nouns, one function concept) is a
+        # distinct question by construction; it does not rewrite an earlier listing phrase
+        previous = None
+    import search_guard
+    if (previous and search_guard.enabled(task) and basis.get('problem_id') == search_guard.NAMES_PROBLEM
+            and previous == recall.LISTING_PHRASE):
+        # r8 (r7 runs B0GLNPC6K8 / B0H16FDSD8): the product-name term of the image, web and enforcement searches is
+        # program-composed too; it was cancelled before sending as a new purpose without a parent
+        previous = None
     if previous and not any(item.get('discovery_intent_id') == previous
             and item.get('jurisdiction') == row.get('jurisdiction')
             and item.get('right_type') == row.get('right_type')

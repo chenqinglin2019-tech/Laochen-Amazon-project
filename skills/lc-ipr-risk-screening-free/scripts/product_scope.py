@@ -303,9 +303,17 @@ def work_entries(task):
             'question':'；'.join(questions),'fact_ids':d['fact_ids'],'object_ids':d['object_ids'],
             'evidence_refs':list(dict.fromkeys(r for v in causes for r in v.get('source_refs',[]))),
             'reasoning':d['reason']})
-    for gap in readiness(task)['gaps']:
+    ready=readiness(task)
+    for gap in ready['gaps']:
         if gap['code'] in {'PRODUCT_CLUE_UNACCOUNTED','CLUE_DISPOSITIONS_INVALID'}:
             entries.append({'work_id':'WORK-clue-'+sha256_json(gap)[:24],'kind':'product_analysis','state':'ready','reason':gap['code'],'source_path':gap.get('source_path')})
+    if task.get('best_estimate_revision') and ready['patent_claim_followup'].get('status')=='pending':
+        # A page that says "patented" names the single most decisive candidate: resolving that marking
+        # comes before any broad discovery search (best-estimate-risk-v1 core-first order).
+        entries.append({'work_id':'WORK-patent-marking','kind':'product_analysis','state':'ready',
+            'reason':'PATENT_MARKING_RESOLUTION_REQUIRED',
+            'question':'产品页／资料出现 patent、patented、专利等标注：先解析为具体专利号（品牌官网虚拟标记页、一次 Google Patents 品牌＋产品词检索），用 record_candidate_lead.py 登记线索；无法解析也要把尝试记入 product.patent_claim_followup。',
+            'evidence_refs':[]})
     bound_facts={fid for direction in data['directions'] for fid in direction['fact_ids']}
     for fact in data['facts']:
         if (fact['fact_id'] in bound_facts or fact.get('status')=='confirmed'

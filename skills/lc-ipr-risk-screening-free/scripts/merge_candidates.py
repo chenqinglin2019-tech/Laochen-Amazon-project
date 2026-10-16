@@ -18,7 +18,7 @@ from common import (
     ensure_object, intrinsic_patent_right_type, is_active_schema, load_json,
     normalize_text, load_skill_config, now_iso, parse_iso, SERPAPI_PROVIDER,
     SERPER_PROVIDERS, api_discovery_patent_right_type, api_first_revision_enabled,
-    stable_id, sha256_json,
+    stable_id, sha256_json, canonical_patent_number,
 )
 from annotate_materiality import apply_materiality_annotations, load_materiality_ledger
 from provider_utils import query_identity
@@ -276,7 +276,8 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
           identity_assignments: dict[str, str] | None = None,
           identity_redirects: dict[str, str] | None = None,
           retired_identity_keys: set[str] | None = None,
-          task_dir: Path | None = None, evidence: dict | None = None) -> list[dict[str, Any]]:
+          task_dir: Path | None = None, evidence: dict | None = None,
+          canonical_numbers: bool = False) -> list[dict[str, Any]]:
     identity_mode = identity_revision == "candidate-identity-v1"
     if identity_revision not in (None, "candidate-identity-v1"):
         raise ValueError("CANDIDATE_IDENTITY_REVISION_INVALID")
@@ -320,8 +321,9 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
                 origin, original_cards = physical_origin
                 logical_anchor = source_anchor(kind, entry, ordinal)
                 original_anchor = source_anchor(kind, origin, ordinal)
-                logical_key = identity_key(kind, item, logical_anchor)[0]
-                original_key = identity_key(kind, original_cards[ordinal - 1], original_anchor)[0]
+                logical_key = identity_key(kind, item, logical_anchor, canonical=canonical_numbers)[0]
+                original_key = identity_key(kind, original_cards[ordinal - 1], original_anchor,
+                                            canonical=canonical_numbers)[0]
                 assigned_original = (identity_assignments or {}).get(original_anchor,
                     (identity_redirects or {}).get(original_key, original_key))
                 assigned_logical = (identity_assignments or {}).get(logical_anchor,
@@ -394,7 +396,7 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
                 item["right_type_status"] = "unresolved"
             if identity_mode:
                 anchor = source_anchor(kind, physical_origin[0] if physical_origin else entry, ordinal)
-                natural_key, identity_status = identity_key(kind, item, anchor)
+                natural_key, identity_status = identity_key(kind, item, anchor, canonical=canonical_numbers)
                 key = (identity_assignments or {}).get(anchor)
                 if key is None:
                     key = (identity_redirects or {}).get(natural_key)
@@ -498,6 +500,10 @@ def merge(kind: str, entries: list[dict[str, Any]], runs: dict[str, dict[str, An
                                   "field_claims", "original_identifiers"} \
                         and (not identity_mode or field not in TRANSPORT_FIELDS) \
                         and current.get(field) != value:
+                    if (canonical_numbers and field == "publication_number"
+                            and canonical_patent_number(current.get(field)) == canonical_patent_number(value)):
+                        # r5d18: one document in two spellings is no conflict; both stay in the field claims
+                        continue
                     claims = current.setdefault("conflicts", {}).setdefault(field, [])
                     current_value = current.get(field)
                     for claim in (current_value, value):
@@ -1149,6 +1155,11 @@ def _jp_candidate_number(item: dict[str, Any], right_type: str) -> tuple[str, st
             return value, kind
     publication = str(item.get("publication_number") or item.get("record_number") or "").strip()
     if publication:
+        # r9: a granted JP patent as Google and EPO spell it (JP6123456B2) is a 7-digit registration number; sent as a
+        # 10-digit publication number the frozen JPO client refused it (JPO_CASE_NUMBER_INVALID)
+        granted = re.fullmatch(r"(?:JP)?\s*(\d{7})\s*B\d?", publication.upper())
+        if right_type == "patent" and granted:
+            return publication, "registration"
         return publication, "publication" if right_type == "patent" else "registration"
     return "", ""
 
@@ -1363,8 +1374,9 @@ def _candidate_document_for_jurisdiction(
         *list_value("family_members"), *list_value("publication_numbers"),
         *list_value("identifiers"),
     ])
+    # The authority is asked in its own spelling (US applications: 11 digits).
     normalized = [
-        re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
+        canonical_patent_number(value)
         for value in values if str(value or "").strip()
     ]
     target = jurisdiction.upper()
@@ -1837,9 +1849,10 @@ def main() -> None:
         official_providers.add("inpi_api")
     from record_candidate_lead import validated_candidate_lead_entries
     lead_entries = validated_candidate_lead_entries(task, evidence, task_dir)
-    from candidate_identity import enabled as identity_enabled, relation_view
+    from candidate_identity import enabled as identity_enabled, relation_view, canonical_numbers
     from candidate_identity_corrections import load_ledger, projection_policy, apply_reviewed_fields, correction_view
     identity_revision = task.get("candidate_identity_revision") if identity_enabled(task) else None
+    canonical = bool(identity_revision) and canonical_numbers(task)
     identity_ledger = load_ledger(task_dir, task) if identity_revision else None
     if identity_ledger and (task_dir / "normalized-candidates.json").is_file():
         previous_view = load_json(task_dir / "normalized-candidates.json")
@@ -1851,7 +1864,7 @@ def main() -> None:
     patents = merge("patent", [*collections.get("patents", []), *lead_entries], runs,
                     identity_revision=identity_revision, identity_assignments=assignments,
                     identity_redirects=redirects, retired_identity_keys=retired,
-                    task_dir=task_dir, evidence=evidence)
+                    task_dir=task_dir, evidence=evidence, canonical_numbers=canonical)
     if task.get("schema_version") == "2.4-free" and not identity_revision:
         expand_family_candidates(patents)
     from official_tmsearch_export import candidate_entries as official_tmsearch_entries

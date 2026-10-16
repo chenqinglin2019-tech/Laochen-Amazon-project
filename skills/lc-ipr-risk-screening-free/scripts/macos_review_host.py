@@ -223,7 +223,7 @@ def run_pair(frozen: dict, task_dir: Path, output_dir: Path, binary: Path,
         (directory / 'stderr.log').write_text(stderr)
         if process.returncode != 0:
             raise ValueError('REVIEW_HOST_EXECUTION_FAILED')
-        events = [json.loads(line) for line in trace_path.read_text().splitlines()]
+        events = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines()]
         thread_id, judgment = completed_review(events,
             [row['material_id'] for row in bundle['materials']] if bundle else None)
         observations = judgment.pop('material_observations', None)
@@ -287,7 +287,7 @@ def main():
             parser.error('adjudication requires --host-run-dir and excludes reviewer execution options')
         key = os.environ.get('LC_IPR_REVIEW_HOST_KEY')
         if not key:
-            key = (args.host_run_dir / 'host-signing-key').read_text()
+            key = (args.host_run_dir / 'host-signing-key').read_text(encoding="utf-8")
         request = load_json(args.adjudication)
         if request.get('kind') != 'adjudicate':
             raise ValueError('REVIEW_HOST_CHIEF_REQUEST_REQUIRED')

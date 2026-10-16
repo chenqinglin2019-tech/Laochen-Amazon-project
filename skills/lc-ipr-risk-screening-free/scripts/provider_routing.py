@@ -30,6 +30,16 @@ def source_upstream(provider: str) -> str:
 def priority(country: str, right_type: str, stage: str, *, revision: str = "api-first-v2") -> list[tuple[str, str]]:
     """Ordered provider roles; callers still apply existing capability gates."""
     country = country.upper()
+    if revision in {"api-first-v3-recall", "api-first-v3-recall-guard"}:
+        # r5d20 recall tasks (owner decision): Google Patents is the US source for patents and designs; EPO runs only
+        # when SerpApi cannot (the planner tries providers in this order and keeps the first that can run)
+        if stage == "discovery" and country == "US" and right_type in {"patent", "utility_model"}:
+            return [("serpapi_google_patents", "preferred"), ("epo_ops", "fallback")]
+        if revision == "api-first-v3-recall-guard" and stage == "discovery" and country == "US" and right_type == "design":
+            # r7 (search-guard-v1, runs B0GLNPC6K8 / B0H16FDSD8): with no SerpApi balance the US design query never ran;
+            # EPO holds US designs (USD...S) and searches their titles (ta=)
+            return [("serpapi_google_patents", "preferred"), ("epo_ops", "fallback"), ("serper_patents", "web_fallback")]
+        return _priority_v3(country, right_type, stage)
     if revision == "api-first-v3":
         return _priority_v3(country, right_type, stage)
     if stage == "content" and right_type in {"patent", "utility_model", "design"}:

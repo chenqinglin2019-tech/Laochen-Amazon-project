@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from common import atomic_write_json, load_json, sha256_json
-from discovery_semantics import current, work_entries
+from discovery_semantics import current, work_entries, dispatch_error
 from record_discovery_semantics import record
 from workflow_v24 import generate_plan, scenario_dispatch_block_from_dir
 import test_product_scope as scope_fixture
@@ -67,6 +67,127 @@ class DiscoverySemanticsTests(unittest.TestCase):
             'original_problem_checked':True,'problem_covered':True,
             'result_reason':'The recorded result and expression address the overall shape.',
             'uncovered_clues':[],'excluded_by_narrowing':[],'next_action':'none',**overrides})
+
+    # --- unmapped-clue-only direction re-review (field patch 3) --------------------------------------
+    UNMAPPED = {'MANUFACTURER': {'fact_id': 'MANUFACTURER', 'status': 'unknown'}}
+
+    def mark_host_family(self, on=True):
+        task = load_json(self.f.run/'task.json')
+        if on:
+            task['host_triage_revision'] = 'host-triage-v1'
+        else:
+            task.pop('host_triage_revision', None)
+        atomic_write_json(self.f.run/'task.json', task)
+
+    def unmapped(self, disposition, **extra):
+        return [{'clue_id': 'fact:MANUFACTURER', 'disposition': disposition,
+                 'reason': 'Recorded for the unmapped manufacturer clue.', **extra}]
+
+    def submitted_chain(self):
+        """direction (manufacturer awaiting information) -> before -> submitted source -> re-reviewed direction."""
+        first = self.direction(unmapped_clues=self.unmapped('awaiting_information'))
+        before = self.before()
+        self.source()
+        second = self.direction(reason='The manufacturer clue was processed in a shared source investigation.',
+            unmapped_clues=self.unmapped('covered_by_other', evidence_refs=['EV-SEMANTIC']))
+        return first, before, second
+
+    def reasons(self):
+        entries = work_entries(load_json(self.f.run/'task.json'), self.plan, load_json(self.f.run/'evidence.json'))
+        return {entry['reason'] for entry in entries if entry.get('query_id') == self.row['query_id']}
+
+    def test_unmapped_only_rereview_keeps_submitted_chain(self):
+        self.mark_host_family()
+        with patch('discovery_semantics._unmapped_facts', return_value=self.UNMAPPED):
+            first, before, second = self.submitted_chain()
+            self.assertNotEqual(first['review_sha256'], second['review_sha256'])
+            self.assertEqual(current(load_json(self.f.run/'task.json'), self.plan, load_json(self.f.run/'evidence.json'),
+                stage='direction', scenario_id='product_entry', jurisdiction='US', right_type='design')['review_sha256'],
+                second['review_sha256'])
+            self.assertNotIn('DISCOVERY_DIRECTION_GAP_REPLAN_REQUIRED', self.reasons())
+            self.assertIsNone(dispatch_error(load_json(self.f.run/'task.json'), self.plan,
+                load_json(self.f.run/'evidence.json'), self.provider, self.row))
+            after = self.after()
+            # The after review stays bound to the direction review its before review was recorded against.
+            self.assertEqual(after['direction_review_sha256'], first['review_sha256'])
+            self.assertEqual(after['before_review_sha256'], before['review_sha256'])
+            self.assertEqual(self.reasons(), set())
+
+    def test_direction_template_carries_the_review_in_force_forward_when_only_unmapped_clues_are_open(self):
+        from input_template import direction_template
+        self.mark_host_family()
+        entry = {'scenario_id': 'product_entry', 'jurisdiction': 'US', 'right_type': 'design'}
+        with patch('discovery_semantics._unmapped_facts', return_value=self.UNMAPPED):
+            task = load_json(self.f.run/'task.json')
+            empty, _ = direction_template(task, entry)
+            self.assertIsNone(empty['clues'][0]['disposition'])      # nothing recorded yet: fully open
+            first = self.direction(unmapped_clues=self.unmapped('awaiting_information'))
+            template, guide = direction_template(load_json(self.f.run/'task.json'), entry)
+        self.assertEqual(template['clues'][0]['disposition'], 'included')
+        self.assertEqual(template['clues'][0]['reason'], 'Visible product outline matters.')
+        self.assertEqual(template['directions'][0]['method'], 'Shape and use search')
+        self.assertEqual(template['directions'][0]['proposed_sources'], ['uspto_patent_browser'])
+        # the open parts stay open, so an unfilled template can never be recorded by accident
+        self.assertIsNone(template['reviewer'])
+        self.assertIsNone(template['reason'])
+        self.assertEqual([row['disposition'] for row in template['unmapped_clues']], [None])
+        self.assertEqual(guide['carried_forward']['from_review_id'], first['review_id'])
+
+    def test_direction_template_is_not_carried_forward_for_a_legacy_task_or_a_changed_inventory(self):
+        from input_template import direction_template
+        entry = {'scenario_id': 'product_entry', 'jurisdiction': 'US', 'right_type': 'design'}
+        self.direction()
+        self.mark_host_family(False)
+        template, guide = direction_template(load_json(self.f.run/'task.json'), entry)
+        self.assertIsNone(template['clues'][0]['disposition'])
+        self.assertNotIn('carried_forward', guide)
+        self.mark_host_family()
+        task = load_json(self.f.run/'task.json')
+        with patch('discovery_semantics._clues', return_value={'fact:shape', 'fact:use'}):
+            template, guide = direction_template(task, entry)
+        self.assertNotIn('carried_forward', guide)
+        self.assertTrue(all(row['disposition'] is None for row in template['clues']))
+
+    def test_rereview_templates_are_requested_explicitly_and_carry_the_review_in_force(self):
+        from input_template import direction_rereview_templates
+        self.mark_host_family()
+        with patch('discovery_semantics._unmapped_facts', return_value=self.UNMAPPED):
+            self.direction(unmapped_clues=self.unmapped('awaiting_information'))
+            task = load_json(self.f.run/'task.json')
+            events, guides = direction_rereview_templates(task, ['product_entry:design:US'])
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]['clues'][0]['disposition'], 'included')
+        self.assertEqual(events[0]['directions'][0]['method'], 'Shape and use search')
+        self.assertIsNone(events[0]['reviewer'])
+        self.assertIsNone(events[0]['unmapped_clues'][0]['disposition'])
+        self.assertEqual(guides[0]['scope'], 'product_entry:design:US')
+        self.assertIn('carried_forward', guides[0])
+        for bad in ('product_entry:design', 'product_entry::US', 'product_entry:no_such_right:US'):
+            with self.assertRaisesRegex(ValueError, 'INPUT_TEMPLATE_DIRECTION_SCOPE_'):
+                direction_rereview_templates(task, [bad])
+
+    def test_legacy_task_keeps_strict_binding(self):
+        self.mark_host_family(False)
+        with patch('discovery_semantics._unmapped_facts', return_value=self.UNMAPPED):
+            self.submitted_chain()
+            self.assertIn('DISCOVERY_DIRECTION_GAP_REPLAN_REQUIRED', self.reasons())
+            with self.assertRaisesRegex(ValueError, 'DISCOVERY_BEFORE_REVIEW_REQUIRED'):
+                self.after()
+
+    def test_mapped_clue_or_direction_change_still_orphans(self):
+        self.mark_host_family()
+        with patch('discovery_semantics._unmapped_facts', return_value=self.UNMAPPED):
+            self.direction(unmapped_clues=self.unmapped('awaiting_information'))
+            self.before()
+            self.source()
+            changed = [{'direction_id': 'outline', 'question': 'A different protected-shape question?',
+                'clue_ids': ['fact:shape'], 'method': 'Shape and use search',
+                'proposed_sources': ['uspto_patent_browser'], 'evidence_needed': 'Reviewed design result set',
+                'supplement_trigger': 'Shape variants or truncated results'}]
+            self.direction(directions=changed, unmapped_clues=self.unmapped('covered_by_other', evidence_refs=['EV-SEMANTIC']))
+            self.assertIn('DISCOVERY_DIRECTION_GAP_REPLAN_REQUIRED', self.reasons())
+            with self.assertRaisesRegex(ValueError, 'DISCOVERY_BEFORE_REVIEW_REQUIRED'):
+                self.after()
 
     def test_hash_bound_unsubmitted_cancellation_does_not_recreate_before_review(self):
         self.direction()
@@ -316,6 +437,7 @@ class DiscoverySemanticsTests(unittest.TestCase):
             excluded_by_narrowing=['Only the current page was retained.'],next_action='awaiting_capability')
         task=load_json(self.f.run/'task.json')
         task['retrieval_workflow_revision']='api-first-v2'
+        task.pop('discovery_refinement_revision', None)  # pre-r5d task contract
         task['source_operation_revision']='source-operation-v1'
         task.setdefault('discovery_followups',[]).append({'role':'review',
             'parent_query_id':self.row['query_id'],'source_run_id':run['run_id'],
@@ -346,6 +468,7 @@ class DiscoverySemanticsTests(unittest.TestCase):
                 next_action='awaiting_capability')
             task=load_json(self.f.run/'task.json')
             task['retrieval_workflow_revision']='api-first-v2'
+            task.pop('discovery_refinement_revision', None)  # pre-r5d task contract
             task['source_operation_revision']='source-operation-v1'
             task['discovery_followups']=[{'role':'review','parent_query_id':self.row['query_id'],
                 'source_run_id':run['run_id'],'outcome':'stop_bounded_discovery','review_id':'API-STOP-1'}]
@@ -383,6 +506,7 @@ class DiscoverySemanticsTests(unittest.TestCase):
             excluded_by_narrowing=['No result set was received.'],next_action='awaiting_capability')
         task=load_json(self.f.run/'task.json')
         task['retrieval_workflow_revision']='api-first-v2'
+        task.pop('discovery_refinement_revision', None)  # pre-r5d task contract
         task['source_operation_revision']='source-operation-v1'
         task.setdefault('discovery_followups',[]).append({'role':'review',
             'parent_query_id':self.row['query_id'],'source_run_id':run['run_id'],

@@ -283,7 +283,7 @@ class ApiPlanAndExecutionTests(unittest.TestCase):
     def test_new_discovery_can_link_requirement_and_use_wave_one(self):
         self.assertEqual(self.authorize()['requirement_ids'], self.row['requirement_ids'])
         self.assertEqual(self.task['serper_free_enhancement']['max_queries_per_task'], 30)
-        self.assertEqual(self.task['serpapi_free_enhancement']['max_queries_per_task'], 10)
+        self.assertEqual(self.task['serpapi_free_enhancement']['max_queries_per_task'], 20)  # r5d16 owner decision
 
     def test_mutated_scope_or_authority_is_rejected(self):
         for key, value in [('required', True), ('authoritative_for_final_rating', True), ('requirement_ids', ['UNKNOWN']), ('wave', 3)]:

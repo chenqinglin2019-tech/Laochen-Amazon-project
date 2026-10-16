@@ -138,3 +138,40 @@ class ReviewReadinessTests(unittest.TestCase):
             self.assertFalse(payload['review_protocol']['first_review_visible'])
             with self.assertRaisesRegex(ValueError, 'OUTPUT_EXISTS'):
                 mod.freeze_input(Path('/task'), target)
+
+
+class PublicationGateBlockerTests(unittest.TestCase):
+    """best-estimate-risk-v2: the publication gates block the final review before it runs.
+
+    The reduced task reproduces the round-7 real run (B07HQL3SPZ, failed delivery DV-1f661dc...): a scope change to
+    version 2 affected CAND-376fb1059d9db9cdf3 and no applicability review existed, so publication failed with
+    PRODUCT_CHANGE_APPLICABILITY_REVIEW_REQUIRED after two full final reviews.
+    """
+
+    def task(self, marker='best-estimate-risk-v2'):
+        return {'task_id': 'IPRF-399217da237c', 'assessment_revision': 'known-findings-risk-v1',
+                'best_estimate_revision': marker, 'product_change_revision': 'product-change-v1',
+                'product_change_version': 2,
+                'product_change_history': [{'change_id': 'CHG-a56c106c2189b262e6', 'kind': 'scope_change', 'version': 2,
+                                            'affected_candidate_ids': ['CAND-376fb1059d9db9cdf3'],
+                                            'expanded_candidate_ids': ['CAND-376fb1059d9db9cdf3']}],
+                'product_applicability_reviews': [],
+                'product_scope': {'scope_sha256': '1aa64f02f7f4f89a2a4ad5b14e8807f6c6fb755cb845c33fa8e4171cf66098e8'}}
+
+    def test_real_run_failure_is_reported_before_the_review(self):
+        from review_readiness import publication_gate_blockers
+        rows = publication_gate_blockers(self.task())
+        self.assertEqual([(r['reason'], r['candidate_id'], r['change_id']) for r in rows],
+                         [('PRODUCT_CHANGE_APPLICABILITY_REVIEW_REQUIRED', 'CAND-376fb1059d9db9cdf3', 'CHG-a56c106c2189b262e6')])
+
+    def test_a_current_usable_review_clears_the_blocker(self):
+        from review_readiness import publication_gate_blockers
+        task = self.task()
+        task['product_applicability_reviews'] = [{'change_id': 'CHG-a56c106c2189b262e6',
+            'candidate_id': 'CAND-376fb1059d9db9cdf3', 'status': 'usable', 'product_version': 2,
+            'scope_sha256': task['product_scope']['scope_sha256']}]
+        self.assertEqual(publication_gate_blockers(task), [])
+
+    def test_older_markers_keep_their_readiness(self):
+        from review_readiness import publication_gate_blockers
+        self.assertEqual(publication_gate_blockers(self.task('best-estimate-risk-v1')), [])

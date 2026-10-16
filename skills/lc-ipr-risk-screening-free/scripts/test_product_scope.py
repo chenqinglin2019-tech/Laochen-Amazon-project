@@ -16,6 +16,7 @@ class ScopeTests(unittest.TestCase):
         # This fixture exercises the historical browser-routing contract.
         # create_task now defaults to api-first-v3, so pin its protocol explicitly.
         task['retrieval_workflow_revision']='api-first-v2'
+        task.pop('recall_revision',None)  # historical planning contract (r5d20 recall tasks plan concept groups)
         task.pop('product_structure_policy',None)
         task['source_operation_revision']='source-operation-v1'
         task['product_scope_required']=True

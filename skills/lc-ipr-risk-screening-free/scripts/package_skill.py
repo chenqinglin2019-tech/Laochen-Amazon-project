@@ -11,6 +11,7 @@ from pathlib import Path, PurePosixPath
 import re
 import stat
 import tempfile
+import time
 import zipfile
 
 SCHEMA = "SKILL-DISTRIBUTION/1.0"
@@ -180,7 +181,10 @@ def _transform(relative, content, transform):
     text = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", lambda m: m[1]+"（发送者历史本机路径已脱敏）"
                   if MACHINE_PATH.search(m[2]) else m[0], text)
     text = MACHINE_PATH.sub("发送者历史本机路径已脱敏", text)
-    return ("> 分发说明：以下保留发送者历史记录；本机路径及恢复命令已脱敏，不提供接收者可执行的历史恢复命令。\n\n" + text).encode()
+    prefix = "> 分发说明：以下保留发送者历史记录；本机路径及恢复命令已脱敏，不提供接收者可执行的历史恢复命令。\n\n"
+    while text.startswith(prefix):
+        text = text[len(prefix):]
+    return (prefix + text).encode('utf-8')
 
 
 def _scan(relative, content, kind, needles, sender_roots):
@@ -299,9 +303,12 @@ def package_skill(source_root, output_dir, *, allowlist_path=None, archive_name=
             if hashlib.sha256(_read_regular(root, relative)).hexdigest() != expected:
                 _fail("SOURCE_CHANGED_DURING_PACKAGE", relative)
         staged_zip = stage / "archive.zip"
+        # Every entry carries this build's time: with one fixed date for all releases, an edit that kept a file's
+        # size left Python running the previous release's compiled cache (r5d17, run B0HF19R4YF).
+        built = max((1980, 1, 1, 0, 0, 0), tuple(time.localtime()[:6]))
         with zipfile.ZipFile(staged_zip, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for entry in [*manifest["files"], {"path": MANIFEST, "mode": "0644"}]:
-                name = entry["path"]; info = zipfile.ZipInfo(spec["package_name"]+"/"+name)
+                name = entry["path"]; info = zipfile.ZipInfo(spec["package_name"]+"/"+name, date_time=built)
                 info.create_system = 3; info.external_attr = (stat.S_IFREG | int(entry["mode"], 8)) << 16
                 info.compress_type = zipfile.ZIP_DEFLATED
                 archive.writestr(info, (tree/name).read_bytes())
