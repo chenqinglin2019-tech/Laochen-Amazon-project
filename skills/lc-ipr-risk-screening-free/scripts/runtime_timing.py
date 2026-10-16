@@ -7,6 +7,7 @@ business assessment. Never derive elapsed time from source or evidence dates.
 from __future__ import annotations
 
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import wraps
 import json
@@ -18,10 +19,13 @@ import time
 from uuid import uuid4
 
 FILENAME = "runtime-timings.jsonl"
+_ACTIVE_DESTINATION = ContextVar("ipr_timing_destination", default=None)
 
 # Only these fixed labels may reach a human progress projection. Source text,
 # exception details, paths and arbitrary log values never enter the CLI view.
 STAGE_LABELS = {
+    "work_view": "工作视图计算", "candidate_media": "候选图片采集", "visual_triage": "批量视觉初筛",
+    "text_triage": "批量文本初筛", "claims_triage": "声明级二次初筛",
     "source_operation_recording": "来源结果登记", "source_material_processing": "来源材料处理",
     "candidate_merge": "候选合并", "candidate_triage": "候选分流",
     "assessment_finalize": "风险评估定稿", "report_build": "报告构建",
@@ -194,8 +198,12 @@ def timed_step(directory, stage: str):
         destination = Path(directory).expanduser().resolve() if directory is not None else None
     except (OSError, ValueError, TypeError):
         destination = None
-    with _measure(destination, stage, "step_inclusive"):
-        yield
+    token = _ACTIVE_DESTINATION.set(destination)
+    try:
+        with _measure(destination, stage, "step_inclusive"):
+            yield
+    finally:
+        _ACTIVE_DESTINATION.reset(token)
 
 
 def timed_cli(stage: str):
@@ -207,7 +215,22 @@ def timed_cli(stage: str):
                 destination = _destination(sys.argv[1:])
             except (OSError, ValueError, TypeError):
                 destination = None
-            with _measure(destination, stage, "cli_main_inclusive"):
-                return function(*args, **kwargs)
+            token = _ACTIVE_DESTINATION.set(destination)
+            try:
+                with _measure(destination, stage, "cli_main_inclusive"):
+                    return function(*args, **kwargs)
+            finally:
+                _ACTIVE_DESTINATION.reset(token)
         return wrapped
     return decorate
+
+
+@contextmanager
+def observed_step(stage):
+    """Record nested computation only inside an explicitly timed operation.
+
+    Direct read-only calls never create or mutate files. Nested timings use
+    the outer operation output directory, never an inferred input directory.
+    """
+    with _measure(_ACTIVE_DESTINATION.get(), stage, "step_inclusive"):
+        yield

@@ -28,7 +28,11 @@ TASK_FIELDS |= {"specialty_analysis_revision", "specialty_analysis_events", "dis
 TASK_FIELDS.add("presentation_policy_revision")
 TASK_FIELDS.add("product_structure_policy")
 TASK_FIELDS.add("final_review_execution_revision")
-TASK_FIELDS |= {"limited_delivery_revision", "review_conflict_revision"}
+TASK_FIELDS.add("review_unit_count_revision")
+TASK_FIELDS.add("review_material_policy_revision")
+TASK_FIELDS.add("best_estimate_revision")
+TASK_FIELDS |= {"limited_delivery_revision", "review_conflict_revision", "execution_efficiency_revision",
+    "execution_efficiency", "investigation_profile", "public_identity_execution_revision"}
 
 
 def enabled(task):
@@ -223,9 +227,8 @@ def prepare_rows(payload, assessments, material, previous=None):
     rows = deepcopy(assessments)
     rows.extend(deepcopy(row) for row in (previous or {}).get("assessments", []) if unit_id(row) in requested)
     statement = payload.get("final_review_statement")
-    if not isinstance(statement, dict) or any(not isinstance(statement.get(key), str) or not statement[key].strip()
-        for key in ("overall", "scope", "limitations")):
-        raise ValueError("FINAL_REVIEW_CURRENT_OVERALL_SCOPE_LIMITATIONS_REQUIRED")
+    from review_judgment import validate_statement
+    validate_statement(statement)
     receipt = {"revision": REVISION, "statement": deepcopy(statement),
         "unit_bindings": {unit_id(row): unit_binding(row, material) for row in rows},
         "reused_unit_ids": list(requested),
@@ -279,7 +282,7 @@ def validate_envelope(review, material=None):
         raise ValueError("FINAL_REVIEW_UNREFERENCED_PREVIOUS_RECEIPT")
     from module_review import validate_execution
     validate_execution(review, required=bool(material and
-        material.get('task', {}).get('final_review_execution_revision') == 'module-double-review-v1'))
+        material.get('task', {}).get('final_review_execution_revision') in {'module-double-review-v1', 'adaptive-double-review-v2'}))
 
 
 def pair_summary(first, second, digest_value):

@@ -32,6 +32,7 @@ REQUIRED_FACTS = frozenset({"abstract", "representative_figures", "protection_co
 # of an authorized obligation. A later pass must reconsider them.
 TEMPORARY_DISPATCH_CODES = frozenset({"PRODUCT_SCOPE_WAITING", "PRODUCT_SCOPE_REVIEW_REQUIRED", "QUERY_IMAGE_INPUT_OR_PERMISSION_UNAVAILABLE", "PRODUCT_FACT_VERSION_REVIEW_REQUIRED", "PRODUCT_TARGET_CHANGE_REVIEW_REQUIRED", "PRODUCT_CHANGE_QUERY_REVIEW_REQUIRED", "TRIAGE_BOUNDED_ACTION_ALREADY_ATTEMPTED",
     "TRIAGE_ATTEMPT_STATE_UNKNOWN", "TRIAGE_REVIEW_REQUIRED", "DISCOVERY_DIRECTION_REVIEW_REQUIRED",
+    "FOLLOWUP_IDENTITY_HISTORY_REVIEW_REQUIRED",
     "DISCOVERY_EXPRESSION_REVIEW_REQUIRED", "DISCOVERY_EXPRESSION_MISMATCH",
     "SOURCE_OPERATION_UNAVAILABLE", "SOURCE_FAILURE_RECOVERY_REVIEW_REQUIRED",
     "PRE_SUBMISSION_REPAIR_REVIEW_REQUIRED", "REVIEW_PROGRESS_QUERY_NOT_PLANNED",
@@ -799,11 +800,13 @@ def resolved_work_view(task, evidence, candidates, plan, ledger, *, supplement=N
     from review_progress_stage_a import project as review_progress_project
     from stage_risk_stage_b import project as stage_risk_project
     from execution_budget import project as budget_project
-    return budget_project(task, evidence, plan, stage_risk_project(task, review_progress_project(task, progress_project(task, continuation_project(task,
+    result = budget_project(task, evidence, plan, stage_risk_project(task, review_progress_project(task, progress_project(task, continuation_project(task,
         continuous_project(task, project_work(task, result, plan), evidence, plan), evidence), evidence), evidence, plan=plan, task_dir=task_dir), evidence, task_dir=task_dir), task_dir)
+    from investigation_policy import project_work as investigation_work
+    return investigation_work(task, result, plan)
 
 
-def work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabilities=None,
+def _work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabilities=None,
                        first_review=None, second_review=None) -> dict:
     from decision_workflow import decision_snapshot
     task = load_json(task_dir / "task.json")
@@ -1269,6 +1272,12 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
                     and action.get("provider") == provider and action.get("operation") == row.get("operation")
                     and action.get("max_attempts") == 1 and expected_params == params
                     and row.get("action_purpose") == "needs_info:" + str(action.get("purpose") or "")):
+                if for_dispatch:
+                    from followup_identity import renamed_attempt
+                    prior = renamed_attempt(task, plan, evidence, ledger, provider, row, annotation, action,
+                        candidate=candidate, supplement=supplement)
+                    if prior:
+                        return {**blocked(prior['reason']), **prior}
                 if for_dispatch and any(run.get("provider") == provider and run.get("query_id") == row.get("query_id")
                        and run.get("plan_entry_sha256") == sha256_json(row) and run.get("status") not in {"cancelled", "not_applicable"}
                        and run.get("submission_state") != "not_submitted" for run in evidence.get("source_runs", [])):
@@ -2035,6 +2044,12 @@ def term_records(task: dict[str, Any]) -> list[dict[str, Any]]:
                     raise ValueError("DISCOVERY_NEW_PURPOSE_REASON_REQUIRED")
                 extra.update({key:item[key] for key in
                     ("discovery_problem_id", "discovery_problem_reason", "different_from_purpose_id")})
+        if item.get("recall_group") is not None:
+            # r5d20: a patent-language concept group is planned only for its own right (recall.py)
+            import recall
+            if not recall.enabled(task) or item["recall_group"] not in recall.GROUPS:
+                raise ValueError(f"query_terms[{i}] has an unsupported recall_group")
+            extra["recall_group"] = item["recall_group"]
         if strict:
             if not re.match(r"^(?:product\.|images\[|candidate:|evidence:|EV-)", str(item["derived_from"])):
                 raise ValueError(f"query_terms[{i}] must reference product, image, candidate or evidence provenance")
@@ -2114,7 +2129,7 @@ def _scope(jurisdiction: str, right: str) -> list[str]:
 
 
 def _api_params(provider: str, term: dict[str, Any], jurisdiction: str, right: str, *,
-                query_compiler_revision: str | None = None) -> dict[str, Any] | None:
+                query_compiler_revision: str | None = None, countries: list[str] | None = None) -> dict[str, Any] | None:
     value = term["value"]
     escaped = value.replace('"', ' ').replace('\\', ' ')
     dim = _dimension(term)
@@ -2126,7 +2141,7 @@ def _api_params(provider: str, term: dict[str, Any], jurisdiction: str, right: s
         field = term["kind"] if term["kind"] in {"ipc", "cpc"} else "in" if term["kind"] == "inventor" else "pa" if dim == "owner" else "ta"
         if query_compiler_revision == "ops-cql-v1":
             from epo_query import compile_ops_query
-            return {"q": compile_ops_query(countries=_scope(jurisdiction, right), field=field,
+            return {"q": compile_ops_query(countries=countries or _scope(jurisdiction, right), field=field,
                 value=value, strategy=term.get("strategy", "boolean")), "range": "1-25"}
         prefix = " or ".join(f"pn={country}*" for country in _scope(jurisdiction, right))
         if term.get("strategy") == "boolean" and (dim == "text" or term["kind"] == "inventor"):
@@ -3154,3 +3169,17 @@ def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: di
     reconcile_scenario_actions(task_dir, task, plan, candidates, ledger, evidence)
     plan["updated_at"] = now_iso()
     atomic_write_json(path, plan)
+
+
+def work_view_from_dir(task_dir: Path, *, browser_status=None, source_capabilities=None,
+                       first_review=None, second_review=None) -> dict:
+    from execution_efficiency import capture_work_view
+    from runtime_timing import observed_step
+    options = dict(browser_status=browser_status, source_capabilities=source_capabilities,
+                   first_review=first_review, second_review=second_review)
+    from work_view_memo import cached
+    with observed_step('work_view'):
+        # best-estimate tasks reuse the view across CLI steps while every task file is unchanged
+        view = cached(task_dir, 'work_view', options, lambda: _work_view_from_dir(task_dir, **options))
+    capture_work_view(task_dir, options, view)
+    return view

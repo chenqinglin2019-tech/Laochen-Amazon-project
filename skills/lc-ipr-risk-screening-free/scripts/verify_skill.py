@@ -30,17 +30,21 @@ def verification_runtime():
     pdf = dependency_info("pypdf")
     toml = dependency_info("tomllib")
     installed = pdf["version"]
+    pillow = dependency_info("PIL")
+    pillow_required = "11.3.0" if sys.version_info[:2] < (3,10) else "12.3.0"
     issues = []
     if sys.version_info[:2] < PYTHON_MIN:
         issues.append("PYTHON_VERSION_UNSUPPORTED")
     if installed != required:
         issues.append("PYPDF_VERSION_MISMATCH" if installed else "PYPDF_MISSING")
+    if pillow["version"] != pillow_required:
+        issues.append("PILLOW_VERSION_MISMATCH" if pillow["available"] else "PILLOW_MISSING")
     if not toml["available"]:
         issues.append("TOML_PARSER_MISSING")
     return {"name": "python-runtime", "status": "failed" if issues else "passed",
             "executable": sys.executable, "version": list(sys.version_info[:3]),
             "minimum_version": list(PYTHON_MIN), "pypdf_version": installed,
-            "required_pypdf_version": required, "dependencies": {"pypdf": pdf, "tomllib": toml}, "issues": issues}
+            "required_pypdf_version": required, "dependencies": {"pypdf": pdf, "tomllib": toml, "PIL": pillow}, "issues": issues}
 
 
 def run_check(name, command, output, *, cwd=ROOT, env=None, timeout=180):
@@ -137,6 +141,32 @@ def generate_estimate_fixture(output, *, scenario=False):
     return directory
 
 
+def verify_operator_fixture(result):
+    """Fail closed on a missing, legacy-policy or undelivered release sample."""
+    from common import load_json
+    if (result.get('transaction', {}).get('completion', {}).get('status')
+            not in {'complete', 'limited_round_closed'}):
+        raise ValueError('OPERATOR_RELEASE_DELIVERY_INCOMPLETE')
+    directory = Path(result.get('delivered') or '')
+    for name in ('report.html', 'report-data.json', 'operator-appendix.html',
+                 'technical-audit.html', 'query-progress.html', 'query-progress.json'):
+        if not (directory / name).is_file():
+            raise ValueError('OPERATOR_RELEASE_FILE_MISSING:' + name)
+    data = load_json(directory / 'report-data.json')
+    if (data.get('presentation_policy_revision') != 'operator-report-v1'
+            or len(data.get('section_order', [])) != 7
+            or len(data.get('operator_view', {}).get('modules', [])) != 9):
+        raise ValueError('OPERATOR_RELEASE_POLICY_OR_MODULES_INVALID')
+    return str(directory / 'report.html')
+
+
+def generate_operator_fixture(directory):
+    from test_evidence_delivery_integration import build_evidence_delivery_fixture
+    result = build_evidence_delivery_fixture(directory, operator_policy=True, transaction=True)
+    verify_operator_fixture(result)
+    return result
+
+
 def _main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=("fast", "release"), default="fast")
@@ -161,6 +191,7 @@ def _main():
     env["LC_IPR_PYTHON"] = sys.executable
     env.pop("REPORT_V2_HTML", None)
     env.pop("REPORT_ESTIMATE_HTML", None)
+    env.pop("REPORT_EXPECTED_POLICY", None)
     env["LC_IPR_RELEASE_CHECK"] = "1" if args.mode == "release" else "0"
     results = [runtime]
     for directory in ("scripts", "tests"):
@@ -202,6 +233,11 @@ def _main():
             "from test_evidence_delivery_integration import build_evidence_delivery_fixture; "
             "print(json.dumps(build_evidence_delivery_fixture(Path(sys.argv[1])), ensure_ascii=False))",
             str(evidence_fixture)], output, cwd=ROOT / "scripts", env=env))
+        operator_fixture = output / "operator-delivery-fixture"
+        results.append(run_check("operator-delivery-pipeline", [sys.executable, "-c",
+            "import json,sys; from pathlib import Path; from verify_skill import generate_operator_fixture; "
+            "print(json.dumps(generate_operator_fixture(Path(sys.argv[1])), ensure_ascii=False))",
+            str(operator_fixture)], output, cwd=ROOT / "scripts", env=env))
         evidence_variants = {}
         for scenario in ("all_discovery_failed", "mixed_high", "summary_only", "browser_scope_high",
                          "browser_scope_failed", "browser_scope_unknown"):
@@ -232,6 +268,15 @@ def _main():
                             "REPORT_SCREENSHOTS_DIR": str(output / "evidence-delivery-screenshots")}
             results.append(run_check("evidence-delivery-layout", [node, "--test", "--test-reporter=tap",
                 str(ROOT / "tools/cdp/report-estimate-layout.test.mjs")], output, cwd=ROOT / "tools/cdp", env=evidence_env))
+            operator_env = {**env,
+                "REPORT_ESTIMATE_HTML": str(output / "operator-delivery-fixture-delivered/report.html"),
+                "REPORT_EXPECTED_POLICY": "operator-report-v1",
+                "REPORT_SCREENSHOTS_DIR": str(output / "operator-delivery-screenshots")}
+            results.append(run_check("operator-delivery-layout", [node, "--test", "--test-reporter=tap",
+                str(ROOT / "tools/cdp/report-estimate-layout.test.mjs")], output,
+                cwd=ROOT / "tools/cdp", env=operator_env))
+            if results[-1]["counts"].get("skipped", 0):
+                results[-1]["status"] = "incomplete"
             for scenario in ("all_discovery_failed", "mixed_high", "browser_scope_high",
                              "browser_scope_failed", "browser_scope_unknown"):
                 variant_env = {**env, "REPORT_ESTIMATE_HTML": str(evidence_variants[scenario] / "report/report.html"),

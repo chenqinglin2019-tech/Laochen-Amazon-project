@@ -144,7 +144,8 @@ def inspect(task_dir, output_dir, *, kind=None, first_review=None, second_review
         'task_id': model.get('task_id'), 'delivery_type': kind,
         'result_version_sha256': version, 'source_hashes': before,
         'status': 'locally_validated' if not errors else 'blocked', 'errors': errors,
-        'checked_files': {str(path.relative_to(out)): sha256_file(path) if path.is_file() else None for path in dict.fromkeys(files)},
+        # r9: '/'-separated on every platform (the delivery link check below names files/ that way; Windows gave '\\')
+        'checked_files': {path.relative_to(out).as_posix(): sha256_file(path) if path.is_file() else None for path in dict.fromkeys(files)},
         'repair_routes': routes, 'bounded_local_repair_allowed': local_only,
         'repair_files': sorted({row['file'] for row in routes if row.get('file')}) if local_only else [],
         'quarantined_judgments': deepcopy(stage.get('quarantined_judgments', [])),

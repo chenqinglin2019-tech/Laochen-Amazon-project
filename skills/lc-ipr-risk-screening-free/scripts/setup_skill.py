@@ -2,6 +2,7 @@
 """Initialize empty local files and inspect/install this Skill's existing dependencies.
 
 No cloud auth, task creation, source request, browser launch or credential output.
+``--check-network`` only resolves a few fixed host names (DNS) to name a local fake-IP proxy.
 """
 from __future__ import annotations
 
@@ -134,9 +135,9 @@ def python_probe(executable):
             f"sys.path.insert(0,{str(Path(__file__).resolve().parent)!r}); "
             "from platform_runtime import inspect_platform; "
             "from runtime_compat import install_existing_dependencies,dependency_info; "
-            "install_existing_dependencies(); p=dependency_info('pypdf'); t=dependency_info('tomllib'); "
+            "install_existing_dependencies(); p=dependency_info('pypdf'); t=dependency_info('tomllib'); i=dependency_info('PIL'); "
             "print(json.dumps({'version':list(sys.version_info[:3]),'executable':sys.executable,'pypdf':p['available'],"
-            "'pypdf_version':p['version'],'dependencies':{'pypdf':p,'tomllib':t},"
+            "'pypdf_version':p['version'],'dependencies':{'pypdf':p,'tomllib':t,'PIL':i},"
             "'is_venv':sys.prefix!=sys.base_prefix,'prefix':sys.prefix,'platform':inspect_platform()}))")
     rc, stdout, _ = _probe([str(executable), "-c", code])
     try:
@@ -181,6 +182,20 @@ def _browser_check(root, runtime):
         return {"status": "probe_failed", "path": None}
 
 
+def native_review_check():
+    """Local capability only; never login, authenticate, query models or change settings."""
+    from review_isolation import select_backend, resolve_codex_binary, inspect_native_capability
+    try:
+        backend = select_backend()
+        binary = resolve_codex_binary(None, backend)
+        return inspect_native_capability(binary, backend)
+    except (OSError, ValueError) as exc:
+        code = str(exc).split(":", 1)[0]
+        reason = code if re.fullmatch(r"[A-Z][A-Z0-9_]{3,100}", code) else "NATIVE_REVIEW_RUNTIME_OR_ISOLATION_UNAVAILABLE"
+        return {"status": "unavailable", "reason": reason,
+                "login": "not_run", "model_execution": "not_run", "model_availability": "not_verified"}
+
+
 def inspect_install(root=ROOT, python=None):
     bootstrap_platform = inspect_platform()
     interpreter = select_python(root, python)
@@ -202,8 +217,10 @@ def inspect_install(root=ROOT, python=None):
     poppler = shutil.which("pdftoppm")
     rc, out, err = _probe([poppler, "-v"]) if poppler else (None, "", "")
     version = re.search(r"pdftoppm version ([0-9.]+)", out + err)
+    # r9: optional - US design PDFs are read with pypdf + Pillow (image_convert.pdf_page_pngs); pdftoppm only serves
+    # the rare controlled page render of user-supplied PDFs, so its absence no longer makes the install "needs_setup"
     pdf = {"pdftoppm_path": poppler, "available": rc == 0 and bool(version),
-           "version": version[1] if version else None}
+           "version": version[1] if version else None, "required": False}
     component = platform_info.get("auth_binary_name")
     binary = root / "tools/bin" / component if component else None
     hashes = runtime.get("auth", {}).get("binary_sha256", {})
@@ -211,8 +228,11 @@ def inspect_install(root=ROOT, python=None):
             hashlib.sha256(binary.read_bytes()).hexdigest() == hashes.get(component))}
     files = local_file_checks(root)
     deps_ready = bool(py and py["supported"] and py["pypdf"] and py.get("pypdf_version") == "6.10.0"
-                      and py.get("dependencies", {}).get("tomllib", {}).get("available") and node_result["supported"]
-                      and installed == expected and browser.get("status") == "available" and pdf["available"])
+                      and py.get("dependencies", {}).get("tomllib", {}).get("available")
+                      and py.get("dependencies", {}).get("tomllib", {}).get("version") in {None, "2.5.0"}
+                      and py.get("dependencies", {}).get("PIL", {}).get("version") == ("11.3.0" if tuple(py["version"][:2]) < (3,10) else "12.3.0")
+                      and node_result["supported"]
+                      and installed == expected and browser.get("status") == "available")
     configured = files["config.json"]["status"] == "configured" and files[".env"]["status"] == "valid"
     runs = Path(str(runtime.get("default_runs_dir") or "runs-free")).expanduser()
     if not runs.is_absolute():
@@ -220,9 +240,17 @@ def inspect_install(root=ROOT, python=None):
     ancestor = runs
     while not ancestor.exists() and ancestor.parent != ancestor:
         ancestor = ancestor.parent
+    warnings = []
+    if os.name == "nt" and interpreter and "windowsapps" in str(interpreter).lower():
+        # r9: Store Python redirects its %TEMP% writes into a private copy the native codex.exe cannot read
+        warnings.append("当前是 Microsoft Store 版 Python（WindowsApps）。它把临时文件写到私有位置，Codex 审阅会话读不到审阅材料；"
+                        "请改装 python.org 的 Python 3.12，并用它重新运行 --install-deps。")
+    if py and isinstance(py.get("version"), list) and len(py["version"]) >= 2 and tuple(py["version"][:2]) < (3, 10):
+        warnings.append("当前 Python 低于 3.10（Mac 自带的是 3.9）。能运行，但网络超时的处理较弱；建议安装 Python 3.12 后重建 .venv。")
     return {"schema": "IPR-INSTALL-CHECK/1.0", "platform": platform_info, "bootstrap_platform": bootstrap_platform, "python": py,
+            **({"warnings": warnings} if warnings else {}),
             "node": node_result, "playwright_core": {"expected": expected, "installed": installed},
-            "chrome": browser, "pdf_renderer": pdf, "auth_component": auth, "local_files": files,
+            "chrome": browser, "pdf_renderer": pdf, "native_review": native_review_check(), "auth_component": auth, "local_files": files,
             "default_runs_dir": str(runs), "runs_parent_writable_hint": os.access(ancestor, os.W_OK),
             "status": "ready_for_auth" if platform_info["compatible"] and deps_ready and configured and auth["hash_matches"] and os.access(ancestor, os.W_OK) else "needs_setup",
             "native_validation": "not_run", "cloud_auth": "not_run", "browser_launch": "not_run",
@@ -234,7 +262,7 @@ def install_dependencies(root=ROOT, python=None):
     executable = select_python(root, python)
     py = python_probe(executable) if executable else None
     if not py or not py["supported"]:
-        raise ValueError("PYTHON_3_12_OR_LATER_REQUIRED")
+        raise ValueError("PYTHON_3_9_OR_LATER_REQUIRED")
     local = root / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if (root / ".venv").is_symlink():
         raise ValueError("LINKED_VENV_NOT_ALLOWED")
@@ -264,7 +292,8 @@ def install_dependencies(root=ROOT, python=None):
         command = [node, str(npm_cli), *command[1:]]
     _run_install(command, root / "tools/cdp")
     return {"status": "dependencies_installed", "python": str(local), "global_packages_changed": False,
-            "external_requirements": ["Node.js 22 or later", "Google Chrome desktop", "Poppler pdftoppm and its native libraries"]}
+            "external_requirements": ["Node.js 22 or later", "Google Chrome desktop"],
+            "optional_requirements": ["Poppler pdftoppm (only for rendering user-supplied PDF pages)"]}
 
 
 def _run_install(command, cwd):
@@ -284,6 +313,9 @@ def main():
     action.add_argument("--init", action="store_true")
     action.add_argument("--check", action="store_true")
     action.add_argument("--install-deps", action="store_true")
+    action.add_argument("--check-network", action="store_true",
+        help="Resolve a few fixed image/patent hosts, name a fake-IP proxy or system proxy, and try a TLS handshake with "
+             "the Google patent hosts (no source request, no credential)")
     parser.add_argument("--python", help="Explicit local Python executable, never shell code")
     args = parser.parse_args()
     try:
@@ -291,10 +323,15 @@ def main():
             value = {"status": "initialized", "files": initialize()}
         elif args.install_deps:
             value = install_dependencies(python=args.python)
+        elif args.check_network:
+            from network_diagnostic import diagnose
+            # r9: DNS, the proxy in use and a TLS handshake with the two Google patent hosts (no request, no credential);
+            # a fake-IP proxy is supported since F3 and no longer fails the check
+            value = diagnose(reach=True)
         else:
             value = inspect_install(python=args.python)
         print(json.dumps(value, ensure_ascii=False, indent=2))
-        return 0 if value["status"] not in {"needs_setup"} else 2
+        return 0 if value["status"] not in {"needs_setup", "non_public_address", "unresolved", "google_unreachable"} else 2
     except (ValueError, OSError) as exc:
         reason = str(exc) if re.fullmatch(r"[A-Z][A-Z0-9_]{3,100}", str(exc)) else "SETUP_FAILED_CHECK_LOCAL_PREREQUISITES"
         print(json.dumps({"status": "setup_failed", "reason": reason}))

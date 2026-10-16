@@ -191,6 +191,61 @@ class TrustedApiTests(unittest.TestCase):
         self.assertEqual(fallback["fallback_basis"]["attempted_query_ids"], [row["query_id"]])
         self.assertEqual(len(queries["serpapi_google_patents"]), 1)
 
+    def _browser_fallback(self, correction):
+        del self.row["claims"]
+        self.refresh()
+        if correction:
+            self.task["workflow_correction_revision"] = "workflow-correction-v1"
+        req = {**self.requirement, "routes": [{"provider": "uspto_patent_browser", "operation": "candidate_verification"}]}
+        queries = {}
+        decision = self.decision()
+        options = {"serpapi_google_patents": {"executable": True}}
+        actions.append(self.task, self.evidence, queries, self.candidate, decision, [req], capabilities=options)
+        row = queries["serpapi_google_patents"][0]
+        self.evidence["source_runs"].append({"query_id": row["query_id"], "status": "failed", "submission_state": "submitted"})
+        actions.append(self.task, self.evidence, queries, self.candidate, decision, [req], capabilities=options)
+        return queries["uspto_patent_browser"][0]
+
+    def test_browser_fallback_row_carries_the_exact_reading_contract(self):
+        from workflow_v24 import reading_contract_valid
+        row = self._browser_fallback(correction=True)
+        # The browser refuses a row without this contract before any request is sent.
+        self.assertEqual(row["required_facts"], ["protection_content"])
+        self.assertEqual(row["reading_scope"], {"level": "protection_content"})
+        self.assertTrue(reading_contract_valid(row))
+
+    def test_reading_contract_is_metadata_and_never_changes_the_query_identity(self):
+        from provider_utils import PLAN_META_KEYS
+        self.assertLessEqual({"required_facts", "reading_scope"}, PLAN_META_KEYS)
+
+    def test_us_application_number_has_one_spelling_for_lookup_and_comparison(self):
+        from common import canonical_patent_number as canonical
+        # EPO docdb drops the leading zero of the 7-digit serial; USPTO/Google/PPS keep it.
+        self.assertEqual(canonical("US2018201441A1"), "US20180201441A1")
+        self.assertEqual(canonical("US 2014/020569 A1"), "US20140020569A1")
+        for unchanged in ("US20180201441A1", "US11401089B2", "US2018201441B2", "EP1234567B1",
+                          "WO2018201441A1", "US1999123456A1", "USD123456S1"):
+            self.assertEqual(canonical(unchanged), unchanged)
+        self.assertEqual(api.identifier("US2018201441A1"), api.identifier("US20180201441A1"))
+
+    def test_docdb_spelled_candidate_asks_serpapi_for_the_eleven_digit_document(self):
+        self.candidate.update(publication_number="US2018201441A1")
+        self.row.update(publication_number="US20180201441A1")
+        del self.row["claims"]
+        self.refresh()
+        queries = {}
+        options = {"serpapi_google_patents": {"executable": True}}
+        actions.append(self.task, self.evidence, queries, self.candidate, self.decision(), [self.requirement], capabilities=options)
+        row = queries["serpapi_google_patents"][0]
+        self.assertEqual(row["patent_id"], "patent/US20180201441A1/en")
+        self.assertEqual(row["q"], "US20180201441A1")
+        self.assertEqual(row["candidate_id"], self.candidate["candidate_id"])
+
+    def test_legacy_task_fallback_row_is_unchanged(self):
+        row = self._browser_fallback(correction=False)
+        self.assertNotIn("required_facts", row)
+        self.assertNotIn("reading_scope", row)
+
     def test_unsubmitted_obsolete_scenario_does_not_block_current_followup(self):
         del self.row["claims"]
         self.refresh()

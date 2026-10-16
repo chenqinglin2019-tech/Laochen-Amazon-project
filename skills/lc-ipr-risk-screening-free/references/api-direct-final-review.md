@@ -40,7 +40,7 @@ M06 未注册外观的身份和保护内容可使用准确 API 公开身份、�
 
 保留 09A 进度及 09B 事实分析，关闭 09C 阶段双审前置。完成可执行调查、材料处理、分流与比较后，先运行 `review_readiness.py`，再用 `report_review_host.py` 对同一冻结输入执行两位隔离审阅者。第二位不读取第一位当轮结论。
 
-新任务的实际执行使用 `module-double-review-v1`：两条独立链各分技术、外观、表达三模块并行阅读同一冻结版本的准确原文和图样，随后各自汇总一次总体、范围和限制。默认四个原生并发槽，六个模块加两个汇总共八个真实会话。各单元绑定实际模块的 session 及原始日志；汇总不改写模块判断，不能把多会话来源合并伪装成一个原审签名。准备、冻结和登记复用同一个内容绑定的进程内准备上下文；原件或语义变化仍拒绝继续。具体命令、隔离与输出结构见[最终双审宿主](report-review-host.md)。
+新任务使用 `adaptive-double-review-v2`，按[完整材料计量阈值](execution-efficiency.md)选择：小包由两个独立整合会话各完成全部必要单元和总体声明；大包保留两链的技术、外观、表达六模块及两个本链汇总，共八个真实会话、默认最多四并行。旧 `module-double-review-v1` 任务不迁移。各单元绑定其真实审阅会话及原始日志；整合会话使用 `integrated_execution`，模块汇总不改写判断。准备、冻结和登记复用同一个内容绑定的进程内准备上下文；原件或语义变化仍拒绝继续。具体命令、隔离与输出结构见[最终双审宿主](report-review-host.md)。
 
 每份审阅均须提供 `final_review_statement`，其 `overall`、`scope`、`limitations` 为本轮实际判断文字。记录器保存 `review_context.final_review.unit_bindings`、执行摘要和原审引用；验证通过后 `assessment.final_review` 是业务完成和 HTML 审阅状态的共同来源。没有 09C 批次不会使最终报告再显示“待阶段双审”。
 

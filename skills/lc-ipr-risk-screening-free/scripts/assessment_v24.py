@@ -244,6 +244,15 @@ def query_coverage(evidence: dict[str, Any], candidates: dict[str, Any], plan: d
             elif (run.get("status") == "no_result"
                   and not zero_result_proven(run, evidence, evidence_root)):
                 output["gap"] = "ZERO_RESULT_UNVERIFIED"
+            elif (run.get("status") == "no_result" and metadata.get("truncated") is True
+                  and __import__("recall").enabled(task or {})):
+                # r5d20+ tasks (r5d21, run B0H16FDSD8): SerpApi's zero envelope carries no total, so the coverage was
+                # flagged "truncated" although the exact zero was verified just above; a proven zero is complete
+                output.update(complete=True, retrieval_complete=True, gap="", scope="reviewed_bounded_api_query",
+                    evidence_refs=[entry["evidence_id"] for entry in evidence_index(evidence).values()
+                                   if _entry_matches_run(entry, run)],
+                    search_coverage={**metadata, "total_hits": 0, "retrieved_hits": 0, "truncated": False,
+                                     "stop_reason": "query_exhausted"})
             elif metadata.get("truncated") is True:
                 output.update(gap="API_RETURNED_SCOPE_TRUNCATED", retrieval_complete=True,
                               search_coverage=metadata)

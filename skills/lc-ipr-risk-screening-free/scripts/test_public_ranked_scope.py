@@ -86,6 +86,101 @@ class PublicRankedScopeTests(unittest.TestCase):
         self.processing.return_value={'material_processing_complete':False,'returned_count':3}
         self.assertIsNone(self.check('serper_web'))
 
+    def images_fixture(self, **row_overrides):
+        self.row.update(operation='images',right_type='trade_dress',gl='us',hl='en',num=10,
+            q='lid securing strap',**row_overrides)
+        self.row['discovery_scope']['max_candidates']=10
+        self.run.update(provider='serper_images',plan_entry_sha256=sha256_json(self.row),
+            request_params={k:self.row[k] for k in ('q','gl','hl','num')})
+        self.run['metadata']['search_coverage'].update(retrieved_hits=10,stop_reason='bounded_discovery_total_unknown')
+        self.after.update(source_run_sha256=sha256_json(self.run),plan_entry_sha256=sha256_json(self.row))
+        self.processing.return_value={'material_processing_complete':True,'returned_count':10}
+
+    def test_public_images_api_bounded_receipt_has_no_exhaustive_claim(self):
+        self.images_fixture()
+        proof=self.check('serper_images')
+        self.assertEqual(proof['retrieval_scope_kind'],'bounded_public_images_api')
+        entry=public_ranked_scope_entry({},self.row,self.after,self.run,proof)
+        self.assertEqual(entry['coverage_status'],'unknown');self.assertEqual(entry['state'],'blocked')
+        self.assertEqual(entry['reason'],'BOUNDED_PUBLIC_DISCOVERY_SCOPE_LIMITED')
+        self.assertNotIn('completed',entry)
+        for key,value in [('gl','gb'),('q','other'),('num',20)]:
+            old=self.run['request_params'][key];self.run['request_params'][key]=value
+            self.after['source_run_sha256']=sha256_json(self.run);self.assertIsNone(self.check('serper_images'))
+            self.run['request_params'][key]=old
+        self.after['source_run_sha256']=sha256_json(self.run)
+        self.processing.return_value={'material_processing_complete':False,'returned_count':10}
+        self.assertIsNone(self.check('serper_images'))
+
+    def test_images_route_rejects_other_operation_right_or_changed_request(self):
+        for key,value in [('operation','search'),('right_type','enforcement'),('right_type','design'),
+                          ('jurisdiction','GB'),('gl','gb')]:
+            with self.subTest(key=key,value=value):
+                self.setUp()
+                self.images_fixture()
+                self.row[key]=value
+                self.run['plan_entry_sha256']=sha256_json(self.row)
+                self.after.update(source_run_sha256=sha256_json(self.run),plan_entry_sha256=sha256_json(self.row))
+                self.assertIsNone(self.check('serper_images'))
+        self.setUp();self.images_fixture()
+        self.assertIsNone(self.check('serper_web'))
+
+    # --- a missing explicit operation review is named as its own step, not as a replan -----------------
+    def check_reporting(self, provider='serpapi_google_lens'):
+        return _current_public_ranked_scope_wait(self.task,{}, {},{}, {},None,Path('/tmp/task'),
+            provider,self.row,self.after,self.run,report_missing_review=True)
+
+    def test_missing_explicit_operation_review_is_reported_only_when_everything_else_holds(self):
+        self.operation.return_value=None
+        self.assertIsNone(self.check())                       # default behaviour is unchanged
+        self.assertEqual(self.check_reporting(),{'missing_operation_review':True})
+        # a different unmet precondition is never reported as the missing review
+        self.validation.return_value='CARD_REVIEW_REQUIRED'
+        self.assertIsNone(self.check_reporting())
+        self.validation.return_value=None
+        self.after['next_action']='refine'
+        self.assertIsNone(self.check_reporting())
+        self.after['next_action']='awaiting_capability'
+        self.task['discovery_followups']=[{**self.review,'outcome':'proceed_to_verification'}]
+        self.assertIsNone(self.check_reporting())             # no stop review yet: not this step
+
+    def test_with_the_review_present_the_flag_changes_nothing(self):
+        self.assertEqual(self.check_reporting(),self.check())
+
+    # --- append-only bounded reviews: the newest record is the effective one (field patch 5) ----------
+    def review_history(self, *outcomes, family=True):
+        if family:
+            self.task['host_triage_revision']='host-triage-v1'
+        self.task['discovery_followups']=[{**self.review,'outcome':outcome,'review_id':'REV-%d'%number}
+                                          for number,outcome in enumerate(outcomes)]
+
+    def test_duplicate_stops_last_effective(self):
+        self.review_history('stop_bounded_discovery','stop_bounded_discovery')
+        self.assertIsNotNone(self.check())
+        self.review_history('stop_bounded_discovery','stop_bounded_discovery',family=False)
+        self.task.pop('host_triage_revision')
+        self.assertIsNone(self.check())
+
+    def test_stale_proceed_then_stop(self):
+        self.review_history('proceed_to_verification','stop_bounded_discovery')
+        self.assertIsNotNone(self.check())
+
+    def test_stop_then_proceed_not_resurrected(self):
+        self.review_history('stop_bounded_discovery','proceed_to_verification')
+        self.assertIsNone(self.check())
+
+    def test_invalid_last_no_fallback(self):
+        self.review_history('stop_bounded_discovery','stop_bounded_discovery')
+        self.validation.side_effect=lambda task,plan,evidence,candidates,ledger,row,review,supplement=None: (
+            'REVIEW_CHANGED' if review.get('review_id')=='REV-1' else None)
+        self.assertIsNone(self.check())
+
+    def test_identical_repeat_idempotent(self):
+        self.review_history('stop_bounded_discovery')
+        first=self.check()
+        self.review_history('stop_bounded_discovery','stop_bounded_discovery','stop_bounded_discovery')
+        self.assertEqual(self.check()['retrieval_scope_kind'],first['retrieval_scope_kind'])
+
     def zero_fixture(self):
         self.native_fixture();self.run['status']='no_result'
         self.run['metadata']['search_coverage'].update(truncated=False,retrieved_hits=0,total_hits=0,

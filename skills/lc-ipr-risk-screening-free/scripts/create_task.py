@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import os
 import re
 import uuid
@@ -20,6 +21,19 @@ from common import (
     RECALL_INTEGRITY_REVISION, API_FIRST_V3_REVISION,
 )
 from decision_workflow import REVISION as DECISION_WORKFLOW_REVISION, default_assessment_scenarios
+
+
+# r6b (owner run B0GFNWR8FW-US-r6-2): the Agent made the empty task directory first; run_pipeline then logged its
+# auth step there and this check refused the directory as not empty. The pipeline's own state and log files and the
+# files Finder / Explorer drop into a folder do not make a directory a used task.
+PIPELINE_OWN_FILES = {"pipeline-state.json", "pipeline-log.jsonl"}
+SYSTEM_JUNK_FILES = {".DS_Store", "Thumbs.db", "desktop.ini"}
+
+
+def ignorable_entry(entry: Path) -> bool:
+    if not entry.is_file():
+        return False
+    return entry.name in PIPELINE_OWN_FILES or entry.name in SYSTEM_JUNK_FILES or entry.name.startswith("._")
 
 
 ASIN_PATTERNS = [r"/(?:dp|gp/product|gp/aw/d)/([A-Z0-9]{10})(?:[/?]|$)", r"[?&]asin=([A-Z0-9]{10})(?:&|$)"]
@@ -81,6 +95,14 @@ def main() -> None:
             "SERPAPI_API_KEY. Source selection follows country, right and required information."
         ),
     )
+    parser.add_argument(
+        "--claims-triage-host", action="store_true",
+        help=(
+            "Opt in to the claims-level second-pass triage host (default off). It may only set aside a selected "
+            "patent candidate after every independent claim was read and quoted verbatim; run its --calibrate "
+            "check on a finished task before relying on it."
+        ),
+    )
     args = parser.parse_args()
     if args.use_serper_existing_balance and not args.enable_serper_free:
         raise SystemExit("Existing Serper balance authorization requires --enable-serper-free")
@@ -119,7 +141,7 @@ def main() -> None:
         configured_root = Path(str(config.get("default_runs_dir", "runs-free"))).expanduser()
         root = configured_root if configured_root.is_absolute() else Path.cwd() / configured_root
         output_dir = (root / f"{asin or 'PRODUCT'}_{stamp}").resolve()
-    if output_dir.exists() and any(output_dir.iterdir()):
+    if output_dir.exists() and any(not ignorable_entry(entry) for entry in output_dir.iterdir()):
         raise SystemExit(f"Output directory must be empty: {output_dir}")
 
     created = now_iso()
@@ -226,7 +248,100 @@ def main() -> None:
         task["product_structure_policy"] = "use_provided_else_unavailable_v1"
         # Progress and scope-change history use the same initial version.
         task["product_change_version"] = 1
-        task["final_review_execution_revision"] = "module-double-review-v1"
+        task["final_review_execution_revision"] = "adaptive-double-review-v2"
+        task["review_unit_count_revision"] = "selected-scope-units-v1"
+        task["review_material_policy_revision"] = "classified-public-originals-v1"
+        # Best-estimate grading (round 6): every applicable scope carries a five-level estimate with a
+        # confidence; pending is reserved for scopes with no search, no material and no institution basis.
+        from assessment_estimate import BEST_ESTIMATE_REVISION
+        task["best_estimate_revision"] = BEST_ESTIMATE_REVISION
+        from execution_efficiency import DEFAULTS as EFFICIENCY_DEFAULTS, REVISION as EFFICIENCY_REVISION
+        task['execution_efficiency_revision'] = EFFICIENCY_REVISION
+        task['execution_efficiency'] = dict(EFFICIENCY_DEFAULTS)
+        # New tasks may use batch judgment hosts: a native session gives compact
+        # judgments, the ordinary recorders write the ledger. Own allowance, never
+        # drawn from the source or final-review budgets.
+        from host_triage import DEFAULTS as HOST_DEFAULTS, REVISION as HOST_REVISION
+        task['host_triage_revision'] = HOST_REVISION
+        task['host_triage'] = dict(HOST_DEFAULTS)
+        # r5d: the result reviewer's "search again" verdict is carried out by the program (auto_refine.py), a
+        # purpose whose rewrites are used up ends as a disclosed bounded limitation, and US utility patent text
+        # discovery never goes to Serper patents (its country operator is ignored by the endpoint).
+        from auto_refine import REVISION as AUTO_REFINE_REVISION
+        task['discovery_refinement_revision'] = AUTO_REFINE_REVISION
+        # r5d2: selection, exact-record budget and dossier stay on the rights that can matter (core_focus.py):
+        # expired / foreign-only cards set aside by program defaults, record requests ordered by the triage
+        # priority, the granted text of a granted application and public pages when the record budget is used up.
+        from core_focus import REVISION as CORE_FOCUS_REVISION
+        task['core_focus_revision'] = CORE_FOCUS_REVISION
+        # r5d3: public web cards are read from their own address before judgment, final-review packets leave out
+        # not_selected candidates' originals and triage prose, the chain summary no longer copies hashes
+        # (review_focus.py).
+        from review_focus import REVISION as REVIEW_FOCUS_REVISION
+        task['review_focus_revision'] = REVIEW_FOCUS_REVISION
+        # r5d4: a run no longer stops where a program can act (gated dispatch, refused cards, design numbers, record-not-
+        # found closeouts, pictures for EPO design cards, license default; pipeline_robust.py) and patents that cannot
+        # matter leave before the final review (prereview_screen.py).
+        from pipeline_robust import REVISION as ROBUST_REVISION
+        task['pipeline_robust_revision'] = ROBUST_REVISION
+        from prereview_screen import REVISION as SCREEN_REVISION
+        task['prereview_screen_revision'] = SCREEN_REVISION
+        # r5d12: the screen also sets aside invention patents whose 20-year term (and every US relative's) has ended
+        from prereview_screen import TERM_REVISION
+        task['prereview_term_revision'] = TERM_REVISION
+        # r5d12: a final-review module gets one text per application and only its own rights' specialty events
+        from module_review import PACKET_SCOPE_REVISION
+        task['review_packet_scope_revision'] = PACKET_SCOPE_REVISION
+        # r5d17: final-review originals once per file content, comparison sessions in five slots, malformed comparison
+        # labels normalized, idle source / core rounds skipped (pipeline_robust.speed_enabled)
+        from pipeline_robust import SPEED_REVISION
+        task['pipeline_speed_revision'] = SPEED_REVISION
+        # r5d17 (owner decision): a design patent whose overall visual impression is plainly different leaves before
+        # the final review when two independent judgments agree (design_screen.py)
+        from design_screen import REVISION as DESIGN_SCREEN_REVISION
+        task['prereview_design_revision'] = DESIGN_SCREEN_REVISION
+        # r5d18: one document is one candidate whatever its spelling (EPO docdb USD1035381S = Google USD1035381S1)
+        from candidate_identity import NUMBER_REVISION
+        task['candidate_number_revision'] = NUMBER_REVISION
+        # r5d20 (owner decision, B0H16FDSD8 / B0GLNPC6K8): a design patent is compared, screened and graded main body
+        # first, and the chief draft never settles it below its main-body floor (design_overall.py)
+        from design_overall import REVISION as DESIGN_OVERALL_REVISION
+        task['design_assessment_revision'] = DESIGN_OVERALL_REVISION
+        # r5d20 (owner authorization): US patents and designs are searched on Google Patents with patent-language
+        # concept groups, 100 results per request, EPO only as a US-only fallback; large result sets get a list
+        # screen before the triage hosts (recall.py, recall_screen.py)
+        from recall import REVISION as RECALL_REVISION
+        task['recall_revision'] = RECALL_REVISION
+        # r5d21 (owner decisions 2026-10-15): the list screen is the triage, deep checks are capped (8 designs, 6
+        # patents), cards Google reports inactive in the US leave by rule (precision.py); the run has a time box and
+        # publishes with the unfinished work disclosed instead of stopping at checkpoint 2 (time_box.py)
+        from precision import REVISION as PRECISION_REVISION
+        task['candidate_precision_revision'] = PRECISION_REVISION
+        from time_box import REVISION as TIME_BOX_REVISION
+        task['time_box_revision'] = TIME_BOX_REVISION
+        # r5d25 (owner direction: fewer, more precise candidates): one US design query of quoted title phrases with the
+        # product's own category name and no upper category; utility groups lose the upper category too (recall.py)
+        from recall import TITLE_PHRASES_REVISION
+        task['design_query_revision'] = TITLE_PHRASES_REVISION
+        # r6 (report-always-v1, owner decisions 2026-10-15): the run always ends with a report - one evidence set per
+        # candidate, module answers repaired row by row, a failed module becomes pending rows its chain hands to the
+        # chief, the chain summary is the program's, the review fits the 40-minute run (report_always.py)
+        from report_always import REVISION as REPORT_ALWAYS_REVISION, TASK_FIELD as REPORT_ALWAYS_FIELD
+        task[REPORT_ALWAYS_FIELD] = REPORT_ALWAYS_REVISION
+        # r7 (search-guard-v1, owner decisions 2026-10-16): the patent search always runs (SerpApi balance read first,
+        # EPO when it is short, a stop when neither can run), the design query keeps only the product's own names,
+        # image/web searches use those names, candidate details are capped at 8 (search_guard.py)
+        from search_guard import REVISION as SEARCH_GUARD_REVISION, TASK_FIELD as SEARCH_GUARD_FIELD
+        task[SEARCH_GUARD_FIELD] = SEARCH_GUARD_REVISION
+        # r9 (portable-v1, owner decisions 2026-10-16): an honest design search boundary, EU/JP scopes without local-
+        # language terms disclosed at planning time, national design lifetimes outside the US (portable.py)
+        from portable import REVISION as PORTABLE_REVISION, TASK_FIELD as PORTABLE_FIELD
+        task[PORTABLE_FIELD] = PORTABLE_REVISION
+        if args.claims_triage_host:
+            from claims_triage_host import REVISION as CLAIMS_REVISION
+            task['claims_triage_revision'] = CLAIMS_REVISION
+        task['public_identity_execution_revision'] = 'public-identity-multicountry-v2'
+
         task["screening_revision"] = RECALL_INTEGRITY_REVISION
         task["recall_planning_revision"] = "identity-discovery-v1"
         task["specialty_workflow_revision"] = "asset-scope-v1"
@@ -240,10 +355,21 @@ def main() -> None:
         task["continuous_recovery_revision"] = "continuous-recovery-stage-b-v1"
         task["continuous_continuation_revision"] = "continuous-continuation-stage-c-v1"
         task["continuous_progress_revision"] = "continuous-progress-stage-d-v1"
-        from execution_budget import DEFAULTS, REVISION as BUDGET_REVISION, policy as budget_policy
+        # v2 sizes the final-review allowance for one failed module being run again (a v1 run died at its
+        # 900 s cap after a one-ID validation slip) and scales it with the number of jurisdictions. Its numbers
+        # live in execution_budget.py, not in runtime-config.json, which stays byte-identical.
+        from execution_budget import REVISION_V2 as BUDGET_REVISION, v2_limits, policy as budget_policy
         task['execution_budget_revision'] = BUDGET_REVISION
-        task['execution_budget'] = {**DEFAULTS, **config.get('execution_budget', {})}
+        task['execution_budget'] = v2_limits(len(set(task['target_jurisdictions'])),
+                                             robust=bool(task.get('pipeline_robust_revision')))
         budget_policy(task)
+        countries = sorted(set(task['target_jurisdictions']) - {'EU'})
+        if len(countries) > 2:
+            # Advice only: a final review session carries one jurisdiction's scopes and its prompt grows with
+            # every extra country; three or more can pass the host's 1,048,576-character prompt limit.
+            print('提示：本任务包含 %d 个国家（%s）。终审单个会话的提示随国家数增长，3 个及以上国家可能超过宿主'
+                  '1,048,576 字符上限而被拒绝；建议每个任务不超过 2 个国家，创建后用 report_review_host.py --preflight '
+                  '预估体量。' % (len(countries), '、'.join(countries)), file=sys.stderr)
         task["review_progress_revision"] = "review-progress-stage-a-v1"
         task["stage_risk_revision"] = "stage-risk-stage-b-v1"
         task["stage_review_revision"] = "stage-review-stage-c-v1"
@@ -337,6 +463,11 @@ def main() -> None:
             **({"asset_provenance": []} if current else {}),
         },
     }
+    if task.get("best_estimate_revision"):
+        # Institution statements for the task's countries (which rights exist there), so a reviewer can
+        # declare "not applicable" with an actual citation instead of leaving the scope pending for ever.
+        from jurisdiction_rights import institution_entries
+        evidence["collections"]["institution_references"] = institution_entries(task["target_jurisdictions"], created)
     assessment = {
         "schema_version": schema_version, "task_id": task_id, "status": "not_started",
         "overall": {

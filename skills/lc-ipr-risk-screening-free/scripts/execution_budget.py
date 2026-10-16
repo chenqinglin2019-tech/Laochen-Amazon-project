@@ -14,30 +14,74 @@ from common import atomic_write_json, load_json, sha256_json, sha256_file
 from execution_lock import execution_lock
 
 REVISION = 'bounded-execution-v1'
+REVISION_V2 = 'bounded-execution-v2'
 JOURNAL = 'execution-budget.json'
 DEFAULTS = {'active_seconds': 1800, 'review_seconds': 900, 'review_reserve_seconds': 600,
             'max_action_rounds': 96, 'max_no_progress_rounds': 12}
+# v2 (new tasks only). The v1 review allowance was sized for exactly one pass of the final review (a real run
+# measured 515 s for the modules plus summaries) and left no room for one failed module to be run again. v2 keeps
+# the cap meaningful but fits one failed module plus its two summaries: review 1200 s, never less than the review
+# allowance reserved out of the source budget, and at most three review invocations / one re-run per slot.
+DEFAULTS_V2 = {'active_seconds': 2400, 'review_seconds': 1200, 'review_reserve_seconds': 1200,
+               'max_action_rounds': 96, 'max_no_progress_rounds': 12,
+               'max_review_invocations': 3, 'max_slot_retries': 1}
+DEFAULTS_BY_REVISION = {REVISION: DEFAULTS, REVISION_V2: DEFAULTS_V2}
+# An owner-authorised extension never resets a counter; it only adds allowance (see extend_review_budget.py).
+MAX_EXTENSION_SECONDS = 1800
+MAX_EXTENSIONS = 3
 ENV_DEADLINE = 'LC_IPR_EXECUTION_DEADLINE_EPOCH'
 ENV_LEASE = 'LC_IPR_EXECUTION_LEASE'
 ENV_TASK = 'LC_IPR_EXECUTION_TASK_DIR'
 ENV_GROUP = 'LC_IPR_OWNED_PROCESS_GROUP'
 
 
-def policy(task):
+def revision_of(task):
     revision = task.get('execution_budget_revision')
+    if revision is not None and revision not in DEFAULTS_BY_REVISION:
+        raise ValueError('EXECUTION_BUDGET_REVISION_INVALID')
+    return revision
+
+
+def policy(task):
+    revision = revision_of(task)
     if revision is None:
         return None
-    if revision != REVISION:
-        raise ValueError('EXECUTION_BUDGET_REVISION_INVALID')
     if not isinstance(task.get('execution_budget', {}), dict):
         raise ValueError('EXECUTION_BUDGET_POLICY_INVALID')
-    values = {**DEFAULTS, **task.get('execution_budget', {})}
-    if set(values) != set(DEFAULTS) or any(type(v) is not int or v <= 0 for v in values.values()):
+    defaults = DEFAULTS_BY_REVISION[revision]
+    values = {**defaults, **task.get('execution_budget', {})}
+    if set(values) != set(defaults) or any(type(v) is not int or v <= 0 for v in values.values()):
         raise ValueError('EXECUTION_BUDGET_POLICY_INVALID')
     if (values['review_seconds'] > values['active_seconds']
             or values['review_reserve_seconds'] >= values['active_seconds']):
         raise ValueError('EXECUTION_BUDGET_REVIEW_EXCEEDS_TOTAL')
+    if revision == REVISION_V2 and values['review_reserve_seconds'] < values['review_seconds']:
+        # The review allowance must really be held back from source work, or it is not an allowance.
+        raise ValueError('EXECUTION_BUDGET_REVIEW_RESERVE_TOO_SMALL')
     return values
+
+
+ROBUST_REVIEW_BASE_SECONDS = 1800
+
+
+def v2_limits(jurisdiction_count, *, robust=False):
+    """Task-creation limits for bounded-execution-v2.
+
+    The review allowance grows with the number of jurisdictions (about eleven more required scopes each, and the
+    module sessions are bound by output speed); source work keeps the 1200 s it always had.
+    r5d10 (robust tasks): one pass measured 666 s (module sessions of 6-11 min on a patent-heavy task), so 1200 s
+    could not hold one module run again after a network cut; the base is 1800 s, still one bounded retry pass.
+    """
+    count = max(1, int(jurisdiction_count))
+    review = min(3600, (ROBUST_REVIEW_BASE_SECONDS if robust else 1200) + 600 * (count - 1))
+    return {**DEFAULTS_V2, 'review_seconds': review, 'review_reserve_seconds': review,
+            'active_seconds': review + 1200}
+
+
+def extension_seconds(journal):
+    """Total owner-authorised review allowance recorded in a journal (0 for tasks that never had one)."""
+    rows = journal.get('review_extensions', []) if isinstance(journal, dict) else []
+    return sum(row['seconds'] for row in rows if isinstance(row, dict) and type(row.get('seconds')) is int)
 
 
 def round_block(task, evidence, *, admitted_ids=()):
@@ -67,16 +111,23 @@ def round_block(task, evidence, *, admitted_ids=()):
 
 def _read(task_dir, task, limits):
     path = Path(task_dir) / JOURNAL
+    revision = revision_of(task)
     data = load_json(path) if path.is_file() else {
-        'revision': REVISION, 'task_id': task['task_id'], 'policy_sha256': sha256_json(limits),
+        'revision': revision, 'task_id': task['task_id'], 'policy_sha256': sha256_json(limits),
         'used_seconds': 0.0, 'review_used_seconds': 0.0, 'invocations': 0, 'active': None}
-    if (data.get('revision') != REVISION or data.get('task_id') != task['task_id']
+    if (data.get('revision') != revision or data.get('task_id') != task['task_id']
             or data.get('policy_sha256') != sha256_json(limits)):
         raise ValueError('EXECUTION_BUDGET_BINDING_CHANGED')
     data.setdefault('review_used_seconds', 0.0)
-    for key in ('used_seconds', 'review_used_seconds', 'invocations'):
+    data.setdefault('review_invocations', 0)
+    for key in ('used_seconds', 'review_used_seconds', 'invocations', 'review_invocations'):
         if type(data.get(key)) not in (int, float) or not math.isfinite(data[key]) or data[key] < 0:
             raise ValueError('EXECUTION_BUDGET_JOURNAL_INVALID')
+    extensions = data.get('review_extensions', [])
+    if (not isinstance(extensions, list) or len(extensions) > MAX_EXTENSIONS
+            or any(not isinstance(row, dict) or type(row.get('seconds')) is not int or row['seconds'] <= 0
+                   for row in extensions) or extension_seconds(data) > MAX_EXTENSION_SECONDS):
+        raise ValueError('EXECUTION_BUDGET_EXTENSION_INVALID')
     active = data.get('active')
     if active is not None and (not isinstance(active, dict)
             or any(type(active.get(k)) not in (int, float) or not math.isfinite(active[k])
@@ -93,17 +144,21 @@ def snapshot(task_dir):
     if limits is None:
         return None
     data = _read(task_dir, task, limits)
+    extra = extension_seconds(data)
     active = data.get('active')
     used = data['used_seconds'] + (max(0, min(time.time(), active['deadline']) - active['started']) if active else 0)
-    remaining = max(0, limits['active_seconds'] - used)
+    remaining = max(0, limits['active_seconds'] + extra - used)
     evidence = load_json(task_dir / 'evidence.json')
     reason = round_block(task, evidence) or ('EXECUTION_SOURCE_TIME_BUDGET_EXHAUSTED'
         if remaining <= limits['review_reserve_seconds'] else None)
     review_used = data['review_used_seconds'] + (max(0, min(time.time(), active['deadline']) - active['started'])
         if active and active.get('phase') == 'review' else 0)
-    return {'revision': REVISION, 'limits': limits, 'used_seconds': round(used, 3),
-            'review_remaining_seconds': max(0, min(remaining, limits['review_seconds'] - review_used)),
+    result = {'revision': revision_of(task), 'limits': limits, 'used_seconds': round(used, 3),
+            'review_remaining_seconds': max(0, min(remaining, limits['review_seconds'] + extra - review_used)),
             'remaining_seconds': remaining, 'stop_reason': reason, 'incomplete': bool(reason)}
+    if extra:
+        result['review_extension_seconds'] = extra
+    return result
 
 
 def remaining(deadline, timeout):
@@ -153,18 +208,33 @@ def execution_budget(task_dir, phase, *, inherit=False, admitted_ids=()):
                 data['review_used_seconds'] += reserved
             data['active'] = None
             atomic_write_json(task_dir / JOURNAL, data)
-        available = limits['active_seconds'] - data['used_seconds']
+        extra = extension_seconds(data)
+        available = limits['active_seconds'] + extra - data['used_seconds']
         if phase == 'review':
-            available = min(available, limits['review_seconds'] - data['review_used_seconds'])
+            available = min(available, limits['review_seconds'] + extra - data['review_used_seconds'])
         else:
             available -= limits['review_reserve_seconds']
         reason = round_block(task, load_json(task_dir / 'evidence.json'), admitted_ids=admitted_ids) if phase != 'review' else None
+        import report_always
+        exhausted = (phase == 'review' and 'max_review_invocations' in limits
+                     and data['review_invocations'] >= limits['max_review_invocations'] + len(data.get('review_extensions', [])))
+        if phase == 'review' and report_always.enabled(task) and (available <= 0 or exhausted):
+            # r6 (report-always-v1): no new review session can be paid for, but the report is still written - every
+            # module that would need one becomes pending rows of its chain (an expired deadline, no lease charged)
+            yield time.time()
+            return
         if reason or available <= 0:
             raise ValueError(reason or 'EXECUTION_TIME_BUDGET_EXHAUSTED')
+        if exhausted:
+            # The count is a loop guard: a pass that keeps failing for the same reason must be diagnosed (the
+            # report_review_host --preflight check costs nothing), not paid for again and again.
+            raise ValueError('EXECUTION_REVIEW_INVOCATIONS_EXHAUSTED')
         now = time.time()
-        deadline = now + min(available, limits['review_seconds'] if phase == 'review' else available)
+        deadline = now + min(available, limits['review_seconds'] + extra if phase == 'review' else available)
         data['active'] = {'lease': uuid.uuid4().hex, 'started': now, 'deadline': deadline, 'phase': phase, 'admitted_ids': list(admitted_ids)}
         data['invocations'] += 1
+        if phase == 'review':
+            data['review_invocations'] += 1
         atomic_write_json(task_dir / JOURNAL, data)
         try:
             yield deadline
@@ -190,7 +260,14 @@ def delivery_limit(task, evidence, plan, entry, task_dir):
 
     Existing originals, candidate reading and unknown submissions retain all
     their original obligations. This proof never grants a final clearance.
+
+    r5d21: in time-box-v1 tasks a closed time box (``time_box.py``) turns every entry it listed into a disclosed
+    limitation too, whatever its kind; it never grants a clearance either.
     """
+    import time_box
+    boxed = time_box.limitation(task, entry, task_dir)
+    if boxed is not None:
+        return boxed
     if task_dir is None or policy(task) is None or entry.get('integrity_failure'):
         return None
     if (entry.get('kind') not in {'source_lookup', 'agent_investigation'}
@@ -244,7 +321,8 @@ def delivery_limit(task, evidence, plan, entry, task_dir):
 
 
 def project(task, evidence, plan, view, task_dir):
-    if policy(task) is None or task_dir is None:
+    import time_box
+    if (policy(task) is None and not time_box.enabled(task)) or task_dir is None:
         return view
     result = deepcopy(view)
     changed = False

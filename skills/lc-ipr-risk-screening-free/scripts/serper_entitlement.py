@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from common import atomic_write_json, credential, load_skill_config, sha256_json
+from common import load_json, atomic_write_json, credential, load_skill_config, sha256_json
 from free_search_budget import _root
 from provider_utils import ProviderError
 
@@ -155,7 +155,7 @@ def load_entitlement(key: str, operation: str, *, path: Path | None = None, now=
         path = path or default_path(key)
         if path.is_symlink() or path.stat().st_size > 100_000:
             _reject('Invalid entitlement file')
-        proof = json.loads(path.read_text())
+        proof = load_json(path)
         ref = proof.get('capture', {})
         name = ref.get('path')
         if not isinstance(name, str) or Path(name).name != name:

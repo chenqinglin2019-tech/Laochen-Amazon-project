@@ -77,6 +77,15 @@ def build_requirements(task: dict[str, Any], legacy_requirements: list[dict[str,
                      'required': False}
             if route not in executable:
                 executable.append(route)
+        import search_guard
+        if search_guard.design_epo_route(task) and country == 'US' and right == 'design':
+            # r8 (search-guard-v2; r7 runs B0GLNPC6K8 / B0H16FDSD8): the planner sends the US design query to EPO when the
+            # SerpApi balance is short, but this table never listed EPO for designs, so the frozen client refused the
+            # row and the EPO batch behind it stopped. EPO holds US designs (USD...S) and searches their titles.
+            route = {'provider': 'epo_ops', 'operation': 'search', 'method': 'api',
+                     'priority': len(executable) + 1, 'provider_role': 'fallback', 'required': False}
+            if not any(item.get('provider') == 'epo_ops' and item.get('operation') == 'search' for item in executable):
+                executable.append(route)
         for route in official:
             if isinstance(route, dict) and route not in provenance:
                 route['gap_only'] = True

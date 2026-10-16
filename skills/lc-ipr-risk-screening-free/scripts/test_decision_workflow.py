@@ -319,11 +319,13 @@ class DecisionWorkflowTests(unittest.TestCase):
             self.assertEqual(task["review_policy_revision"], "final-double-review-v1")
             self.assertEqual(task["assessment_revision"], "known-findings-risk-v1")
             self.assertEqual(task["presentation_policy_revision"], "operator-report-v1")
-            self.assertEqual(task['final_review_execution_revision'], 'module-double-review-v1')
+            self.assertEqual(task['final_review_execution_revision'], 'adaptive-double-review-v2')
+            self.assertEqual(task['execution_efficiency_revision'], 'execution-efficiency-v2')
+            self.assertEqual(task['review_material_policy_revision'], 'classified-public-originals-v1')
             self.assertEqual(task["retrieval_policy"], {**runtime["api_first"],
                 "dynamic_evidence_max_age_hours": runtime["performance"]["dynamic_evidence_max_age_hours"]})
             self.assertEqual(task["serper_free_enhancement"]["max_queries_per_task"], 30)
-            self.assertEqual(task["serpapi_free_enhancement"]["max_queries_per_task"], 10)
+            self.assertEqual(task["serpapi_free_enhancement"]["max_queries_per_task"], 20)  # r5d16 owner decision
             self.assertEqual(workflow.validate_decision_workflow(task), [])
             self.assertEqual(load_json(root / "new/materiality-annotations.json")["schema_version"], "2.0")
             args[-1] = str(root / "old")

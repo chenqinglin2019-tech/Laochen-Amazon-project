@@ -266,6 +266,17 @@ class SerpApiEnvelopeTests(unittest.TestCase):
         self.assertEqual(payload['organic_results'], [])
         self.assertNotIn('error', payload)
 
+    def test_patents_engine_zero_message_is_a_zero_only_with_a_successful_envelope(self):
+        message = "Google Patents hasn't returned any results for this query."
+        self.assertIn(message, serpapi.ZERO_RESULT_MESSAGES)
+        for payload in ({'error': message}, {'error': message, 'search_metadata': {'status': 'Error'}},
+                        {'error': message + ' timeout', 'search_metadata': {'status': 'Success'}}):
+            with self.subTest(payload=payload), self.assertRaises(ProviderError):
+                self.call(payload)
+        payload = self.call({'error': message, 'search_metadata': {'status': 'Success'}})
+        self.assertEqual(payload['organic_results'], [])
+        self.assertNotIn('error', payload)
+
     def test_successful_zero_and_positive_are_preserved(self):
         for rows in ([], [{'patent_id': 'US1A'}]):
             self.assertEqual(self.call({'search_metadata': {'status': 'Success'}, 'organic_results': rows})['organic_results'], rows)

@@ -13,7 +13,9 @@ Without ``--work-id`` every currently supported work entry gets a template. Supp
 DISCOVERY_DIRECTION_REVIEW_REQUIRED, DISCOVERY_EXPRESSION_REVIEW_REQUIRED,
 DISCOVERY_RESULT_SEMANTIC_REVIEW_REQUIRED (-> record_discovery_semantics.py, ``{"events":[...]}``),
 SOURCE_OPERATION_REVIEW_REQUIRED (-> record_source_operation.py, ``{"reviews":[...]}``) and
-REVIEW_PROGRESS_QUERY_NOT_PLANNED (-> record_review_progress.py, one initialize/add event).
+REVIEW_PROGRESS_QUERY_NOT_PLANNED (-> record_review_progress.py, one initialize/add event; the owning
+modules and the standard acceptance text are prefilled) and API_DISCOVERY_REVIEW_REQUIRED
+(-> record_discovery_review.py, ``{"reviews":[...]}``; run, evidence ids and the current triage digest are prefilled).
 """
 from __future__ import annotations
 
@@ -26,21 +28,33 @@ from common import atomic_write_json, ensure_object, load_json, sha256_json
 DISCOVERY_STAGES = {"DISCOVERY_DIRECTION_REVIEW_REQUIRED": "direction",
                     "DISCOVERY_EXPRESSION_REVIEW_REQUIRED": "before",
                     "DISCOVERY_RESULT_SEMANTIC_REVIEW_REQUIRED": "after"}
+# An after review whose next action is a replan can be reconsidered (refine now, or wait for a capability): the
+# same after template applies. A replan that exists because the expression review is missing cannot.
+AFTER_RECONSIDER_REASON = "DISCOVERY_DIRECTION_GAP_REPLAN_REQUIRED"
 OPERATION_REASON = "SOURCE_OPERATION_REVIEW_REQUIRED"
 PROGRESS_REASON = "REVIEW_PROGRESS_QUERY_NOT_PLANNED"
 RESULT_REASON = "SOURCE_RESULTS_PENDING_PROCESSING"
+DISCOVERY_REVIEW_REASON = "API_DISCOVERY_REVIEW_REQUIRED"
+PROGRESS_ACCEPTANCE = "原查询提交成功或真实零结果，原始回执可核对"
 HANDOFF_REASON = "CANDIDATE_HANDOFF_READY"
 RECOVERY_REASONS = frozenset({"SOURCE_FAILURE_RECOVERY_REVIEW_REQUIRED", "PRE_SUBMISSION_REPAIR_REVIEW_REQUIRED",
                               "VERIFY_PRIOR_SUBMISSION_BEFORE_RETRY"})
 SUPPORTED_REASONS = frozenset({*DISCOVERY_STAGES, OPERATION_REASON, PROGRESS_REASON, RESULT_REASON,
-                               HANDOFF_REASON, *RECOVERY_REASONS})
+                               HANDOFF_REASON, DISCOVERY_REVIEW_REASON, *RECOVERY_REASONS})
 
 
 def supported(entry: dict) -> bool:
     """Work entries this tool can prefill: the listed reasons, and candidate triage decisions."""
     return isinstance(entry, dict) and bool(entry.get("work_id")) and (
         entry.get("reason") in SUPPORTED_REASONS
+        or _after_reconsideration(entry)
         or (entry.get("kind") == "triage" and bool(entry.get("candidate_id"))))
+
+
+def _after_reconsideration(entry: dict) -> bool:
+    return (entry.get("reason") == AFTER_RECONSIDER_REASON and bool(entry.get("source_run_id"))
+            and bool(entry.get("query_id")) and bool(entry.get("direction_id"))
+            and not entry.get("historical_expression_review_missing"))
 CLASSIFICATION_KINDS = {"ipc", "cpc", "uspc", "locarno", "nice", "similar_group", "figurative_classification",
                         "jpo_figurative_classification", "design_code"}
 LANGUAGE_KINDS = {"translation", "original_japanese", "english", "romaji", "reading"}
@@ -52,27 +66,92 @@ def _plan_row(plan: dict, query_id) -> tuple:
     return matches[0] if len(matches) == 1 else (None, None)
 
 
+DIRECTION_JUDGMENT_FIELDS = ("question", "method", "proposed_sources", "evidence_needed", "supplement_trigger")
+
+
+def _direction_in_force(task: dict, scenario, right, jurisdiction, clue_ids, directions):
+    """The latest direction review of this scope, when only its unmapped clues can differ from what is required.
+
+    Same clue inventory and same directions (ids and clue sets): the mapped judgments are exactly the ones that
+    are already recorded, so a re-review that only reconsiders unmapped clues need not retype them. Anything else
+    (a changed clue, direction or clue set) returns None and the template stays fully open.
+    """
+    import discovery_semantics as ds
+    if not ds.review_binding_relaxed(task):
+        return None
+    previous = None
+    for event in ds._events(task):
+        if (isinstance(event, dict) and event.get("stage") == "direction" and event.get("scenario_id") == scenario
+                and event.get("right_type") == right and event.get("jurisdiction") == jurisdiction):
+            previous = event
+    if previous is None:
+        return None
+    clues = {row.get("clue_id"): row for row in previous.get("clues", []) if isinstance(row, dict)}
+    rows = {row.get("direction_id"): row for row in previous.get("directions", []) if isinstance(row, dict)}
+    wanted = {item["direction_id"]: sorted({"fact:" + fid for fid in item["fact_ids"]}
+                                           | {"object:" + oid for oid in item["object_ids"]}) for item in directions}
+    if (set(clues) != set(clue_ids) or set(rows) != set(wanted)
+            or any(sorted(rows[key].get("clue_ids") or []) != value for key, value in wanted.items())):
+        return None
+    return previous, clues, rows
+
+
 def direction_template(task: dict, entry: dict):
     import discovery_semantics as ds
     scenario, right = entry.get("scenario_id"), entry.get("right_type")
     directions = ds._directions(task, scenario, right)
     unmapped = sorted(ds._unmapped_facts(task))
+    clue_ids = sorted(ds._clues(task, scenario, right))
+    carried = _direction_in_force(task, scenario, right, entry.get("jurisdiction"), clue_ids, directions)
+    clues = [{"clue_id": clue, "disposition": None, "reason": None} for clue in clue_ids]
+    rows = [{"direction_id": item["direction_id"], "question": None,
+             "clue_ids": sorted({"fact:" + fid for fid in item["fact_ids"]} | {"object:" + oid for oid in item["object_ids"]}),
+             "method": None, "proposed_sources": None, "evidence_needed": None,
+             "supplement_trigger": None} for item in directions]
+    if carried is not None:
+        _, old_clues, old_rows = carried
+        for row in clues:
+            old = old_clues[row["clue_id"]]
+            row.update({key: old[key] for key in ("disposition", "reason", "evidence_refs") if key in old})
+        for row in rows:
+            old = old_rows[row["direction_id"]]
+            row.update({key: old[key] for key in DIRECTION_JUDGMENT_FIELDS if key in old})
     template = {"stage": "direction", "scenario_id": scenario, "jurisdiction": entry.get("jurisdiction"),
-                "right_type": right, "reviewer": None, "reason": None,
-                "clues": [{"clue_id": clue, "disposition": None, "reason": None}
-                          for clue in sorted(ds._clues(task, scenario, right))],
-                "directions": [{"direction_id": item["direction_id"], "question": None,
-                                "clue_ids": sorted({"fact:" + fid for fid in item["fact_ids"]}
-                                                   | {"object:" + oid for oid in item["object_ids"]}),
-                                "method": None, "proposed_sources": None, "evidence_needed": None,
-                                "supplement_trigger": None} for item in directions]}
+                "right_type": right, "reviewer": None, "reason": None, "clues": clues, "directions": rows}
     if unmapped:
         template["unmapped_clues"] = [{"clue_id": "fact:" + fid, "disposition": None, "reason": None}
                                       for fid in unmapped]
     guide = {"clue_dispositions": sorted(ds.CLUE_STATES),
              "note": "covered_by_other also needs evidence_refs (existing evidence ids); unmapped clues may not be 'included'; "
                      "every direction's clue_ids are already the exact required set"}
+    if carried is not None:
+        guide["carried_forward"] = {"from_review_id": carried[0].get("review_id"),
+            "note": "clues and directions are copied unchanged from the direction review in force (same clue inventory, same "
+                    "directions); only reviewer, reason and the unmapped clues are open - change a copied judgment only "
+                    "if it is no longer true, which makes this a full re-review"}
     return template, guide
+
+
+def direction_rereview_templates(task: dict, scopes):
+    """Direction-review templates for scopes the Agent chooses to re-review, with the review in force carried forward.
+
+    A re-review is the Agent's own decision (for example a clue marked awaiting_information that existing evidence
+    now answers), so no work entry asks for it and it is requested explicitly: SCENARIO:RIGHT:JURISDICTION.
+    """
+    import discovery_semantics as ds
+    events, guides = [], []
+    for spec in scopes:
+        parts = str(spec).split(":")
+        if len(parts) != 3 or not all(part.strip() for part in parts):
+            raise ValueError("INPUT_TEMPLATE_DIRECTION_SCOPE_INVALID: " + str(spec))
+        scenario, right, jurisdiction = (part.strip() for part in parts)
+        if not ds._directions(task, scenario, right):
+            raise ValueError("INPUT_TEMPLATE_DIRECTION_SCOPE_UNKNOWN: " + str(spec))
+        template, guide = direction_template(task, {"scenario_id": scenario, "right_type": right,
+                                                    "jurisdiction": jurisdiction})
+        events.append(template)
+        guides.append({"scope": ":".join((scenario, right, jurisdiction)), **guide})
+    return events, guides
 
 
 def before_template(task: dict, plan: dict, entry: dict):
@@ -145,6 +224,41 @@ def progress_item(task: dict, plan: dict, entry: dict):
     identity = sha256_json({"query_id": row["query_id"], "scope": scope})[:20]
     return {"item_id": "ITEM-" + identity, "kind": "query", "scope": scope, "module_ids": None,
             "acceptance_condition": None, "query_id": row["query_id"]}, None
+
+
+def progress_defaults(item: dict) -> dict:
+    """Registration fields the task state already determines: owning modules by right type, standard acceptance text."""
+    from assessment_estimate import MODULE_RIGHTS
+    right = (item.get("scope") or {}).get("right_type")
+    modules = sorted(name for name, rights in MODULE_RIGHTS.items() if right in rights)
+    return {**item, "module_ids": item.get("module_ids") or modules or None,
+            "acceptance_condition": item.get("acceptance_condition") or PROGRESS_ACCEPTANCE}
+
+
+def discovery_review_template(task: dict, plan: dict, evidence: dict, candidates: dict, ledger: dict,
+                              supplement, entry: dict):
+    """One bounded discovery-result review; the digest is the exact current triage state of this query."""
+    import discovery_semantics as ds
+    from api_first_planning import triage_digest
+    provider, row = _plan_row(plan, entry.get("query_id"))
+    run = next((r for r in evidence.get("source_runs", []) if r.get("run_id") == entry.get("source_run_id")), None)
+    if row is None or run is None:
+        return None, "QUERY_OR_RUN_UNKNOWN"
+    template = {"query_id": row["query_id"], "source_run_id": run["run_id"],
+                "evidence_ids": sorted(ds._linked_evidence(evidence, run)),
+                "reviewer": None, "reason": None, "outcome": None}
+    if run.get("status") in {"success", "no_result"}:
+        template["triage_digest"] = triage_digest(task, evidence, candidates, ledger, supplement,
+                                                  query_id=row["query_id"])
+    else:
+        template["blocker"] = None
+    guide = {"provider": provider, "run_status": run.get("status"), "error_code": run.get("error_code"),
+             "outcome": ["proceed_to_verification", "stop_bounded_discovery", "blocked"],
+             "note": "proceed_to_verification needs a current selected in-scope candidate of this query; "
+                     "stop_bounded_discovery records a reasoned stop (never a coverage claim) and needs every card "
+                     "merged and triaged; blocked is only for a failed/access-limited run and needs blocker. "
+                     "triage_digest binds the current triage: record the triage first, then regenerate this template"}
+    return template, guide
 
 
 def _bound_candidates(candidates: dict, run_id: str, rows: dict) -> dict:
@@ -331,8 +445,9 @@ def build(task_dir: Path, work_ids=None):
         raise ValueError("INPUT_TEMPLATE_WORK_ID_NOT_CURRENT: " + ",".join(sorted(unknown)))
     files, summaries, skipped = {}, [], []
     discovery = {"direction": [], "before": [], "after": []}
-    operations, progress_items, results, triage, handoffs, recoveries = [], [], [], [], [], []
+    operations, progress_items, results, triage, handoffs, recoveries, reviews = [], [], [], [], [], [], []
     candidates = load_json(task_dir / "normalized-candidates.json") if (task_dir / "normalized-candidates.json").is_file() else {}
+    review_context = {}
     for entry in entries:
         if wanted and entry.get("work_id") not in wanted:
             continue
@@ -341,8 +456,8 @@ def build(task_dir: Path, work_ids=None):
             if wanted:
                 skipped.append({"work_id": entry.get("work_id"), "reason": "NO_TEMPLATE_FOR_" + str(reason)})
             continue
-        if reason in DISCOVERY_STAGES:
-            stage = DISCOVERY_STAGES[reason]
+        if reason in DISCOVERY_STAGES or _after_reconsideration(entry):
+            stage = DISCOVERY_STAGES.get(reason, "after")
             template, guide = (direction_template(task, entry) if stage == "direction" else
                                before_template(task, plan, entry) if stage == "before" else
                                after_template(task, plan, evidence, entry))
@@ -353,6 +468,15 @@ def build(task_dir: Path, work_ids=None):
         elif reason == RESULT_REASON:
             template, guide = result_processing_event(task_dir, evidence, candidates, entry)
             target = results
+        elif reason == DISCOVERY_REVIEW_REASON:
+            if not review_context:
+                from workflow_v24 import scenario_supplement
+                ledger_path = task_dir / "materiality-annotations.json"
+                review_context.update(ledger=load_json(ledger_path) if ledger_path.is_file() else {},
+                                      supplement=scenario_supplement(task_dir, task=task, evidence=evidence))
+            template, guide = discovery_review_template(task, plan, evidence, candidates, review_context["ledger"],
+                                                        review_context["supplement"], entry)
+            target = reviews
         elif reason == HANDOFF_REASON:
             template, guide = handoff_item(entry)
             target = handoffs
@@ -367,6 +491,8 @@ def build(task_dir: Path, work_ids=None):
             target = triage
         else:
             template, guide = progress_item(task, plan, entry)
+            if template is not None:
+                template = progress_defaults(template)
             target = progress_items
         if template is None:
             skipped.append({"work_id": entry.get("work_id"), "reason": guide})
@@ -379,6 +505,12 @@ def build(task_dir: Path, work_ids=None):
             summaries.append({"file": name, "recorder": "record_discovery_semantics.py", "count": len(items),
                               "work_ids": [item["work_id"] for item in items],
                               "fill": _null_paths(files[name]), "guide": [item["guide"] for item in items]})
+    if reviews:
+        files["discovery-review.json"] = {"reviews": [item["template"] for item in reviews]}
+        summaries.append({"file": "discovery-review.json", "recorder": "record_discovery_review.py",
+                          "count": len(reviews), "work_ids": [item["work_id"] for item in reviews],
+                          "fill": _null_paths(files["discovery-review.json"]),
+                          "guide": [item["guide"] for item in reviews], "batch_input": True})
     if handoffs:
         files["candidate-handoff.json"] = {
             "candidate_ids": [item["template"]["candidate_id"] for item in handoffs],
@@ -437,8 +569,9 @@ def build(task_dir: Path, work_ids=None):
                           "count": len(progress_items), "work_ids": [item["work_id"] for item in progress_items],
                           "fill": _null_paths(event),
                           "guide": {"module_ids": sorted(_module_ids()),
-                                    "note": "module_ids: pick the modules that own each item's right type; "
-                                            "acceptance_condition: what completing the query must show"}})
+                                    "note": "module_ids and acceptance_condition are prefilled from the item's right "
+                                            "type and the standard query acceptance text; adjust only if the item "
+                                            "needs a different owner or condition; fill actor and reasoning"}})
     return files, summaries, skipped
 
 
@@ -474,11 +607,25 @@ def main() -> None:
     parser.add_argument("--task-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True, help="A new directory for the template files")
     parser.add_argument("--work-id", action="append", help="Only this current work entry (repeatable)")
+    parser.add_argument("--direction-rereview", action="append", metavar="SCENARIO:RIGHT:JURISDICTION",
+        help="Also write a direction re-review template for this scope. The clues and directions of the review "
+             "in force are carried forward unchanged (when the clue inventory and directions are the same); "
+             "reviewer, reason and the unmapped clues stay null (repeatable)")
     args = parser.parse_args()
     task_dir = args.task_dir.resolve()
     if args.output_dir.exists():
         parser.error("--output-dir must not exist; choose a new directory")
     files, summaries, skipped = build(task_dir, args.work_id)
+    if args.direction_rereview:
+        try:
+            events, guides = direction_rereview_templates(
+                ensure_object(load_json(task_dir / "task.json"), "task.json"), args.direction_rereview)
+        except ValueError as exc:
+            parser.error(str(exc))
+        name = "discovery-direction-rereview.json"
+        files[name] = {"events": events}
+        summaries.append({"file": name, "recorder": "record_discovery_semantics.py", "count": len(events),
+                          "work_ids": [], "fill": _null_paths(files[name]), "guide": guides})
     if files:
         args.output_dir.mkdir(parents=True)
         for name, content in files.items():

@@ -95,13 +95,14 @@ def record_operation_acceptance(task_dir, task, evidence, row, run, entry):
     if operation in {'candidate_detail', 'trademark_media', 'candidate_verification',
                      'document_retrieval', 'number_lookup'}:
         def normalized_ids(value):
+            from common import canonical_patent_number
             text = str(value or '').strip()
-            values = {re.sub(r'[^A-Za-z0-9]', '', text).upper()} if text else set()
+            values = {canonical_patent_number(text)} if text else set()
             # SerpApi Google Patents identifies a grant as patent/US.../en;
             # its normalized record stores the publication number separately.
             match = re.fullmatch(r'patent/([A-Za-z]{2}[A-Za-z0-9]+)/[a-z]{2}', text, re.I)
             if match:
-                values.add(re.sub(r'[^A-Za-z0-9]', '', match.group(1)).upper())
+                values.add(canonical_patent_number(match.group(1)))
             return {value for value in values if value}
         expected_groups = []
         for key in identity_fields:
@@ -143,8 +144,13 @@ def record_operation_acceptance(task_dir, task, evidence, row, run, entry):
             raise ValueError('SOURCE_OPERATION_ZERO_UNPROVEN')
         if run.get('status') == 'success' and not rows and metadata.get('returned_count') not in (None, 0):
             raise ValueError('SOURCE_OPERATION_RESPONSE_INCOMPLETE')
-        if any(api_country(record.get('jurisdiction') or record.get('office') or record.get('country_code'))
-               != api_country(row.get('jurisdiction'))
+        offices = {api_country(row.get('jurisdiction'))}
+        if provider == 'epo_ops':
+            # The planned CQL names its publication offices (a US plan also asks for WO); a record
+            # from an office the request itself asked for is the expected response, not a mismatch.
+            offices |= {api_country(code) for code in
+                        re.findall(r'(?<![A-Za-z])pn\s*=\s*([A-Za-z]{2})(?![A-Za-z])', str(row.get('q') or ''), re.I)}
+        if any(api_country(record.get('jurisdiction') or record.get('office') or record.get('country_code')) not in offices
                for record in rows if record.get('jurisdiction') or record.get('office')):
             raise ValueError('SOURCE_OPERATION_RECORD_IDENTITY_MISMATCH')
         identity = {'record_count': len(rows), 'search_zero_proven': zero}
@@ -310,6 +316,8 @@ def current_operation_acceptance(task, evidence, provider, row, task_dir=None):
                 and run.get('right_type') == row.get('right_type')
                 and run.get('submission_state') == 'submitted'
                 and run.get('status') not in {'success', 'no_result', 'not_applicable'}
+                # A clean "no such document" answer says nothing against the operation itself.
+                and run.get('error_code') != 'PROVIDER_RECORD_NOT_FOUND'
                 and str(run.get('finished_at') or run.get('started_at') or '') > accepted_time):
             return False
     for failure in evidence.get('operation_acceptance_failures', []):

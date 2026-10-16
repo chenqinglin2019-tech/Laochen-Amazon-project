@@ -5,6 +5,7 @@ register, performs a source request, or assigns a legal risk level.
 """
 from __future__ import annotations
 
+import re
 import trusted_api
 from copy import deepcopy
 from datetime import date, datetime
@@ -71,6 +72,12 @@ def events(task: dict) -> list[dict]:
     history = task.get(EVENTS, [])
     if not isinstance(history, list):
         raise ValueError("SPECIALTY_EVENTS_INVALID")
+    # r5d21: inside one read-only derivation the same unchanged chain is verified once (derivation_memo)
+    import derivation_memo
+    memo = derivation_memo.cache('specialty_chain')
+    key = derivation_memo.chain_key(task, history) if memo is not None else None
+    if key is not None and key in memo:
+        return history
     previous = ""
     for row in history:
         if (not isinstance(row, dict) or row.get("kind") not in KINDS
@@ -79,6 +86,8 @@ def events(task: dict) -> list[dict]:
                     sha256_json({k: v for k, v in row.items() if k != "event_id"}))):
             raise ValueError("SPECIALTY_EVENTS_CHANGED")
         previous = row["event_id"]
+    if key is not None:
+        memo[key] = True
     return history
 
 
@@ -1845,3 +1854,99 @@ def work_entries(view: dict) -> list[dict]:
                 projected["specialty_reason"] = blocker["reason"]
             result.append(projected)
     return result
+
+
+# ----- claims projection for the final review and the chief (best-estimate-risk-v1) ------------------------------
+ELEMENT_RESULTS = {"corresponds": "supports_risk", "differs": "excludes_risk", "unknown": "unknown"}
+
+
+def _claim_number(unit):
+    """The claim number an inventory unit compares, from its original location or its unit id."""
+    for text in (str(unit.get("original_location") or ""), str(unit.get("unit_id") or "")):
+        match = re.search(r"(?:claim|claims)\s+(\d{1,3})", text, re.I) or re.match(r"^C(\d{1,3})(?:[^0-9]|$)", text)
+        if match:
+            return match.group(1)
+    return None
+
+
+def claims_projection(task: dict, scope: dict) -> dict:
+    """The recorded independent-claim comparison of one selected candidate in the shape the final review contract
+    requires (comparison.implementations[] / comparison.claims[]).
+
+    Pure read of the retained specialty events: implementations are the inventory's product configurations,
+    every element keeps its recorded quote, product fact, evidence references and result, and the claim's
+    conclusion follows the contract (supports_risk only when every element corresponds, excludes_risk when a
+    necessary element differs, otherwise unknown). Nothing is decided here; a reviewer or the chief still
+    grades the row. Returns {"implementations": [], "claims": []} when nothing is recorded for the scope.
+    """
+    empty = {"implementations": [], "claims": []}
+    try:
+        history = events(task)
+    except (ValueError, KeyError):
+        return empty
+    key = tuple(scope.get(name) for name in SCOPE)
+    intakes = [row for row in history if row.get("kind") == "intake" and _scope(row) == key]
+    if not intakes:
+        return empty
+    intake_id = intakes[-1]["event_id"]
+    inventory = next((row for row in reversed(history) if row.get("kind") == "inventory"
+                      and row.get("intake_event_id") == intake_id and _scope(row) == key), None)
+    if inventory is None:
+        return empty
+    comparisons = {}
+    for row in history:
+        if (row.get("kind") == "comparison" and row.get("intake_event_id") == intake_id and _scope(row) == key
+                and row.get("disposition", "compared") == "compared" and row.get("unit_id")):
+            comparisons[row["unit_id"]] = row          # the latest comparison of a unit wins
+    implementations, claims = {}, []
+    for unit in inventory.get("units", []):
+        if not isinstance(unit, dict) or unit.get("kind") != "independent_claim":
+            continue
+        comparison = comparisons.get(unit.get("unit_id"))
+        number = _claim_number(unit)
+        implementation_id = str(unit.get("implementation_id") or "")
+        if comparison is None or number is None or not implementation_id:
+            continue
+        elements = []
+        recorded = [element for element in comparison.get("elements", []) if isinstance(element, dict)]
+        # an element recorded without its own product references (e.g. "not visible") still names the product
+        # material that was examined: the comparison's product references
+        seen_product_refs = list(dict.fromkeys(ref for element in recorded
+                                               for ref in element.get("product_evidence_refs", []) if isinstance(ref, str)))
+        seen_product_refs = seen_product_refs or [ref for ref in comparison.get("evidence_refs", []) if isinstance(ref, str)]
+        for element in recorded:
+            if element.get("result") not in ELEMENT_RESULTS:
+                continue
+            claim_refs = [ref for ref in element.get("claim_evidence_refs", []) if isinstance(ref, str)]
+            product_refs = [ref for ref in element.get("product_evidence_refs", []) if isinstance(ref, str)] or seen_product_refs
+            elements.append({"implementation_id": implementation_id, "claim_id": number,
+                "claim_element": str(element.get("element_id") or ""), "claim_quote": str(element.get("claim_quote") or ""),
+                "product_feature": str(element.get("product_fact") or element.get("reasoning") or ""),
+                "product_evidence_refs": product_refs, "result": ELEMENT_RESULTS[element["result"]],
+                "evidence_refs": list(dict.fromkeys([*claim_refs, *product_refs])),
+                "reasoning": str(element.get("reasoning") or element.get("product_fact") or "")})
+        if not elements:
+            continue
+        if all(item["result"] == "supports_risk" and item["evidence_refs"] for item in elements):
+            conclusion = "supports_risk"
+        elif any(item["result"] == "excludes_risk" and item["evidence_refs"] for item in elements):
+            conclusion = "excludes_risk"
+        else:
+            conclusion = "unknown"
+        product_refs = list(dict.fromkeys(ref for item in elements for ref in item["product_evidence_refs"]))
+        implementation = implementations.setdefault(implementation_id, {
+            "implementation_id": implementation_id,
+            "title": (str(unit.get("product_configuration") or implementation_id).strip()[:60] or implementation_id),
+            "description": str(unit.get("product_configuration") or implementation_id).strip(),
+            "product_evidence_refs": []})
+        implementation["product_evidence_refs"] = list(dict.fromkeys([*implementation["product_evidence_refs"], *product_refs]))
+        claims.append({"implementation_id": implementation_id, "claim_id": number, "claim_type": "independent",
+            "conclusion": conclusion,
+            "claim_evidence_refs": list(dict.fromkeys(ref for item in elements for ref in item["evidence_refs"]
+                                                       if ref not in item["product_evidence_refs"])),
+            "elements": elements, "source_unit_id": unit.get("unit_id"),
+            "source_comparison_event_id": comparison.get("event_id")})
+    for implementation in implementations.values():
+        if not implementation["product_evidence_refs"]:
+            implementation["product_evidence_refs"] = list(inventory.get("evidence_refs", []))
+    return {"implementations": list(implementations.values()), "claims": claims}

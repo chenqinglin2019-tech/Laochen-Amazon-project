@@ -21,7 +21,7 @@
 
 全部第三方凭据只从 Skill 根目录 `.env` 读取，无环境变量或 Keychain 回退；后台授权恢复原包规则：非空进程 `LAOCHEN_BACKEND_TOKEN` 优先，否则读取同目录 `config.json` 与 `config.local.json` 合并后的 `backend_token`。新建私密文件使用当前用户权限，macOS/Unix 为 `0600`；缺失、格式或权限问题输出脱敏原因；可选凭据不可用只影响对应来源。`.env` 不执行 shell、不展开变量、不修改进程环境。会话 Token、Cookie 仅存内存；凭据不写入任务、原始响应、报表或命令参数。初始化与分发见 [本地配置与凭据](../INSTRUCTIONS.md#2-本地配置与凭据)。
 
-`.env` 沿用 12 个既有字段名：`EPO_OPS_CONSUMER_KEY`、`EPO_OPS_CONSUMER_SECRET`、`EUIPO_CLIENT_ID`、`EUIPO_CLIENT_SECRET`、`JPO_API_USERNAME`、`JPO_API_PASSWORD`、`INPI_USERNAME`、`INPI_PASSWORD`、`SERPER_API_KEY`、`SIGNA_API_KEY`、`SERPAPI_API_KEY`、`RAPIDAPI_KEY`。空值表示未配置；保留 `RAPIDAPI_KEY` 字段不代表启用新来源。云端 Skill 授权与知识产权数据源账号独立，后台 Token 不存入 `.env`。
+`.env` 沿用 12 个既有字段名：`EPO_OPS_CONSUMER_KEY`、`EPO_OPS_CONSUMER_SECRET`、`EUIPO_CLIENT_ID`、`EUIPO_CLIENT_SECRET`、`JPO_API_USERNAME`、`JPO_API_PASSWORD`、`INPI_USERNAME`、`INPI_PASSWORD`、`SERPER_API_KEY`、`SIGNA_API_KEY`、`SERPAPI_API_KEY`、`RAPIDAPI_KEY`。空值表示未配置；保留 `RAPIDAPI_KEY` 字段不代表启用新来源。r8 起可选第 13 个字段 `SERPAPI_API_KEY_BACKUP`（SerpApi 备用账户）：只在新任务开跑前的余额检查选中它时使用，选择结果记在任务的 `serpapi-capacity.json`（`key_slot`，不含 key），由 `scripts/configure_backup_key.py` 填写。云端 Skill 授权与知识产权数据源账号独立，后台 Token 不存入 `.env`。
 
 ### 请求与重试安全
 
@@ -121,6 +121,7 @@ Serper 的官方账户证明校验与跨任务账本已实现，线上可用性�
 
 - 两引擎共享同一账号、任务锁、硬停止记录和新 API-first 任务**每任务合计十次**预算，专利搜索、详情与 Lens 共享，按任务冻结值执行。合计三次及两条专利＋一条 Lens 仅属于历史无 API-first 标记任务。
 - 专利计划使用 `q/num/country/right_type`；已绑定且正常完成的 Serper 同查询使该 SerpApi fallback 跳过。[Google Patents API](https://serpapi.com/google-patents-api)
+- r5d20 起的新任务（`recall_revision`）：美国专利与外观的发现检索以 Google Patents 为主，计划另带 `type`（外观 `DESIGN`、发明 `PATENT`）、`after`（优先权日下限，外观近 16 年、发明近 21 年）和较宽外观组的 `sort=new`；每次请求取 100 条（同样计一次）。EPO 只在 SerpApi 不可用或额度用完时补位，并只查美国文献。
 - 新规划在相同预算内保留身份发现与产品特征查询；未有上述召回不足决定时，正常完成的主源仍按原备用规则跳过。源成功不等于相关性充分，不得把跳过备用报告为第二个来源已搜索。
 - Lens 来源为 `serpapi_google_lens/image_search`；计划使用 `q/image_url/type/hl/country/right_type=copyright`。只接收已在 `task.images` 记录并具有摘要的公开 Amazon 媒体 URL；禁止上传本地图片或自动公开产品资料。[Google Lens API](https://serpapi.com/google-lens-api)
 - Lens 查询参数映射到 `engine=google_lens,url,type,hl,country`；原始响应只把有来源页面的 visual/exact matches 归一化为发现线索。不推定首次创作、权利人或侵权概率，未知搜索总量记截断。

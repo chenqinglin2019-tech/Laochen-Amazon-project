@@ -137,6 +137,33 @@ class AssessmentStatusContractTests(unittest.TestCase):
         # Historical compatibility remains unchanged; new prompts require an explicit enum.
         self.validate(dict(self.row, assessment_status=None))
 
+    def test_best_estimate_rules_appear_only_with_the_marker_in_both_routes(self):
+        for module in (None, {'right_types': ['patent', 'utility_model'], 'required_scopes': []}):
+            payload = {'task': self.task}
+            if module: payload['module_scope'] = module
+            prompt, contract = self.contract(payload, 1)
+            self.assertNotIn('best_estimate_rules', contract)
+            self.assertNotIn('best-estimate-risk-v1', prompt)
+            marked = {**payload, 'task': dict(self.task, assessment_revision='known-findings-risk-v1',
+                                               best_estimate_revision='best-estimate-risk-v1')}
+            prompt, contract = self.contract(marked, 1)
+            rules = contract['best_estimate_rules']
+            self.assertEqual(rules['revision'], 'best-estimate-risk-v1')
+            self.assertEqual(rules['patent_all_elements_supports_or_unknown_consistent'], '高')
+            self.assertEqual(rules['status_unverified_confidence_cap'], '中')
+            self.assertIn('institution_references', rules['institution_not_applicable'])
+            self.assertIn('覆盖上文', prompt)
+            self.assertIn('search_comparison', prompt)
+            self.assertIn('conclusion仍写unknown', prompt)
+        # the per-chain summary prompt follows the same marker
+        from module_review import summary_prompt
+        packet = {'task': dict(self.task, assessment_revision='known-findings-risk-v1'), 'modules': [], 'chain_id': '1'}
+        self.assertIn('known-findings-risk-v1', summary_prompt(packet))
+        packet['task']['best_estimate_revision'] = 'best-estimate-risk-v1'
+        text = summary_prompt(packet)
+        self.assertIn('best-estimate-risk-v1', text)
+        self.assertNotIn('按known-findings-risk-v1', text)
+
     def test_institutional_applicability_requires_evidence_and_is_not_a_status(self):
         row = dict(self.row, scope_applicability={'status': 'not_applicable',
                     'reasoning': 'Synthetic institutional source', 'evidence_refs': ['E']})
@@ -419,20 +446,34 @@ class HostObservationTests(unittest.TestCase):
         self.assertIn('thread.started', trace.read_text())
         self.assertEqual(obs['review_validation'], 'not_performed')
 
-    def test_spawn_failure_and_nonzero_exit_are_distinct(self):
+    def test_nonzero_child_exit_is_recorded_on_every_platform(self):
         (_, _, _), obs, _ = self.execute('import sys;sys.exit(7)')
         self.assertEqual((obs['status'],obs['exit_code']), ('process_failed',7))
+
+    def test_spawn_exception_is_recorded_on_every_platform(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); trace=root/'events.jsonl'
-            # bounded_popen uses a process-group launcher: exec failure is a
-            # real nonzero launcher exit, not necessarily a Popen exception.
-            proc, _, _ = run_native_logged(['/nonexistent-review-binary'], '', root, trace, root/'errors', 2)
-            self.assertNotEqual(proc.returncode, 0)
-            with patch('execution_budget.bounded_popen', side_effect=FileNotFoundError), self.assertRaises(FileNotFoundError):
-                run_native_logged(['/nonexistent-review-binary'], '', root, trace, root/'errors', 2)
+            original_error=FileNotFoundError('Synthetic missing review binary')
+            with patch('execution_budget.bounded_popen', side_effect=original_error), self.assertRaises(FileNotFoundError) as caught:
+                run_native_logged([str(root/'missing-review-binary')], '', root, trace, root/'errors', 2)
+            self.assertIs(caught.exception, original_error)
             obs=json.loads(trace.with_suffix('.execution.json').read_text())
             self.assertEqual(obs['status'],'start_failed')
             self.assertIsNone(obs['process_id'])
+
+    @unittest.skipIf(sys.platform == 'win32', 'POSIX process-group launcher only')
+    def test_posix_launcher_exec_failure_without_inherited_group_is_nonzero_exit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp); trace=root/'events.jsonl'
+            # A standalone POSIX launcher starts successfully before exec
+            # fails. Windows and nested process groups do not use this route.
+            with patch('execution_budget.owned_group', return_value=None):
+                proc, _, _ = run_native_logged([str(root/'missing-review-binary')], '', root,
+                    trace, root/'errors', 2)
+            self.assertNotEqual(proc.returncode, 0)
+            obs=json.loads(trace.with_suffix('.execution.json').read_text())
+            self.assertEqual(obs['status'],'process_failed')
+            self.assertIsNotNone(obs['process_id'])
 
     def test_running_observation_is_available_before_process_exit(self):
         import time

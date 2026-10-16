@@ -245,6 +245,20 @@ def record_gap(task_dir: Path, provider: str, row: dict, code: str, detail: str,
                         request_params={**{k: v for k, v in row.items() if k not in PLAN_META_KEYS}, "right_type": row.get("right_type", "")}, query_id=row["query_id"])
 
 
+def _refusal_safe_gap(task_dir: Path, provider: str, row: dict, code: str, detail: str, *, submission_state: str = "unknown") -> dict:
+    """r8 (search-guard tasks; r7 runs B0GLNPC6K8 / B0H16FDSD8): a gap the evidence recorder itself refuses (a route the
+    task never configured) is returned unrecorded instead of raising, so the rows queued behind it in the same lane
+    are still sent. The row stays unsubmitted; its own work entry and later rounds handle it."""
+    try:
+        return record_gap(task_dir, provider, row, code, detail, submission_state=submission_state)
+    except ProviderError as exc:
+        from provider_utils import redact_sensitive_text
+        return {"provider": provider, "query_id": row.get("query_id"), "status": "failed",
+                "error_code": getattr(exc, "code", "") or "PROVIDER_OPERATION_REFUSED", "submission_state": "not_submitted",
+                "source_query_performed": False, "recorded": False, "detail": redact_sensitive_text(str(exc))[:300],
+                "original_error_code": code}
+
+
 def api_execution_lock(task_dir: Path):
     return execution_lock(task_dir, "api")
 
@@ -552,6 +566,8 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
     from run_browser_plan import _BatchInputs
     from serpapi_patents_client import fallback_satisfied
     task, plan = load_json(task_dir / "task.json"), load_json(task_dir / "search-plan.json")
+    import search_guard
+    record_gap = _refusal_safe_gap if search_guard.enabled(task) else globals()["record_gap"]
     from retrieval_execution import selected_phase, in_phase
     phase = selected_phase(task, phase, "api")
     assert_active_free_policy(task)
@@ -791,8 +807,16 @@ def _execute_api_plan(task_dir: Path, *, wave: str, include_optional: bool, max_
                         result.update({key: recorded[-1].get(key) for key in ("status", "error_code")})
                         result['source_run_id'] = recorded[-1].get('run_id')
                     elif result.get("status") not in {"success", "no_result"}:
-                        result = {**record_gap(task_dir, provider, row, str(result.get("error_code") or "API_EXECUTION_FAILED"),
-                                              str(result.get("stderr") or "Client failed before retaining a plan-bound source run")[:500]), "dispatch": "failed"}
+                        failure_code, failure_options = str(result.get("error_code") or "API_EXECUTION_FAILED"), {}
+                        import search_guard
+                        if (provider.startswith("serpapi") and not result.get("error_code") and search_guard.enabled(task)
+                                and search_guard.pre_network_quota(result.get("stderr"))):
+                            # r7 (run B0GFNWR8FW): the client refused before sending (balance or local ledger); not an
+                            # unknown submission - the pass stops SerpApi and the plan records the quota gap
+                            failure_code, failure_options = "FREE_QUOTA_EXHAUSTED", {"submission_state": "not_submitted"}
+                        result = {**record_gap(task_dir, provider, row, failure_code,
+                                              str(result.get("stderr") or "Client failed before retaining a plan-bound source run")[:500],
+                                              **failure_options), "dispatch": "failed"}
                     if process.returncode and result.get("status") in {"success", "no_result"}:
                         result = {**record_gap(task_dir, provider, row, "API_EXIT_STATUS_MISMATCH", "Client exited unsuccessfully after reporting a successful response"), "dispatch": "failed"}
                     if result.get("status") in {"success", "no_result"} and not any(

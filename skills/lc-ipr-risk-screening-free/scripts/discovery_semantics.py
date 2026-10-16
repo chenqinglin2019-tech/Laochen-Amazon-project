@@ -375,6 +375,48 @@ def current(task, plan, evidence, *, stage, scenario_id, jurisdiction, right_typ
     return None
 
 
+# A direction review may be re-recorded only to update the disposition/explanation of UNMAPPED clues (a fact
+# that no direction uses yet, for example the manufacturer). Unmapped clues can never be `included`, so such a
+# re-review cannot change what an already reviewed or submitted query was judged against. Only these
+# bookkeeping fields may differ between two direction reviews of the same retrieval basis.
+DIRECTION_BOOKKEEPING_FIELDS = frozenset({'unmapped_clues', 'reason', 'reviewer', 'reviewed_at',
+    'request_sha256', 'scope_sha256', 'review_id', 'review_sha256'})
+
+
+def review_binding_relaxed(task):
+    """Tasks of the host-triage family keep earlier query reviews across an unmapped-clue-only re-review."""
+    return task.get('host_triage_revision') is not None
+
+
+def bound_direction_sha256(task, plan, evidence, bound_review, direction, task_dir=None):
+    """The direction review SHA that `bound_review` (a before review) is recorded against, when it still counts.
+
+    Returns the current direction's own SHA when they are bound directly; the earlier direction review's SHA when
+    that earlier review is still valid and differs from the current one only in unmapped-clue bookkeeping;
+    otherwise None (the query's expression review must be redone or reconciled as before).
+    """
+    if not isinstance(bound_review, dict) or not isinstance(direction, dict):
+        return None
+    bound = bound_review.get('direction_review_sha256')
+    if bound and bound == direction.get('review_sha256'):
+        return bound
+    if not bound or not review_binding_relaxed(task):
+        return None
+    candidates = [item for item in _events(task) if item.get('stage') == 'direction'
+                  and item.get('review_sha256') == bound]
+    if len(candidates) != 1:
+        return None
+    earlier = candidates[0]
+    changed = {key for key in set(earlier) | set(direction) if earlier.get(key) != direction.get(key)}
+    if changed - DIRECTION_BOOKKEEPING_FIELDS:
+        return None
+    try:
+        validate(task, plan, evidence, earlier, task_dir)
+    except ValueError:
+        return None
+    return bound
+
+
 def dispatch_error(task, plan, evidence, provider, row):
     if not enabled(task) or row.get('action_purpose') != 'discovery':
         return None
@@ -396,7 +438,7 @@ def dispatch_error(task, plan, evidence, provider, row):
             before = current(task, plan, evidence, stage='before', scenario_id=sid,
                 jurisdiction=country, right_type=row['right_type'],
                 direction_id=ref['direction_id'], provider=provider, row=row)
-            if before is None or before.get('direction_review_sha256') != direction['review_sha256']:
+            if before is None or bound_direction_sha256(task, plan, evidence, before, direction) is None:
                 return 'DISCOVERY_EXPRESSION_REVIEW_REQUIRED'
             if before['semantic_fit'] == 'mismatch':
                 return 'DISCOVERY_EXPRESSION_MISMATCH'
@@ -405,6 +447,40 @@ def dispatch_error(task, plan, evidence, provider, row):
 
 def _current_bounded_capability_wait(task, plan, evidence, candidates, ledger, supplement,
                                     task_dir, provider, row, after, run):
+    """A truncated search waiting on an accepted page limit, or (auto-refine tasks) a reviewed search whose
+    reviewed rewrites are exhausted and stopped; None otherwise."""
+    page = _bounded_page_wait(task, plan, evidence, candidates, ledger, supplement, task_dir, provider, row, after, run)
+    if page is not None:
+        return page
+    return refinement_exhausted_wait(task, plan, evidence, candidates, ledger, supplement, task_dir, provider, row,
+                                     after, run)
+
+
+def refinement_exhausted_wait(task, plan, evidence, candidates, ledger, supplement, task_dir, provider, row, after, run):
+    """The after review asked for another search (refine / fallback / unproven capability wait), every rewrite
+    the plan can still make for this purpose is used up (round limit, no unused applicable term or no source
+    budget; ``auto_refine.exhausted``) and the exact response carries a valid bounded stop review: the remaining
+    recall is a disclosed limitation, never a coverage claim. auto-refine-v1 tasks only."""
+    import auto_refine
+    if (not auto_refine.enabled(task) or task_dir is None or candidates is None or ledger is None
+            or not isinstance(after, dict) or after.get('problem_covered') is not False
+            or after.get('next_action') not in {'refine', 'fallback', 'awaiting_capability'}):
+        return None
+    if not auto_refine.exhausted(task, plan, evidence, provider, row):
+        return None
+    from api_first_planning import current_followup_review, review_validation, source_files_error
+    stop = current_followup_review(task, row, run.get('run_id'))
+    if stop is None or stop.get('outcome') != 'stop_bounded_discovery':
+        return None
+    if review_validation(task, plan, evidence, candidates, ledger, row, stop, supplement):
+        return None
+    if source_files_error(task_dir, evidence, run):
+        return None
+    return stop
+
+
+def _bounded_page_wait(task, plan, evidence, candidates, ledger, supplement,
+                       task_dir, provider, row, after, run):
     """Prove a truncated search is genuinely waiting on an accepted route limit.
 
     The API review is the full-batch merge/triage gate. The exact retained run
@@ -431,11 +507,11 @@ def _current_bounded_capability_wait(task, plan, evidence, candidates, ledger, s
         and type(retrieved) is int and retrieved == end - start + 1 and total > retrieved)
     if coverage.get('truncated') is not True or not (remaining_count_proven or range_count_proven):
         return None
-    reviews = [item for item in task.get('discovery_followups', []) if isinstance(item, dict)
-               if item.get('role') == 'review' and item.get('parent_query_id') == row.get('query_id')
-               and item.get('source_run_id') == run.get('run_id')]
-    if len(reviews) != 1 or reviews[0].get('outcome') != 'stop_bounded_discovery':
+    from api_first_planning import current_followup_review
+    stop = current_followup_review(task, row, run.get('run_id'))
+    if stop is None or stop.get('outcome') != 'stop_bounded_discovery':
         return None
+    reviews = [stop]
     from api_first_planning import review_validation
     if review_validation(task, plan, evidence, candidates, ledger, row, reviews[0], supplement):
         return None
@@ -485,10 +561,10 @@ def _current_source_fault_wait(task, plan, evidence, candidates, ledger, supplem
     from api_first_planning import _receipt_classified_failure, review_validation, source_files_error
     if not _receipt_classified_failure(task_dir, task, evidence, run):
         return None
-    reviews = [item for item in task.get('discovery_followups', []) if isinstance(item, dict)
-        if item.get('role') == 'review' and item.get('parent_query_id') == row.get('query_id')
-        and item.get('source_run_id') == run.get('run_id')]
-    if (len(reviews) != 1 or reviews[0].get('outcome') != 'stop_bounded_discovery'
+    from api_first_planning import current_followup_review
+    stop = current_followup_review(task, row, run.get('run_id'))
+    reviews = [stop] if stop is not None else []
+    if (not reviews or reviews[0].get('outcome') != 'stop_bounded_discovery'
             or review_validation(task, plan, evidence, candidates, ledger, row, reviews[0], supplement)):
         return None
     if source_files_error(task_dir, evidence, run):
@@ -537,8 +613,13 @@ def _retained_ranked_operation_review(task, plan, evidence, task_dir, provider, 
 
 
 def _current_public_ranked_scope_wait(task, plan, evidence, candidates, ledger, supplement,
-                                    task_dir, provider, row, after, run):
-    """End an exactly supported public API scope without claiming exhaustive recall."""
+                                    task_dir, provider, row, after, run, *, report_missing_review=False):
+    """End an exactly supported public API scope without claiming exhaustive recall.
+
+    With ``report_missing_review`` a proof that holds in every respect except the explicit, accepted operation
+    review of this exact response returns ``{'missing_operation_review': True}`` instead of None, so the missing
+    step can be named as work (an operation-level acceptance of some earlier response is not a review of this one).
+    """
     from coverage_v3 import public_discovery_enabled
     if any(not isinstance(value, dict) for value in (row, after, run)):
         return None
@@ -546,14 +627,26 @@ def _current_public_ranked_scope_wait(task, plan, evidence, candidates, ledger, 
     design_route = (provider == 'serpapi_google_patents' and row.get('operation') == 'search'
         and row.get('right_type') == 'design' and row.get('type') == 'DESIGN'
         and row.get('jurisdiction') == 'US' and row.get('country') == 'US')
+    import recall
+    recall_task = recall.enabled(task)
+    if recall_task and not design_route:
+        # r5d20: a recall task's Google Patents utility page is the same single ranked page as the design lane
+        design_route = (provider == 'serpapi_google_patents' and row.get('operation') == 'search'
+            and row.get('right_type') == 'patent' and row.get('type') == 'PATENT'
+            and row.get('jurisdiction') == 'US' and row.get('country') == 'US')
     native_route = (provider == 'epo_ops' and row.get('operation') == 'search'
         and row.get('right_type') in {'patent', 'design', 'utility_model'})
     zero_route = native_route and run.get('status') == 'no_result'
     web_route = (provider == 'serper_web' and row.get('operation') == 'search'
         and row.get('right_type') == 'enforcement' and row.get('jurisdiction') == 'US'
         and row.get('gl') == 'us')
+    # Serper Images answers a single bounded page of image cards exactly like the web route: the same request
+    # identity and one-page scope checks apply; only its operation name and rights differ.
+    images_route = (provider == 'serper_images' and row.get('operation') == 'images'
+        and row.get('right_type') in {'copyright', 'trade_dress'} and row.get('jurisdiction') == 'US'
+        and row.get('gl') == 'us')
     if (task.get('retrieval_workflow_revision') != 'api-first-v3' or not public_discovery_enabled(task)
-            or not (visual_route or design_route or native_route or web_route)
+            or not (visual_route or design_route or native_route or web_route or images_route)
             or task_dir is None or candidates is None or ledger is None
             or after.get('next_action') != 'awaiting_capability' or after.get('problem_covered') is not False
             or after.get('source_run_id') != run.get('run_id')
@@ -580,12 +673,13 @@ def _current_public_ranked_scope_wait(task, plan, evidence, candidates, ledger, 
         return None
     if zero_route and (coverage.get('total_hits') != 0 or coverage.get('empty_fault_receipt') is not True):
         return None
-    if web_route and (type(row.get('num')) is not int or not 1 <= row['num'] <= 10
+    if (web_route or images_route) and (type(row.get('num')) is not int or not 1 <= row['num'] <= 10
             or scope.get('max_candidates') != row['num'] or type(scope.get('max_candidates')) is not int
             or retrieved > row['num'] or not isinstance(run.get('request_params'), dict)
             or any(run['request_params'].get(key) != row.get(key) for key in ('q','gl','hl','num'))):
         return None
-    if design_route and (type(row.get('num')) is not int or not 1 <= row['num'] <= 25
+    if design_route and (type(row.get('num')) is not int
+            or not 1 <= row['num'] <= (recall.SERPAPI_MAX_RESULTS if recall_task else 25)
             or type(scope.get('max_candidates')) is not int
             or row['num'] != scope.get('max_candidates') or retrieved > row['num']):
         return None
@@ -616,10 +710,10 @@ def _current_public_ranked_scope_wait(task, plan, evidence, candidates, ledger, 
                         and child.get('discovery_role') == 'pagination'
                         and not pagination_parent_stop_valid(task, plan, evidence, candidates, ledger, child, supplement)):
                     return None
-    reviews = [item for item in task.get('discovery_followups', []) if isinstance(item, dict)
-        and item.get('role') == 'review' and item.get('parent_query_id') == row.get('query_id')
-        and item.get('source_run_id') == run.get('run_id')]
-    if len(reviews) != 1 or reviews[0].get('outcome') != 'stop_bounded_discovery':
+    from api_first_planning import current_followup_review
+    stop = current_followup_review(task, row, run.get('run_id'))
+    reviews = [stop] if stop is not None else []
+    if not reviews or reviews[0].get('outcome') != 'stop_bounded_discovery':
         return None
     try:
         from api_first_planning import review_validation, source_files_error
@@ -633,13 +727,14 @@ def _current_public_ranked_scope_wait(task, plan, evidence, candidates, ledger, 
                 return None
             raw = load_json(Path(paths[0]))
             params = raw.get('search_parameters') if isinstance(raw, dict) else None
-            if (not isinstance(params, dict) or params.get('engine') != 'google_patents' or params.get('type') != 'DESIGN'
+            if (not isinstance(params, dict) or params.get('engine') != 'google_patents'
+                    or params.get('type') != (row.get('type') if recall_task else 'DESIGN')
                     or params.get('country') != 'US' or params.get('q') != row.get('q')
                     or str(params.get('num')) != str(row['num'])):
                 return None
         operation_review = _retained_ranked_operation_review(task, plan, evidence, task_dir, provider, run)
         if not operation_review:
-            return None
+            return {'missing_operation_review': True} if report_missing_review else None
         processed = progress(Path(task_dir), run, evidence)
         if (processed.get('material_processing_complete') is not True
                 or processed.get('returned_count') != retrieved
@@ -654,7 +749,7 @@ def _current_public_ranked_scope_wait(task, plan, evidence, candidates, ledger, 
         return None
     return {'review_sha256':sha256_json(reviews[0]), 'after_review_sha256':after.get('review_sha256'),
         'original_operation_review_sha256':sha256_json(operation_review),
-        'retrieval_scope_kind':'bounded_native_zero_with_shared_scope' if zero_route else 'public_visual_ranking' if visual_route else 'bounded_native_api_range' if native_route else 'bounded_public_enforcement_api' if web_route else 'bounded_us_design_api',
+        'retrieval_scope_kind':'bounded_native_zero_with_shared_scope' if zero_route else 'public_visual_ranking' if visual_route else 'bounded_native_api_range' if native_route else 'bounded_public_enforcement_api' if web_route else 'bounded_public_images_api' if images_route else 'bounded_us_design_api',
         **({'total_record_count':total, 'unretrieved_record_count':total - retrieved,
             'retained_range_start':start, 'retained_range_end':end} if native_route and not zero_route else {}),
         **({'shared_direction_scope':shared} if zero_route else {}),
@@ -804,7 +899,7 @@ def work_entries(task, plan, evidence, *, candidates=None, ledger=None, suppleme
                         row_base = {**base,'direction_id':d['direction_id'],'query_id':row['query_id'],
                                     'provider':provider,'discovery_intent_id':row.get('discovery_intent_id'),
                                     'plan_entry_sha256':sha256_json(row)}
-                        if before is None or before.get('direction_review_sha256') != review['review_sha256']:
+                        if before is None or bound_direction_sha256(task, plan, evidence, before, review, task_dir) is None:
                             prior_attempts = [run for run in evidence.get('source_runs', [])
                                 if run.get('query_id') == row['query_id'] and run.get('provider') == provider
                                 and run.get('plan_entry_sha256') == sha256_json(row)
@@ -835,13 +930,28 @@ def work_entries(task, plan, evidence, *, candidates=None, ledger=None, suppleme
                                 and run.get('status') in {'success','no_result'}]
                         if runs:
                             if after and after.get('before_review_sha256') == before['review_sha256']:
+                                import auto_refine
+                                if (auto_refine.enabled(task) and not after.get('problem_covered')
+                                        and after.get('next_action') in {'refine', 'fallback', 'awaiting_capability'}
+                                        and auto_refine.has_child(plan, row, evidence)):
+                                    # The reviewed next search exists; it carries this direction's obligation.
+                                    continue
                                 waiting_clue = (_after_waiting_information(review, after)
                                                 if after.get('next_action') == 'awaiting_information' else None)
                                 bounded_review = None
                                 fault_review = None
                                 if after.get('next_action') == 'awaiting_capability':
                                     public_scope = _current_public_ranked_scope_wait(task, plan, evidence,
-                                        candidates, ledger, supplement, task_dir, provider, row, after, runs[-1])
+                                        candidates, ledger, supplement, task_dir, provider, row, after, runs[-1],
+                                        report_missing_review=review_binding_relaxed(task))
+                                    if public_scope and public_scope.get('missing_operation_review'):
+                                        # Everything else about the bounded scope holds; only an explicit accepted
+                                        # review of this exact response is missing. Say so, instead of a replan that
+                                        # can never close it (host-triage tasks; older tasks keep the replan entry).
+                                        pending.append({**row_base,'kind':'agent_investigation','state':'awaiting_review',
+                                            'reason':'SOURCE_OPERATION_REVIEW_REQUIRED','source_run_id':runs[-1]['run_id'],
+                                            'purpose':'bounded_public_scope_proof'})
+                                        continue
                                     if public_scope:
                                         pending.append(public_ranked_scope_entry(row_base, row, after, runs[-1], public_scope))
                                         continue
@@ -849,6 +959,9 @@ def work_entries(task, plan, evidence, *, candidates=None, ledger=None, suppleme
                                         ledger, supplement, task_dir, provider, row, after, runs[-1])
                                     bounded_review = _current_bounded_capability_wait(task, plan, evidence,
                                         candidates, ledger, supplement, task_dir, provider, row, after, runs[-1])
+                                if bounded_review is None and fault_review is None:
+                                    bounded_review = refinement_exhausted_wait(task, plan, evidence, candidates,
+                                        ledger, supplement, task_dir, provider, row, after, runs[-1])
                                 if waiting_clue:
                                     # The matching user-information entry was
                                     # emitted above from this same direction review.

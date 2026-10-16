@@ -202,3 +202,108 @@ class ProductChangeTests(unittest.TestCase):
 
 
 if __name__=='__main__': unittest.main()
+
+
+class AdditiveScopeChangeTests(unittest.TestCase):
+    """best-estimate-risk-v2: an added direction/right type reopens nothing and records applicability itself."""
+
+    def setUp(self):
+        self.f=delivery_fixture.ProductDeliveryTests(); self.f.setUp(); self.addCleanup(self.f.doCleanups)
+        self.run=self.f.run
+
+    def additive_save(self, marker):
+        self.f.save(); generate_plan(self.run)
+        task=load_json(self.run/'task.json')
+        task['assessment_revision']='known-findings-risk-v1'; task['best_estimate_revision']=marker
+        atomic_write_json(self.run/'task.json',task)
+        ref=task['product_identity']['evidence_id']
+        atomic_write_json(self.run/'normalized-candidates.json',{'schema_version':'2.4-free','task_id':task['task_id'],
+            'patents':[{'candidate_id':'CAND-pat','jurisdiction':'US','right_type':'patent','sources':[],'evidence_refs':[ref]}],
+            'trademarks':[],'copyright_assets':[],
+            'enforcement':[{'candidate_id':'CAND-web','jurisdiction':'US','right_type':'unknown','sources':[],'evidence_refs':[ref]}]})
+        self.f.payload['expected_scope_sha256']=task['product_scope']['scope_sha256']
+        scope=self.f.payload['scope']
+        product=scope['objects'][0]
+        product['right_types']=sorted(set(product['right_types'])|{'enforcement'})
+        base=scope['directions'][-1]
+        scope['directions'].append({**deepcopy(base),'direction_id':'DIR-enforcement-added','right_type':'enforcement',
+                                    'object_ids':[product['object_id']],'reason':'Public enforcement signals for the product.'})
+        self.f.save()
+        return load_json(self.run/'task.json'), load_json(self.run/'evidence.json')
+
+    def test_additive_change_reopens_no_query_and_records_usable_applicability(self):
+        task,evidence=self.additive_save('best-estimate-risk-v2')
+        event=task['product_change_history'][-1]
+        self.assertTrue(event['additive'])
+        self.assertEqual(event['affected_query_ids'],[])
+        self.assertEqual(event['affected_candidate_ids'],['CAND-web'])
+        rows=task['product_applicability_reviews']
+        self.assertEqual([(r['candidate_id'],r['status'],r['reviewer']) for r in rows],
+                         [('CAND-web','usable','program:additive_scope_change')])
+        verify(task,evidence,self.run)
+        assessment_gate(task,evidence,[])        # nothing left for an Agent to review
+
+    def test_v1_task_keeps_the_round_6_impact(self):
+        task,evidence=self.additive_save('best-estimate-risk-v1')
+        event=task['product_change_history'][-1]
+        self.assertNotIn('additive',event)
+        self.assertFalse(task.get('product_applicability_reviews'))
+
+    def test_additive_delta_predicate(self):
+        from product_change import additive_delta
+        obj={'object_id':'O','kind':'product','relation':'target','right_types':['patent'],'description':'d'}
+        old={'facts':[],'objects':[obj],'directions':[{'direction_id':'D1','scenario_id':'s','right_type':'patent','fact_ids':[],'object_ids':['O']}]}
+        grown={**old,'objects':[{**obj,'right_types':['patent','enforcement']}],
+               'directions':old['directions']+[{'direction_id':'D2','scenario_id':'s','right_type':'enforcement','fact_ids':[],'object_ids':['O']}]}
+        self.assertTrue(additive_delta(old,grown))
+        self.assertFalse(additive_delta(old,{**grown,'objects':[{**obj,'description':'changed','right_types':['patent','enforcement']}]}))
+        self.assertFalse(additive_delta(old,{**old,'objects':[{**obj,'right_types':[]}]}))
+        self.assertFalse(additive_delta(old,old))
+
+
+class RebaseProgressTests(unittest.TestCase):
+    """best-estimate-risk-v2: stale version items after an additive change are re-planned/retired by the program."""
+
+    def test_unsubmitted_query_is_replanned_and_covered_items_removed(self):
+        import tempfile
+        from pathlib import Path
+        from unittest.mock import patch
+        import product_change
+        root = Path(tempfile.mkdtemp()); self.addCleanup(__import__('shutil').rmtree, root, True)
+        task = {'task_id': 'T', 'assessment_revision': 'known-findings-risk-v1', 'best_estimate_revision': 'best-estimate-risk-v2',
+                'product_change_revision': 'product-change-v1', 'product_change_version': 2,
+                'product_change_history': [{'change_id': 'CHG-1', 'version': 2, 'additive': True}]}
+        atomic_write_json(root / 'task.json', task)
+        atomic_write_json(root / 'evidence.json', {'task_id': 'T', 'review_progress_events': [{'kind': 'initialize'}],
+            'source_runs': [{'query_id': 'Q-done', 'submission_state': 'submitted'},
+                            {'query_id': 'Q-old', 'submission_state': 'submitted'}]})
+        scope = lambda right, version: {'scenario_id': 'product_entry', 'jurisdiction': 'US', 'right_type': right,
+                                        'product_version': version}
+        items = [{'item_id': 'ITEM-a', 'kind': 'query', 'query_id': 'Q-new', 'state': 'planned', 'scope': scope('design', '1'),
+                  'module_ids': ['appearance_patent'], 'acceptance_condition': 'c'},
+                 {'item_id': 'ITEM-b', 'kind': 'query', 'query_id': 'Q-done', 'state': 'completed', 'scope': scope('patent', '1'),
+                  'module_ids': ['utility_patent'], 'acceptance_condition': 'c'},
+                 {'item_id': 'ITEM-c', 'kind': 'query', 'query_id': 'Q-cur', 'state': 'planned', 'scope': scope('patent', '2'),
+                  'module_ids': ['utility_patent'], 'acceptance_condition': 'c'},
+                 {'item_id': 'ITEM-d', 'kind': 'query', 'query_id': 'Q-old', 'state': 'completed', 'scope': scope('copyright', '1'),
+                  'module_ids': ['copyright_ip'], 'acceptance_condition': 'c'}]
+        calls = []
+        with patch('review_progress_stage_a.ledger', return_value={'items': items}), \
+                patch('review_progress_stage_a.record_event', side_effect=lambda d, r: calls.append(r)):
+            result = product_change.rebase_progress(root)
+        self.assertEqual([c['kind'] for c in calls], ['add', 'remove', 'remove'])
+        self.assertEqual(calls[0]['items'][0]['query_id'], 'Q-new')
+        self.assertEqual(calls[0]['items'][0]['scope']['product_version'], '2')
+        self.assertEqual(sorted(result['removed']), ['ITEM-a', 'ITEM-b'])
+        self.assertEqual(result['left'], ['ITEM-d'])           # submitted, nothing covers it: left for the Agent
+        self.assertTrue(all(c['actor'] == 'program:additive_scope_change' for c in calls))
+
+    def test_non_additive_change_is_left_alone(self):
+        import tempfile
+        from pathlib import Path
+        import product_change
+        root = Path(tempfile.mkdtemp()); self.addCleanup(__import__('shutil').rmtree, root, True)
+        atomic_write_json(root / 'task.json', {'task_id': 'T', 'assessment_revision': 'known-findings-risk-v1',
+            'best_estimate_revision': 'best-estimate-risk-v2', 'product_change_revision': 'product-change-v1',
+            'product_change_version': 2, 'product_change_history': [{'change_id': 'CHG-1', 'version': 2}]})
+        self.assertEqual(product_change.rebase_progress(root)['reason'], 'LATEST_CHANGE_NOT_ADDITIVE')

@@ -9,6 +9,7 @@ from common import atomic_write_json, load_json, now_iso, resolve_retained_path,
 
 EVENTS = 'public_identity_investigations'
 REVISION = 'public-identity-bounded-v1'
+MULTICOUNTRY = 'public-identity-multicountry-v2'
 GAPS = {'right_type', 'rights_holder', 'first_publication', 'supply_chain_authorization'}
 
 
@@ -131,16 +132,38 @@ def enabled(task):
         and task.get('public_discovery_routing_revision') == 'public-discovery-v1')
 
 
+# Public sales-image routes whose cards can only be associated with a product, never identify a right.
+# Lens is the original route; best-estimate-risk-v2 tasks also accept Serper Google Images cards (their
+# references carry no collection name: every card comes from the response's single "images" list).
+LENS_ROUTE = {'provider': 'serpapi_google_lens', 'index': 'google_lens', 'collections': {'visual_matches', 'exact_matches'}}
+SERPER_ROUTE = {'provider': 'serper_images', 'index': 'google_images', 'collections': {'images'}, 'default_collection': 'images'}
+
+
+def _routes(task):
+    from assessment_estimate import best_estimate_v2
+    return (LENS_ROUTE, SERPER_ROUTE) if best_estimate_v2(task) else (LENS_ROUTE,)
+
+
+def _route_for(task, provider):
+    return next((route for route in _routes(task) if route['provider'] == provider), None)
+
+
+def _ref_collection(ref, route):
+    return ref.get('source_collection') or route.get('default_collection')
+
+
 def public_sales_lead(task, candidate):
-    return (enabled(task) and candidate.get('right_type') == 'unknown'
-        and candidate.get('source_index') == 'google_lens'
-        and candidate.get('match_type') in {'visual_matches','exact_matches'}
-        and not any(candidate.get(k) for k in ('publication_number','application_number','grant_number',
-            'registration_number','serial_number','record_number','claims','claim','claim_text'))
-        and isinstance(candidate.get('sources'),list) and bool(candidate['sources'])
-        and all(isinstance(ref,dict) and ref.get('provider') == 'serpapi_google_lens'
-            and ref.get('source_collection') in {'visual_matches','exact_matches'}
-            and not (ref.get('identity_observation') or {}).get('identifiers') for ref in candidate['sources']))
+    if not (enabled(task) and candidate.get('right_type') == 'unknown'
+            and not any(candidate.get(k) for k in ('publication_number','application_number','grant_number',
+                'registration_number','serial_number','record_number','claims','claim','claim_text'))
+            and isinstance(candidate.get('sources'),list) and bool(candidate['sources'])):
+        return False
+    route = next((r for r in _routes(task) if r['index'] == candidate.get('source_index')), None)
+    if route is None or (route is LENS_ROUTE and candidate.get('match_type') not in {'visual_matches','exact_matches'}):
+        return False
+    return all(isinstance(ref,dict) and ref.get('provider') == route['provider']
+               and _ref_collection(ref, route) in route['collections']
+               and not (ref.get('identity_observation') or {}).get('identifiers') for ref in candidate['sources'])
 
 
 def _text(value):
@@ -148,6 +171,13 @@ def _text(value):
 
 
 def _review_valid(request):
+    if isinstance(request, dict) and 'shared_query_ids_by_country' in request:
+        mapping = request['shared_query_ids_by_country']
+        if not isinstance(mapping, dict) or not mapping:
+            return False
+        return all(_text(country) and _review_valid({k:v for k,v in request.items()
+            if k != 'shared_query_ids_by_country'} | {'shared_query_ids': ids})
+            for country, ids in mapping.items())
     return (isinstance(request,dict) and request.get('reading_purpose') == 'source_association'
         and request.get('individual_image_use') == 'not_used_for_expression_or_authorship'
         and isinstance(request.get('unresolved_facts'),list)
@@ -177,7 +207,7 @@ def _validated_events(evidence, task):
         if not isinstance(event,dict):
             raise ValueError('PUBLIC_IDENTITY_EVENTS_INVALID')
         unsigned = {k:v for k,v in event.items() if k != 'event_id'}
-        if (not _review_valid(event) or event.get('revision') != REVISION or event.get('previous_event_id') != previous
+        if (not _review_valid(event) or event.get('revision') not in {REVISION, MULTICOUNTRY} or event.get('previous_event_id') != previous
                 or event.get('event_id') != stable_id('PUBLIC-ID', task['task_id'], sha256_json(unsigned))):
             raise ValueError('PUBLIC_IDENTITY_HISTORY_CHANGED')
         previous = event['event_id']
@@ -189,14 +219,19 @@ def binding(task_dir, task, evidence, candidates, ledger, request, supplement=No
     from decision_workflow import triage_summary, candidate_content_sha256, candidate_identity_fingerprint
     from source_result_processing import _retained_run, _latest_decisions
     from assessment_v24 import evidence_index
+    multicountry = (task.get('public_identity_execution_revision') == MULTICOUNTRY
+        and isinstance(request, dict) and 'shared_query_ids_by_country' in request)
     if (not isinstance(request,dict) or not enabled(task) or request.get('jurisdiction') != 'UNLOCATED'
             or request.get('right_type') != 'unknown'
-            or len(task.get('target_jurisdictions', [])) != 1):
+            or (not multicountry and len(task.get('target_jurisdictions', [])) != 1)):
         raise ValueError('PUBLIC_IDENTITY_SCOPE_INVALID')
     state = _validation(task,evidence,candidates,ledger,supplement,task_dir)
     _guard_file(state,task_dir/'task.json')
     _guard_file(state,task_dir/'search-plan.json')
-    country = task['target_jurisdictions'][0]
+    countries = task['target_jurisdictions']
+    country = countries[0]
+    if multicountry and set(request['shared_query_ids_by_country']) != set(countries):
+        raise ValueError('PUBLIC_IDENTITY_ALL_COUNTRIES_REQUIRED')
     cid, sid = request.get('candidate_id'), request.get('scenario_id')
     matches = [c for c in candidates.get('copyright_assets', []) if c.get('candidate_id') == cid]
     if len(matches) != 1:
@@ -219,12 +254,13 @@ def binding(task_dir, task, evidence, candidates, ledger, request, supplement=No
         raise ValueError('PUBLIC_IDENTITY_ORIGINAL_SOURCE_REQUIRED')
     sources = []
     for ref in source_refs:
-        if (ref.get('provider') != 'serpapi_google_lens'
-                or ref.get('source_collection') not in {'visual_matches', 'exact_matches'}
+        route = _route_for(task, ref.get('provider'))
+        collection = _ref_collection(ref, route) if route else None
+        if (route is None or collection not in route['collections']
                 or (ref.get('identity_observation') or {}).get('identifiers')):
             raise ValueError('PUBLIC_IDENTITY_NOT_PUBLIC_SALES_LEAD')
         runs = [r for r in evidence.get('source_runs', []) if r.get('run_id') == ref.get('source_run_id')]
-        if (len(runs) != 1 or runs[0].get('status') != 'success' or runs[0].get('jurisdiction') != country
+        if (len(runs) != 1 or runs[0].get('status') != 'success' or runs[0].get('jurisdiction') not in (countries if multicountry else [country])
                 or runs[0].get('source_environment') in {'test_fixture','sandbox','non_production'}
                 or runs[0].get('fixture') or runs[0].get('test_only')):
             raise ValueError('PUBLIC_IDENTITY_SOURCE_SCOPE_INVALID')
@@ -250,29 +286,38 @@ def binding(task_dir, task, evidence, candidates, ledger, request, supplement=No
             raise ValueError('PUBLIC_IDENTITY_SOURCE_FIELDS_REQUIRED')
         source_row = next(r for r in index['rows'] if r['position'] == positions[0])
         original = json.loads(raw_body)[source_row['collection']][source_row['collection_position']-1]
-        if (source_row['collection'] != ref['source_collection']
+        if (source_row['collection'] != collection
                 or original.get('title') != fields['title'] or original.get('link') != fields['url']
                 or any(original.get(k) for k in ('publication_number','registration_number','serial_number','claims','claim'))):
             raise ValueError('PUBLIC_IDENTITY_SOURCE_FIELDS_CHANGED')
         sources.append({'run_id':run['run_id'], 'run_sha256':sha256_json(run),
             'source_anchor':ref.get('source_anchor'), 'record_sha256':ref['source_record_sha256'],
-            'position':positions[0], 'reading_fields':{'title':fields['title'],'url':fields['url']}})
+            'position':positions[0], 'reading_fields':{'title':fields['title'],'url':fields['url']},
+            **({'query_jurisdiction': run['jurisdiction'], 'right_jurisdiction': candidate.get('jurisdiction', 'UNLOCATED')} if multicountry else {})})
     plan = load_json(task_dir / 'search-plan.json')
     registry = evidence_index(evidence)
     registry.update({e['evidence_id']:e for e in (supplement or {}).get('evidence', [])})
-    package_key = ('shared',sid,country,tuple(sorted(request.get('shared_query_ids',[]))))
-    if state is not None and package_key in state['memo']:
-        shared, dependencies = state['memo'][package_key]
-    else:
-        shared, dependencies = _shared_packages(task_dir,task,evidence,plan,registry,sid,country,
-            request.get('shared_query_ids',[]),state)
-        if state is not None:
-            state['memo'][package_key] = (shared,dependencies)
+    all_shared, all_dependencies = [], []
+    for investigation_country in countries if multicountry else [country]:
+        ids = (request['shared_query_ids_by_country'][investigation_country] if multicountry
+               else request.get('shared_query_ids', []))
+        package_key = ('shared', sid, investigation_country, tuple(sorted(ids)))
+        if state is not None and package_key in state['memo']:
+            shared, dependencies = state['memo'][package_key]
+        else:
+            shared, dependencies = _shared_packages(task_dir, task, evidence, plan, registry,
+                sid, investigation_country, ids, state)
+            if state is not None:
+                state['memo'][package_key] = (shared, dependencies)
+        all_shared.extend([{**row, 'investigation_jurisdiction': investigation_country} for row in shared]
+                          if multicountry else shared)
+        all_dependencies.extend(dependencies)
     return {'candidate_identity_sha256':candidate_identity_fingerprint('copyright_assets',candidate),
         'candidate_content_sha256':candidate_content_sha256(candidate,evidence,supplement,task=task),
         'annotation_id':annotation['annotation_id'],'annotation_sha256':sha256_json(annotation),
-        'target_jurisdictions':[country],'sources':sources,'shared_public_packages':shared,
-        'external_dependencies':dependencies}
+        'target_jurisdictions':list(countries) if multicountry else [country],
+        'sources':sources,'shared_public_packages':all_shared,
+        'external_dependencies':all_dependencies}
 
 
 def _shared_packages(task_dir, task, evidence, plan, registry, sid, country, shared_query_ids, state):
@@ -372,9 +417,14 @@ def record(task_dir, request):
             raise ValueError('PUBLIC_IDENTITY_COMPLETED_READ_ONLY')
         supplement = scenario_supplement(task_dir,task=task,evidence=evidence)
         bound = binding(task_dir,task,evidence,candidates,ledger,request,supplement)
+        multicountry = 'shared_query_ids_by_country' in request
+        if multicountry and task.get('public_identity_execution_revision') != MULTICOUNTRY:
+            raise ValueError('PUBLIC_IDENTITY_MULTICOUNTRY_NEW_TASK_REQUIRED')
         item = {k:request[k] for k in ('candidate_id','scenario_id','jurisdiction','right_type',
-            'reading_purpose','individual_image_use','unresolved_facts','shared_query_ids','reviewer','reason','resume_condition')}
-        item.update(revision=REVISION,task_root=str(task_dir),binding=bound)
+            'reading_purpose','individual_image_use','unresolved_facts','reviewer','reason','resume_condition')}
+        key = 'shared_query_ids_by_country' if multicountry else 'shared_query_ids'
+        item[key] = request[key]
+        item.update(revision=MULTICOUNTRY if multicountry else REVISION,task_root=str(task_dir),binding=bound)
         events = _events(evidence,task)
         for prior in reversed(events):
             if all(prior.get(k) == v for k,v in item.items()):

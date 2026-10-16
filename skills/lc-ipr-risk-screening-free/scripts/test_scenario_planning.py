@@ -40,6 +40,7 @@ class ScenarioPlanningTests(unittest.TestCase):
         self.task.pop("specialty_analysis_revision", None)  # Historical fixture predates 06 specialty records.
         self.task.pop("distinctive_rights_revision", None)  # Historical fixture predates 07A factual records.
         self.task.pop("discovery_semantics_revision", None)  # Historical scenario-routing fixture.
+        self.task.pop("recall_revision", None)  # Historical planning fixture predates r5d20 concept-group recall.
         self.task.pop("retrieval_workflow_revision", None)
         self.task.pop("retrieval_policy", None)
         self.task.pop("review_policy_revision", None)

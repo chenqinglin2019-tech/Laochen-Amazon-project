@@ -236,8 +236,16 @@ def check_completion(task_dir, *, first_review=None, second_review=None, adjudic
         return base | {"status": "continue", "stage": "setup", "reasons": ["SEARCH_PLAN_NOT_CREATED"],
             "progress_digest": progress_digest(source, *paths), "next_actions": [
                 {"action": "Complete credentials preflight, product capture/analysis and generate_search_plan.py; preserve auth-first order."}]}
-    view = work_view_from_dir(source, first_review=load_json(first) if first.is_file() else None,
-                             second_review=load_json(second) if second.is_file() else None)
+    first_value = load_json(first) if first.is_file() else None
+    second_value = load_json(second) if second.is_file() else None
+    view = None
+    if validation_context is not None and output_dir is not None:
+        from delivery_validation import require
+        view = require(validation_context).work_view(output_dir, source=source,
+            first_review=first_value, second_review=second_value,
+            reviews={'first_review':first, 'second_review':second, 'adjudication':chief if chief.is_file() else None})
+    if view is None:
+        view = work_view_from_dir(source, first_review=first_value, second_review=second_value)
     packet = actionable_packet(view)
     errors = []
     stage = workflow_stage(view, packet, first_review=first, second_review=second,
@@ -273,7 +281,7 @@ def check_completion(task_dir, *, first_review=None, second_review=None, adjudic
         actions = [{"action": {"independent_review": "Write both independent reviews against the current frozen digest.",
             "adjudication": "Write evidence-bound adjudication.json.",
             "delivery": "Use delivery_versions_stage_e.py --action deliver with the frozen version and a NEW explicit local destination; recheck actual entry before completion.",
-            "publication": "Publish with publish_report.py --mode auto --output-dir NEW_BUILD --deliver-to NEW_ENTRY --require-complete (new directories), then run completion_check.py --output-dir NEW_ENTRY.",
+            "publication": "Publish with publish_report.py --mode auto --output-dir NEW_BUILD --deliver-to NEW_ENTRY --require-complete (new directories); its successful complete/limited_round_closed response includes the actual-entry completion check.",
             "validation": "Diagnose independent validation failure; do not edit receipts to bypass it.",
             "investigation": "Resolve the recorded user/access/unknown-submission obligations; do not blindly retry submissions."}[stage]}]
     if paused:

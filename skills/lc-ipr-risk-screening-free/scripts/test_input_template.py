@@ -107,6 +107,45 @@ class InputTemplateTests(unittest.TestCase):
         self.assertNotEqual(again.returncode, 0)
 
 
+    def test_a_replan_that_follows_an_after_review_gets_the_after_template_to_reconsider(self):
+        h = self.h
+        h.direction(); h.before(); h.source()
+        h.after(problem_covered=False, next_action='refine', uncovered_clues=['fact:shape'],
+                excluded_by_narrowing=['A narrower expression of the outline was not searched'])
+        files, summaries, skipped = it.build(self.run_dir)
+        event = next(e for e in files["discovery-after.json"]["events"] if e["right_type"] == "design")
+        self.assertEqual(event["source_run_id"], "RUN-SEMANTIC")
+        self.assertIsNone(event["next_action"])                # still the Agent's judgment
+        self.assertIsNone(event["reviewer"])
+        entry = {"work_id": "WORK-X", "reason": it.AFTER_RECONSIDER_REASON, "source_run_id": "RUN-SEMANTIC",
+                 "query_id": "Q", "direction_id": "outline"}
+        self.assertTrue(it.supported(entry))
+        self.assertFalse(it.supported({**entry, "historical_expression_review_missing": True}))
+        self.assertFalse(it.supported({**entry, "source_run_id": None}))
+
+    def test_cli_direction_rereview_flag_writes_one_extra_file_and_rejects_unknown_scopes(self):
+        script = str(Path(__file__).resolve().parent / "input_template.py")
+        out = self.run_dir.parent / "templates-rereview"
+        done = subprocess.run([sys.executable, script, "--task-dir", str(self.run_dir), "--output-dir", str(out),
+                               "--direction-rereview", "product_entry:design:US"],
+                              capture_output=True, text=True, encoding="utf-8")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        report = json.loads(done.stdout)
+        written = {row["file"].rsplit("/", 1)[-1]: row for row in report["written"]}
+        self.assertIn("discovery-direction-rereview.json", written)
+        self.assertIn("record_discovery_semantics.py", written["discovery-direction-rereview.json"]["command"])
+        event = load_json(out / "discovery-direction-rereview.json")["events"][0]
+        self.assertEqual((event["scenario_id"], event["right_type"], event["jurisdiction"]),
+                         ("product_entry", "design", "US"))
+        self.assertIsNone(event["reviewer"])
+        bad = subprocess.run([sys.executable, script, "--task-dir", str(self.run_dir),
+                              "--output-dir", str(self.run_dir.parent / "templates-bad"),
+                              "--direction-rereview", "product_entry:no_such_right:US"],
+                             capture_output=True, text=True, encoding="utf-8")
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertIn("INPUT_TEMPLATE_DIRECTION_SCOPE_UNKNOWN", bad.stderr)
+
+
 class ResultProcessingTemplateTests(unittest.TestCase):
     def setUp(self):
         self.h = result_fixtures.ResultProcessingTests("test_parse_and_disposition_batch_writes_once_and_repeats_without_write")

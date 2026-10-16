@@ -74,8 +74,13 @@ def _prepare(task, plan, evidence, task_dir: Path, request):
             before = ds.current(task,plan,evidence,stage='before',scenario_id=event.get('scenario_id'),
                 jurisdiction=event.get('jurisdiction'),right_type=event.get('right_type'),
                 direction_id=event.get('direction_id'),provider=provider,row=row,task_dir=task_dir)
-            if before is None or before['direction_review_sha256'] != direction['review_sha256']:
+            bound = (ds.bound_direction_sha256(task, plan, evidence, before, direction, task_dir)
+                     if before is not None else None)
+            if bound is None:
                 raise ValueError('DISCOVERY_BEFORE_REVIEW_REQUIRED')
+            # An after review is bound to the direction review its before review was recorded against; that is
+            # the current one, or an earlier one that differs only in unmapped-clue bookkeeping.
+            event['direction_review_sha256'] = bound
             event['before_review_sha256'] = before['review_sha256']
             runs = [run for run in evidence.get('source_runs', []) if run.get('run_id') == event.get('source_run_id')]
             if len(runs) != 1:

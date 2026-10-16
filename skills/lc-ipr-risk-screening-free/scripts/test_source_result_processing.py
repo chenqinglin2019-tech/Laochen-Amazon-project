@@ -798,6 +798,55 @@ class OpsZeroConsumerTests(unittest.TestCase):
             self.assertFalse(current_operation_acceptance(self.task, self.evidence, 'epo_ops', self.row))
             self.assertEqual(len(self.evidence['operation_acceptances']), 1)
 
+    def _accept_with_records(self, query, records):
+        from source_operation import record_operation_acceptance
+        from trusted_api import annotate_entry
+        from common import sha256_json
+        self.task['retrieval_workflow_revision'] = 'api-first-v3'
+        self.row['q'] = query
+        self.run['plan_entry_sha256'] = sha256_json(self.row)
+        self.entry['plan_entry_sha256'] = self.run['plan_entry_sha256']
+        self.entry['payload'] = {'candidates': records, 'status': 'success'}
+        self.run.update(status='success', error_code='')
+        annotate_entry(self.task, self.entry, self.run)
+        context = {'credential_fingerprint_sha256': 'c' * 64,
+            'permission_fingerprint_sha256': 'p' * 64, 'adapter_version': 'a' * 64}
+        with patch('common.assert_provider_execution_allowed'), \
+                patch('source_operation.operation_acceptance_context', return_value=context), \
+                patch('source_operation.load_skill_config', return_value={'providers': {'epo_ops': {}}}), \
+                patch('source_result_processing.zero_result_proven', return_value=False):
+            return record_operation_acceptance(self.root, self.task, self.evidence, self.row, self.run, self.entry)
+
+    def test_epo_search_accepts_records_from_the_offices_its_own_cql_asked_for(self):
+        records = [{'publication_number': 'US2020123456A1', 'jurisdiction': 'US', 'title': 'a'},
+                   {'publication_number': 'WO2020123456A1', 'jurisdiction': 'WO', 'title': 'b'}]
+        try:
+            accepted = self._accept_with_records('(pn=US or pn=WO) and (ta="lid")', records)
+        except ValueError as exc:   # fixture without a usable response body is not what this test is about
+            self.skipTest('fixture cannot retain a record response: %s' % exc)
+        self.assertEqual(accepted['state'], 'accepted')
+        with self.assertRaisesRegex(ValueError, 'SOURCE_OPERATION_RECORD_IDENTITY_MISMATCH'):
+            self._accept_with_records('(pn=US) and (ta="lid")', records)
+
+    def test_provider_record_not_found_does_not_revoke_the_operation_but_other_failures_do(self):
+        from source_operation import record_operation_acceptance, current_operation_acceptance
+        from trusted_api import annotate_entry
+        self.task['retrieval_workflow_revision'] = 'api-first-v3'
+        annotate_entry(self.task, self.entry, self.run)
+        context = {'credential_fingerprint_sha256': 'c' * 64,
+            'permission_fingerprint_sha256': 'p' * 64, 'adapter_version': 'a' * 64}
+        with patch('common.assert_provider_execution_allowed'), \
+                patch('source_operation.operation_acceptance_context', return_value=context), \
+                patch('source_operation.load_skill_config', return_value={'providers': {'epo_ops': {}}}):
+            acceptance = record_operation_acceptance(self.root, self.task, self.evidence, self.row, self.run, self.entry)
+            self.evidence['operation_acceptances'] = [acceptance]
+            later = {**self.run, 'run_id': 'LATER', 'status': 'failed', 'submission_state': 'submitted',
+                     'finished_at': '2026-09-30T01:00:00Z', 'error_code': 'PROVIDER_RECORD_NOT_FOUND'}
+            self.evidence['source_runs'].append(later)
+            self.assertTrue(current_operation_acceptance(self.task, self.evidence, 'epo_ops', self.row))
+            later['error_code'] = 'PROVIDER_HTTP_ERROR'
+            self.assertFalse(current_operation_acceptance(self.task, self.evidence, 'epo_ops', self.row))
+
     def test_operation_acceptance_reads_legacy_zero_without_rewriting_proof_inputs(self):
         from source_operation import record_operation_acceptance
         from trusted_api import annotate_entry

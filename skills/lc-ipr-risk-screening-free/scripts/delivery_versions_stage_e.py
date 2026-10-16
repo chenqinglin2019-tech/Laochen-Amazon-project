@@ -207,8 +207,9 @@ def _file_errors(directory, files):
     # Report links must resolve locally. Retained originals in files/ keep their
     # source-site links unchanged; their bytes are still checked above.
     for name in files:
-        if name.endswith('.html') and not name.startswith('files/') and (directory / name).is_file():
-            html = (directory / name).read_text()
+        # r9: a record written on Windows before r9 names files\\...; both spellings are the retained originals
+        if name.endswith('.html') and not name.replace('\\', '/').startswith('files/') and (directory / name).is_file():
+            html = (directory / name).read_text(encoding="utf-8")
             from urllib.parse import unquote, urlsplit
             for link in re.findall(r'(?:href|src)=["\']([^"\']+)["\']', html):
                 parsed = urlsplit(link)
@@ -234,7 +235,7 @@ def _file_errors(directory, files):
                         errors.append('DELIVERY_JSON_REFERENCE_UNAVAILABLE:' + link)
                 elif parsed.fragment and target.suffix in {'.html', '.htm'}:
                     fragment = unquote(parsed.fragment)
-                    if not re.search(r'(?:id|name)=["\']' + re.escape(fragment) + r'["\']', target.read_text()):
+                    if not re.search(r'(?:id|name)=["\']' + re.escape(fragment) + r'["\']', target.read_text(encoding="utf-8")):
                         errors.append('DELIVERY_LOCAL_ANCHOR_UNAVAILABLE:' + link)
     return errors
 

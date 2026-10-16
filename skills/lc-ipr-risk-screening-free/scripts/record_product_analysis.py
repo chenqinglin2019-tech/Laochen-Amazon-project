@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -38,6 +39,9 @@ def validate_input(task: dict[str, Any], payload: dict[str, Any]) -> dict[str, A
     if not scope_enabled(task) and (not isinstance(product.get("structure"), list) or not product["structure"]):
         raise ValueError("PRODUCT_ANALYSIS_STRUCTURE_REQUIRED")
     merged = {**task, "product": {**task.get("product", {}), **product}, "query_terms": payload["query_terms"]}
+    if 'investigation_profile' in payload:
+        from investigation_policy import bind_profile
+        merged['investigation_profile'] = bind_profile(merged, payload['investigation_profile'])
     errors = inventory_validation_errors(merged)
     if errors:
         raise ValueError("PRODUCT_INVENTORY_INVALID: " + "; ".join(errors))
@@ -92,7 +96,8 @@ def main() -> None:
     atomic_write_json(task_dir / "task.json", merged)
     if args.revise:
         expanded = subprocess.run([sys.executable, str(Path(__file__).with_name("generate_search_plan.py")),
-            "--task-dir", str(task_dir), "--expand"], check=False, text=True, capture_output=True)
+            "--task-dir", str(task_dir), "--expand"], check=False, text=True, encoding="utf-8", errors="replace",
+            capture_output=True, env={**os.environ, "PYTHONUTF8": "1"})      # r9: UTF-8 on Windows too
         if expanded.returncode:
             raise ValueError("PRODUCT_ANALYSIS_REPLAN_FAILED: " + expanded.stderr[-800:])
     print(json.dumps({"task_id": merged["task_id"], "status": "confirmed", "identity_sha256": merged["product"]["analysis"]["identity_sha256"]}, ensure_ascii=False))

@@ -86,6 +86,11 @@ def prepare_review_context(task_dir):
 
 
 def current_digest(task_dir: Path) -> str:
+    from work_view_memo import cached
+    return cached(task_dir, 'review_digest', {}, lambda: _current_digest(task_dir))
+
+
+def _current_digest(task_dir: Path) -> str:
     from workflow_v24 import _scenario_context, scenario_supplement
     from assessment_estimate import review_digest
     task = load_json(task_dir / 'task.json')
@@ -143,6 +148,7 @@ def readiness(task_dir: Path) -> dict:
                    if row.get('state') not in {'removed', 'exempt'}
                    and row.get('scope', {}).get('product_version') != _version(task)]
     plan_required = bool(task.get('review_progress_revision')) and view.get('review_progress', {}).get('status') == 'plan_required'
+    blockers.extend(publication_gate_blockers(task))
     digest = current_digest(task_dir)
     from assessment_estimate import known_findings_enabled
     publication_gate = preparation_issues_from_dir(task_dir, task=task, prepared_view=view) if known_findings_enabled(task) else None
@@ -154,6 +160,31 @@ def readiness(task_dir: Path) -> dict:
                                       if row.get('state') in {'awaiting_access', 'awaiting_user', 'blocked'}],
             **({'publication_preparation': publication_gate} if publication_gate is not None else {}),
             'meaning': 'input preparation only; current execution and limitation proof issues are collected together; final independent reviews remain required for publication'}
+
+
+def publication_gate_blockers(task: dict) -> list[dict]:
+    """best-estimate-risk-v2: the assessment gates publication applies, checked before any final-review expense.
+
+    A product change whose affected candidates have no applicability review, or a candidate still waiting for a
+    user answer, makes publication fail after both reviews have run (round-7 run: three review passes). They are
+    reported here as ordinary readiness blockers with the recorder that resolves them.
+    """
+    from assessment_estimate import best_estimate_v2
+    if not best_estimate_v2(task):
+        return []
+    from product_change import unresolved_candidates
+    from product_feedback import pending
+    rows = [{'kind': 'product_change_applicability', 'state': 'ready',
+             'reason': 'PRODUCT_CHANGE_APPLICABILITY_REVIEW_REQUIRED',
+             'candidate_id': item['candidate_id'], 'change_id': item['change_id'],
+             'next_action': 'record_product_applicability.py --task-dir RUN --input <product-applicability-v1> '
+                            '(an additive scope change records this automatically)'}
+            for item in unresolved_candidates(task)]
+    rows.extend({'kind': 'product_feedback_answer', 'state': 'ready', 'reason': 'PRODUCT_FEEDBACK_ANSWER_PENDING',
+                 'candidate_id': row.get('candidate_id'), 'request_id': row.get('request_id'),
+                 'next_action': 'record_product_feedback.py: record the answer or the unavailability of this request'}
+                for row in pending(task) if row.get('candidate_id'))
+    return rows
 
 
 def preparation_issues_from_dir(task_dir: Path, *, task=None, prepared_view=None) -> dict:
@@ -173,6 +204,36 @@ def preparation_issues_from_dir(task_dir: Path, *, task=None, prepared_view=None
     return collect_publication_issues(task, evidence, candidates, plan, ledger, assessment,
         mode='evidence', snapshots=snapshots, task_dir=task_dir, evidence_root=task_dir,
         preparation=True, prepared_view=prepared_view)
+
+
+def preview_payload(task_dir: Path) -> dict:
+    """The payload freeze_input would export, assembled in memory only.
+
+    Nothing is written: no task.json assessment-instant cache, no export file. The sizes, packets and prompts
+    built from it are what a real freeze at this moment would produce (the assessment instant aside).
+    """
+    from copy import deepcopy
+    from workflow_v24 import _scenario_context, scenario_supplement
+    from assessment_estimate import review_digest
+    task_dir = Path(task_dir).resolve()
+    task = deepcopy(load_json(task_dir / 'task.json'))
+    candidates, ledger, evidence = _scenario_context(task_dir, task)
+    plan = load_json(task_dir / 'search-plan.json')
+    supplement = scenario_supplement(task_dir, task=task, evidence=evidence)
+    digest = review_digest(evidence, candidates, ledger, plan, task, supplement)
+    from final_review import enabled as final_enabled, freeze_time_binding, evaluation_at
+    if final_enabled(task):
+        task['final_review_freeze'] = freeze_time_binding(task, evidence, evaluation_at(task, evidence))
+    payload = {'schema': 'IPR-REPORT-REVIEW-FREEZE/1.0', 'task_id': task['task_id'],
+        'evidence_digest': digest, 'task': task, 'evidence': evidence,
+        'candidates': candidates, 'materiality_ledger': ledger, 'search_plan': plan,
+        'supplement': supplement,
+        'review_protocol': {'first_review_visible': False, 'second_review_visible': False, 'instruction': (
+            'Review current overall, scope and limitations independently; unchanged units may reference each slot own immutable prior receipt.'
+            if final_enabled(task) else 'Run both independent reviews against this exact payload; any live input change invalidates both.')}}
+    if final_enabled(task):
+        payload['assessment_at'] = task['final_review_freeze']['assessment_at']
+    return payload
 
 
 def freeze_input(task_dir: Path, output_path: Path, *, prepared_context=None) -> dict:

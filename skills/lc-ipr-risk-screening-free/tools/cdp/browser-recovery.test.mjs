@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright-core";
 import { compilePpubsBoolean, compilePpubsQuery, extractAmazonProduct, freshState, browserRateLimited,
-  dismissPpubsRegistrationNotice, submitSearch, waitForSearchSemanticState, collectPpubsRenderedResults, existingProviderRateLimit, rateLimitPageRef, ensureSession } from "./cdp-cli.mjs";
+  dismissPpubsRegistrationNotice, ppubsClick, ppubsNoticeCloseLabelOk, submitSearch, waitForSearchSemanticState, collectPpubsRenderedResults, existingProviderRateLimit, rateLimitPageRef, ensureSession } from "./cdp-cli.mjs";
 
 const CHROME = requireChromeExecutable();
 const TM = { tmsearch_query_binding: { tmsearchQuery: 'CM:"FUNANYWHERE"' }, cdp: { semantic_poll_ms: 15, semantic_stable_samples: 2 } };
@@ -208,6 +208,109 @@ test("only the known future PPS registration notification can be dismissed", asy
   assert.equal(await dismissPpubsRegistrationNotice(page, before), false);
 });
 
+
+// PPS 4.4.0 renders the same notice as a Bootstrap-style modal (heading and message inside modal-body, an
+// "x" in the header, the account button in the footer). Its markup is reproduced from the live capture.
+const PPS_440 = `<div role="dialog" aria-labelledby="dialogLabel"
+    class="modal modal-sm registration-notification-overlay activeoverlay ui-draggable" style="display:block">
+  <div class="modal-dialog"><div class="modal-content">
+    <div class="modal-header"><button type="button" class="close" id="closer"><span aria-hidden="true">&times;</span></button>
+      <h4 class="modal-title" id="dialogLabel">Notification</h4></div>
+    <div class="modal-body"><p><strong>Patent Public Search Registration Requirement</strong></p>
+      <p>Beginning <b>November 7, 2026</b>, Patent Public Search (PPUBS) will require users to sign in with a
+      <a href="#">USPTO account</a>. To ensure uninterrupted access, create an account early.</p></div>
+    <div class="modal-footer"><button type="button" class="btn btn-primary" id="account">Create USPTO.gov account</button></div>
+  </div></div></div>`;
+
+async function ppsPage(t, markup) {
+  const page = await localPage(t);
+  await page.unroute("**/*");
+  await page.route("**/*", route => route.fulfill({ contentType: "text/html", body: markup }));
+  await page.goto("https://ppubs.uspto.gov/pubwebapp/");
+  await page.evaluate(() => {
+    window.closeClicks = window.accountClicks = 0;
+    const closer = document.querySelector("#closer, .close, [data-dismiss], [data-action='close']");
+    const overlay = document.querySelector(".registration-notification-overlay");
+    if (closer) closer.addEventListener("click", () => { window.closeClicks++; overlay.style.display = "none"; });
+    const account = document.querySelector("#account, [data-action='createaccount']");
+    if (account) account.addEventListener("click", () => window.accountClicks++);
+  });
+  return page;
+}
+
+test("the PPS 4.4.0 modal notification is recognized by its words and closed through its header control only", async t => {
+  const before = Date.parse("2026-10-11T00:00:00Z");
+  const page = await ppsPage(t, PPS_440);
+  assert.equal(await dismissPpubsRegistrationNotice(page, before), true);
+  assert.equal(await page.evaluate(() => window.closeClicks), 1);
+  assert.equal(await page.evaluate(() => window.accountClicks), 0);
+  // already gone: nothing to do, nothing clicked
+  assert.equal(await dismissPpubsRegistrationNotice(page, before), false);
+  assert.equal(await page.evaluate(() => window.closeClicks), 1);
+});
+
+test("the PPS 4.4.0 notification is left alone after its effective date or when its wording differs", async t => {
+  for (const [label, markup, now] of [
+    ["effective date reached", PPS_440, Date.parse("2026-11-07T00:00:00Z")],
+    ["sign-in now required", PPS_440.replace("Beginning <b>November 7, 2026</b>, Patent Public Search (PPUBS) will require users to sign in with a",
+      "Patent Public Search (PPUBS) requires you to sign in with a"), Date.parse("2026-10-11T00:00:00Z")],
+    ["different heading", PPS_440.replace("Patent Public Search Registration Requirement", "Session expired"), Date.parse("2026-10-11T00:00:00Z")],
+  ]) {
+    const page = await ppsPage(t, markup);
+    assert.equal(await dismissPpubsRegistrationNotice(page, now), false, label);
+    assert.equal(await page.evaluate(() => window.closeClicks + window.accountClicks), 0, label);
+  }
+});
+
+test("without exactly one verified close control the notification is not touched and the account button is never clicked", async t => {
+  const before = Date.parse("2026-10-11T00:00:00Z");
+  const noClose = PPS_440.replace(/<button type="button" class="close" id="closer">.*?<\/button>/s, "");
+  const two = PPS_440.replace('<h4 class="modal-title"', '<button class="close" id="second">&times;</button><h4 class="modal-title"');
+  const onlyAccount = noClose.replace('id="account"', 'id="account" class="close"');
+  const iconOnly = PPS_440.replace(/<button type="button" class="close" id="closer">.*?<\/button>/s,
+    '<button type="button" id="closer"><span aria-hidden="true"></span></button>');
+  for (const [label, markup] of [["no close control", noClose], ["two close controls", two],
+      ["footer account button styled close", onlyAccount], ["icon-only header button without close markup", iconOnly]]) {
+    const page = await ppsPage(t, markup);
+    assert.equal(await dismissPpubsRegistrationNotice(page, before), false, label);
+    assert.equal(await page.evaluate(() => window.accountClicks), 0, label);
+  }
+  assert.equal(ppubsNoticeCloseLabelOk("Close"), true);
+  assert.equal(ppubsNoticeCloseLabelOk("×"), true);
+  assert.equal(ppubsNoticeCloseLabelOk("", { closeish: true }), true);
+  assert.equal(ppubsNoticeCloseLabelOk("", { closeish: false }), false);
+  assert.equal(ppubsNoticeCloseLabelOk("× Close"), true);
+  assert.equal(ppubsNoticeCloseLabelOk("Create USPTO.gov account"), false);
+  assert.equal(ppubsNoticeCloseLabelOk("Sign in"), false);
+  assert.equal(ppubsNoticeCloseLabelOk("Close", { inFooter: true }), false);
+});
+
+test("a click blocked by the PPS notification closes it and repeats once; other failures are not retried", async t => {
+  const before = Date.now();
+  const markup = `<button id="clear">Clear</button>` + PPS_440.replace('style="display:block"', 'style="display:none"');
+  const page = await ppsPage(t, markup);
+  await page.evaluate(() => { window.clears = 0; document.querySelector("#clear").addEventListener("click", () => window.clears++); });
+  const real = page.locator("#clear");
+  let attempts = 0;
+  const flaky = { click: async options => {
+    attempts++;
+    if (attempts === 1) {      // the notification appears between the check and the click
+      await page.evaluate(() => { document.querySelector(".registration-notification-overlay").style.display = "block"; });
+      throw new Error('locator.click: Timeout 15000ms exceeded. <div class="modal-dialog">…</div> from <div role="dialog" class="modal registration-notification-overlay activeoverlay">…</div> subtree intercepts pointer events');
+    }
+    return real.click(options);
+  } };
+  assert.ok(before < Date.parse("2026-11-07T00:00:00Z"), "this fixture needs the real clock before the PPS effective date");
+  await ppubsClick(page, flaky, 3000);
+  assert.equal(attempts, 2);
+  assert.equal(await page.evaluate(() => window.clears), 1);
+  assert.equal(await page.evaluate(() => window.closeClicks), 1);
+  assert.equal(await page.evaluate(() => window.accountClicks), 0);
+  let other = 0;
+  await assert.rejects(() => ppubsClick(page, { click: async () => { other++; throw new Error("locator.click: Timeout exceeded: element is not enabled"); } }, 3000),
+    /not enabled/);
+  assert.equal(other, 1);
+});
 
 test("PPS semantic readiness shares canonical history equality but preserves exact result and editor bindings", async t => {
   const page = await localPage(t);

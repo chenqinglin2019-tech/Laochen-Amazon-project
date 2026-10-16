@@ -13,6 +13,52 @@
 - 风险等级与 `status/business_completion` 分开。没有任何有效查询的模块可有政策标签，但查询状态必须写“未查询”，不能写成“完成查询且未发现风险”。完整率由唯一查询计划和真实验收计算，不是侵权排除百分比。
 - 新政策本身进入完整输入摘要和每项审阅绑定。评级政策变化需新审阅总体、范围、限制及受影响评级单元；原事实、原文和比较可作为已有材料复用，但不能把旧评级签名改绑新摘要。原始未知仍不得改写为已核实。
 
+## 最佳估计评级：best-estimate-risk-v1
+
+新任务另写 `task.best_estimate_revision=best-estimate-risk-v1`（`assessment_revision` 仍为 known-findings-risk-v1；两者都进入输入摘要，策略变化即需重审）。它覆盖上一节"无依据仍待定"的默认：**每个适用范围都给出现有证据下最合理的预判等级，未知进入置信度、假设与缺口；只有既无检索收据、无原件材料、也无制度依据的范围才允许待定。**
+
+| 范围 | 等级 | 置信度 |
+|---|---|---|
+| 已授权专利候选：对至少一个实施方案，某项独立权利要求的全部必要要素为"对应"或"未知但与已见结构一致" | **高**；`comparison.claims[]` 列出该独立项（含 unknown 要素时该项结论写 `unknown`，行等级仍可为高），`assumptions` 逐项列推定一致的要素，`lower_if` 写"该要素实际不同" | 存续／权属未核实 → 上限**中**，`right_state` 保持 unknown，`assumptions` 含"授权在保护期内推定有效"，`lower_if` 含"官方记录显示失效／未缴维持费" |
+| 同上，且现行状态经可信 API／官方记录核实为有效、要素对应经产品图确认、产品页标注 PATENTED 且参考产品为权利人（或其被许可人）产品 | **极高** | 高 |
+| 组合权利要求而产品是专为该组合制造并按该用途销售的部件 | 与组合权利要求同级（间接侵权风险）；reasoning 分别写裸件、组合、方法 | 同上 |
+| 已授权候选，所有实施方案都在某必要要素上"不同" | 低（有具体差异证据且全范围决定性排除时可极低，须 `decisive_exclusion`） | 中／高 |
+| 外观候选：整体视觉印象比较 | 按比较结果 高／中／低 | 视图完整度 |
+| 外观候选（r5d20 起的新任务，`design_assessment_revision=design-overall-v1`）：先看主体再看细节 | 同品类、主体造型相同、只有端面／把手／按钮／扣件／装饰／分开画出的附件等次要差异 → 高；近似照抄 → 极高；同类造型但主体有改变第一眼印象的明显差异 → 中；主体基本形状不同或不是同一品类 → 低（有决定性证据才极低）。主审预填不低于比对记录主体关系对应的等级（same_form 高、similar 中），届满等决定性排除除外 | 视图完整度、实物差异 |
+| 无候选的整体范围：已执行有界检索或调查、全部返回卡片已分流、无入选 | **低**（不再待定）；有该范围回执时附 `search_comparison`，无回执则省略，程序记 `coverage_limited=true` 并把置信度限制为低（原置信度存 `reviewed_evidence_confidence`） | 单页有界 → 低；多页／官方召回 → 中 |
+| 版权／商业外观／未注册权利：参考产品为第三方销售、无具体主张或登记证据 | 低；有功能性依据时写明 | 低／中 |
+| 制度在该国不存在（US 实用新型、US 未注册外观、GB 实用新型……） | `scope_applicability.not_applicable`，引用冻结输入 `institution_references` 中同国家同权利的 `EV-INST-*` 证据 → 报告显示"不适用"；审阅者漏填时程序按制度表补填并留痕 `applicability_basis=program_default`（引用了别国或别权利的条目记 `unbound`，不算不适用） | — |
+| 自有品牌未提供（own_brand 行） | 保持待定，但不计入 `pending_count`、不锁上架建议；建议文字附"自有品牌名称／Logo 尚未提供，未对其作商标清查" | — |
+| 结构事实用户不可提供（`record_product_feedback.py` 的不可提供记录） | 不再阻断该候选评级（历史策略下 `PRODUCT_FEEDBACK_COMPARISON_PENDING` 使其永远待定）：按可见结构评级，未知要素写入 `assumptions`／`lower_if`，置信度相应限制；仍在等待用户回答的非结构问题继续阻断 | 中以下 |
+| 维权信号 | 参与模块与总体等级：有界检索后无已确认信号 → 低；有针对同类产品的已确认维权记录 → 在对应 enforcement 候选行给中／高并引用记录 | 低／中 |
+| 既无检索也无材料也无制度依据 | 待定（唯一允许） | — |
+
+不变的底线：中／高／极高仍须候选与绑定的正面证据；极低仍须决定性排除；候选级"低"仍须绑定反证；评级的专利行仍须独立权利要求比较表（`prepare_adjudication.py --draft-selected-candidates` 可从专项比较事件预填 `comparison.implementations[]/claims[]`，主审只填等级、状态与理由）。总体＝主情景已评定的最高等级（含维权信号）；高／极高 → 不建议上架；中或仍有待定行（own_brand 不算）→ 暂缓上架；其余 → 可考虑上架。`assessment.best_estimate` 记录修订号、`coverage_limited_rows`、`institution_not_applicable_scopes`、`own_brand_not_supplied`。制度表见 [jurisdiction-rights.md](jurisdiction-rights.md)。
+
+## 最佳估计评级第二版：best-estimate-risk-v2
+
+新任务写 `task.best_estimate_revision=best-estimate-risk-v2`。上表全部规则继续适用，只改四处：
+
+| 项 | v2 规则 |
+|---|---|
+| 极高 | 已授权专利候选同时满足：① 可信 API 记录现行状态有效（`legal_status=Active`）；② 商品页面或资料标注 PATENTED／专利号；③ 至少一个实施方案的某项独立权利要求，全部必要要素为"对应"或"未知但与已见结构一致"。→ **极高／置信度高**。权利人未具名（API 记为 Individual）或与品牌、制造商不一致，只写入 `assumptions` 与 `human_checks`，不降低等级，`right_state` 可保持 unknown。缺任一项按上表定高。 |
+| 主审 | `prepare_adjudication.py --auto-agree`：两审等级与状态一致的行由程序写好主审理由；两审都评高或极高且冻结输入满足上面三项时，程序按规则定极高并写明三项依据（原评等级保留在理由里）；其余行留空给主审。输出的 `open_decisions` 为 0 时主审只需签名。 |
+| 整体行 | 已有中／高／极高候选的范围，其无候选整体行可保持待定，程序记 `known_finding_status=subsumed_by_candidate`，不计入 `pending_count`，报告该模块不再列"待判断"。 |
+| 报告 | 高／极高候选在主报告候选卡显示"风险依据"：权利号、名称、申请号、申请日、优先权日、授权日、现行状态与最近维持费事件、按申请日加 20 年推算的到期日、权利人或发明人、原文与 PDF 链接、商品页专利标注原文、独立权利要求逐要素对照、权利附图、假设、降级条件、建议核实。附图来自该候选可信 API 详情所列官方附图（`core_dossier.py` 留存，`record_public_source.py` 以 `kind=patent_drawing_image` 绑定候选），文献身份与权利要求由同一 API 记录满足，不再依赖 PDF 页图渲染。审阅文字直接给卖家看，不写字段名或规则术语。 |
+
+## 发明专利定级与极高（r6 起的新任务，`stability_revision=report-always-v1`）
+
+用户 2026-10-15 决定，覆盖上节“unknown 但与已见结构一致即定高”：
+
+| 某项独立权利要求的要素 | 等级 |
+|---|---|
+| 全部能从产品图核对并且对应 | 高（另满足下行条件时极高） |
+| 可见的都对应，有内部或照片看不到的要素 | 中，human_checks 写明需拿样品或向供应商核对的要素 |
+| 照片上一个都看不到 | 低、置信度低，human_checks 写明需核对的要素 |
+| 有要素明确不对应 | 低 |
+
+极高：可信 API 记录现行有效、商品页面标注的专利号就是该候选的号码（"patent pending""patent leather"等不算）、且该独立权利要求全部要素都对应。主审草稿由程序按这张表执行（`prepare_adjudication.utility_cap_level`）：两审评级高于本表时降到本表等级；降级后两审一致即由程序写主审理由，否则交主审。
+
 ## 保留原版本的历史任务
 
 历史任务的评级、阶段性报告与不完整报告规则见 [legacy/risk-estimate-historical.md](legacy/risk-estimate-historical.md)；新任务不读。

@@ -31,7 +31,7 @@
   "approved_logic_revision": "api-first-v3/final-double-review-v1/known-findings-risk-v1/operator-report-v1: exact Generic reference-name exemption; risk follows known facts independently of progress; operator presentation and separate complete annexes explicitly approved by user; historical rendering remains versioned.",
   "operator_revision": "operator-report-v1",
   "operator_css_path": "assets/operator-report.css",
-  "operator_css_sha256": "53c83d97efbe74bcf46f8f17a43b3fa78026dfb2f8dc373ae12aa1acb5a60232",
+  "operator_css_sha256": "768c0da41c986efb8246883bd42ad029fad234fc12edff9a8e512d9e57f4a087",
   "operator_section_order": [
     "product",
     "decision",
@@ -58,7 +58,10 @@
     "_pending_key": "323062ada77394ae21afba8c71988ab4896a28f2cdd46ad5fb9d8eb86d65e29e",
     "_comparison_performed": "b3fa167b77f1bef3ed9765eca730ded933409ecab83db7d6e13ed9bb19829b87",
     "_display_progress": "7751cd5d66c1901d6c06611eda1311a62cf0b612ead2496515b41c84b2c7ccd4",
-    "build": "48038373f1f325cc15276c1230b5a87c91bd706010c4338eae9c81bbbf5cfc56",
+    "_v2": "459e26b117780b3d36e3e8b8e0055284a7c262158ffc256b16a37d10fc6ae262",
+    "_add_years": "404d2387c3c43e6df2549d2085cfdcb583388fce05c6c3fded1c4c8cd6465b74",
+    "_evidence_block": "1301cf40010f575703ae440e21b6d6fdeedddd8ba939f07134f4ae787fbea270",
+    "build": "5a92f25bc7de6fdefedd725e7ec7c52a6a6d9bef3e3aad6d6412a4b066a774da",
     "project": "409da0182ee7ec199cf92f67c6a1825ac384cccfacb63d1f82f5c2c3792f0fc4",
     "_e": "2f935c5d7842e5db9d18f0533c3623e726cf869d6e3f8c70e1904a843ac66287",
     "_paragraphs": "66ac84a72338029700a5772ae5110878383a6ca8f069286b0c82ed11b7fbcf58",
@@ -67,7 +70,8 @@
     "_progress_label": "5d85c202681cdcbbc70957a9db361b054b3aab015f5287f9211c866357fab28f",
     "_progress_summary": "b5860eb1b4071839b978f8997fdfc85198f06982fd128d25b968c8312fd75b6a",
     "_query_basis": "1e69827c2fee0eb89c0490844832b478a02622289c80c6e78a7114e34b521c9f",
-    "render": "6362cbcd657158dc054d30b7ce9337d1896f5e0577072760242f7b5ec9d6594b",
+    "_evidence_html": "f57be6dfd0b010663cefeafdd373c96a8f790b9e703f9ac6e08f211770271ef0",
+    "render": "32a2b6518b211a8ebbd53a964300aa198073ec594edc2df74cf475014d4e138d",
     "render_appendix": "afd3647b9925b60528b722632ad458c2e031d88dafb36d53a07af49f91862d22",
     "render_query_progress": "019533e7886210763ef8b76493b277e89933d9c954d0e3fd13e3f1da11922659",
     "render_audit": "2b2d16ce6a13668ae36a48e87fd68d73bb61decafc874692a8c2cd7fc276b804",
@@ -96,6 +100,10 @@
     "confidence_required": true,
     "query_progress_source": "actual_query_execution_progress",
     "empty_plan_label": "不适用（无查询计划）",
-    "unregistered_plan_label": "查询计划未登记"
+    "unregistered_plan_label": "查询计划未登记",
+    "evidence_block": {
+      "approved_on": "2026-10-11",
+      "reference": "Owner decision E1 (round 7): high/extreme candidate cards add a risk-basis block (identity, status, listing marking, independent-claim element table, right figures, assumptions, lower-if, checks); only under best-estimate-risk-v2; seven sections, nine modules and appendices unchanged."
+    }
   }
 }

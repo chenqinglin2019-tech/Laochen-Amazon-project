@@ -975,6 +975,15 @@ function cleanNumber(value) {
   return String(value || "").replace(/[^A-Za-z0-9]/g, "").toUpperCase();
 }
 
+// Patent Public Search lists a US design patent as "US D887770 S"; the same document is USD887770S1 elsewhere.
+export function sameRecordNumber(observed, record) {
+  const a = cleanNumber(observed), b = cleanNumber(record);
+  if (a === b) return true;
+  const design = /^(USD\d+)S\d?$/;
+  const x = a.match(design), y = b.match(design);
+  return Boolean(x && y && x[1] === y[1]);
+}
+
 export function formatTmQuery(query, strategy) {
   const value = String(query || "").trim();
   if (strategy === "prefix") return `${value}*`;
@@ -2018,26 +2027,85 @@ function automaticQueryError(code) {
   return error;
 }
 
+const PPUBS_NOTICE_HEADING = /Patent Public Search Registration Requirement/i;
+const PPUBS_NOTICE_BEGINS = /Beginning ([A-Za-z]+ \d{1,2}, \d{4}), Patent Public Search \(PPUBS\) will require users to sign in with a/;
+const PPUBS_NOTICE_CLOSE_SELECTOR = [
+  "button.close", "a.close", '[data-dismiss="modal"]', '[data-action="close"]',
+  'button[aria-label="Close" i]', 'button[title="Close" i]',
+  '.modal-header :is(button, a, [role="button"])', '.modal-header [class*="close" i]',
+].join(", ");
+
+// A close control is accepted by what it says, not by its markup: its own label may only be a close word or a
+// multiplication sign, it must be visible and enabled, and it must sit outside the footer where the account
+// button lives. PPS 4.3 and 4.4 wrap the same notice in different markup.
+export function ppubsNoticeCloseLabelOk(label, { inFooter = false, closeish = true } = {}) {
+  if (inFooter) return false;
+  const text = String(label || "").toLowerCase();
+  const tokens = text.split(/[\s\u00d7\u2715\u2716\u2573]+/).filter(Boolean);
+  // An icon-only control (no words at all) counts only when its own markup says it closes.
+  if (!tokens.length) return Boolean(closeish);
+  return tokens.every(token => token === "close" || token === "dismiss" || token === "x");
+}
+
+async function ppubsNoticeCloseControl(notice) {
+  const controls = notice.locator(PPUBS_NOTICE_CLOSE_SELECTOR);
+  const rows = await controls.evaluateAll(nodes => nodes.map(node => {
+    const rect = node.getBoundingClientRect();
+    const style = getComputedStyle(node);
+    return { label: node.getAttribute("aria-label") || node.getAttribute("title") || node.textContent || "",
+      visible: rect.width > 0 && rect.height > 0 && style.visibility !== "hidden" && style.display !== "none",
+      disabled: node.disabled === true || node.getAttribute("aria-disabled") === "true",
+      closeish: /close|dismiss/i.test([node.className && node.className.baseVal !== undefined ? node.className.baseVal : node.className,
+        node.getAttribute("data-dismiss"), node.getAttribute("data-action"), node.getAttribute("aria-label"),
+        node.getAttribute("title")].filter(Boolean).join(" ")),
+      inFooter: Boolean(node.closest(".modal-footer, footer")) };
+  })).catch(() => []);
+  const accepted = [];
+  rows.forEach((row, index) => {
+    if (row.visible && !row.disabled && ppubsNoticeCloseLabelOk(row.label, row)) accepted.push(index);
+  });
+  // A header holds one control that closes it; several candidates is an unfamiliar dialog: leave it alone.
+  return accepted.length === 1 ? controls.nth(accepted[0]) : null;
+}
+
 export async function dismissPpubsRegistrationNotice(page, now = Date.now()) {
   // Close only the known informational notice before its effective date.
   // Authentication, consent, rate-limit and unfamiliar dialogs stay untouched.
   const url = new URL(page.url());
-  if (url.hostname !== "ppubs.uspto.gov" || !/^\/pubwebapp\/?$/.test(url.pathname)) return false;
+  if (url.hostname !== "ppubs.uspto.gov" || !/^\/pubwebapp(?:\/|$)/.test(url.pathname)) return false;
   const state = await freshState(page);
   if (browserRateLimited(state.bodyText)) return false;
   const notice = page.locator('.registration-notification-overlay[role="dialog"]');
   if (await notice.count() !== 1 || !await notice.isVisible()) return false;
-  const heading = (await notice.locator('.registration-notification-content > strong').textContent().catch(() => "")).trim();
-  const message = (await notice.locator('.registration-notification-message').innerText().catch(() => "")).replace(/\s+/g, " ").trim();
-  const begins = message.match(/^Beginning ([A-Za-z]+ \d{1,2}, \d{4}), Patent Public Search \(PPUBS\) will require users to sign in with a/);
+  // Identify it by its own visible words (PPS 4.4 moved the heading and message into modal markup).
+  const text = (await notice.innerText().catch(() => "")).replace(/\s+/g, " ").trim();
+  const begins = text.match(PPUBS_NOTICE_BEGINS);
   const effective = begins ? Date.parse(begins[1] + " 00:00:00 UTC") : NaN;
-  if (heading !== "Patent Public Search Registration Requirement" || !Number.isFinite(effective)
+  if (!PPUBS_NOTICE_HEADING.test(text) || !Number.isFinite(effective)
       || !Number.isFinite(now) || now >= effective) return false;
-  const close = notice.locator('button.close[data-action="close"][title="Close"]');
-  if (await close.count() !== 1 || !await close.isVisible() || !await close.isEnabled()) return false;
+  const close = await ppubsNoticeCloseControl(notice);
+  if (!close) return false;
   await close.click({ timeout: operationTimeout(3000) });
   await notice.waitFor({ state: "hidden", timeout: operationTimeout(3000) });
   return true;
+}
+
+// Click through PPS's pointer-blocking notice: close it first when it is already showing, and when it appears
+// between the check and the click, close it once and repeat the click. Any other failure is rethrown unchanged.
+export async function ppubsClick(page, locator, timeoutMs) {
+  let showing = false;
+  try {
+    showing = await page.locator(".registration-notification-overlay").first().isVisible();
+  } catch {}
+  if (showing) await dismissPpubsRegistrationNotice(page);
+  try {
+    await locator.click({ timeout: operationTimeout(timeoutMs) });
+    return;
+  } catch (error) {
+    if (!/registration-notification-overlay/.test(String(error && error.message))) throw error;
+    if (!await dismissPpubsRegistrationNotice(page)) throw error;
+  }
+  await locator.click({ timeout: operationTimeout(timeoutMs) });
 }
 
 async function submitPpubsAdvancedSearch(page, renderedQuery, { strict = false } = {}) {
@@ -2057,15 +2125,15 @@ async function submitPpubsAdvancedSearch(page, renderedQuery, { strict = false }
     // control resets the controlled Trix model; never append to stale input.
     const clear = page.locator("button.buttonReset[title='Clear search query and reset search options']");
     if (!await clear.isVisible().catch(() => false)) throw automaticQueryError("PPUBS_CLEAR_CONTROL_UNAVAILABLE");
-    await clear.click({ timeout: operationTimeout(15000) });
+    await ppubsClick(page, clear, 15000);
     const empty = await waitForStableSemanticState(async () => {
       const value = (await editor.textContent()).trim();
       return { ready: value === "", signature: value === "" ? "empty" : value };
     }, { timeoutMs: 3000, pollMs: 100, stableSamples: 2 });
     if (!empty.stable) throw automaticQueryError("PPUBS_CLEAR_INPUT_MISMATCH");
-    await editor.click({ timeout: operationTimeout(15000) });
+    await ppubsClick(page, editor, 15000);
   } else {
-    await editor.click({ timeout: operationTimeout(15000) });
+    await ppubsClick(page, editor, 15000);
     const selectAll = process.platform === "darwin" ? "Meta+A" : "Control+A";
     await editor.press(selectAll, { timeout: operationTimeout(15000) });
     await editor.press("Backspace", { timeout: operationTimeout(15000) });
@@ -2086,7 +2154,7 @@ async function submitPpubsAdvancedSearch(page, renderedQuery, { strict = false }
   try {
     // A timeout during click can still have reached the official service, so
     // callers must observe the page instead of retrying a possible submission.
-    await button.click({ timeout: operationTimeout(15000) });
+    await ppubsClick(page, button, 15000);
   } catch (error) {
     error.submission_state = "uncertain";
     error.phase = "submit";
@@ -3125,14 +3193,14 @@ async function verifyPpubsPublishedDocument(args, config, resolved) {
     noResult = Boolean(result.stable && result.query_bound && result.noResult);
     if (noResult) status = "no_result";
     else {
-      if (!result.stable || !result.query_bound || !result.candidates?.some(row => cleanNumber(row.record_number) === record)) {
+      if (!result.stable || !result.query_bound || !result.candidates?.some(row => sameRecordNumber(row.record_number, record))) {
         throw new Error("PUBLISHED_DOCUMENT_EXACT_RESULT_MISSING");
       }
       const cells = page.locator("#search-results-table .slick-cell[aria-describedby$='documentId'] button");
       let match = null;
       for (let i = 0; i < await cells.count(); i++) {
         const cell = cells.nth(i);
-        if (cleanNumber(await cell.textContent()) === record) { match = cell; break; }
+        if (sameRecordNumber(await cell.textContent(), record)) { match = cell; break; }
       }
       if (!match) throw new Error("PUBLISHED_DOCUMENT_EXACT_CONTROL_MISSING");
       await match.click({ timeout: operationTimeout(15000) });
@@ -3140,12 +3208,16 @@ async function verifyPpubsPublishedDocument(args, config, resolved) {
       if (await toText.isVisible().catch(() => false)) await toText.click({ timeout: operationTimeout(10000) });
       const loaded = await waitForStableSemanticState(async () => {
         const value = await ppubsPublishedDocumentSnapshot(page);
-        return { ready: value.page_record_number === record && Boolean(value.title && value.rendered_text),
+        return { ready: sameRecordNumber(value.page_record_number, record) && Boolean(value.title && value.rendered_text),
           signature: JSON.stringify(value), value };
       }, { timeoutMs: operationTimeout(reading ? Math.min(45000, Number(config.cdp?.navigation_timeout_ms || 45000)) : 20000),
         pollMs: 400, stableSamples: 3 });
       if (!loaded.stable) throw new Error("PUBLISHED_DOCUMENT_IDENTITY_UNCONFIRMED");
       document = loaded.value;
+      if (document.page_record_number !== record) {
+        document.observed_record_number = document.page_record_number;
+        document.page_record_number = record;
+      }
       if (!reading || reading.required_facts.some(fact => ["representative_figures", "protection_content"].includes(fact))) {
         media = await capturePpubsDocumentPages(page, record, taskDir, path.basename(screenshotPath, ".png"),
           reading?.reading_scope.page_numbers.length ? { pageNumbers: reading.reading_scope.page_numbers } : {});
@@ -3168,7 +3240,7 @@ async function verifyPpubsPublishedDocument(args, config, resolved) {
         document.satisfied_facts = obtained;
       }
       const after = await ppubsPublishedDocumentSnapshot(page);
-      if (after.page_record_number !== record || after.title !== document.title) {
+      if (!sameRecordNumber(after.page_record_number, record) || after.title !== document.title) {
         document = null; media = {}; throw new Error("PUBLISHED_DOCUMENT_IDENTITY_CHANGED");
       }
       status = reading && reading.required_facts.every(fact => document.satisfied_facts.includes(fact))

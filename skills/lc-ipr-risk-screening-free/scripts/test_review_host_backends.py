@@ -25,7 +25,8 @@ class FakeNative:
         session = "native-" + chain + "-" + group + "-" + str(len(self.calls))
         if group == "summary":
             digests = json.loads(re.search(r"module_review_digests=(\[.*?\])\n", prompt).group(1))
-            raw = {"assessments": [], "future_applications": [], "enforcement_signals": [],
+            raw = {"reviewer": "ipr-module-chain-" + chain,
+                   "assessments": [], "future_applications": [], "enforcement_signals": [],
                    "module_review_digests": digests, "coverage_confidence_cap": "低",
                    "coverage_confidence_reasoning": "fixture",
                    "final_review_statement": {"overall": "o", "scope": "s", "limitations": "l"}}

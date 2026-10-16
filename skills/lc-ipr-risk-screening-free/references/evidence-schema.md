@@ -44,6 +44,10 @@
 
 `evidence.json.source_runs[]` 保存 run_id、query_id、plan_entry_sha256、requirement_ids、provider、operation、jurisdiction、right_type、status、脱敏请求、raw_paths、payload_digest、时间、错误码和配额信息。对应 collections 的 evidence 记录携带同样的计划与范围绑定；缺少或不匹配的哈希不满足发布条件。
 
+`best-estimate-risk-v1` 新任务的 `evidence.collections.institution_references[]` 由 `create_task.py` 按 `references/jurisdiction-rights.json` 写入（每目标国 × 实用新型／未注册外观；欧盟成员国另带 EU 层）：`evidence_id=EV-INST-<国家>-<权利>`、`provider=institution_reference`、`operation=jurisdiction_rights_table`、`kind=institution_reference`、`authority_scope=institution_statement_only`、`reference_revision`、`reference_sha256`、`payload{applicable,statement_zh,statement_en,source_title,source_url,retrieved,verification}`。它是制度陈述不是检索结果：没有顶层 path／sha256／source_url，不作为原件附送也不列为未传送；`evidence_index` 索引它，模块包按 `right_type` 路由，审阅者据此写 `scope_applicability.not_applicable`，收尾在行上记 `applicability_basis`（institution_reference／program_default／unbound）。
+
+`best-estimate-risk-v2` 新任务：`core_dossier.py` 把入选专利／外观候选可信 API 详情所列官方附图留存到 `raw/core-dossier/`，经 `record_public_source.py` 登记为 `evidence.collections.sources[]` 条目（`kind=patent_drawing_image`，`payload{visual_role:patent_drawings, figure_label, candidate_id, publication_number, jurisdiction, right_type, source_record_evidence_id}`，顶层带 path／sha256／bytes／source_url）。它绑定候选但不是候选文献：不进入候选内容摘要、不使分流失效；终审包按原件附送；报告的文献身份与权利要求角色由同一候选的 `serpapi_google_patents candidate_detail` 记录满足（`report_estimate._core_visuals` 的 v2 分支），附图角色由这些条目满足。评估结果另有 `known_finding_status=subsumed_by_candidate`、`subsumed_by_candidates[]` 与 `assessment.best_estimate.subsumed_scope_rows[]`。
+
 04A 新任务的 `result_processing_revision=source-result-processing-v1`：发现类 `source_run.result_processing` 固定原回执哈希、已得结果位置及原行哈希、原始已解析数量和可信零条状态；`evidence.result_dispositions` 追加逐位置人工审阅去向。请求状态、解析／入库进度与结果审阅分开，统一 `next_work` 显示未处理位置，详见[原始结果与处理进度](source-result-processing.md)。旧任务不补造位置或回执。
 
 04C 新任务的 `candidate_acquisition_revision=candidate-acquisition-v1` 在浏览器主动发现的 `source_run.candidate_acquisition` 留执行时去重收据，当前候选数量独立投影；`candidate_handoff_revision=candidate-handoff-v1` 将候选和各国家／情景审阅按批次写入 `candidate-handoffs.json`。待解析、未审阅位置不因局部交接变成材料完成，详见[执行计数与增量交接](candidate-accounting-handoff.md)。
@@ -113,7 +117,7 @@ digest 是 `assessment_v24.review_digest(evidence,candidates,ledger,plan,task)`�
 
 每个 assessment 包含 jurisdiction、right_type、candidate_id、risk、evidence_confidence、reasoning、evidence_refs、right_state、right_state_evidence_refs、comparison、confidence_basis、findings。风险无法判断可引用不足原因；中高风险必须有具体候选和 findings，finding 包含 finding_id、title、evidence_refs、recommended_action。
 
-comparison.criteria 每项使用 criterion、result、reasoning、evidence_refs；result 为 supports_risk、excludes_risk、unknown、not_applicable。所有权利的实际必需 criterion 名由 `assessment_v24.CRITERIA` 定义，详见 risk-rules.md。comparison.unresolved 保留所有未解决问题。
+comparison.criteria 每项使用 criterion、result、reasoning、evidence_refs；result 为 supports_risk、excludes_risk、unknown、not_applicable。所有权利的实际必需 criterion 名由 `assessment_v24.CRITERIA` 定义，详见 risk-rules.md。comparison.unresolved 保留所有未解决问题。评级的专利行另需 `comparison.implementations[]`（implementation_id、title、description、product_evidence_refs）与 `comparison.claims[]`（implementation_id、claim_id、claim_type、conclusion、claim_evidence_refs、elements[]{claim_element、claim_quote、product_feature、product_evidence_refs、result、evidence_refs、reasoning}）；`specialty_analysis.claims_projection` 可从专项比较事件投影（corresponds→supports_risk、differs→excludes_risk、unknown→unknown；全部对应→supports_risk，任一必要要素不同→excludes_risk，否则 unknown）。
 
 专利还需 claims：每项 claim_id、claim_evidence_refs、elements；要素包含 claim_element、claim_quote（原文要素引句）、product_feature、result、evidence_refs、product_evidence_refs（单独绑定实际产品证据）。必要视图放 comparison.visual_coverage：required_views、product_views、right_views；两侧视图元素为 view、evidence_refs、artifact_sha256，分别绑定实际产品图和权利媒体。
 
@@ -140,7 +144,7 @@ assessment 使用 `SCOPED-IPR/1.0`。assessments[] 各自有 risk、evidence_con
 
 新策略使用 `assessment_object=product|own_brand` 区分评价对象，省略时默认 product；`unknown_own_brand` 自动归 own_brand。双审、主审定位和 `task.assessment_scope_exclusions` 均精确到对象。已查产品文字与未知自有品牌可在同一国家/权利类型下并列；后者不拖低产品判断置信度，也不能代替产品文字的实际清查。
 
-未知且未纳入评价的自有品牌或 Logo 使用 `out_of_scope:true`、`risk:null` 及 `scope_reasoning`，明确标为范围排除，不显示为风险结论。`future_signal` 和 `enforcement` 是独立补充，不混入当前总评。
+未知且未纳入评价的自有品牌或 Logo 使用 `out_of_scope:true`、`risk:null` 及 `scope_reasoning`，明确标为范围排除，不显示为风险结论。任务没有给必做工作的条件情景（continuous-work-v2 任务中不在 `execution_scenario_ids` 的非主情景，例如用户不沿用参考品牌时的 `brand_reuse`）的行同样可以这样写，由任务记录绑定（r5d19）；主情景与已启用情景的排除仍须列在 `task.assessment_scope_exclusions`。`future_signal` 和 `enforcement` 是独立补充，不混入当前总评。
 
 审阅文件另有 `coverage_confidence_cap` 及 `coverage_confidence_reasoning`，说明哪些检索或素材范围缺口可能影响总体判断；该字段限制总置信度，不机械改变单项风险等级。
 

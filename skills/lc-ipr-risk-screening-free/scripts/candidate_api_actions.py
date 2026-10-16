@@ -129,7 +129,71 @@ def _physical_planned(task, evidence, queries, providers, *, plan=None, task_dir
     return retained
 
 
-def _budget_issue(task, evidence, queries, provider, *, plan=None, task_dir=None):
+LEAD_RESERVE = 2
+
+
+def _lead_numbers(evidence):
+    """Canonical publication numbers of the documents the product itself points to (reviewed leads)."""
+    from common import canonical_patent_number
+    rows = (evidence.get('collections') or {}).get('candidate_leads')
+    result = set()
+    for entry in rows if isinstance(rows, list) else []:
+        lead = entry.get('lead') if isinstance(entry, dict) else None
+        number = lead.get('publication_number') if isinstance(lead, dict) else None
+        if isinstance(number, str) and number.strip():
+            result.add(canonical_patent_number(number))
+    return result
+
+
+def _lead_reserve(task, evidence, queries, candidate):
+    """Record requests kept free for a document the product itself claims, for host-triage tasks only.
+
+    Summary-level candidates picked by a host used to take every free detail request first, so the one patent
+    the product points to was left without its current-status/ownership fields. A candidate that is itself such
+    a lead (or any task without one) is not held back; reserved slots are released once a lead's own request is
+    planned.
+    """
+    if 'host_triage_revision' not in task or not isinstance(candidate, dict):
+        return 0
+    from common import canonical_patent_number
+    numbers = _lead_numbers(evidence)
+    if not numbers:
+        return 0
+    own = candidate.get('publication_number')
+    if (isinstance(own, str) and canonical_patent_number(own) in numbers) or any(
+            isinstance(source, dict) and source.get('provider') == 'external_document_lead'
+            for source in candidate.get('sources', []) if isinstance(candidate.get('sources'), list)):
+        return 0
+    funded = set()
+    for row in (queries.get('serpapi_google_patents') or []):
+        if isinstance(row, dict) and row.get('operation') == 'candidate_detail':
+            value = row.get('q') or (row.get('params') or {}).get('q')
+            if isinstance(value, str) and value.strip():
+                funded.add(canonical_patent_number(value))
+    return min(LEAD_RESERVE, len(numbers - funded))
+
+
+def _core_reserve(task, evidence, queries, candidate, task_dir):
+    """Record requests kept for the core candidates (core-focus tasks): a candidate the text triage marked
+    'related' may not take the requests a 'core' candidate (same kind of article, same use) or a selected design
+    still needs. r5d real run: the ten requests went to toilet-lid, cooler and tray patents in arrival order and the
+    selected design patent never got its record."""
+    import core_focus
+    if task_dir is None or not core_focus.enabled(task) or not isinstance(candidate, dict):
+        return 0
+    marks = core_focus.priorities(task_dir)
+    if marks.get(candidate.get('candidate_id')) == 'core':
+        return 0
+    from common import canonical_patent_number
+    funded = {row.get('candidate_id') for row in (queries.get('serpapi_google_patents') or [])
+              if isinstance(row, dict) and row.get('operation') == 'candidate_detail'}
+    funded |= {run.get('candidate_id') or (run.get('request_params') or {}).get('candidate_id')
+               for run in evidence.get('source_runs', []) if isinstance(run, dict)
+               and run.get('provider') == 'serpapi_google_patents' and run.get('operation') == 'candidate_detail'}
+    return sum(1 for cid, mark in marks.items() if mark == 'core' and cid not in funded)
+
+
+def _budget_issue(task, evidence, queries, provider, *, plan=None, task_dir=None, reserve=0):
     """Keep shared planned slots and actual attempts within existing free caps."""
     if provider == "signa":
         from signa_client import consumed_queries, persisted_stop_reason
@@ -144,6 +208,8 @@ def _budget_issue(task, evidence, queries, provider, *, plan=None, task_dir=None
     maximum = (task.get(selection) or {}).get("max_queries_per_task")
     if isinstance(maximum, bool) or not isinstance(maximum, int) or maximum <= 0:
         return "FREE_TASK_BUDGET_UNAVAILABLE"
+    if reserve and 0 < reserve < maximum:
+        maximum -= reserve      # the last slots stay free for a document the product itself claims
     if stop:
         return "FREE_PROVIDER_STOP_RECORDED"
     consumed = consumed_queries(evidence)
@@ -166,6 +232,11 @@ def _options(task, evidence, candidate, country, right, missing, requirements):
     number = str(candidate.get("publication_number") or candidate.get("serial_number")
         or candidate.get("registration_number") or candidate.get("application_number")
         or candidate.get("record_number") or "")
+    if right in {"patent", "utility_model", "design"} and number:
+        # EPO docdb spells a US application without its leading zero; SerpApi and
+        # PPS answer that spelling "no result" and still count the request.
+        from common import canonical_patent_number
+        number = canonical_patent_number(number) if country == "US" else number
     base = {"q": number, "candidate_id": candidate["candidate_id"], "record_number": number}
     result = []
     if right in {"patent", "utility_model", "design"} and number:
@@ -269,13 +340,28 @@ def append(task, evidence, queries, candidate, decision, requirements, *, capabi
     options = _options(task, evidence, candidate, country, right, missing, requirements)
     options.sort(key=lambda option: (option[4], option[0] not in origins))
     budget_limits = {}
+    import core_focus
     for provider, operation, params, supported, browser in options:
         if not browser and capabilities.get(provider, {}).get("executable") is not True:
+            continue
+        if provider == "uspto_patent_browser" and core_focus.enabled(task):
+            # Patent Public Search returns the published text only; its operation review requires a current
+            # status it can never show, so every such read stayed open (r5d real run: 16). core_dossier retains
+            # the same published text from the public Google Patents page instead (core-focus tasks).
             continue
         if any(old_provider == provider and old.get("operation") == operation
                and old.get("media_id") == params.get("media_id") for old_provider, old in prior):
             continue
-        budget_issue = _budget_issue(task, evidence, queries, provider, plan=plan, task_dir=task_dir)
+        budget_issue = ''
+        if provider == 'serpapi_google_patents' and operation == 'candidate_detail':
+            # r7 (search-guard-v1, owner decision 2026-10-16): at most 8 details a task, same-form designs and core
+            # utility patents first, never more than the recorded balance leaves after the discovery searches
+            import search_guard
+            budget_issue = search_guard.detail_issue(task, evidence, queries, candidate, task_dir)
+        budget_issue = budget_issue or _budget_issue(task, evidence, queries, provider, plan=plan, task_dir=task_dir,
+                                     reserve=_lead_reserve(task, evidence, queries, candidate)
+                                     + (_core_reserve(task, evidence, queries, candidate, task_dir)
+                                        if provider == 'serpapi_google_patents' else 0))
         if budget_issue:
             budget_limits[provider] = budget_issue
             continue
@@ -296,6 +382,15 @@ def append(task, evidence, queries, candidate, decision, requirements, *, capabi
             derived_from=["candidate:" + candidate["candidate_id"]], wave=2)
         row.update(required_for="comparison", execute_by_default=True, execution_phase="verification",
                    search_dimension="identifier", search_language="")
+        if provider == "uspto_patent_browser":
+            from workflow_v24 import correction_enabled
+            if correction_enabled(task):
+                # A Patent Public Search record read is planned by its exact
+                # reading contract (same shape as the triage-action rows): the
+                # browser refuses, before any request, a row without it and the
+                # recorder compares the capture with it. Both are metadata keys,
+                # so the query identity of the row does not change.
+                row.update(required_facts=["protection_content"], reading_scope={"level": "protection_content"})
         if provider == "signa":
             from common import SIGNA_FREE_ROLE
             row.update(retrieval_workflow_revision=trusted_api.REVISION,

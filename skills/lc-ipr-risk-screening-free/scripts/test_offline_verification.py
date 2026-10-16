@@ -25,11 +25,11 @@ class OfflineVerificationTests(unittest.TestCase):
             run.assert_not_called()
             manifest = json.loads((Path(temporary) / "verification.json").read_text())
             self.assertEqual(manifest["status"], "incomplete")
-            self.assertEqual(manifest["checks"][0]["issues"], ["PYTHON_VERSION_UNSUPPORTED", "PYPDF_MISSING", "TOML_PARSER_MISSING"])
+            self.assertEqual(manifest["checks"][0]["issues"], ["PYTHON_VERSION_UNSUPPORTED", "PYPDF_MISSING", "PILLOW_MISSING", "TOML_PARSER_MISSING"])
 
     def test_runtime_requires_the_existing_pinned_dependency(self):
         with patch.object(verify_skill.sys, "version_info", (3, 9, 6)), patch(
-            "runtime_compat.dependency_info", return_value={"available": True, "version": "6.9.0"}
+            "runtime_compat.dependency_info", side_effect=lambda name: {"available": True, "version": "11.3.0" if name == "PIL" else "6.9.0"}
         ):
             self.assertEqual(verify_skill.verification_runtime()["issues"], ["PYPDF_VERSION_MISMATCH"])
 

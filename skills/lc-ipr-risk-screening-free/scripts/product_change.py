@@ -69,11 +69,51 @@ def _candidate_ids(task_dir, evidence, query_ids, scope_keys):
     return sorted(affected), sorted(expanded)
 
 
+def _v2(task):
+    try:
+        from assessment_estimate import best_estimate_v2
+        return best_estimate_v2(task)
+    except ValueError:
+        return False
+
+
+def additive_delta(old, new):
+    """True when the new scope only adds directions and right types on existing objects.
+
+    No fact changes, no new or removed object, no change to any object field other than a strictly larger
+    right_types list, no changed or removed direction. Such a change cannot alter any retained comparison.
+    """
+    facts, objects, directions = scope_delta(old, new)
+    if facts or not (objects or directions):
+        return False
+    for row in objects:
+        before, after = row['before'], row['after']
+        if before is None or after is None:
+            return False
+        if any(before.get(field) != after.get(field) for field in OBJECT_CONTENT if field != 'right_types'):
+            return False
+        if not set(before.get('right_types') or []) <= set(after.get('right_types') or []):
+            return False
+    return all(row['before'] is None for row in directions)
+
+
 def scope_impact(task_dir, task, evidence, old, new, plan):
     facts, objects, directions = scope_delta(old, new)
     changed_facts = {row['id'] for row in facts}
     changed_objects = {row['id'] for row in objects}
     changed_directions = {row['id'] for row in directions}
+    if _v2(task) and additive_delta(old, new):
+        # best-estimate-risk-v2: an additive change touches only the new directions; existing objects, facts,
+        # queries and comparisons are unchanged, so they are not reopened.
+        scope_keys = {(country, row['after']['right_type']) for row in directions
+                      for country in task.get('target_jurisdictions', [])}
+        candidates, expanded = _candidate_ids(task_dir, evidence, set(), scope_keys)
+        return {'fact_changes': facts, 'object_changes': objects, 'direction_changes': directions,
+                'affected_direction_ids': sorted(changed_directions), 'affected_query_ids': [],
+                'affected_candidate_ids': candidates, 'expanded_candidate_ids': expanded,
+                'additive': True,
+                'expansion_reason': ('Additive scope change: only candidates within the newly added right types were '
+                                     'widened for an applicability check.' if expanded else '')}
     for direction in old.get('directions', []) + new.get('directions', []):
         if changed_facts & set(direction.get('fact_ids', [])) or changed_objects & set(direction.get('object_ids', [])):
             changed_directions.add(direction['direction_id'])
@@ -122,7 +162,116 @@ def append_scope_change(task_dir, task, evidence, old, new, plan, *, prior_scope
     if task.get('state') in {'ready_for_assessment','assessing','needs_review','completed'}:
         from common import add_history
         add_history(task,'collecting','Product scope changed; affected work and reviews require reassessment.')
+    if impact.get('additive') and event['affected_candidate_ids']:
+        auto_additive_applicability(task_dir, task, evidence, event)
     return event
+
+
+ADDITIVE_REVIEWER = 'program:additive_scope_change'
+
+
+def auto_additive_applicability(task_dir, task, evidence, event):
+    """best-estimate-risk-v2: an additive change leaves every retained candidate usable; record that at once.
+
+    The rows have exactly the shape record_product_applicability.py writes (same review_id, receipt and hash), the
+    reviewer is the program, the reason states the change was additive, and the sources are the candidate's own
+    registered references (or the change's scope sources). Called with the new scope already current.
+    """
+    from annotate_materiality import iter_candidates
+    path = Path(task_dir) / 'normalized-candidates.json'
+    candidates = {item['candidate_id']: item for _, item in iter_candidates(load_json(path))} if path.is_file() else {}
+    known = {item.get('evidence_id') for group in evidence.get('collections', {}).values()
+             if isinstance(group, list) for item in group if isinstance(item, dict) and item.get('evidence_id')}
+    scope_refs = [ref for obj in task.get('product_scope', {}).get('objects', []) for ref in obj.get('source_refs', [])]
+    saved = {(row.get('change_id'), row.get('candidate_id')) for row in task.get('product_applicability_reviews', [])}
+    added = '、'.join(row['after']['right_type'] for row in event.get('direction_changes', []) if row.get('after'))
+    rows = []
+    for cid in event['affected_candidate_ids']:
+        candidate = candidates.get(cid)
+        if candidate is None or (event['change_id'], cid) in saved:
+            continue
+        refs = [ref for ref in candidate.get('evidence_refs', []) if ref in known] or \
+               [ref for ref in scope_refs if ref in known]
+        if not refs:
+            continue                        # nothing citable: left for the ordinary applicability review
+        row = {'change_id': event['change_id'], 'candidate_id': cid, 'status': 'usable', 'reviewer': ADDITIVE_REVIEWER,
+               'reason': ('范围版本' + str(event['version']) + '仅新增方向' + ('（' + added + '）' if added else '')
+                          + '，未改变产品事实、对象内容或既有方向；该候选的来源、原文与比较对当前版本仍然适用。'),
+               'source_refs': list(dict.fromkeys(refs)), 'old_evidence_refs': list(candidate.get('evidence_refs', [])),
+               'product_version': task['product_change_version'], 'target_sha256': task['product_identity']['sha256'],
+               'scope_sha256': task['product_scope']['scope_sha256']}
+        row['review_id'] = stable_id('REV', task['task_id'], event['change_id'], cid, str(task['product_change_version']))
+        row['reviewed_at'] = event['at']
+        row['sha256'] = sha256_json(row)
+        rows.append(row)
+    for row in rows:
+        task.setdefault('product_applicability_reviews', []).append(row)
+        retain_applicability(task_dir, task, evidence, row)
+    return rows
+
+
+def rebase_progress(task_dir):
+    """best-estimate-risk-v2: retire review-progress items left on an older product version by additive changes.
+
+    For each stale item (planned or completed, scope version older than the current one): an unsubmitted query is
+    re-planned at the current version first; then the stale item is removed when a current-version item covers the
+    same scenario, country and right type. Only additive changes are handled; anything else is listed as left.
+    Every write goes through review_progress_stage_a.record_event (actor program:additive_scope_change).
+    """
+    from review_progress_stage_a import _version, ledger, record_event
+    task_dir = Path(task_dir)
+    task = load_json(task_dir / 'task.json')
+    if not _v2(task) or not enabled(task):
+        return {'removed': [], 'added': [], 'left': [], 'reason': 'NOT_APPLICABLE'}
+    history = task.get('product_change_history', [])
+    latest = history[-1] if history else None
+    if not latest or not latest.get('additive'):
+        return {'removed': [], 'added': [], 'left': [], 'reason': 'LATEST_CHANGE_NOT_ADDITIVE'}
+    evidence = load_json(task_dir / 'evidence.json')
+    if not evidence.get('review_progress_events'):
+        return {'removed': [], 'added': [], 'left': [], 'reason': 'PROGRESS_NOT_INITIALIZED'}
+    current = _version(task)
+    items = ledger(task, evidence).get('items', [])
+    live = [row for row in items if row.get('state') not in {'removed', 'exempt'}]
+    stale = [row for row in live if row.get('scope', {}).get('product_version') != current]
+    submitted = {run.get('query_id') for run in evidence.get('source_runs', [])
+                 if isinstance(run, dict) and run.get('submission_state') == 'submitted'}
+
+    def key(row):
+        scope = row.get('scope', {})
+        return (row.get('kind'), scope.get('scenario_id'), scope.get('jurisdiction'), scope.get('right_type'))
+
+    covering = {}
+    for row in live:
+        if row.get('scope', {}).get('product_version') == current:
+            covering.setdefault(key(row), []).append(row['item_id'])
+    added, removed, left = [], [], []
+    copies = []
+    for row in stale:
+        if row.get('kind') == 'query' and row.get('query_id') not in submitted and not covering.get(key(row)):
+            copy = {'item_id': 'ITEM-' + sha256_json([row['item_id'], current])[:20], 'kind': 'query',
+                    'scope': {**row['scope'], 'product_version': current}, 'module_ids': list(row['module_ids']),
+                    'acceptance_condition': row['acceptance_condition'], 'query_id': row['query_id']}
+            copies.append(copy)
+            covering.setdefault(key(row), []).append(copy['item_id'])
+    if copies:
+        record_event(task_dir, {'kind': 'add', 'actor': ADDITIVE_REVIEWER, 'upstream_ref': latest['change_id'],
+                                'reasoning': '范围版本' + current + '仅为加法变化，原查询表达与产品未变，按当前版本重新登记计划项。',
+                                'items': copies})
+        added = [row['item_id'] for row in copies]
+    for row in stale:
+        cover = [item for item in covering.get(key(row), []) if item != row['item_id']]
+        if not cover:
+            left.append(row['item_id'])
+            continue
+        record_event(task_dir, {'kind': 'remove', 'actor': ADDITIVE_REVIEWER, 'item_id': row['item_id'],
+                                'upstream_ref': latest['change_id'],
+                                'reasoning': ('Scope version ' + str(row['scope'].get('product_version'))
+                                              + ' obligation is superseded by current version ' + current
+                                              + ' obligation(s): ' + ', '.join(cover)
+                                              + '. Additive scope change; retained receipts, candidates and limitations are kept.')})
+        removed.append(row['item_id'])
+    return {'removed': removed, 'added': added, 'left': left}
 
 
 def append_target_change(task_dir, task, evidence, old_task, plan, review, source_refs):
@@ -352,3 +501,20 @@ def dispatch_reason(task, row):
            for event in task.get('product_change_history', [])):
         return 'PRODUCT_CHANGE_QUERY_REVIEW_REQUIRED'
     return None
+
+
+def main():
+    import argparse
+    import json
+    parser = argparse.ArgumentParser(description='Product change maintenance (best-estimate-risk-v2 tasks).')
+    parser.add_argument('--task-dir', type=Path, required=True)
+    parser.add_argument('--rebase-progress', action='store_true',
+                        help='Retire review-progress items left on an older version by an additive scope change')
+    args = parser.parse_args()
+    if not args.rebase_progress:
+        parser.error('choose an action: --rebase-progress')
+    print(json.dumps(rebase_progress(args.task_dir.resolve()), ensure_ascii=False, separators=(',', ':')))
+
+
+if __name__ == '__main__':
+    main()

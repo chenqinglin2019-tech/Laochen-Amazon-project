@@ -5,6 +5,7 @@ foreign site-packages directory or compiled extension is added to sys.path.
 """
 from __future__ import annotations
 
+import importlib
 import importlib.abc
 import importlib.metadata
 import importlib.util
@@ -14,6 +15,17 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE_NAMES = frozenset({"pypdf", "tomllib"})
+
+
+class GeneratedTextPath(type(Path())):
+    """UTF-8 reads for fixed Skill styles without editing locked renderer bodies.
+
+    Used only by report style paths. External original decoders keep Path and
+    their original encoding policies; explicit caller encodings remain honored.
+    """
+    def read_text(self, encoding=None, errors=None, **kwargs):
+        return super().read_text(encoding='utf-8' if encoding is None else encoding,
+                                 errors=errors, **kwargs)
 
 
 def dependency_roots():
@@ -56,6 +68,10 @@ class ExistingPackageFinder(importlib.abc.MetaPathFinder):
 
 
 def install_existing_dependencies():
+    # Python <3.11 uses the pinned package installed in this interpreter.
+    # Alias the public API so existing callers keep their tomllib imports.
+    if importlib.util.find_spec("tomllib") is None and importlib.util.find_spec("tomli") is not None:
+        sys.modules["tomllib"] = importlib.import_module("tomli")
     if any(getattr(finder, "_lc_ipr_existing_packages", False) for finder in sys.meta_path):
         return
     roots = dependency_roots()
@@ -67,7 +83,7 @@ def install_existing_dependencies():
 
 
 def dependency_info(name):
-    if name not in PACKAGE_NAMES:
+    if name not in PACKAGE_NAMES | {"PIL"}:
         raise ValueError("COMPAT_PACKAGE_NOT_ALLOWLISTED")
     spec = importlib.util.find_spec(name)
     if spec is None:
@@ -76,6 +92,12 @@ def dependency_info(name):
     fallback = any(getattr(finder, "_lc_ipr_existing_packages", False) and
                    finder.packages.get(name) == package for finder in sys.meta_path)
     version = None
+    if name == "tomllib" and spec.name == "tomli":
+        version = importlib.metadata.version("tomli")
+    if name == "PIL":
+        from PIL import Image
+        Image.new("RGB", (1, 1)).load()
+        version = importlib.metadata.version("Pillow")
     if name == "pypdf":
         distributions = list(package.parent.glob("pypdf-*.dist-info"))
         if len(distributions) == 1:

@@ -4,9 +4,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from common import sha256_json, stable_id
+from common import canonical_patent_number, sha256_json, stable_id
 
 REVISION = "candidate-identity-v1"
+# r5d18 (run B0H16FDSD8): one document is one candidate whatever its spelling. EPO docdb writes Google's USD1035381S1 as
+# USD1035381S (and a US application without its leading zero); the two cards used to stay two candidates, each with
+# its own record request, comparison and screen, and the older record stopped checkpoint 2 unread.
+NUMBER_REVISION = "canonical-number-v1"
 NUMBER_FIELDS = ("publication_number", "registration_number", "serial_number",
                  "application_number", "record_number", "case_number", "docket_number")
 CLAIM_FIELDS = (*NUMBER_FIELDS, "title", "mark_text", "owner", "right_type",
@@ -34,6 +38,15 @@ def enabled(task: dict) -> bool:
     return True
 
 
+def canonical_numbers(task: dict) -> bool:
+    value = task.get("candidate_number_revision")
+    if value is None:
+        return False
+    if value != NUMBER_REVISION:
+        raise ValueError("CANDIDATE_NUMBER_REVISION_INVALID")
+    return True
+
+
 def source_anchor(kind: str, entry: dict, ordinal: int) -> str:
     return stable_id("SRC", kind, str(entry.get("evidence_id") or ""),
                      str(entry.get("source_run_id") or ""), str(ordinal))
@@ -43,14 +56,19 @@ def normalized_number(value: Any) -> str:
     return re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
 
 
-def identity_key(kind: str, item: dict, anchor: str) -> tuple[str, str]:
-    """Only exact, typed identifiers merge automatically; all other rows survive."""
+def identity_key(kind: str, item: dict, anchor: str, *, canonical: bool = False) -> tuple[str, str]:
+    """Only exact, typed identifiers merge automatically; all other rows survive.
+
+    ``canonical`` (canonical-number-v1 tasks) keys a publication by its one canonical spelling, so the docdb and the
+    Google spelling of one document merge; the raw spellings stay in the field claims."""
     country = str(item.get("jurisdiction") or item.get("office") or "").upper().strip()
     right = str(item.get("right_type") or "unknown").strip() or "unknown"
     if kind == "patent":
         raw = str(item.get("publication_number") or "").strip()
         number = normalized_number(raw)
         if raw and DOCUMENT_NUMBER.fullmatch(number) and country and country == number[:2]:
+            if canonical:
+                number = canonical_patent_number(number)
             return f"{country}:{right}:publication:{number}", "exact_document_number"
     elif kind == "trademark":
         for field in ("serial_number", "registration_number"):
