@@ -78,6 +78,25 @@
 - 图片任务慢时等待轮询，不要因数分钟等待重复提交。
 - `no_result` 必须来自成功且结构有效的零候选响应；认证、配额、超时、畸形 JSON 和解析失败都不是 `no_result`。
 - 供应商原始响应与 `raw/` 证据不可由 Agent 修补。URL 和候选字段的可移植规范化由 CLI 完成；失败时复用原任务和稳定 operation 恢复，不改原始字节、不换 ID 重提。
+
+### V2 恢复与明确失败后的补查
+
+新 `prepare-us-screen` 计划显式使用 V2。V1 服务已停用；旧计划缺少版本字段时不得继续远程执行，也不能手改计划、摘要或旧任务原始响应来迁移。遇到 `SKILL_UPGRADE_REQUIRED` / HTTP 410，安装或更新新版 Skill 后新建任务，不重试旧请求。后端未启用 V2 时停止执行并报告服务未就绪，不降级重发 V1。
+
+原任务超时、`uncertain`、`isStale` 或暂时查不到时，继续原 `us-screen` 或原补查命令查询已有 operation。不得新建批次规避未决状态；已成功来源不会重复提交，GET 与原任务恢复不新增扣费。
+
+遇到 `V2_EVIDENCE_REQUIRES_REVIEW` 或 `RECOVERY_REQUIRES_REVIEW` 时停止自动恢复，保留 operation ID 和错误码供核对；它们不是已确认失败，不能换批次重新收费检索。
+
+只有确认失败的文字商标或图搜来源才能新建补查批次：
+
+1. `prepare-us-screen-retry --task-dir <任务目录> --batch <稳定批次名> --sources graphic_mark`。图搜来源可选 `design_patent`、`graphic_mark`、`copyright`，多个用逗号分隔；`word_mark` 必须单独一批。
+2. 检查返回的补查计划和计费说明：新批次会产生新业务请求；补单个图搜来源仍按现有图搜整组报价，文字商标按现有文字商标报价。同批次恢复不重复计费。
+3. `run-us-screen-retry --task-dir <任务目录> --plan <补查plan.json> --config <config.json>`。中断后使用完全相同的批次和计划恢复，不另建新批次。
+4. `import-us-screen-retry --task-dir <任务目录> --plan <补查plan.json>`。若证据已冻结，先用现有 `revise-evidence` 创建证据修订，再导入。导入中断可重跑同一命令，不重新检索。返回 `US_SCREEN_RETRY_IMPORT_PARTIAL` 时，成功来源已经导入，按 `failed_queries` 处理剩余缺口，不重查成功来源。随后重新完成受影响的候选审阅及报告门禁。
+
+补查位于 `us-screen/retries/<批次>/`，绑定父计划和原响应摘要，不覆盖原 `us-screen/raw/` 或已经成功的 provider run。原始详情和分页字节保存在 `us-screen/raw/provider-pages/`；合并结果是派生数据，不能当作供应商原始页修改。补查结果仍有错误、警告或缺页时保留覆盖缺口，不能把候选为空解释为检索成功。
+
+V2 候选图片会立即缓存；签名图片地址过期且本地缺图时，运行 `refresh-us-screen-images --task-dir <任务目录> --config <config.json>`。该命令只免费读取已有任务，不重新检索；刷新响应单独留档，仅补本地图片缓存。候选内容或顺序发生变化时拒绝套用新图；仍无法读取的图片保留证据缺口，不凭相似度代替看图。
 - `no_result` 不等于不存在权利。
 
 ## 候选全批次处置
