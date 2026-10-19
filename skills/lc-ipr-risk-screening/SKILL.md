@@ -1,6 +1,6 @@
 ---
 name: lc-ipr-risk-screening
-description: 针对单个美国、欧洲 Amazon 商品汇总云端与公开网页候选，完成七模块知识产权风险审阅并输出离线报告。
+description: 对单个美国 Amazon 商品执行知识产权风险筛查。冻结商品事实，经老陈云端完成商品详情和知识产权候选发现；有 SERPER_API_KEY 时本机补公开网页检索，没有也不阻断。再做全批次候选处置、七模块审阅和离线报告。不是法律意见；未检出不等于安全。
 ---
 
 # LC IPR Risk Screening（US）
@@ -8,6 +8,8 @@ description: 针对单个美国、欧洲 Amazon 商品汇总云端与公开网�
 一次只处理一个美国商品。用户提供老陈访问 Token。公开网页检索先读环境变量 `SERPER_API_KEY`：有 Key 则本机跑完整检索；读不到就询问用户，用户没有也不阻断，云端商品详情和知识产权发现继续走完。
 
 ## 开始前
+
+本版仅用于 V2 新任务。服务端停用 V1 后，遇到 `SKILL_UPGRADE_REQUIRED` 或旧任务的 HTTP 410，停止该任务并提示用户安装/更新新版 Skill 后新建筛查任务；不要重试旧请求、改 ID 或将旧计划转换为新的收费请求。手工安装用户替换 Skill 包，任务数据保留在包外。
 
 1. 读取 `INSTRUCTIONS.md`、`references/input-routing.md`、`references/us-workflow.md`、`references/risk-judgment.md`。
 2. 选择 `tools/bin/` 中当前平台 CLI；macOS 首次运行前按 `INSTRUCTIONS.md` 处理 quarantine。
@@ -37,6 +39,7 @@ description: 针对单个美国、欧洲 Amazon 商品汇总云端与公开网�
 - 草稿报告中的候选数量和检索相似度不是综合风险等级；没有完成绑定证据的七模块审阅时，风险必须显示为“无法判断”。
 - 对高风险候选、权利状态不清或拟正式上线的商品，应建议用户咨询美国知识产权律师。
 - 不得把 Token、上游服务 Key、Cookie 或浏览器凭据写入任务目录、报告或聊天。
+- 新发现计划使用 Trohub V2；历史计划不转换版本，V1 已停用，不再提交或恢复其远程任务。V2 恢复使用原 operation，不能通过换 ID 重提未决任务。明确失败来源需要新补查时，按 `references/us-workflow.md` 的补查批次流程操作，保留已成功证据。
 
 ## 资源
 
