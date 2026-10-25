@@ -1,0 +1,458 @@
+{
+  "schemaVersion": "1.0",
+  "fixture": true,
+  "product": {
+    "site": "US",
+    "currency": "USD",
+    "asin": "B000000002",
+    "childConfirmed": true,
+    "title": "公式验收案例 2 · 人工测试商品",
+    "unitsPerSale": 1,
+    "price": "50",
+    "priceIncludesDiscounts": true,
+    "goodsType": "general",
+    "feeCategory": "fixture",
+    "packaging": {
+      "cm": [
+        "20",
+        "10",
+        "5"
+      ],
+      "kg": "0.5"
+    }
+  },
+  "scenario": {
+    "calculationDate": "2026-10-24",
+    "shipDate": "2026-10-24",
+    "entryDate": "2026-10-24",
+    "exitDate": null,
+    "ageDays": "30",
+    "purchaseCny": "105",
+    "adRatio": "0.1",
+    "adTax": {
+      "mode": "none"
+    },
+    "returnRate": "0.2",
+    "unsellableRatio": "0.25",
+    "channel": "express",
+    "adInput": {
+      "kind": "ratio",
+      "ratio": "0.08",
+      "taxIncludedDenominator": false,
+      "refundsDeducted": false,
+      "normalizedRatio": "0.1",
+      "confirmedAt": "2026-10-24",
+      "calculation": "0.08 × 50 ÷ (1 - 0.2) = 5；5 ÷ 50 = 0.1"
+    }
+  },
+  "sellerProfile": {
+    "localFba": true,
+    "salesPlan": "professional",
+    "taxMethod": "general",
+    "establishment": "fixture"
+  },
+  "provenance": {
+    "product": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "price": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "packaging": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "purchase": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "advertising": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "returns": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "inventory": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "taxProfile": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "costBoundary": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    }
+  },
+  "assumptions": [],
+  "history": [],
+  "extraFees": [],
+  "feeReview": {
+    "mediaFee": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "individualPlan": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "peakDelivery": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "lowInventory": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "storageUtilization": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "agedInventory": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "inboundPlacement": {
+      "status": "included",
+      "itemId": "inbound",
+      "reason": "按人工测试值计入",
+      "confirmedAt": "2026-10-24"
+    },
+    "inboundDefect": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "prepLabel": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "partneredCarrier": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "overseasAWD": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "digitalService": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "promotion": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "payoutFX": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "epr": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "serviceTax": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "importTax": {
+      "status": "included",
+      "itemId": "importTax",
+      "reason": "按人工测试值计入",
+      "confirmedAt": "2026-10-24"
+    },
+    "withholding": {
+      "status": "notApplicable",
+      "reason": "人工测试边界明确不发生",
+      "confirmedAt": "2026-10-24"
+    },
+    "returns": {
+      "status": "included",
+      "itemId": "returnLoss",
+      "reason": "按人工测试值计入",
+      "confirmedAt": "2026-10-24"
+    }
+  },
+  "ruleSnapshot": {
+    "id": "fixture-2",
+    "fx": {
+      "kind": "CNH",
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      },
+      "cnhPerCurrency": {
+        "CNY": "1",
+        "USD": "7"
+      },
+      "originalPair": "USD/CNH",
+      "quoteTime": "2026-10-24T00:00:00Z",
+      "chain": [
+        "USD → CNH：7（测试值）"
+      ]
+    },
+    "rules": {
+      "salesTax": {
+        "status": "active",
+        "site": "US",
+        "currency": "USD",
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+        "scope": {},
+        "source": {
+          "type": "fixture",
+          "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+          "at": "2026-10-24T00:00:00Z"
+        },
+        "expression": "0",
+        "tax": {
+          "mode": "none"
+        }
+      },
+      "commission": {
+        "status": "active",
+        "site": "US",
+        "currency": "USD",
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+        "scope": {},
+        "source": {
+          "type": "fixture",
+          "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+          "at": "2026-10-24T00:00:00Z"
+        },
+        "expression": {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            "0.15"
+          ]
+        },
+        "tax": {
+          "mode": "none"
+        }
+      },
+      "fulfillment": {
+        "status": "active",
+        "site": "US",
+        "currency": "USD",
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+        "scope": {},
+        "source": {
+          "type": "fixture",
+          "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+          "at": "2026-10-24T00:00:00Z"
+        },
+        "expression": "5",
+        "tax": {
+          "mode": "none"
+        }
+      },
+      "storage": {
+        "status": "active",
+        "site": "US",
+        "currency": "USD",
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+        "scope": {},
+        "source": {
+          "type": "fixture",
+          "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+          "at": "2026-10-24T00:00:00Z"
+        },
+        "expression": "0.5",
+        "tax": {
+          "mode": "none"
+        }
+      },
+      "inbound": {
+        "status": "active",
+        "site": "US",
+        "currency": "USD",
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+        "scope": {},
+        "source": {
+          "type": "fixture",
+          "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+          "at": "2026-10-24T00:00:00Z"
+        },
+        "expression": "0.6",
+        "tax": {
+          "mode": "none"
+        }
+      },
+      "importTax": {
+        "status": "active",
+        "site": "US",
+        "currency": "USD",
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+        "scope": {},
+        "source": {
+          "type": "fixture",
+          "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+          "at": "2026-10-24T00:00:00Z"
+        },
+        "expression": "0.9",
+        "tax": {
+          "mode": "none"
+        },
+        "covers": [
+          "duty",
+          "importTax"
+        ]
+      },
+      "otherTax": {
+        "status": "active",
+        "site": "US",
+        "currency": "USD",
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+        "scope": {},
+        "source": {
+          "type": "fixture",
+          "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+          "at": "2026-10-24T00:00:00Z"
+        },
+        "expression": "0",
+        "tax": {
+          "mode": "none"
+        }
+      },
+      "returnLoss": {
+        "status": "active",
+        "site": "US",
+        "currency": "USD",
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+        "scope": {},
+        "source": {
+          "type": "fixture",
+          "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+          "at": "2026-10-24T00:00:00Z"
+        },
+        "expression": "6.5",
+        "tax": {
+          "mode": "none"
+        }
+      },
+      "withholding": {
+        "status": "active",
+        "site": "US",
+        "currency": "USD",
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+        "scope": {},
+        "source": {
+          "type": "fixture",
+          "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+          "at": "2026-10-24T00:00:00Z"
+        },
+        "expression": "0",
+        "tax": {
+          "mode": "none"
+        },
+        "recoverable": true
+      }
+    }
+  },
+  "logistics": {
+    "express": {
+      "type": "express",
+      "status": "active",
+      "mode": "manual",
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      },
+      "destination": "US",
+      "goodsType": "general",
+      "currency": "USD",
+      "validFrom": "2026-01-01",
+      "validTo": "2026-12-31",
+      "inclusions": {
+        "pickup": "included",
+        "clearance": "included",
+        "duty": "excluded",
+        "importTax": "excluded",
+        "lastMile": "included",
+        "overseasAWD": "included",
+        "insurance": "included"
+      },
+      "manualRule": {
+        "status": "active",
+        "site": "US",
+        "currency": "USD",
+        "validFrom": "2026-01-01",
+        "validTo": "2026-12-31",
+        "scope": {},
+        "source": {
+          "type": "fixture",
+          "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+          "at": "2026-10-24T00:00:00Z"
+        },
+        "expression": "5",
+        "tax": {
+          "mode": "none"
+        }
+      },
+      "tax": {
+        "mode": "none"
+      },
+      "includedImportTaxRecovery": "0",
+      "resolvedComponents": {
+        "duty": "importTax",
+        "importTax": "importTax"
+      }
+    },
+    "air": {
+      "status": "excluded",
+      "reason": "人工案例仅测算当前渠道",
+      "confirmedAt": "2026-10-24"
+    },
+    "fastSea": {
+      "status": "excluded",
+      "reason": "人工案例仅测算当前渠道",
+      "confirmedAt": "2026-10-24"
+    },
+    "slowSea": {
+      "status": "excluded",
+      "reason": "人工案例仅测算当前渠道",
+      "confirmedAt": "2026-10-24"
+    }
+  }
+}

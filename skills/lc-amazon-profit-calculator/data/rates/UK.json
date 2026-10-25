@@ -1,0 +1,1878 @@
+{
+  "schemaVersion": "2.0",
+  "site": "UK",
+  "revision": "2026-10-25.1",
+  "source": {
+    "type": "official",
+    "locator": "https://m.media-amazon.com/images/G/02/sell/images/260410-FBA-Rate-Card-EN.pdf",
+    "at": "2026-10-25T00:00:00Z"
+  },
+  "sources": [
+    "https://m.media-amazon.com/images/G/02/sell/images/260410-FBA-Rate-Card-EN.pdf"
+  ],
+  "checkedAt": "2026-10-25T00:00:00Z",
+  "effectiveFrom": "2026-04-17",
+  "goodsTypes": [
+    "ordinary"
+  ],
+  "feePrecision": 2,
+  "salesTax": {
+    "default": ".20"
+  },
+  "commissions": {
+    "footwear": {
+      "op": "max",
+      "args": [
+        0.25,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "apparel": {
+      "op": "max",
+      "args": [
+        ".25",
+        {
+          "op": "select",
+          "rows": [
+            {
+              "when": {
+                "price": {
+                  "lte": "15"
+                }
+              },
+              "value": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  ".05"
+                ]
+              }
+            },
+            {
+              "when": {
+                "price": {
+                  "gt": "15",
+                  "lte": "20"
+                }
+              },
+              "value": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  ".1"
+                ]
+              }
+            },
+            {
+              "when": {
+                "price": {
+                  "gt": "20"
+                }
+              },
+              "value": {
+                "op": "tier",
+                "mode": "progressive",
+                "base": {
+                  "ref": "price"
+                },
+                "bands": [
+                  {
+                    "upTo": 40,
+                    "rate": ".15"
+                  },
+                  {
+                    "upTo": null,
+                    "rate": ".07"
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "home": {
+      "op": "max",
+      "args": [
+        ".25",
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lte": "20"
+                    }
+                  },
+                  "value": ".08"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": "20"
+                    }
+                  },
+                  "value": ".15"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "kitchen": {
+      "op": "max",
+      "args": [
+        0.25,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "toys": {
+      "op": "max",
+      "args": [
+        0.25,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "sports": {
+      "op": "max",
+      "args": [
+        0.25,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "pet": {
+      "op": "max",
+      "args": [
+        0.25,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "office": {
+      "op": "max",
+      "args": [
+        0.25,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "electronicsAccessories": {
+      "op": "max",
+      "args": [
+        ".25",
+        {
+          "op": "tier",
+          "mode": "progressive",
+          "base": {
+            "ref": "price"
+          },
+          "bands": [
+            {
+              "upTo": 100,
+              "rate": ".15"
+            },
+            {
+              "upTo": null,
+              "rate": ".08"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "fulfillment": [
+    {
+      "id": "low-price-0-10",
+      "maxCm": [
+        33,
+        23,
+        2.5
+      ],
+      "maxKg": ".46",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".02"
+              }
+            },
+            "value": "1.46"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".02",
+                "lte": ".04"
+              }
+            },
+            "value": "1.50"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".04",
+                "lte": ".06"
+              }
+            },
+            "value": "1.52"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".06",
+                "lte": ".08"
+              }
+            },
+            "value": "1.67"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".08",
+                "lte": ".10"
+              }
+            },
+            "value": "1.70"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".10",
+                "lte": ".21"
+              }
+            },
+            "value": "1.73"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".21",
+                "lte": ".46"
+              }
+            },
+            "value": "1.87"
+          }
+        ]
+      },
+      "categories": [
+        "office",
+        "kitchen"
+      ],
+      "maxPrice": 10,
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".02"
+              }
+            },
+            "value": "1.70"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".02",
+                "lte": ".04"
+              }
+            },
+            "value": "1.74"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".04",
+                "lte": ".06"
+              }
+            },
+            "value": "1.75"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".06",
+                "lte": ".08"
+              }
+            },
+            "value": "1.92"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".08",
+                "lte": ".10"
+              }
+            },
+            "value": "1.93"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".10",
+                "lte": ".21"
+              }
+            },
+            "value": "1.87"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".21",
+                "lte": ".46"
+              }
+            },
+            "value": "1.99"
+          }
+        ]
+      }
+    },
+    {
+      "id": "low-price-0-20",
+      "maxCm": [
+        33,
+        23,
+        2.5
+      ],
+      "maxKg": ".46",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".02"
+              }
+            },
+            "value": "1.46"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".02",
+                "lte": ".04"
+              }
+            },
+            "value": "1.50"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".04",
+                "lte": ".06"
+              }
+            },
+            "value": "1.52"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".06",
+                "lte": ".08"
+              }
+            },
+            "value": "1.67"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".08",
+                "lte": ".10"
+              }
+            },
+            "value": "1.70"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".10",
+                "lte": ".21"
+              }
+            },
+            "value": "1.73"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".21",
+                "lte": ".46"
+              }
+            },
+            "value": "1.87"
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel",
+        "home",
+        "toys",
+        "sports",
+        "pet",
+        "electronicsAccessories"
+      ],
+      "maxPrice": 20,
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".02"
+              }
+            },
+            "value": "1.70"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".02",
+                "lte": ".04"
+              }
+            },
+            "value": "1.74"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".04",
+                "lte": ".06"
+              }
+            },
+            "value": "1.75"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".06",
+                "lte": ".08"
+              }
+            },
+            "value": "1.92"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".08",
+                "lte": ".10"
+              }
+            },
+            "value": "1.93"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".10",
+                "lte": ".21"
+              }
+            },
+            "value": "1.87"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".21",
+                "lte": ".46"
+              }
+            },
+            "value": "1.99"
+          }
+        ]
+      }
+    },
+    {
+      "id": "low-price-7-10",
+      "maxCm": [
+        33,
+        23,
+        4
+      ],
+      "maxKg": ".96",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.42"
+          }
+        ]
+      },
+      "categories": [
+        "office",
+        "kitchen"
+      ],
+      "maxPrice": 10,
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "low-price-7-20",
+      "maxCm": [
+        33,
+        23,
+        4
+      ],
+      "maxKg": ".96",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.42"
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel",
+        "home",
+        "toys",
+        "sports",
+        "pet",
+        "electronicsAccessories"
+      ],
+      "maxPrice": 20,
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "low-price-8-10",
+      "maxCm": [
+        33,
+        23,
+        6
+      ],
+      "maxKg": ".96",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.65"
+          }
+        ]
+      },
+      "categories": [
+        "office",
+        "kitchen"
+      ],
+      "maxPrice": 10,
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.21"
+          }
+        ]
+      }
+    },
+    {
+      "id": "low-price-8-20",
+      "maxCm": [
+        33,
+        23,
+        6
+      ],
+      "maxKg": ".96",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.65"
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel",
+        "home",
+        "toys",
+        "sports",
+        "pet",
+        "electronicsAccessories"
+      ],
+      "maxPrice": 20,
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.21"
+          }
+        ]
+      }
+    },
+    {
+      "id": "low-price-9-10",
+      "maxCm": [
+        35,
+        25,
+        12
+      ],
+      "maxKg": ".4",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".15"
+              }
+            },
+            "value": "2.67"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".15",
+                "lte": ".4"
+              }
+            },
+            "value": "2.70"
+          }
+        ]
+      },
+      "categories": [
+        "office",
+        "kitchen"
+      ],
+      "maxPrice": 10,
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".15"
+              }
+            },
+            "value": "2.22"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".15",
+                "lte": ".4"
+              }
+            },
+            "value": "2.27"
+          }
+        ]
+      }
+    },
+    {
+      "id": "low-price-9-20",
+      "maxCm": [
+        35,
+        25,
+        12
+      ],
+      "maxKg": ".4",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".15"
+              }
+            },
+            "value": "2.67"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".15",
+                "lte": ".4"
+              }
+            },
+            "value": "2.70"
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel",
+        "home",
+        "toys",
+        "sports",
+        "pet",
+        "electronicsAccessories"
+      ],
+      "maxPrice": 20,
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".15"
+              }
+            },
+            "value": "2.22"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".15",
+                "lte": ".4"
+              }
+            },
+            "value": "2.27"
+          }
+        ]
+      }
+    },
+    {
+      "id": "envelope-0",
+      "maxCm": [
+        33,
+        23,
+        2.5
+      ],
+      "maxKg": ".46",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".02"
+              }
+            },
+            "value": "1.83"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".02",
+                "lte": ".04"
+              }
+            },
+            "value": "1.87"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".04",
+                "lte": ".06"
+              }
+            },
+            "value": "1.89"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".06",
+                "lte": ".08"
+              }
+            },
+            "value": "2.07"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".08",
+                "lte": ".10"
+              }
+            },
+            "value": "2.08"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".10",
+                "lte": ".21"
+              }
+            },
+            "value": "2.10"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".21",
+                "lte": ".46"
+              }
+            },
+            "value": "2.16"
+          }
+        ]
+      },
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".02"
+              }
+            },
+            "value": "1.70"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".02",
+                "lte": ".04"
+              }
+            },
+            "value": "1.74"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".04",
+                "lte": ".06"
+              }
+            },
+            "value": "1.75"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".06",
+                "lte": ".08"
+              }
+            },
+            "value": "1.92"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".08",
+                "lte": ".10"
+              }
+            },
+            "value": "1.93"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".10",
+                "lte": ".21"
+              }
+            },
+            "value": "1.87"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".21",
+                "lte": ".46"
+              }
+            },
+            "value": "1.99"
+          }
+        ]
+      }
+    },
+    {
+      "id": "envelope-7",
+      "maxCm": [
+        33,
+        23,
+        4
+      ],
+      "maxKg": ".96",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.72"
+          }
+        ]
+      },
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.15"
+          }
+        ]
+      }
+    },
+    {
+      "id": "envelope-8",
+      "maxCm": [
+        33,
+        23,
+        6
+      ],
+      "maxKg": ".96",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.94"
+          }
+        ]
+      },
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".96"
+              }
+            },
+            "value": "2.21"
+          }
+        ]
+      }
+    },
+    {
+      "id": "fashion-parcel-1",
+      "maxCm": [
+        35,
+        25,
+        7
+      ],
+      "maxKg": "3.9",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "add",
+        "args": [
+          "2.83",
+          {
+            "op": "mul",
+            "args": [
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "ceilStep",
+                    "args": [
+                      {
+                        "op": "max",
+                        "args": [
+                          0,
+                          {
+                            "op": "sub",
+                            "args": [
+                              {
+                                "ref": "shippingWeight"
+                              },
+                              ".1"
+                            ]
+                          }
+                        ]
+                      },
+                      ".1"
+                    ]
+                  },
+                  ".1"
+                ]
+              },
+              "0.02"
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel"
+      ]
+    },
+    {
+      "id": "fashion-parcel-2",
+      "maxCm": [
+        35,
+        25,
+        9
+      ],
+      "maxKg": "3.9",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "add",
+        "args": [
+          "2.87",
+          {
+            "op": "mul",
+            "args": [
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "ceilStep",
+                    "args": [
+                      {
+                        "op": "max",
+                        "args": [
+                          0,
+                          {
+                            "op": "sub",
+                            "args": [
+                              {
+                                "ref": "shippingWeight"
+                              },
+                              ".1"
+                            ]
+                          }
+                        ]
+                      },
+                      ".1"
+                    ]
+                  },
+                  ".1"
+                ]
+              },
+              "0.02"
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel"
+      ]
+    },
+    {
+      "id": "fashion-parcel-3",
+      "maxCm": [
+        35,
+        25,
+        12
+      ],
+      "maxKg": "3.9",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "add",
+        "args": [
+          "2.91",
+          {
+            "op": "mul",
+            "args": [
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "ceilStep",
+                    "args": [
+                      {
+                        "op": "max",
+                        "args": [
+                          0,
+                          {
+                            "op": "sub",
+                            "args": [
+                              {
+                                "ref": "shippingWeight"
+                              },
+                              ".1"
+                            ]
+                          }
+                        ]
+                      },
+                      ".1"
+                    ]
+                  },
+                  ".1"
+                ]
+              },
+              "0.02"
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel"
+      ]
+    },
+    {
+      "id": "fashion-parcel-4",
+      "maxCm": [
+        40,
+        30,
+        6
+      ],
+      "maxKg": "11.9",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "add",
+        "args": [
+          "2.97",
+          {
+            "op": "mul",
+            "args": [
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "ceilStep",
+                    "args": [
+                      {
+                        "op": "max",
+                        "args": [
+                          0,
+                          {
+                            "op": "sub",
+                            "args": [
+                              {
+                                "ref": "shippingWeight"
+                              },
+                              ".1"
+                            ]
+                          }
+                        ]
+                      },
+                      ".1"
+                    ]
+                  },
+                  ".1"
+                ]
+              },
+              "0.02"
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel"
+      ]
+    },
+    {
+      "id": "fashion-parcel-5",
+      "maxCm": [
+        40,
+        30,
+        20
+      ],
+      "maxKg": "11.9",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "add",
+        "args": [
+          "3.1",
+          {
+            "op": "mul",
+            "args": [
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "ceilStep",
+                    "args": [
+                      {
+                        "op": "max",
+                        "args": [
+                          0,
+                          {
+                            "op": "sub",
+                            "args": [
+                              {
+                                "ref": "shippingWeight"
+                              },
+                              ".1"
+                            ]
+                          }
+                        ]
+                      },
+                      ".1"
+                    ]
+                  },
+                  ".1"
+                ]
+              },
+              "0.03"
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel"
+      ]
+    },
+    {
+      "id": "fashion-parcel-6",
+      "maxCm": [
+        45,
+        34,
+        10
+      ],
+      "maxKg": "11.9",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "add",
+        "args": [
+          "3.34",
+          {
+            "op": "mul",
+            "args": [
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "ceilStep",
+                    "args": [
+                      {
+                        "op": "max",
+                        "args": [
+                          0,
+                          {
+                            "op": "sub",
+                            "args": [
+                              {
+                                "ref": "shippingWeight"
+                              },
+                              ".1"
+                            ]
+                          }
+                        ]
+                      },
+                      ".1"
+                    ]
+                  },
+                  ".1"
+                ]
+              },
+              "0.03"
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel"
+      ]
+    },
+    {
+      "id": "fashion-parcel-7",
+      "maxCm": [
+        45,
+        34,
+        26
+      ],
+      "maxKg": "11.9",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "add",
+        "args": [
+          "3.97",
+          {
+            "op": "mul",
+            "args": [
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "ceilStep",
+                    "args": [
+                      {
+                        "op": "max",
+                        "args": [
+                          0,
+                          {
+                            "op": "sub",
+                            "args": [
+                              {
+                                "ref": "shippingWeight"
+                              },
+                              ".1"
+                            ]
+                          }
+                        ]
+                      },
+                      ".1"
+                    ]
+                  },
+                  ".1"
+                ]
+              },
+              "0.03"
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel"
+      ]
+    },
+    {
+      "id": "standard-parcel-9",
+      "maxCm": [
+        35,
+        25,
+        12
+      ],
+      "maxKg": "3.9",
+      "weightMode": "max",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".15"
+              }
+            },
+            "value": "2.91"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".15",
+                "lte": ".4"
+              }
+            },
+            "value": "3.00"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".4",
+                "lte": ".9"
+              }
+            },
+            "value": "3.04"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".9",
+                "lte": "1.4"
+              }
+            },
+            "value": "3.05"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.4",
+                "lte": "1.9"
+              }
+            },
+            "value": "3.25"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.9",
+                "lte": "3.9"
+              }
+            },
+            "value": "3.27"
+          }
+        ]
+      },
+      "excludeCategories": [
+        "footwear",
+        "apparel"
+      ],
+      "divisor": "5000",
+      "maxDimKg": "2.1",
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".15"
+              }
+            },
+            "value": "2.22"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".15",
+                "lte": ".4"
+              }
+            },
+            "value": "2.27"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".4",
+                "lte": ".9"
+              }
+            },
+            "value": "2.35"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".9",
+                "lte": "1.4"
+              }
+            },
+            "value": "2.49"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.4",
+                "lte": "1.9"
+              }
+            },
+            "value": "2.69"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.9",
+                "lte": "3.9"
+              }
+            },
+            "value": "4.31"
+          }
+        ]
+      }
+    },
+    {
+      "id": "standard-parcel-15",
+      "maxCm": [
+        45,
+        34,
+        26
+      ],
+      "maxKg": "11.9",
+      "weightMode": "max",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".15"
+              }
+            },
+            "value": "2.94"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".15",
+                "lte": ".4"
+              }
+            },
+            "value": "3.01"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".4",
+                "lte": ".9"
+              }
+            },
+            "value": "3.06"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".9",
+                "lte": "1.4"
+              }
+            },
+            "value": "3.26"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.4",
+                "lte": "1.9"
+              }
+            },
+            "value": "3.48"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.9",
+                "lte": "2.9"
+              }
+            },
+            "value": "3.49"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "2.9",
+                "lte": "3.9"
+              }
+            },
+            "value": "3.54"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "3.9",
+                "lte": "5.9"
+              }
+            },
+            "value": "3.56"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "5.9",
+                "lte": "8.9"
+              }
+            },
+            "value": "3.57"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "8.9",
+                "lte": "11.9"
+              }
+            },
+            "value": "3.58"
+          }
+        ]
+      },
+      "excludeCategories": [
+        "footwear",
+        "apparel"
+      ],
+      "divisor": "5000",
+      "maxDimKg": "7.96",
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".15"
+              }
+            },
+            "value": "2.23"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".15",
+                "lte": ".4"
+              }
+            },
+            "value": "2.32"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".4",
+                "lte": ".9"
+              }
+            },
+            "value": "2.41"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".9",
+                "lte": "1.4"
+              }
+            },
+            "value": "2.51"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.4",
+                "lte": "1.9"
+              }
+            },
+            "value": "2.66"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.9",
+                "lte": "2.9"
+              }
+            },
+            "value": "2.83"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "2.9",
+                "lte": "3.9"
+              }
+            },
+            "value": "2.89"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "3.9",
+                "lte": "5.9"
+              }
+            },
+            "value": "3.02"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "5.9",
+                "lte": "8.9"
+              }
+            },
+            "value": "3.35"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "8.9",
+                "lte": "11.9"
+              }
+            },
+            "value": "3.97"
+          }
+        ]
+      }
+    }
+  ],
+  "storage": [
+    {
+      "low": ".62",
+      "peak": ".82",
+      "volumeCm3PerUnit": "28316.846592",
+      "categories": [
+        "footwear",
+        "apparel"
+      ]
+    },
+    {
+      "low": ".76",
+      "peak": "1.51",
+      "volumeCm3PerUnit": "28316.846592"
+    }
+  ],
+  "returns": [
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "mul",
+            "args": [
+              {
+                "ref": "F"
+              },
+              ".5"
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel"
+      ]
+    },
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "ref": "returnProcessing"
+          }
+        ]
+      },
+      "note": "高退货率类目保守按每次退货均收处理费估算，不计账户豁免；实际费用可能更低。"
+    }
+  ],
+  "notes": [
+    "适用于本地 FBA 普货；不含跨境履约、危险品和账户专属优惠。",
+    "常规 FBA 加 1.5% 燃料附加费。德国使用 DE Only 档，不假设参与中欧计划。内置至标准包裹，特殊细分类目需单独匹配。",
+    "销售税按本站普通商品标准税率还原价内税；美国/加拿大默认页面价外税。特殊税率商品需另取规则。",
+    "销售税按本站普通商品标准税率还原价内税；美国/加拿大默认页面价外税。特殊税率商品需另取规则。"
+  ],
+  "fulfillmentMultiplier": "1.015",
+  "salesTaxSource": "https://www.gov.uk/vat-rates"
+}

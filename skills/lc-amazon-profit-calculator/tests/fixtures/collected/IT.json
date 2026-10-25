@@ -1,0 +1,17 @@
+{
+  "source": "sellersprite.asin_detail",
+  "capturedAt": "2026-10-25",
+  "raw": {
+    "asin": "B0BF4MBNS5",
+    "marketplace": "IT",
+    "title": "Rilista Donna Slingback Kitten Tacchi Chiuso A Punta Punta Da Festa Di Nozze Abito Pompe Scarpe",
+    "asinUrl": "https://www.amazon.it/dp/B0BF4MBNS5?psc=1",
+    "price": null,
+    "dimensions": "27,51 x 15,09 x 9,7 cm",
+    "weight": "581 grammi",
+    "nodeLabelPath": "Moda:Donna:Scarpe:Scarpe col tacco",
+    "skuList": null,
+    "updatedTime": 1718251052000
+  },
+  "expectedSite": "IT"
+}

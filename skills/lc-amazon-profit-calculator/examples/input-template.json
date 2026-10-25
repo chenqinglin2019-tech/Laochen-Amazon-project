@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "1.0",
+  "fixture": false,
+  "product": {
+    "site": null,
+    "currency": null,
+    "asin": null,
+    "childConfirmed": false,
+    "title": null,
+    "unitsPerSale": null,
+    "price": null,
+    "priceIncludesDiscounts": true,
+    "goodsType": null,
+    "feeCategory": null,
+    "packaging": {
+      "cm": [
+        null,
+        null,
+        null
+      ],
+      "kg": null
+    }
+  },
+  "scenario": {
+    "calculationDate": "2026-10-24",
+    "shipDate": "2026-10-24",
+    "entryDate": "2026-10-24",
+    "exitDate": null,
+    "ageDays": null,
+    "purchaseCny": null,
+    "adRatio": null,
+    "adTax": null,
+    "returnRate": null,
+    "unsellableRatio": null,
+    "channel": "express"
+  },
+  "sellerProfile": {
+    "localFba": true,
+    "salesPlan": "professional",
+    "taxMethod": null,
+    "establishment": null
+  },
+  "provenance": {},
+  "assumptions": [],
+  "history": [],
+  "extraFees": [],
+  "feeReview": {
+    "mediaFee": null,
+    "individualPlan": null,
+    "peakDelivery": null,
+    "lowInventory": null,
+    "storageUtilization": null,
+    "agedInventory": null,
+    "inboundPlacement": null,
+    "inboundDefect": null,
+    "prepLabel": null,
+    "partneredCarrier": null,
+    "overseasAWD": null,
+    "digitalService": null,
+    "promotion": null,
+    "payoutFX": null,
+    "epr": null,
+    "serviceTax": null,
+    "importTax": null,
+    "withholding": null,
+    "returns": null
+  },
+  "ruleSnapshot": {
+    "fx": null,
+    "rules": {}
+  },
+  "logistics": {
+    "express": {
+      "status": "pending"
+    },
+    "air": {
+      "status": "pending"
+    },
+    "fastSea": {
+      "status": "pending"
+    },
+    "slowSea": {
+      "status": "pending"
+    }
+  }
+}

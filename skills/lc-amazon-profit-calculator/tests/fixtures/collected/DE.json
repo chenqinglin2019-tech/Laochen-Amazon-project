@@ -1,0 +1,20 @@
+{
+  "source": "sellersprite.asin_detail",
+  "capturedAt": "2026-10-25",
+  "raw": {
+    "asin": "B0BF4MBNS5",
+    "marketplace": "DE",
+    "title": "Rilista Damen-Pumps mit Slingback-Kätzchen-Absatz, geschlossen, spitzer Zehenbereich, Hochzeit, Party, Kleid, Pumps",
+    "asinUrl": "https://www.amazon.de/dp/B0BF4MBNS5?psc=1",
+    "price": 48.73,
+    "dimensions": null,
+    "weight": null,
+    "nodeLabelPath": "Fashion:Damen:Schuhe:Pumps",
+    "skuList": [
+      "Farbe: 0 Schwarz",
+      "Größe: 39 EU"
+    ],
+    "updatedTime": 1749807589000
+  },
+  "expectedSite": "DE"
+}

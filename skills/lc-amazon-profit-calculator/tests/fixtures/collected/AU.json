@@ -1,0 +1,20 @@
+{
+  "source": "sellersprite.asin_detail",
+  "capturedAt": "2026-10-25",
+  "raw": {
+    "asin": "B0BF4MBNS5",
+    "marketplace": "AU",
+    "title": "Rilista Women's Slingback Kitten Heels Closed Pointed Toe Wedding Party Dress Pumps Shoes",
+    "asinUrl": "https://www.amazon.com.au/dp/B0BF4MBNS5?psc=1",
+    "price": 64.5,
+    "dimensions": null,
+    "weight": null,
+    "nodeLabelPath": "Clothing, Shoes & Accessories:Women:Shoes:Heels",
+    "skuList": [
+      "Colour: Black suede",
+      "Size: 8 US"
+    ],
+    "updatedTime": 1789733157000
+  },
+  "expectedSite": "AU"
+}
