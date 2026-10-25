@@ -10,7 +10,6 @@ Public repository for Laochen Amazon workflow skills.
   Version 2.1.0; includes 11-marketplace rule paths and explicit fee coverage limits.
   Last updated: 2026-10-25 (UTC+8).
   [Detailed PRD](skills/lc-amazon-profit-calculator/references/product-prd-v2.1.md).
-  [Download the ZIP](skills/lc-amazon-profit-calculator.zip).
 - `skills/amazon-listing-image-studio/` - Build non-copycat Amazon listing image
   systems from product photos, selling points, and competitor references.
 - `skills/lc_amazon_listing/` - Generate Amazon listings from fully imported
@@ -24,7 +23,6 @@ Public repository for Laochen Amazon workflow skills.
   from verified product assets, with user reference template intake, local
   typography, product-consistency QA, and cross-platform runtime setup (V7).
   Last updated: 2026-10-04 (UTC+8).
-  [Download the credential-free ZIP](skills/lc-amazon-image-studio-v7.zip).
 - `skills/lc-amazon-data-crawl/` - Crawl Amazon keyword searches, storefronts,
   and image-similar competitors through background OpenCLI tabs in daily Chrome;
   category ranking retains CDP. Includes native-format exports and merging,
@@ -57,7 +55,6 @@ Public repository for Laochen Amazon workflow skills.
   Credentials supplied in chat are saved locally without echoing their values.
   Last updated: 2026-10-02 (UTC+8).
   [Installation and platform validation](skills/lc-ipr-risk-screening-free/references/installation.md).
-  [Download the credential-free ZIP](skills/lc-ipr-risk-screening-free.zip).
 
 - `skills/lc-amazon-compliance-screening/` - Screen single products and selection
   spreadsheets across ten Amazon marketplaces using versioned compliance rules.
@@ -65,7 +62,6 @@ Public repository for Laochen Amazon workflow skills.
   Includes four-platform authorization programs; macOS Apple Silicon validated,
   other platforms await real-device validation. Last updated: 2026-10-14 (UTC+8).
   [Installation and authorization](skills/lc-amazon-compliance-screening/README.md).
-  [Download the credential-free ZIP](skills/lc-amazon-compliance-screening.zip).
 
 ## Install Path
 
