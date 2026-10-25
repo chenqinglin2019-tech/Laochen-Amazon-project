@@ -1,0 +1,20 @@
+{
+  "source": "sellersprite.asin_detail",
+  "capturedAt": "2026-10-25",
+  "raw": {
+    "asin": "B0BF4MBNS5",
+    "marketplace": "MX",
+    "title": "Rilista Women's Slingback Kitten Heels Closed Pointed Toe Wedding Party Dress Pumps Shoes",
+    "asinUrl": "https://www.amazon.com.mx/dp/B0BF4MBNS5?psc=1",
+    "price": 1299.43,
+    "dimensions": null,
+    "weight": null,
+    "nodeLabelPath": "Ropa, Zapatos y Accesorios:Mujeres:Zapatos:Zapatillas",
+    "skuList": [
+      "Color: Ante negro",
+      "Talla: 25.0 cm"
+    ],
+    "updatedTime": 1767540558000
+  },
+  "expectedSite": "MX"
+}

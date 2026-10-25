@@ -1,0 +1,3587 @@
+{
+  "schemaVersion": "1.0",
+  "status": "可计算",
+  "missingItems": [],
+  "metrics": {
+    "revenue": "50",
+    "grossProfit": "7.5",
+    "margin": "0.15",
+    "cnyEquivalent": "52.5",
+    "afterUnrecoverableWithholding": "7.5",
+    "withholding": "0",
+    "recoverableTax": "0",
+    "salesTax": "0",
+    "currency": "USD",
+    "displayPrecision": 2
+  },
+  "totals": {
+    "C": "15",
+    "H": "5",
+    "M": "7.5",
+    "F": "5",
+    "S": "0.5",
+    "I": "0.6",
+    "A": "5",
+    "D": "3",
+    "T": "0.9",
+    "O": "0"
+  },
+  "feeItems": [
+    {
+      "id": "C",
+      "category": "C",
+      "amount": "15",
+      "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      }
+    },
+    {
+      "id": "H",
+      "category": "H",
+      "amount": "5",
+      "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      },
+      "detail": {
+        "method": "人工单销售单位金额",
+        "expression": "5"
+      }
+    },
+    {
+      "id": "commission",
+      "category": "M",
+      "amount": "7.5",
+      "serviceTax": "0",
+      "recoverableTax": "0",
+      "formula": "按快照公式与适用条件计算",
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      },
+      "expression": {
+        "op": "mul",
+        "args": [
+          {
+            "ref": "price"
+          },
+          "0.15"
+        ]
+      },
+      "status": "active"
+    },
+    {
+      "id": "fulfillment",
+      "category": "F",
+      "amount": "5",
+      "serviceTax": "0",
+      "recoverableTax": "0",
+      "formula": "按快照公式与适用条件计算",
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      },
+      "expression": "5",
+      "status": "active"
+    },
+    {
+      "id": "inbound",
+      "category": "I",
+      "amount": "0.6",
+      "serviceTax": "0",
+      "recoverableTax": "0",
+      "formula": "按快照公式与适用条件计算",
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      },
+      "expression": "0.6",
+      "status": "active"
+    },
+    {
+      "id": "importTax",
+      "category": "T",
+      "amount": "0.9",
+      "serviceTax": "0",
+      "recoverableTax": "0",
+      "formula": "按快照公式与适用条件计算",
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      },
+      "expression": "0.9",
+      "status": "active"
+    },
+    {
+      "id": "otherTax",
+      "category": "T",
+      "amount": "0",
+      "serviceTax": "0",
+      "recoverableTax": "0",
+      "formula": "按快照公式与适用条件计算",
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      },
+      "expression": "0",
+      "status": "active"
+    },
+    {
+      "id": "storage",
+      "category": "S",
+      "amount": "0.5",
+      "serviceTax": "0",
+      "recoverableTax": "0",
+      "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      },
+      "expression": "0.5",
+      "status": "active",
+      "detail": []
+    },
+    {
+      "id": "advertising",
+      "category": "A",
+      "amount": "5",
+      "serviceTax": "0",
+      "recoverableTax": "0",
+      "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+    },
+    {
+      "id": "returnLoss",
+      "category": "D",
+      "amount": "3",
+      "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+      "detail": {
+        "L": "12",
+        "invested": "22",
+        "returnExtra": "0",
+        "u": "0.25"
+      },
+      "source": {
+        "type": "fixture",
+        "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+        "at": "2026-10-24T00:00:00Z"
+      }
+    }
+  ],
+  "assumptions": [],
+  "dates": {
+    "ship": "2026-10-24",
+    "entry": "2026-10-29",
+    "exit": "2026-11-28",
+    "ageDays": "30"
+  },
+  "sources": {
+    "product": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "price": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "packaging": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "purchase": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "advertising": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "returns": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "inventory": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "taxProfile": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    },
+    "costBoundary": {
+      "type": "fixture",
+      "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+      "at": "2026-10-24T00:00:00Z"
+    }
+  },
+  "channel": "express",
+  "scenarioResults": {
+    "logistics": {
+      "status": "可比较",
+      "results": {
+        "express": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "7.5",
+            "margin": "0.15",
+            "cnyEquivalent": "52.5",
+            "afterUnrecoverableWithholding": "7.5",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "5",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "5",
+            "D": "3",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "3",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "12",
+                "invested": "22",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        },
+        "air": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "8.5625",
+            "margin": "0.17125",
+            "cnyEquivalent": "59.9375",
+            "afterUnrecoverableWithholding": "8.5625",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "4",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "5",
+            "D": "2.9375",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "4",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "4"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "2.9375",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "11.75",
+                "invested": "21",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-11-03",
+            "exit": "2026-12-03",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "air"
+        },
+        "fastSea": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "9.625",
+            "margin": "0.1925",
+            "cnyEquivalent": "67.375",
+            "afterUnrecoverableWithholding": "9.625",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "3",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "5",
+            "D": "2.875",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "3",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "3"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "2.875",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "11.5",
+                "invested": "20",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-11-15",
+            "exit": "2026-12-15",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "fastSea"
+        },
+        "slowSea": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "10.15625",
+            "margin": "0.203125",
+            "cnyEquivalent": "71.09375",
+            "afterUnrecoverableWithholding": "10.15625",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "2.5",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "5",
+            "D": "2.84375",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "2.5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "2.5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "2.84375",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "11.375",
+                "invested": "19.5",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-11-28",
+            "exit": "2026-12-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "slowSea"
+        }
+      },
+      "ranking": [
+        "slowSea",
+        "fastSea",
+        "air",
+        "express"
+      ]
+    },
+    "sensitivity": [
+      {
+        "name": "售价 -10%",
+        "value": "45",
+        "result": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "45",
+            "grossProfit": "3.75",
+            "margin": "0.08333333333333333333333333333333333333333",
+            "cnyEquivalent": "26.25",
+            "afterUnrecoverableWithholding": "3.75",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "5",
+            "M": "6.75",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "4.5",
+            "D": "3",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "6.75",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "4.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "3",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "12",
+                "invested": "22",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        }
+      },
+      {
+        "name": "售价 10%",
+        "value": "55",
+        "result": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "55",
+            "grossProfit": "11.25",
+            "margin": "0.2045454545454545454545454545454545454545",
+            "cnyEquivalent": "78.75",
+            "afterUnrecoverableWithholding": "11.25",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "5",
+            "M": "8.25",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "5.5",
+            "D": "3",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "8.25",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "5.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "3",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "12",
+                "invested": "22",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        }
+      },
+      {
+        "name": "采购 -10%",
+        "value": "94.5",
+        "result": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "9.09375",
+            "margin": "0.181875",
+            "cnyEquivalent": "63.65625",
+            "afterUnrecoverableWithholding": "9.09375",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "13.5",
+            "H": "5",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "5",
+            "D": "2.90625",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "13.5",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "2.90625",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "11.625",
+                "invested": "20.5",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        }
+      },
+      {
+        "name": "采购 10%",
+        "value": "115.5",
+        "result": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "5.90625",
+            "margin": "0.118125",
+            "cnyEquivalent": "41.34375",
+            "afterUnrecoverableWithholding": "5.90625",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "16.5",
+            "H": "5",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "5",
+            "D": "3.09375",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "16.5",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "3.09375",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "12.375",
+                "invested": "23.5",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        }
+      },
+      {
+        "name": "广告占比 -5 个百分点",
+        "value": "0.05",
+        "result": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "10",
+            "margin": "0.2",
+            "cnyEquivalent": "70",
+            "afterUnrecoverableWithholding": "10",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "5",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "2.5",
+            "D": "3",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "2.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "3",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "12",
+                "invested": "22",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        }
+      },
+      {
+        "name": "广告占比 5 个百分点",
+        "value": "0.15",
+        "result": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "5",
+            "margin": "0.1",
+            "cnyEquivalent": "35",
+            "afterUnrecoverableWithholding": "5",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "5",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "7.5",
+            "D": "3",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "3",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "12",
+                "invested": "22",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        }
+      },
+      {
+        "name": "退货率 -5 个百分点",
+        "value": "0.15",
+        "result": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "8.38235294117647058823529411764705882353",
+            "margin": "0.1676470588235294117647058823529411764706",
+            "cnyEquivalent": "58.67647058823529411764705882352941176471",
+            "afterUnrecoverableWithholding": "8.38235294117647058823529411764705882353",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "5",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "5",
+            "D": "2.117647058823529411764705882352941176471",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "2.117647058823529411764705882352941176471",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "12",
+                "invested": "22",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        },
+        "fixedAdPerShipped": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "8.67647058823529411764705882352941176471",
+            "margin": "0.1735294117647058823529411764705882352942",
+            "cnyEquivalent": "60.73529411764705882352941176470588235297",
+            "afterUnrecoverableWithholding": "8.67647058823529411764705882352941176471",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "5",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "4.705882352941176470588235294117647058824",
+            "D": "2.117647058823529411764705882352941176471",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "4.705882352941176470588235294117647058824",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "2.117647058823529411764705882352941176471",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "12",
+                "invested": "22",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        }
+      },
+      {
+        "name": "退货率 5 个百分点",
+        "value": "0.25",
+        "result": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "6.5",
+            "margin": "0.13",
+            "cnyEquivalent": "45.5",
+            "afterUnrecoverableWithholding": "6.5",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "5",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "5",
+            "D": "4",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "4",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "12",
+                "invested": "22",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        },
+        "fixedAdPerShipped": {
+          "schemaVersion": "1.0",
+          "status": "可计算",
+          "missingItems": [],
+          "metrics": {
+            "revenue": "50",
+            "grossProfit": "6.16666666666666666666666666666666666666",
+            "margin": "0.1233333333333333333333333333333333333332",
+            "cnyEquivalent": "43.16666666666666666666666666666666666662",
+            "afterUnrecoverableWithholding": "6.16666666666666666666666666666666666666",
+            "withholding": "0",
+            "recoverableTax": "0",
+            "salesTax": "0",
+            "currency": "USD",
+            "displayPrecision": 2
+          },
+          "totals": {
+            "C": "15",
+            "H": "5",
+            "M": "7.5",
+            "F": "5",
+            "S": "0.5",
+            "I": "0.6",
+            "A": "5.333333333333333333333333333333333333335",
+            "D": "4",
+            "T": "0.9",
+            "O": "0"
+          },
+          "feeItems": [
+            {
+              "id": "C",
+              "category": "C",
+              "amount": "15",
+              "formula": "人民币采购成本 ÷ 每单位站点货币对应 CNH",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            },
+            {
+              "id": "H",
+              "category": "H",
+              "amount": "5",
+              "formula": "整箱或整票费用 ÷ 销售单位数 × 汇率，拆税后计入",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "detail": {
+                "method": "人工单销售单位金额",
+                "expression": "5"
+              }
+            },
+            {
+              "id": "commission",
+              "category": "M",
+              "amount": "7.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "price"
+                  },
+                  "0.15"
+                ]
+              },
+              "status": "active"
+            },
+            {
+              "id": "fulfillment",
+              "category": "F",
+              "amount": "5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "5",
+              "status": "active"
+            },
+            {
+              "id": "inbound",
+              "category": "I",
+              "amount": "0.6",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.6",
+              "status": "active"
+            },
+            {
+              "id": "importTax",
+              "category": "T",
+              "amount": "0.9",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.9",
+              "status": "active"
+            },
+            {
+              "id": "otherTax",
+              "category": "T",
+              "amount": "0",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "按快照公式与适用条件计算",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0",
+              "status": "active"
+            },
+            {
+              "id": "storage",
+              "category": "S",
+              "amount": "0.5",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "体积 × 月费率 × 当月占用天数 / 当月天数",
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              },
+              "expression": "0.5",
+              "status": "active",
+              "detail": []
+            },
+            {
+              "id": "advertising",
+              "category": "A",
+              "amount": "5.333333333333333333333333333333333333335",
+              "serviceTax": "0",
+              "recoverableTax": "0",
+              "formula": "净收入 × 已确认广告占比（费用含税时拆分）"
+            },
+            {
+              "id": "returnLoss",
+              "category": "D",
+              "amount": "4",
+              "formula": "r × (退货订单净费用 + 发货类补充费用 + u × 已投入成本) / (1-r)",
+              "detail": {
+                "L": "12",
+                "invested": "22",
+                "returnExtra": "0",
+                "u": "0.25"
+              },
+              "source": {
+                "type": "fixture",
+                "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+                "at": "2026-10-24T00:00:00Z"
+              }
+            }
+          ],
+          "assumptions": [],
+          "dates": {
+            "ship": "2026-10-24",
+            "entry": "2026-10-29",
+            "exit": "2026-11-28",
+            "ageDays": "30"
+          },
+          "sources": {
+            "product": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "price": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "packaging": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "purchase": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "advertising": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "returns": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "inventory": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "taxProfile": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            },
+            "costBoundary": {
+              "type": "fixture",
+              "locator": "PRD v1.2 第 13.2 节人工测试数据，不是实际收费",
+              "at": "2026-10-24T00:00:00Z"
+            }
+          },
+          "channel": "express"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,3495 @@
+{
+  "schemaVersion": "2.0",
+  "site": "US",
+  "revision": "2026-10-25.1",
+  "source": {
+    "type": "official",
+    "locator": "https://sellercentral.amazon.com/help/hub/reference/external/GABBX6GZPA8MSZGW",
+    "at": "2026-10-25T00:00:00Z"
+  },
+  "sources": [
+    "https://sellercentral.amazon.com/help/hub/reference/external/GABBX6GZPA8MSZGW",
+    "https://sell.amazon.com/pricing",
+    "https://sellercentral.amazon.com/help/hub/reference/external/GZGEQLTM3RZXUV6T",
+    "https://sellercentral.amazon.com/gp/help/external/21531"
+  ],
+  "checkedAt": "2026-10-25T00:00:00Z",
+  "effectiveFrom": "2026-01-01",
+  "goodsTypes": [
+    "ordinary"
+  ],
+  "feePrecision": 2,
+  "salesTax": {
+    "default": "0"
+  },
+  "commissions": {
+    "footwear": {
+      "op": "max",
+      "args": [
+        0.3,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "apparel": {
+      "op": "max",
+      "args": [
+        ".3",
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lte": "15"
+                    }
+                  },
+                  "value": ".05"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": "15",
+                      "lte": "20"
+                    }
+                  },
+                  "value": ".10"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": "20"
+                    }
+                  },
+                  "value": ".17"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "home": {
+      "op": "max",
+      "args": [
+        0.3,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "kitchen": {
+      "op": "max",
+      "args": [
+        0.3,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "toys": {
+      "op": "max",
+      "args": [
+        0.3,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "sports": {
+      "op": "max",
+      "args": [
+        0.3,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "pet": {
+      "op": "max",
+      "args": [
+        0.3,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "office": {
+      "op": "max",
+      "args": [
+        0.3,
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "electronicsAccessories": {
+      "op": "max",
+      "args": [
+        ".3",
+        {
+          "op": "tier",
+          "mode": "progressive",
+          "base": {
+            "ref": "price"
+          },
+          "bands": [
+            {
+              "upTo": 100,
+              "rate": ".15"
+            },
+            {
+              "upTo": null,
+              "rate": ".08"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "fulfillment": [
+    {
+      "id": "apparel-small-standard",
+      "maxCm": [
+        38.1,
+        30.48,
+        1.905
+      ],
+      "maxKg": "0.45359237",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": "0.05669904625"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.62"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.51"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "3.77"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.05669904625",
+                "lte": "0.1133980925"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.64"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.54"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "3.80"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.1133980925",
+                "lte": "0.17009713875"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.68"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.59"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "3.85"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.17009713875",
+                "lte": "0.226796185"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.81"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.69"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "3.95"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.226796185",
+                "lte": "0.28349523125"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "3.00"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.91"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.17"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.28349523125",
+                "lte": "0.3401942775"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "3.10"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "4.09"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.35"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.3401942775",
+                "lte": "0.39689332375"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "3.20"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "4.20"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.46"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.39689332375",
+                "lte": "0.45359237"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "3.30"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "4.25"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.51"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "categories": [
+        "apparel"
+      ],
+      "divisor": "5021.693588011632558986827755",
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "category": {
+                "in": [
+                  "apparel",
+                  "footwear"
+                ]
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "lte": "0.1133980925"
+                    }
+                  },
+                  "value": "1.65"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.1133980925",
+                      "lte": "0.226796185"
+                    }
+                  },
+                  "value": "1.75"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.226796185",
+                      "lte": "0.3401942775"
+                    }
+                  },
+                  "value": "1.85"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.3401942775",
+                      "lte": "0.45359237"
+                    }
+                  },
+                  "value": "1.95"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "category": {
+                "in": [
+                  "home",
+                  "kitchen",
+                  "toys",
+                  "sports",
+                  "pet",
+                  "office",
+                  "electronicsAccessories"
+                ]
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "lte": "0.05669904625"
+                    }
+                  },
+                  "value": "1.78"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.05669904625",
+                      "lte": "0.1133980925"
+                    }
+                  },
+                  "value": "1.84"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.1133980925",
+                      "lte": "0.17009713875"
+                    }
+                  },
+                  "value": "1.90"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.17009713875",
+                      "lte": "0.226796185"
+                    }
+                  },
+                  "value": "1.96"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.226796185",
+                      "lte": "0.28349523125"
+                    }
+                  },
+                  "value": "2.02"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.28349523125",
+                      "lte": "0.3401942775"
+                    }
+                  },
+                  "value": "2.08"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.3401942775",
+                      "lte": "0.39689332375"
+                    }
+                  },
+                  "value": "2.14"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.39689332375",
+                      "lte": "0.45359237"
+                    }
+                  },
+                  "value": "2.21"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "apparel-large-standard",
+      "maxCm": [
+        45.72,
+        35.56,
+        20.32
+      ],
+      "maxKg": "9.07184740",
+      "weightMode": "max",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": "0.1133980925"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "3.48"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "4.30"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.56"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.1133980925",
+                "lte": "0.226796185"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "3.68"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "4.50"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.76"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.226796185",
+                "lte": "0.3401942775"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "3.90"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "4.72"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.98"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.3401942775",
+                "lte": "0.45359237"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "4.35"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "5.17"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "5.43"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.45359237",
+                "lte": "0.5669904625"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.05"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "5.87"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.13"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.5669904625",
+                "lte": "0.680388555"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.22"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "6.04"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.30"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.680388555",
+                "lte": "0.7937866475"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.32"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "6.14"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.40"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.7937866475",
+                "lte": "0.90718474"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.43"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "6.25"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.51"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.90718474",
+                "lte": "1.0205828325"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.78"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "6.60"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.86"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.0205828325",
+                "lte": "1.133980925"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.90"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "6.72"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.98"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.133980925",
+                "lte": "1.2473790175"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.95"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "6.77"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "7.03"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.2473790175",
+                "lte": "1.36077711"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "6.08"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "6.90"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "7.16"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.36077711"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": {
+                    "op": "add",
+                    "args": [
+                      "6.15",
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "div",
+                            "args": [
+                              {
+                                "op": "ceilStep",
+                                "args": [
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      0,
+                                      {
+                                        "op": "sub",
+                                        "args": [
+                                          {
+                                            "ref": "shippingWeight"
+                                          },
+                                          "1.36077711"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "0.226796185"
+                                ]
+                              },
+                              "0.226796185"
+                            ]
+                          },
+                          ".16"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": {
+                    "op": "add",
+                    "args": [
+                      "6.97",
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "div",
+                            "args": [
+                              {
+                                "op": "ceilStep",
+                                "args": [
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      0,
+                                      {
+                                        "op": "sub",
+                                        "args": [
+                                          {
+                                            "ref": "shippingWeight"
+                                          },
+                                          "1.36077711"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "0.226796185"
+                                ]
+                              },
+                              "0.226796185"
+                            ]
+                          },
+                          ".16"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": {
+                    "op": "add",
+                    "args": [
+                      "7.23",
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "div",
+                            "args": [
+                              {
+                                "op": "ceilStep",
+                                "args": [
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      0,
+                                      {
+                                        "op": "sub",
+                                        "args": [
+                                          {
+                                            "ref": "shippingWeight"
+                                          },
+                                          "1.36077711"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "0.226796185"
+                                ]
+                              },
+                              "0.226796185"
+                            ]
+                          },
+                          ".16"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "categories": [
+        "apparel"
+      ],
+      "divisor": "5021.693588011632558986827755",
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "category": {
+                "in": [
+                  "apparel",
+                  "footwear"
+                ]
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "lte": "0.1133980925"
+                    }
+                  },
+                  "value": "2.04"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.1133980925",
+                      "lte": "0.226796185"
+                    }
+                  },
+                  "value": "2.12"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.226796185",
+                      "lte": "0.3401942775"
+                    }
+                  },
+                  "value": "2.19"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.3401942775",
+                      "lte": "0.45359237"
+                    }
+                  },
+                  "value": "2.27"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.45359237",
+                      "lte": "0.680388555"
+                    }
+                  },
+                  "value": "2.62"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.680388555",
+                      "lte": "0.90718474"
+                    }
+                  },
+                  "value": "2.98"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.90718474",
+                      "lte": "1.133980925"
+                    }
+                  },
+                  "value": "3.33"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.133980925",
+                      "lte": "1.36077711"
+                    }
+                  },
+                  "value": "3.69"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.36077711"
+                    }
+                  },
+                  "value": {
+                    "op": "add",
+                    "args": [
+                      "3.89",
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "div",
+                            "args": [
+                              {
+                                "op": "ceilStep",
+                                "args": [
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      0,
+                                      {
+                                        "op": "sub",
+                                        "args": [
+                                          {
+                                            "ref": "shippingWeight"
+                                          },
+                                          "1.36077711"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "0.226796185"
+                                ]
+                              },
+                              "0.226796185"
+                            ]
+                          },
+                          ".10"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "category": {
+                "in": [
+                  "home",
+                  "kitchen",
+                  "toys",
+                  "sports",
+                  "pet",
+                  "office",
+                  "electronicsAccessories"
+                ]
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "lte": "0.1133980925"
+                    }
+                  },
+                  "value": "2.36"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.1133980925",
+                      "lte": "0.226796185"
+                    }
+                  },
+                  "value": "2.70"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.226796185",
+                      "lte": "0.3401942775"
+                    }
+                  },
+                  "value": "3.05"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.3401942775",
+                      "lte": "0.45359237"
+                    }
+                  },
+                  "value": "3.39"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.45359237",
+                      "lte": "0.5669904625"
+                    }
+                  },
+                  "value": "3.70"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.5669904625",
+                      "lte": "0.680388555"
+                    }
+                  },
+                  "value": "4.01"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.680388555",
+                      "lte": "0.7937866475"
+                    }
+                  },
+                  "value": "4.32"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.7937866475",
+                      "lte": "0.90718474"
+                    }
+                  },
+                  "value": "4.63"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.90718474",
+                      "lte": "1.0205828325"
+                    }
+                  },
+                  "value": "4.66"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.0205828325",
+                      "lte": "1.133980925"
+                    }
+                  },
+                  "value": "4.68"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.133980925",
+                      "lte": "1.2473790175"
+                    }
+                  },
+                  "value": "4.71"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.2473790175",
+                      "lte": "1.36077711"
+                    }
+                  },
+                  "value": "4.73"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.36077711"
+                    }
+                  },
+                  "value": {
+                    "op": "add",
+                    "args": [
+                      "5",
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "div",
+                            "args": [
+                              {
+                                "op": "ceilStep",
+                                "args": [
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      0,
+                                      {
+                                        "op": "sub",
+                                        "args": [
+                                          {
+                                            "ref": "shippingWeight"
+                                          },
+                                          "1.36077711"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "0.1133980925"
+                                ]
+                              },
+                              "0.1133980925"
+                            ]
+                          },
+                          ".05"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "small-standard",
+      "maxCm": [
+        38.1,
+        30.48,
+        1.905
+      ],
+      "maxKg": "0.45359237",
+      "weightMode": "actual",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": "0.05669904625"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.43"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.32"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "3.58"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.05669904625",
+                "lte": "0.1133980925"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.49"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.42"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "3.68"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.1133980925",
+                "lte": "0.17009713875"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.56"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.45"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "3.71"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.17009713875",
+                "lte": "0.226796185"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.66"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.54"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "3.80"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.226796185",
+                "lte": "0.28349523125"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.77"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.68"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "3.94"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.28349523125",
+                "lte": "0.3401942775"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.82"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.78"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.04"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.3401942775",
+                "lte": "0.39689332375"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.92"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.91"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.17"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.39689332375",
+                "lte": "0.45359237"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.95"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.96"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.22"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "home",
+        "kitchen",
+        "toys",
+        "sports",
+        "pet",
+        "office",
+        "electronicsAccessories"
+      ],
+      "divisor": "5021.693588011632558986827755",
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "category": {
+                "in": [
+                  "apparel",
+                  "footwear"
+                ]
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "lte": "0.1133980925"
+                    }
+                  },
+                  "value": "1.65"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.1133980925",
+                      "lte": "0.226796185"
+                    }
+                  },
+                  "value": "1.75"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.226796185",
+                      "lte": "0.3401942775"
+                    }
+                  },
+                  "value": "1.85"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.3401942775",
+                      "lte": "0.45359237"
+                    }
+                  },
+                  "value": "1.95"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "category": {
+                "in": [
+                  "home",
+                  "kitchen",
+                  "toys",
+                  "sports",
+                  "pet",
+                  "office",
+                  "electronicsAccessories"
+                ]
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "lte": "0.05669904625"
+                    }
+                  },
+                  "value": "1.78"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.05669904625",
+                      "lte": "0.1133980925"
+                    }
+                  },
+                  "value": "1.84"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.1133980925",
+                      "lte": "0.17009713875"
+                    }
+                  },
+                  "value": "1.90"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.17009713875",
+                      "lte": "0.226796185"
+                    }
+                  },
+                  "value": "1.96"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.226796185",
+                      "lte": "0.28349523125"
+                    }
+                  },
+                  "value": "2.02"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.28349523125",
+                      "lte": "0.3401942775"
+                    }
+                  },
+                  "value": "2.08"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.3401942775",
+                      "lte": "0.39689332375"
+                    }
+                  },
+                  "value": "2.14"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.39689332375",
+                      "lte": "0.45359237"
+                    }
+                  },
+                  "value": "2.21"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "large-standard",
+      "maxCm": [
+        45.72,
+        35.56,
+        20.32
+      ],
+      "maxKg": "9.07184740",
+      "weightMode": "max",
+      "storageSize": "standard",
+      "expression": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": "0.1133980925"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "2.91"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.73"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "3.99"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.1133980925",
+                "lte": "0.226796185"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "3.13"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "3.95"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.21"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.226796185",
+                "lte": "0.3401942775"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "3.38"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "4.20"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.46"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.3401942775",
+                "lte": "0.45359237"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "3.78"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "4.60"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "4.86"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.45359237",
+                "lte": "0.5669904625"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "4.22"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "5.04"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "5.30"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.5669904625",
+                "lte": "0.680388555"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "4.60"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "5.42"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "5.68"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.680388555",
+                "lte": "0.7937866475"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "4.75"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "5.57"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "5.83"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.7937866475",
+                "lte": "0.90718474"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.00"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "5.82"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.08"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.90718474",
+                "lte": "1.0205828325"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.10"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "5.92"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.18"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.0205828325",
+                "lte": "1.133980925"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.28"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "6.10"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.36"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.133980925",
+                "lte": "1.2473790175"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.44"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "6.26"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.52"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.2473790175",
+                "lte": "1.36077711"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": "5.85"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": "6.67"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": "6.93"
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.36077711"
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 10
+                    }
+                  },
+                  "value": {
+                    "op": "add",
+                    "args": [
+                      "6.15",
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "div",
+                            "args": [
+                              {
+                                "op": "ceilStep",
+                                "args": [
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      0,
+                                      {
+                                        "op": "sub",
+                                        "args": [
+                                          {
+                                            "ref": "shippingWeight"
+                                          },
+                                          "1.36077711"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "0.1133980925"
+                                ]
+                              },
+                              "0.1133980925"
+                            ]
+                          },
+                          ".08"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 10,
+                      "lte": 50
+                    }
+                  },
+                  "value": {
+                    "op": "add",
+                    "args": [
+                      "6.97",
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "div",
+                            "args": [
+                              {
+                                "op": "ceilStep",
+                                "args": [
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      0,
+                                      {
+                                        "op": "sub",
+                                        "args": [
+                                          {
+                                            "ref": "shippingWeight"
+                                          },
+                                          "1.36077711"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "0.1133980925"
+                                ]
+                              },
+                              "0.1133980925"
+                            ]
+                          },
+                          ".08"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gt": 50
+                    }
+                  },
+                  "value": {
+                    "op": "add",
+                    "args": [
+                      "7.23",
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "div",
+                            "args": [
+                              {
+                                "op": "ceilStep",
+                                "args": [
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      0,
+                                      {
+                                        "op": "sub",
+                                        "args": [
+                                          {
+                                            "ref": "shippingWeight"
+                                          },
+                                          "1.36077711"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "0.1133980925"
+                                ]
+                              },
+                              "0.1133980925"
+                            ]
+                          },
+                          ".08"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "home",
+        "kitchen",
+        "toys",
+        "sports",
+        "pet",
+        "office",
+        "electronicsAccessories"
+      ],
+      "divisor": "5021.693588011632558986827755",
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "category": {
+                "in": [
+                  "apparel",
+                  "footwear"
+                ]
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "lte": "0.1133980925"
+                    }
+                  },
+                  "value": "2.04"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.1133980925",
+                      "lte": "0.226796185"
+                    }
+                  },
+                  "value": "2.12"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.226796185",
+                      "lte": "0.3401942775"
+                    }
+                  },
+                  "value": "2.19"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.3401942775",
+                      "lte": "0.45359237"
+                    }
+                  },
+                  "value": "2.27"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.45359237",
+                      "lte": "0.680388555"
+                    }
+                  },
+                  "value": "2.62"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.680388555",
+                      "lte": "0.90718474"
+                    }
+                  },
+                  "value": "2.98"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.90718474",
+                      "lte": "1.133980925"
+                    }
+                  },
+                  "value": "3.33"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.133980925",
+                      "lte": "1.36077711"
+                    }
+                  },
+                  "value": "3.69"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.36077711"
+                    }
+                  },
+                  "value": {
+                    "op": "add",
+                    "args": [
+                      "3.89",
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "div",
+                            "args": [
+                              {
+                                "op": "ceilStep",
+                                "args": [
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      0,
+                                      {
+                                        "op": "sub",
+                                        "args": [
+                                          {
+                                            "ref": "shippingWeight"
+                                          },
+                                          "1.36077711"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "0.226796185"
+                                ]
+                              },
+                              "0.226796185"
+                            ]
+                          },
+                          ".10"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "when": {
+              "category": {
+                "in": [
+                  "home",
+                  "kitchen",
+                  "toys",
+                  "sports",
+                  "pet",
+                  "office",
+                  "electronicsAccessories"
+                ]
+              }
+            },
+            "value": {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "lte": "0.1133980925"
+                    }
+                  },
+                  "value": "2.36"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.1133980925",
+                      "lte": "0.226796185"
+                    }
+                  },
+                  "value": "2.70"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.226796185",
+                      "lte": "0.3401942775"
+                    }
+                  },
+                  "value": "3.05"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.3401942775",
+                      "lte": "0.45359237"
+                    }
+                  },
+                  "value": "3.39"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.45359237",
+                      "lte": "0.5669904625"
+                    }
+                  },
+                  "value": "3.70"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.5669904625",
+                      "lte": "0.680388555"
+                    }
+                  },
+                  "value": "4.01"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.680388555",
+                      "lte": "0.7937866475"
+                    }
+                  },
+                  "value": "4.32"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.7937866475",
+                      "lte": "0.90718474"
+                    }
+                  },
+                  "value": "4.63"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "0.90718474",
+                      "lte": "1.0205828325"
+                    }
+                  },
+                  "value": "4.66"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.0205828325",
+                      "lte": "1.133980925"
+                    }
+                  },
+                  "value": "4.68"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.133980925",
+                      "lte": "1.2473790175"
+                    }
+                  },
+                  "value": "4.71"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.2473790175",
+                      "lte": "1.36077711"
+                    }
+                  },
+                  "value": "4.73"
+                },
+                {
+                  "when": {
+                    "shippingWeight": {
+                      "gt": "1.36077711"
+                    }
+                  },
+                  "value": {
+                    "op": "add",
+                    "args": [
+                      "5",
+                      {
+                        "op": "mul",
+                        "args": [
+                          {
+                            "op": "div",
+                            "args": [
+                              {
+                                "op": "ceilStep",
+                                "args": [
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      0,
+                                      {
+                                        "op": "sub",
+                                        "args": [
+                                          {
+                                            "ref": "shippingWeight"
+                                          },
+                                          "1.36077711"
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  "0.1133980925"
+                                ]
+                              },
+                              "0.1133980925"
+                            ]
+                          },
+                          ".05"
+                        ]
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "storage": [
+    {
+      "low": ".78",
+      "peak": "2.40",
+      "volumeCm3PerUnit": "28316.846592",
+      "size": "standard"
+    }
+  ],
+  "returns": [
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "ref": "returnProcessing"
+          }
+        ]
+      },
+      "categories": [
+        "apparel",
+        "footwear"
+      ]
+    },
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "mul",
+            "args": [
+              {
+                "ref": "returnProcessing"
+              },
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      0,
+                      {
+                        "op": "sub",
+                        "args": [
+                          {
+                            "ref": "r"
+                          },
+                          ".081"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "ref": "r"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "home"
+      ],
+      "note": "高退货处理费按类目阈值以上退货分摊，保守假设不享受小批量或新品豁免。"
+    },
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "mul",
+            "args": [
+              {
+                "ref": "returnProcessing"
+              },
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      0,
+                      {
+                        "op": "sub",
+                        "args": [
+                          {
+                            "ref": "r"
+                          },
+                          ".081"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "ref": "r"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "kitchen"
+      ],
+      "note": "高退货处理费按类目阈值以上退货分摊，保守假设不享受小批量或新品豁免。"
+    },
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "mul",
+            "args": [
+              {
+                "ref": "returnProcessing"
+              },
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      0,
+                      {
+                        "op": "sub",
+                        "args": [
+                          {
+                            "ref": "r"
+                          },
+                          ".047"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "ref": "r"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "toys"
+      ],
+      "note": "高退货处理费按类目阈值以上退货分摊，保守假设不享受小批量或新品豁免。"
+    },
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "mul",
+            "args": [
+              {
+                "ref": "returnProcessing"
+              },
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      0,
+                      {
+                        "op": "sub",
+                        "args": [
+                          {
+                            "ref": "r"
+                          },
+                          ".087"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "ref": "r"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "sports"
+      ],
+      "note": "高退货处理费按类目阈值以上退货分摊，保守假设不享受小批量或新品豁免。"
+    },
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "mul",
+            "args": [
+              {
+                "ref": "returnProcessing"
+              },
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      0,
+                      {
+                        "op": "sub",
+                        "args": [
+                          {
+                            "ref": "r"
+                          },
+                          ".102"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "ref": "r"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "pet"
+      ],
+      "note": "高退货处理费按类目阈值以上退货分摊，保守假设不享受小批量或新品豁免。"
+    },
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "mul",
+            "args": [
+              {
+                "ref": "returnProcessing"
+              },
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      0,
+                      {
+                        "op": "sub",
+                        "args": [
+                          {
+                            "ref": "r"
+                          },
+                          ".044"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "ref": "r"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "office"
+      ],
+      "note": "高退货处理费按类目阈值以上退货分摊，保守假设不享受小批量或新品豁免。"
+    },
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "op": "mul",
+            "args": [
+              {
+                "ref": "returnProcessing"
+              },
+              {
+                "op": "div",
+                "args": [
+                  {
+                    "op": "max",
+                    "args": [
+                      0,
+                      {
+                        "op": "sub",
+                        "args": [
+                          {
+                            "ref": "r"
+                          },
+                          ".088"
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "ref": "r"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "categories": [
+        "electronicsAccessories"
+      ],
+      "note": "高退货处理费按类目阈值以上退货分摊，保守假设不享受小批量或新品豁免。"
+    }
+  ],
+  "notes": [
+    "适用于本地 FBA 普货；不含跨境履约、危险品和账户专属优惠。",
+    "双情景均使用常规配送费加 3.5% 燃料附加费；不混入旺季配送加价。当前内置到大号标准尺寸，超档自动要求补充对应规则。",
+    "销售税按本站普通商品标准税率还原价内税；美国/加拿大默认页面价外税。特殊税率商品需另取规则。",
+    "销售税按本站普通商品标准税率还原价内税；美国/加拿大默认页面价外税。特殊税率商品需另取规则。"
+  ],
+  "fulfillmentMultiplier": "1.035",
+  "salesTaxSource": "https://sell.amazon.com/help/sales-tax"
+}

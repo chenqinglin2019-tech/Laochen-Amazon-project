@@ -1,0 +1,17 @@
+{
+  "source": "sellersprite.asin_detail",
+  "capturedAt": "2026-10-25",
+  "raw": {
+    "asin": "B0BF4MBNS5",
+    "marketplace": "ES",
+    "title": "Rilista Zapatos de tacón de gatito para mujer con punta cerrada y punta puntiaguda para vestido de fiesta de boda, negro, (0-black), 39 EU",
+    "asinUrl": "https://www.amazon.es/dp/B0BF4MBNS5?psc=1",
+    "price": null,
+    "dimensions": "27,51 x 15,09 x 9,7 cm",
+    "weight": "581 g",
+    "nodeLabelPath": "Moda:Mujer:Zapatos:Zapatos de tacón",
+    "skuList": null,
+    "updatedTime": 1749807589000
+  },
+  "expectedSite": "ES"
+}

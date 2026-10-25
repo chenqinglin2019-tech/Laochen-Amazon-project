@@ -1,0 +1,20 @@
+{
+  "source": "sellersprite.asin_detail",
+  "capturedAt": "2026-10-25",
+  "raw": {
+    "asin": "B0BF4MBNS5",
+    "marketplace": "US",
+    "title": "Rilista Women's Slingback Kitten Heels Closed Pointed Toe Backless Wedding Party Dress Pumps Shoes",
+    "asinUrl": "https://www.amazon.com/dp/B0BF4MBNS5?psc=1",
+    "price": 39.99,
+    "dimensions": "13.6 x 7.3 x 5.1 inches",
+    "weight": "1.19 pounds",
+    "nodeLabelPath": "Clothing, Shoes & Jewelry:Women:Shoes:Pumps",
+    "skuList": [
+      "Color: Black Suede",
+      "Size: 8"
+    ],
+    "updatedTime": 1792889973000
+  },
+  "expectedSite": "US"
+}

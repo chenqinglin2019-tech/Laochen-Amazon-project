@@ -1,0 +1,17 @@
+{
+  "source": "sellersprite.asin_detail",
+  "capturedAt": "2026-10-25",
+  "raw": {
+    "asin": "B0BF4MBNS5",
+    "marketplace": "FR",
+    "title": "Rilista Escarpins à talons pour femme à bride arrière et bout pointu fermé pour fête de mariage, 0 - Noir, 39 EU",
+    "asinUrl": "https://www.amazon.fr/dp/B0BF4MBNS5?psc=1",
+    "price": null,
+    "dimensions": "27,51 x 15,09 x 9,7 cm",
+    "weight": "581 grammes",
+    "nodeLabelPath": "Mode:Femme:Chaussures:Escarpins",
+    "skuList": null,
+    "updatedTime": 1749807589000
+  },
+  "expectedSite": "FR"
+}

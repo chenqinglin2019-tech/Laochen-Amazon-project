@@ -4,6 +4,13 @@ Public repository for Laochen Amazon workflow skills.
 
 ## Skills
 
+- `skills/lc-amazon-profit-calculator/` - 易逊-亚马逊商品毛利计算。
+  Read Amazon product data, open an editable form inside Codex, compare low/peak
+  storage profit scenarios, and automatically save inputs and results locally.
+  Version 2.1.0; includes 11-marketplace rule paths and explicit fee coverage limits.
+  Last updated: 2026-10-25 (UTC+8).
+  [Detailed PRD](skills/lc-amazon-profit-calculator/references/product-prd-v2.1.md).
+  [Download the ZIP](skills/lc-amazon-profit-calculator.zip).
 - `skills/amazon-listing-image-studio/` - Build non-copycat Amazon listing image
   systems from product photos, selling points, and competitor references.
 - `skills/lc_amazon_listing/` - Generate Amazon listings from fully imported
@@ -72,6 +79,7 @@ skills/<skill-name>
 Direct folder URLs:
 
 ```text
+https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-amazon-profit-calculator
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/amazon-listing-image-studio
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-amazon-listing-asin
 https://github.com/chenqinglin2019-tech/Laochen-Amazon-project/tree/main/skills/lc-amazon-image-studio

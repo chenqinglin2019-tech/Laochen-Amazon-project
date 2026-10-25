@@ -1,0 +1,20 @@
+{
+  "source": "sellersprite.asin_detail",
+  "capturedAt": "2026-10-25",
+  "raw": {
+    "asin": "B0BF4MBNS5",
+    "marketplace": "GB",
+    "title": "Rilista Women's Slingback Kitten Heels Closed Pointed Toe Wedding Party Dress Pumps Shoes",
+    "asinUrl": "https://www.amazon.co.uk/dp/B0BF4MBNS5?th=1",
+    "price": 32.94,
+    "dimensions": null,
+    "weight": null,
+    "nodeLabelPath": "Fashion:Women:Shoes:Court Shoes",
+    "skuList": [
+      "Colour: Black Suede",
+      "Size: 6 UK"
+    ],
+    "updatedTime": 1785209157000
+  },
+  "expectedSite": "UK"
+}

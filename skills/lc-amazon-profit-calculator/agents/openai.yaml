@@ -1,0 +1,6 @@
+interface:
+  display_name: "易逊-亚马逊商品毛利计算"
+  short_description: "链接自动取数，在 Codex 页面填写参数，比较双仓储毛利并自动保存"
+  default_prompt: "使用 $lc-amazon-profit-calculator，按这个亚马逊商品链接测算同款或同类产品的选品参考毛利。先自动读取商品数据和已有参数，在 Codex 内打开本地 HTML，让用户直接填写采购、头程、退货及无法自动读取的关键资料，自动计算淡旺季仓储毛利并保存。"
+policy:
+  allow_implicit_invocation: true

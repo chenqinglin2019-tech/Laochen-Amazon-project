@@ -1,0 +1,817 @@
+{
+  "schemaVersion": "2.0",
+  "site": "CA",
+  "revision": "2026-10-25.1",
+  "source": {
+    "type": "official",
+    "locator": "https://sell.amazon.ca/pricing",
+    "at": "2026-10-25T00:00:00Z"
+  },
+  "sources": [
+    "https://sell.amazon.ca/pricing",
+    "https://sellercentral.amazon.ca/help/hub/reference/external/G201112630",
+    "https://sellercentral.amazon.ca/seller-forums/discussions/t/19cfb5ccec632b70486cd4545566b559",
+    "https://sellercentral.amazon.ca/gp/help/external/GNN4PAXSGE3K9GNV",
+    "https://sellercentral.amazon.ca/help/hub/reference/external/G201112630",
+    "https://sellercentral.amazon.ca/seller-forums/discussions/t/19cfb5ccec632b70486cd4545566b559",
+    "https://sellercentral.amazon.ca/gp/help/external/GNN4PAXSGE3K9GNV",
+    "https://sellercentral.amazon.ca/help/hub/reference/external/G201112630",
+    "https://sellercentral.amazon.ca/seller-forums/discussions/t/19cfb5ccec632b70486cd4545566b559",
+    "https://sellercentral.amazon.ca/gp/help/external/GNN4PAXSGE3K9GNV"
+  ],
+  "checkedAt": "2026-10-25T00:00:00Z",
+  "effectiveFrom": "2026-01-01",
+  "goodsTypes": [
+    "ordinary"
+  ],
+  "feePrecision": 2,
+  "salesTax": {
+    "default": "0"
+  },
+  "commissions": {
+    "footwear": {
+      "op": "max",
+      "args": [
+        ".40",
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "apparel": {
+      "op": "max",
+      "args": [
+        ".4",
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            {
+              "op": "select",
+              "rows": [
+                {
+                  "when": {
+                    "price": {
+                      "lt": 20
+                    }
+                  },
+                  "value": ".10"
+                },
+                {
+                  "when": {
+                    "price": {
+                      "gte": 20
+                    }
+                  },
+                  "value": ".17"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "home": {
+      "op": "max",
+      "args": [
+        ".40",
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "kitchen": {
+      "op": "max",
+      "args": [
+        ".40",
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "toys": {
+      "op": "max",
+      "args": [
+        ".40",
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "sports": {
+      "op": "max",
+      "args": [
+        ".40",
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "pet": {
+      "op": "max",
+      "args": [
+        ".40",
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "office": {
+      "op": "max",
+      "args": [
+        ".40",
+        {
+          "op": "mul",
+          "args": [
+            {
+              "ref": "price"
+            },
+            ".15"
+          ]
+        }
+      ]
+    },
+    "electronicsAccessories": {
+      "op": "max",
+      "args": [
+        ".4",
+        {
+          "op": "tier",
+          "mode": "progressive",
+          "base": {
+            "ref": "price"
+          },
+          "bands": [
+            {
+              "upTo": 100,
+              "rate": ".15"
+            },
+            {
+              "upTo": null,
+              "rate": ".08"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "fulfillment": [
+    {
+      "id": "envelope",
+      "maxCm": [
+        38,
+        27,
+        2
+      ],
+      "maxKg": ".5",
+      "weightMode": "max",
+      "storageSize": "standard",
+      "expression": {
+        "op": "sub",
+        "args": [
+          {
+            "op": "select",
+            "rows": [
+              {
+                "when": {
+                  "shippingWeight": {
+                    "lte": ".1"
+                  }
+                },
+                "value": "4.46"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": ".1",
+                    "lte": ".2"
+                  }
+                },
+                "value": "4.71"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": ".2",
+                    "lte": ".3"
+                  }
+                },
+                "value": "5.01"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": ".3",
+                    "lte": ".4"
+                  }
+                },
+                "value": "5.28"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": ".4",
+                    "lte": ".5"
+                  }
+                },
+                "value": "5.62"
+              }
+            ]
+          },
+          {
+            "op": "select",
+            "rows": [
+              {
+                "when": {
+                  "price": {
+                    "lt": 14
+                  }
+                },
+                "value": ".80"
+              },
+              {
+                "when": {
+                  "price": {
+                    "gte": 14
+                  }
+                },
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "divisor": "5000",
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": ".1"
+              }
+            },
+            "value": "3.75"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".1",
+                "lte": ".2"
+              }
+            },
+            "value": "3.81"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".2",
+                "lte": ".3"
+              }
+            },
+            "value": "3.88"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".3",
+                "lte": ".4"
+              }
+            },
+            "value": "3.94"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": ".4",
+                "lte": ".5"
+              }
+            },
+            "value": "4.00"
+          }
+        ]
+      }
+    },
+    {
+      "id": "standard",
+      "maxCm": [
+        45,
+        35,
+        20
+      ],
+      "maxKg": "9",
+      "weightMode": "max",
+      "storageSize": "standard",
+      "expression": {
+        "op": "sub",
+        "args": [
+          {
+            "op": "select",
+            "rows": [
+              {
+                "when": {
+                  "shippingWeight": {
+                    "lte": "0.1"
+                  }
+                },
+                "value": "5.92"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "0.1",
+                    "lte": "0.2"
+                  }
+                },
+                "value": "6.12"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "0.2",
+                    "lte": "0.3"
+                  }
+                },
+                "value": "6.36"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "0.3",
+                    "lte": "0.4"
+                  }
+                },
+                "value": "6.73"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "0.4",
+                    "lte": "0.5"
+                  }
+                },
+                "value": "7.23"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "0.5",
+                    "lte": "0.6"
+                  }
+                },
+                "value": "7.40"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "0.6",
+                    "lte": "0.7"
+                  }
+                },
+                "value": "7.71"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "0.7",
+                    "lte": "0.8"
+                  }
+                },
+                "value": "7.95"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "0.8",
+                    "lte": "0.9"
+                  }
+                },
+                "value": "8.25"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "0.9",
+                    "lte": "1"
+                  }
+                },
+                "value": "8.49"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "1",
+                    "lte": "1.1"
+                  }
+                },
+                "value": "8.58"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "1.1",
+                    "lte": "1.2"
+                  }
+                },
+                "value": "8.84"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "1.2",
+                    "lte": "1.3"
+                  }
+                },
+                "value": "9.04"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "1.3",
+                    "lte": "1.4"
+                  }
+                },
+                "value": "9.29"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "1.4",
+                    "lte": "1.5"
+                  }
+                },
+                "value": "9.60"
+              },
+              {
+                "when": {
+                  "shippingWeight": {
+                    "gt": "1.5"
+                  }
+                },
+                "value": {
+                  "op": "add",
+                  "args": [
+                    "10.32",
+                    {
+                      "op": "mul",
+                      "args": [
+                        {
+                          "op": "div",
+                          "args": [
+                            {
+                              "op": "ceilStep",
+                              "args": [
+                                {
+                                  "op": "max",
+                                  "args": [
+                                    0,
+                                    {
+                                      "op": "sub",
+                                      "args": [
+                                        {
+                                          "ref": "shippingWeight"
+                                        },
+                                        "1.5"
+                                      ]
+                                    }
+                                  ]
+                                },
+                                ".1"
+                              ]
+                            },
+                            ".1"
+                          ]
+                        },
+                        ".09"
+                      ]
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "op": "select",
+            "rows": [
+              {
+                "when": {
+                  "price": {
+                    "lt": 14
+                  }
+                },
+                "value": ".80"
+              },
+              {
+                "when": {
+                  "price": {
+                    "gte": 14
+                  }
+                },
+                "value": 0
+              }
+            ]
+          }
+        ]
+      },
+      "divisor": "5000",
+      "returnProcessing": {
+        "op": "select",
+        "rows": [
+          {
+            "when": {
+              "shippingWeight": {
+                "lte": "0.1"
+              }
+            },
+            "value": "4.08"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.1",
+                "lte": "0.2"
+              }
+            },
+            "value": "4.16"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.2",
+                "lte": "0.3"
+              }
+            },
+            "value": "4.24"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.3",
+                "lte": "0.4"
+              }
+            },
+            "value": "4.35"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.4",
+                "lte": "0.5"
+              }
+            },
+            "value": "4.45"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.5",
+                "lte": "0.6"
+              }
+            },
+            "value": "4.56"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.6",
+                "lte": "0.7"
+              }
+            },
+            "value": "4.67"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.7",
+                "lte": "0.8"
+              }
+            },
+            "value": "4.77"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.8",
+                "lte": "0.9"
+              }
+            },
+            "value": "4.86"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "0.9",
+                "lte": "1"
+              }
+            },
+            "value": "4.95"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1",
+                "lte": "1.1"
+              }
+            },
+            "value": "5.14"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.1",
+                "lte": "1.2"
+              }
+            },
+            "value": "5.34"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.2",
+                "lte": "1.3"
+              }
+            },
+            "value": "5.53"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.3",
+                "lte": "1.4"
+              }
+            },
+            "value": "5.72"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.4",
+                "lte": "1.5"
+              }
+            },
+            "value": "5.92"
+          },
+          {
+            "when": {
+              "shippingWeight": {
+                "gt": "1.5"
+              }
+            },
+            "value": {
+              "op": "add",
+              "args": [
+                "6.17",
+                {
+                  "op": "mul",
+                  "args": [
+                    {
+                      "op": "div",
+                      "args": [
+                        {
+                          "op": "ceilStep",
+                          "args": [
+                            {
+                              "op": "max",
+                              "args": [
+                                0,
+                                {
+                                  "op": "sub",
+                                  "args": [
+                                    {
+                                      "ref": "shippingWeight"
+                                    },
+                                    "1.5"
+                                  ]
+                                }
+                              ]
+                            },
+                            ".1"
+                          ]
+                        },
+                        ".1"
+                      ]
+                    },
+                    ".05"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "storage": [
+    {
+      "low": "40",
+      "peak": "77",
+      "volumeCm3PerUnit": "1000000"
+    }
+  ],
+  "returns": [
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          {
+            "ref": "returnProcessing"
+          }
+        ]
+      },
+      "categories": [
+        "footwear",
+        "apparel"
+      ]
+    },
+    {
+      "expression": {
+        "op": "add",
+        "args": [
+          {
+            "ref": "F"
+          },
+          {
+            "op": "min",
+            "args": [
+              5,
+              {
+                "op": "mul",
+                "args": [
+                  {
+                    "ref": "M"
+                  },
+                  ".2"
+                ]
+              }
+            ]
+          },
+          0
+        ]
+      },
+      "note": "加拿大当地退货处理费适用于服装与配饰、鞋靴；其他已覆盖普货按退款管理费及原配送费分摊。"
+    }
+  ],
+  "notes": [
+    "适用于本地 FBA 普货；不含跨境履约、危险品和账户专属优惠。",
+    "销售税按本站普通商品标准税率还原价内税；美国/加拿大默认页面价外税。特殊税率商品需另取规则。",
+    "销售税按本站普通商品标准税率还原价内税；美国/加拿大默认页面价外税。特殊税率商品需另取规则。"
+  ],
+  "fulfillmentMultiplier": "1.035",
+  "salesTaxSource": "https://www.canada.ca/en/revenue-agency/services/tax/businesses/topics/gst-hst-businesses/charge-collect-which-rate.html"
+}

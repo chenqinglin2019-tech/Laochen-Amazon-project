@@ -1,0 +1,17 @@
+{
+  "source": "sellersprite.asin_detail",
+  "capturedAt": "2026-10-25",
+  "raw": {
+    "asin": "B0BF4MBNS5",
+    "marketplace": "JP",
+    "title": null,
+    "asinUrl": null,
+    "price": null,
+    "dimensions": null,
+    "weight": null,
+    "nodeLabelPath": null,
+    "skuList": null,
+    "updatedTime": 1718251048000
+  },
+  "expectedSite": "JP"
+}
