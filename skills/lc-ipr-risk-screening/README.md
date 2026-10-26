@@ -1,31 +1,35 @@
-# LC IPR Risk Screening 技能
+# LC IPR Risk Screening 1.0.3
 
-> **待核：客户最终验收和当前客户端发行版本与 master 的对应关系，本次只整理文档未重新验收。**
+对单个美国 Amazon 商品执行知识产权风险筛查，使用老陈云端服务完成核心查询，
+再由 Agent 审阅候选并生成离线报告。报告不是法律意见，未检出不等于没有风险。
 
-给美国站单商品做有证据留痕的知识产权风险筛查。
+## 安装或更新
 
-**状态：** 本地技能，云端 `ipr-backend-dev3` 在跑；非盘点五项货架；master 已有 6e708f2 单审更新，验收不能仅凭提交推定。运行状态基线为 2026-09-08；代码核对日期 2026-09-09。
+- Skilldeck 用户：在技能市场刷新，更新 IPR Skill，再新建任务或选择新版技能。
+  已有任务可能仍绑定旧版本，更新不会自动重跑或迁移它们。
+- 手工安装用户：先备份旧的 `lc-ipr-risk-screening` 目录和个人配置，再用本包的同名
+  目录整体替换旧版技能目录。不要把新旧 `tools/` 文件混用。
+- 保留个人老陈 Token；推荐通过 `LAOCHEN_BACKEND_TOKEN` 环境变量提供。
+  本包 `config.json` 的 Token 默认留空，不包含客户凭据。
+- 保留已有任务、原始结果和回执。任务目录应放在 Skill 包外；如果此前误放在包内，
+  先将完整任务目录保全到包外，再替换 Skill，不要覆盖或删除任务资料。
+- 更新完成后，让 Agent 重新读取 `SKILL.md`，执行 `auth-check` 验证授权，再创建新筛查任务。
+  遇到旧 V1 的 HTTP 410 / `SKILL_UPGRADE_REQUIRED` 时停止，不更换请求 ID 重提旧任务。
 
-## 接口
+## 使用
 
-CLI 不监听端口。`../go-cli/auth.go` 调 `/auth/skill-check`；`product_cloud.go` 经 Gateway `/ipr` 调商品详情、图片和 operation，后端 8909。Serper 可选增强由本地环境配置直连，不要求通过云端旧 Serper 路由。
+向 Agent 提供美国 Amazon 链接或 ASIN，也可附主图和细节图。运行流程以
+`SKILL.md`、`INSTRUCTIONS.md` 和 `references/` 为准。需要有效的老陈 Token 和本技能授权。
+`SERPER_API_KEY` 为可选公开网页增强；没有时可跳过，继续云端核心流程。
 
-## 代码一分钟
+包内包含 Windows x64、Linux x64、macOS Intel 和 Apple Silicon 程序。
+macOS 首次运行的权限处理见 `INSTRUCTIONS.md`。
 
-- [INSTRUCTIONS.md](INSTRUCTIONS.md)：云端发现与一次完整 Agent 审阅。
-- [../go-cli/main.go](../go-cli/main.go)：CLI 入口。
-- [../go-cli/product_cloud.go](../go-cli/product_cloud.go)：云端和 operation 恢复。
-- [../go-cli/review.go](../go-cli/review.go)：审阅门禁。
-- [../docs/project-status.md](../docs/project-status.md)：当前产品范围及已知限制。
+## 本版修复
 
-## 数据
+- 配套云端后端已修复文字商标检索参数；保留历史请求与回执绑定。
+- 单项明确待核对时，后续独立查询继续执行；未决请求和已有成功结果保留。
+- 图搜待核对时，已成功来源可正常导入；后续独立 TRO 案卷不会被前一项阻断。
+- 兼容历史版权图片摘要，避免已有图片被误判为未绑定。
 
-本地 task/raw/evidence/report 目录为证据资产，无本地数据库服务；远程 operations/images 持久卷归 backend，见后端 README。
-
-## 部署
-
-见[部署手册](../../../docs/deploy.md#7-交付记录与仍待核实的范围)；这是客户端/离线资产，按手册对应范围交付。
-
-## 已知坑
-
-WIP 分支保留 0904 未验收快照，不是当前 master/生产版本。无结果不代表无风险；确定性门禁不能替代 Agent 真正的图像比较。
+计费价格与退款规则不变。更新本身不会自动重跑旧任务、补扣或退款。

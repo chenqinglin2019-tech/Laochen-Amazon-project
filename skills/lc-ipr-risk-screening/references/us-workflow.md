@@ -71,7 +71,7 @@
 - `import-us-screen-evidence` 会把明确失败的云端操作导入正式账本，保留原请求 ID、安全错误码和不可变状态快照；返回 `US_SCREEN_EVIDENCE_PARTIAL` 及 `failed_queries`。全失败批次也可留痕，失败不算覆盖完成；复跑导入不产生新远程请求或重复记录。补充反查失败不会抹掉已成功的主查询，`uncertain` 不转成明确失败。导入中断后可复跑同一命令：已完成记录通过身份校验后复用，保留并继续未完成项，不清空其他活动操作。
 - 新版状态文件应继续使用新版 CLI；旧版严格 JSON 读取器可能拒绝新增错误字段，不能通过删字段或换请求 ID 绕过。
 
-- `uncertain` 表示结果状态未知且可能已计费：停止当前付费链，不得换 request ID 重提。
+- `uncertain` 表示结果状态未知且可能已计费，不得换 request ID 重提。尚未确认提交、普通轮询中断或网络错误仍停止当前付费链；仅当已绑定后端任务且明确返回下述 V2 待核对错误时，跳过该项并继续原计划中的其他独立查询。
 - 明确 HTTP 5xx 且未消耗 credit 的 Serper 行记录为可选来源失败，继续其余独立查询，不自动重试失败项；它可以限制对应模块置信度，但不进入正式结论的必需 coverage gap。
 - Serper 单条响应可用候选保留率不低于 90% 时，孤立畸形项记入 parser warnings 而不阻断 coverage；原始响应、`items/total` 差异和拒绝原因仍全部保留。低于 90% 为 `partial`，零条可用为失败。
 - `run-serper-plan` 在 `ready`、可审计的 `partial` 或 `SERPER_SKIPPED_NO_KEY` 时进入候选处置；`SERPER_SKIPPED_NO_KEY` 时问一次，用户给出 Key 就注入当前会话并立刻重跑，用户明确没有则继续云端结果。Serper 行仍保留在冻结计划中，但属于可选增强，不进入必需 coverage gap。`blocked` 必须留在当前阶段恢复。
@@ -85,7 +85,7 @@
 
 原任务超时、`uncertain`、`isStale` 或暂时查不到时，继续原 `us-screen` 或原补查命令查询已有 operation。不得新建批次规避未决状态；已成功来源不会重复提交，GET 与原任务恢复不新增扣费。
 
-遇到 `V2_EVIDENCE_REQUIRES_REVIEW` 或 `RECOVERY_REQUIRES_REVIEW` 时停止自动恢复，保留 operation ID 和错误码供核对；它们不是已确认失败，不能换批次重新收费检索。
+遇到 `V2_EVIDENCE_REQUIRES_REVIEW` 或 `RECOVERY_REQUIRES_REVIEW` 时，该项停止自动恢复，保留 operation ID、原始结果、补查绑定及错误码；同次 `us-screen` 可继续原计划中的其他独立查询，依赖该项结果的反查不执行。鉴权、限流、取消和落盘失败仍停止整个命令。待核对项不是明确失败，不能换批次重新收费检索；正式导入保留已成功候选并返回 `US_SCREEN_EVIDENCE_PARTIAL` 与 `pending_operations`，不会把待核对项记成失败或零结果。
 
 只有确认失败的文字商标或图搜来源才能新建补查批次：
 
@@ -120,3 +120,5 @@ V2 候选图片会立即缓存；签名图片地址过期且本地缺图时，�
 5. `finalize-assessment`、`render-report`、`validate-release` 全部通过。
 
 云端核心条件不满足时输出 draft/incomplete 并说明缺口。没有 Serper Key 本身不阻断正式筛查报告；Agent 仍须给出七模块判断，但只能说“本轮未发现明确风险信号”，不能把未检出写成不存在权利。有 Serper 时，其候选进入同一账本和审阅并可改变风险。完整报告仍是风险筛查，不是官方法律状态确认或法律意见。
+
+图搜待核对但已返回部分成功来源时，CLI 把响应保存为绑定原请求的独立快照，不覆盖原始结果或补查绑定。正式导入只接纳状态为 completed、证据完整且已接受的来源；其余来源继续待核对，不按零命中处理。重复导入及同一图搜随后完成时保留已导入候选身份。TRO 单个案件待核对或明确失败不阻断后续独立案件；鉴权、限流、传输或落盘失败仍停止。
