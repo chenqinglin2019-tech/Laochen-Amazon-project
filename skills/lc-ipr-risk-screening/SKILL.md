@@ -27,7 +27,7 @@ description: 对单个美国 Amazon 商品执行知识产权风险筛查。冻�
 4. 再运行 `prepare-serper-run` 与 `run-serper-plan`。有 `SERPER_API_KEY` 则本机跑完整公开网页检索。返回 `SERPER_SKIPPED_NO_KEY` 时问用户一次；用户把 Key 发在对话里就注入当前会话环境变量并立刻重跑 `run-serper-plan`，不要让用户去设系统变量或重启 Agent。用户明确没有就跳过公开网页、继续候选审阅。禁止把 Key 写入 `config.json`、命令参数、任务目录或报告。
 5. 进入候选审阅，对工作区中的全部候选一次性完成 `material`、`not_material` 或 `needs_review` 处置。不得遗漏来源条目。审阅 JSON 必须保持 UTF-8；连续 `????` 或替换字符会使整批失败，Windows 写入工具不能可靠保存中文时直接使用可读英文理由。检索相似度只用于排序；外观设计、图形商标/商业外观、版权图片等视觉候选若可能进入 `material`，Agent 必须调用图像查看能力实际打开 `input-images/` 中的目标图和候选摘要 `image_ref` 对应的图片，分别记录共同点、关键差异与整体视觉印象。候选图不可读取时使用 `needs_review`，不得凭分数判高风险。文字商标还必须同时确认文字近似与商品/服务类别重叠。
 6. 通过查询覆盖、候选完整性和候选处置门禁后，冻结证据并由当前 Agent 完成一次完整的七模块审阅。Serper 是可选增强：未提供 Key 或单条检索失败都不阻断云端核心证据形成正式筛查结论；有 Key 时，其候选进入同一证据账本和审阅流程，并可改变模块及综合风险。没有 Serper 候选时只能表述“本轮未发现明确风险信号”，不得表述为不存在权利。一审完成后直接定稿，不启动独立二审，不向用户索要人工裁决。
-7. 执行 `finalize-assessment`、`render-report`、`validate-release`，交付离线 HTML 及结构化产物。
+7. 执行 `finalize-assessment`、`render-report`、`validate-release`，交付离线 HTML 及结构化产物。报告排版与完整性按 `references/report-presentation.md` 执行；直接使用 CLI 产物，不手工删减候选、替换事实或添加示例内容。
 
 ## 边界
 
