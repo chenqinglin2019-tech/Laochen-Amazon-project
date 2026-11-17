@@ -88,6 +88,7 @@ r5d4 起的新任务（`pipeline_robust_revision`、`prereview_screen_revision`�
 - 终审材料包超过上限时，程序按 `references/pipeline.md` r10 一节自动瘦身（`review_packet_budget`），不再因 `REPORT_REVIEW_HOST_INPUT_TOO_LARGE_AFTER_LOSSLESS_ENCODING` 停下；不要为此手工改判候选。
 - r10 之前建的任务没有 `eu_scope_revision`，仍按旧规则运行；德国站等非美国任务请新建任务重跑，不要给旧任务补字段或改脚本。
 - 德国本国（及法、意、西、日本国）范围仍不检索，照旧原样转告 `scope_notice`。
+- 输出里出现 `language_notice`（资料是外语、没有可用的英文检索词）时原样转告用户，并建议按提示删掉 1-*.json、重跑产品理解；不要手工往草稿里补检索词。
 
 r5d4 起对 Agent 的两条规则：
 - **检查点 2**：先运行一次 `run_pipeline.py --task-dir <同一目录> --resume`（程序会先补跑一轮派发、分流、核心资料、比对和筛查，多数待办由此关闭），仍停下时再按清单处理。流水线管理的任务不要直接调用 `run_api_plan.py`，它绕过进度记账和派发门槛；需要派发时用 `advance_work.py --execute-sources` 或 `--resume`。

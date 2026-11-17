@@ -225,16 +225,85 @@ def unlocated_selected_limitation(task, row):
 
 
 # ----- product understanding -----------------------------------------------------------------------------------------
-# 'die' and 'den' are left out: they are English words too (die-cast housing, den)
-_GERMAN_WORDS = frozenset({'und', 'mit', 'fur', 'für', 'der', 'das', 'dem', 'des', 'ein', 'eine',
-                           'einer', 'einem', 'einen', 'zum', 'zur', 'aus', 'oder', 'bei', 'von', 'auf', 'im', 'ist',
-                           'nicht', 'ohne', 'inkl', 'fuer', 'mehrfach', 'steckdose', 'steckdosenleiste',
-                           'schalter', 'nachtlicht', 'kabel', 'stecker'})
+# Function words of the European marketplaces' listing languages (r10b). Words that are also English, or English
+# prefixes and codes (die, den, im, per, pour, par, al, di, da, en, au), are left out; tokens are whole
+# whitespace-separated words, so a hyphenated English word (de-icing, un-plug) is never split into a match.
+FUNCTION_WORDS = {
+    'de': frozenset({'und', 'mit', 'für', 'fur', 'fuer', 'der', 'das', 'dem', 'des', 'ein', 'eine', 'einer', 'einem',
+                     'einen', 'zum', 'zur', 'aus', 'oder', 'bei', 'von', 'auf', 'ist', 'nicht', 'ohne', 'inkl',
+                     'mehrfach', 'steckdose', 'steckdosenleiste', 'schalter', 'nachtlicht', 'kabel', 'stecker'}),
+    'fr': frozenset({'avec', 'sans', 'et', 'du', 'des', 'le', 'la', 'les', 'un', 'une', 'aux', 'sur', 'pour', 'de'}),
+    'it': frozenset({'con', 'senza', 'della', 'delle', 'dello', 'dei', 'degli', 'il', 'lo', 'gli', 'una', 'uno',
+                     'nel', 'nella', 'alla', 'e'}),
+    'es': frozenset({'con', 'sin', 'para', 'del', 'los', 'las', 'el', 'una', 'uno', 'por', 'y', 'de'}),
+}
+# English words that the lists above would otherwise catch in English patent phrases
+_ENGLISH_ALSO = frozenset({'pour', 'e', 'y', 'de', 'la', 'le', 'un', 'el'})
+_FOREIGN_WORDS = frozenset().union(*FUNCTION_WORDS.values()) - _ENGLISH_ALSO
 
 
-def looks_german(text) -> bool:
-    """True when a term is German listing text (umlaut/sharp s, or a German function word)."""
-    value = str(text or '').casefold()
-    if re.search(r'[äöüß]', value):
+def _tokens(text):
+    return [word.strip('.,;:()[]"\'!?/').casefold() for word in str(text or '').split()]
+
+
+def looks_foreign(text) -> bool:
+    """True when a term is listing text in another language: any non-ASCII letter (accents, umlauts, Japanese ...)
+    or a German, French, Italian or Spanish function word."""
+    value = str(text or '')
+    if any(ord(char) > 127 and char.isalpha() for char in value):
         return True
-    return any(word in _GERMAN_WORDS for word in re.findall(r"[a-zäöüß]+", value))
+    return any(word in _FOREIGN_WORDS for word in _tokens(value))
+
+
+looks_german = looks_foreign      # r10 name
+
+
+def garbled(term, source) -> bool:
+    """True when a program-cut term is not made of whole words of its source text: the ASCII word cutter split an
+    accented word ('Dämmerungssensor' -> 'd mmerungssensor', 'intégrée' -> 'int gr e')."""
+    words = {word.casefold() for word in re.findall(r'[^\W\d_]+', str(source or ''))}
+    parts = [part.casefold() for part in re.findall(r'[A-Za-z]+', str(term or ''))]
+    return bool(source) and any(part not in words for part in parts)
+
+
+def english_term(term, source=None) -> bool:
+    """A usable English search term: at least one real word, no foreign listing text, not cut out of a foreign word."""
+    value = str(term or '')
+    if not re.search(r'[A-Za-z]{2,}', value) or looks_foreign(value):
+        return False
+    return source is None or not garbled(value, source)
+
+
+def english_concepts(raw):
+    """The model's patent concept groups without foreign-language names and forms (``recall.parse_concepts`` input)."""
+    if not isinstance(raw, dict):
+        return raw
+    result = dict(raw)
+    names = raw.get('article_names')
+    if isinstance(names, list):
+        result['article_names'] = [item for item in names
+                                   if english_term(item.get('value') if isinstance(item, dict) else item)]
+    functions = raw.get('function_concepts')
+    if isinstance(functions, list):
+        kept = []
+        for item in functions:
+            if isinstance(item, dict) and isinstance(item.get('terms'), list):
+                item = {**item, 'terms': [form for form in item['terms'] if english_term(form)]}
+                if not item['terms']:
+                    continue
+            kept.append(item)
+        result['function_concepts'] = kept
+    return result
+
+
+UNDETERMINED = 'und'       # ISO 639-2 "undetermined": no search scope requires it, so the planner never uses it
+LANGUAGE_NOTICE = ('页面资料不是英文，本次没有得到可用的英文检索词：欧盟（及英国）层的专利、外观文字检索会没有词可用，'
+                   '只做图片检索，报告会列为限制。建议删除 %s 下的 1-*.json 后用同一命令重跑产品理解（模型会话会把资料译成'
+                   '英文专利用语）；确认要继续再按上面的步骤。')
+
+
+def english_text_terms(terms) -> list:
+    """The analysis terms that can serve an English text search (brands and image terms are not text terms)."""
+    return [term for term in terms or [] if isinstance(term, dict) and term.get('kind') not in {'brand'}
+            and str(term.get('language') or '').casefold() == 'en' and str(term.get('value') or '').strip()
+            and not str(term.get('value')).startswith(('http://', 'https://'))]
