@@ -295,5 +295,134 @@ class GermanTermTests(unittest.TestCase):
             self.assertFalse(eu_scope.looks_german(value), value)
 
 
+
+class ForeignWordTests(unittest.TestCase):
+    """r10b: other European listing languages, accents and cut-up words (French, Italian, Spanish, Japanese)."""
+
+    def test_listing_text_of_each_marketplace_is_foreign(self):
+        for value in ('multiprise avec veilleuse', 'con luce notturna', 'regleta con luz nocturna', 'veilleuse intégrée',
+                      'luz nocturna led con sensor', '電源タップ', 'schalter und nachtlicht'):
+            self.assertTrue(eu_scope.looks_foreign(value), value)
+            self.assertFalse(eu_scope.english_term(value), value)
+
+    def test_english_patent_phrases_stay_english(self):
+        for value in ('power strip', 'de-icing heater', 'pour spout lid', 'die cast housing', 'night light with sensor',
+                      'la crosse clock', 'socket outlet with switch'):
+            self.assertTrue(eu_scope.english_term(value), value)
+
+    def test_a_term_cut_out_of_an_accented_word_is_not_english(self):
+        self.assertFalse(eu_scope.english_term('int gr e', 'Veilleuse LED intégrée'))
+        self.assertFalse(eu_scope.english_term('led nachtlicht mit d mmerungssensor', 'LED Nachtlicht mit Dämmerungssensor'))
+        self.assertTrue(eu_scope.english_term('built-in led night light', 'Built-in LED night light with sensor'))
+        self.assertFalse(eu_scope.english_term('4'))
+
+    def test_concept_groups_lose_their_foreign_names(self):
+        raw = {'article_names': [{'value': 'power strip'}, {'value': 'multiprise'}, {'value': 'steckdosenleiste'},
+                                 'extension socket'],
+               'function_concepts': [{'label': 'light', 'terms': ['night light', 'veilleuse intégrée']},
+                                     {'label': 'x', 'terms': ['luz nocturna con sensor']}]}
+        result = eu_scope.english_concepts(raw)
+        self.assertEqual([item if isinstance(item, str) else item['value'] for item in result['article_names']],
+                         ['power strip', 'multiprise', 'extension socket'])     # a bare foreign noun is not caught
+        self.assertEqual(result['function_concepts'], [{'label': 'light', 'terms': ['night light']}])
+
+
+class ForeignListingUnderstandingTests(unittest.TestCase):
+    """The understanding host on a French listing of an EU + FR task, and the US task unchanged."""
+
+    def setUp(self):
+        import test_product_understanding_host as base
+        self.case = base.ProductUnderstandingTests()
+        self.case.setUp()
+        self.addCleanup(self.case.doCleanups)
+        from common import atomic_write_json, load_json
+        self.load, self.write = load_json, atomic_write_json
+
+    def target(self, title, bullets, targets=('EU', 'FR')):
+        task = self.load(self.case.run / 'task.json')
+        task['product'].update(title=title, bullets=list(bullets), brand='Acme')
+        task['target_jurisdictions'] = list(targets)
+        task.update(EU)
+        if 'product_delivery' in task:
+            from product_delivery import project
+            task['product_delivery'] = project(task)
+        self.write(self.case.run / 'task.json', task)
+
+    def analysis(self):
+        return self.load(self.case.out / '1-analysis.json')
+
+    # The recorders' coverage contract is built for the fixture's own country, so the two drafts that are recorded keep
+    # it and treat the task as a European one through ``eu_scope.non_us``.
+    def test_a_foreign_program_draft_has_no_english_term_and_still_records(self):
+        import product_understanding_host as host
+        self.target('Multiprise avec veilleuse, bloc 4 prises avec interrupteur', ['Veilleuse LED intégrée avec capteur'],
+                    targets=('US',))
+        with mock.patch.object(eu_scope, 'non_us', return_value=True):
+            summary = host.run(self.case.run, self.case.out)
+        self.assertEqual(summary['driver'], 'program')
+        terms = self.analysis()['query_terms']
+        self.assertEqual(eu_scope.english_text_terms(terms), [])
+        self.assertTrue(all(t['language'] in {'und', 'en'} for t in terms))
+        self.assertFalse(any(t.get('recall_group') for t in terms))          # no patent group from a French phrase
+        self.case.record_drafts()
+
+    def test_an_english_listing_of_a_european_marketplace_keeps_its_terms(self):
+        import product_understanding_host as host
+        self.target('Power Strip with Night Light, 4 Outlets with Switch', ['Built-in LED night light with sensor'])
+        host.run(self.case.run, self.case.out)
+        self.assertTrue(eu_scope.english_text_terms(self.analysis()['query_terms']))
+
+    def test_a_foreign_model_term_is_dropped_alone(self):
+        import product_understanding_host as host
+        self.target('Multiprise avec veilleuse, bloc 4 prises avec interrupteur', ['Veilleuse LED intégrée avec capteur'],
+                    targets=('US',))
+        raw = {'product_description': '带夜灯的插座排', 'query_terms': [
+            {'value': 'veilleuse intégrée', 'kind': 'function', 'derived_from': 'product.title'},
+            {'value': 'multiprise avec veilleuse', 'kind': 'design', 'derived_from': 'product.title'},
+            {'value': 'power strip night light', 'kind': 'structural_feature', 'derived_from': 'product.title'}],
+            'patent_numbers': []}
+        with mock.patch.object(eu_scope, 'non_us', return_value=True):
+            summary = host.run(self.case.run, self.case.out, native=lambda task: raw)
+        self.assertEqual((summary['driver'], summary['fallback_reason']), ('native', None))
+        analysis = self.analysis()
+        values = [t['value'] for t in analysis['query_terms'] if t['language'] == 'en']
+        self.assertIn('power strip night light', values)
+        self.assertNotIn('multiprise avec veilleuse', values)
+        self.assertEqual(analysis['analysis']['foreign_terms_dropped'], ['veilleuse intégrée', 'multiprise avec veilleuse'])
+        self.case.record_drafts()
+
+    def test_us_tasks_keep_the_old_contract(self):
+        import product_understanding_host as host
+        self.target('Folding Stand with a hinged support arm for phones', [], targets=('US',))
+        raw = {'query_terms': [{'value': 'veilleuse intégrée', 'kind': 'function', 'derived_from': 'product.title'}]}
+        summary = host.run(self.case.run, self.case.out, native=lambda task: raw)
+        self.assertEqual(summary['driver'], 'program')
+        self.assertIn('TERM_INVALID', summary['fallback_reason'])
+
+
+class LanguageNoticeTests(unittest.TestCase):
+    def notice(self, terms, targets=('EU', 'FR')):
+        import threading
+        from types import SimpleNamespace
+        import run_pipeline
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            (root / 'cp').mkdir()
+            (root / 'task.json').write_text(json.dumps(task(targets)), encoding='utf-8')
+            (root / 'cp' / '1-analysis.json').write_text(json.dumps({'query_terms': terms}), encoding='utf-8')
+            fake = SimpleNamespace(run=root, state={}, lock=threading.Lock())
+            text = run_pipeline.Pipeline.language_notice(fake, root / 'cp')
+            return text, fake.state
+
+    def test_checkpoint_one_names_a_draft_without_english_terms(self):
+        foreign = [{'value': 'multiprise avec veilleuse', 'kind': 'design', 'language': 'und'},
+                   {'value': 'Acme', 'kind': 'brand', 'language': 'en'}]
+        text, state = self.notice(foreign)
+        self.assertIn('没有得到可用的英文检索词', text)
+        self.assertIn('language_notice', state)
+        self.assertEqual(self.notice(foreign + [{'value': 'power strip', 'kind': 'design', 'language': 'en'}])[0], '')
+        self.assertEqual(self.notice(foreign, targets=('US',))[0], '')
+
+
 if __name__ == '__main__':
     unittest.main()

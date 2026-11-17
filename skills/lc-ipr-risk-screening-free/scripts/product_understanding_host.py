@@ -272,17 +272,24 @@ def program_drafts(task, evidence):
                           'derived_from': 'product.bullets[%d]' % index})
             break
     import eu_scope
+    foreign_listing = False
     if eu_scope.non_us(task):
-        # r10: a German listing phrase is not an English term; kept only when nothing else is left (old behaviour)
-        english = [term for term in terms if not eu_scope.looks_german(term['value'])]
-        terms = english or terms
+        # r10b: a phrase cut out of listing text in another language (German, French, Italian, Spanish, Japanese ...,
+        # or an accented word the ASCII cutter split: 'int gr e') is not an English term. It stays in the draft
+        # labelled undetermined, so no search scope plans it; checkpoint 1 says when no English term is left.
+        texts = {'product.title': title, **{'product.bullets[%d]' % index: bullet for index, bullet in enumerate(bullets)}}
+        for term in terms:
+            if term['kind'] != 'brand' and not eu_scope.english_term(term['value'], texts.get(term['derived_from'])):
+                term['language'] = eu_scope.UNDETERMINED
+        foreign_listing = not eu_scope.english_text_terms(terms)
     if not terms:
         raise ValueError('PRODUCT_UNDERSTANDING_QUERY_TERMS_UNAVAILABLE')
     if recall.enabled(task):
         # r5d20: without a model the listing's own product phrase is the only article name (one design and one
         # patent group); the native session replaces these with patent-language concept groups
         import precision
-        concepts = recall.program_concepts(phrase or function, narrow=precision.enabled(task))
+        concepts = (None if foreign_listing or (eu_scope.non_us(task) and not eu_scope.english_term(phrase or function, title))
+                    else recall.program_concepts(phrase or function, narrow=precision.enabled(task)))
         if concepts:
             terms += [row for row in recall.compose_terms(concepts, phrases=recall.phrases_enabled(task),
                                                             guard=__import__('search_guard').enabled(task))
@@ -347,12 +354,18 @@ def apply_refinement(task, evidence, scope_payload, analysis_payload, raw):
     sources = term_sources(scope)
     model_terms = []
     import eu_scope
+    foreign = eu_scope.non_us(task)
     for term in extra[:8]:
         if (not isinstance(term, dict) or term.get('kind') not in allowed_kinds or not isinstance(term.get('value'), str)
-                or not ENGLISH.match(term['value'].strip()) or term.get('derived_from') not in sources):
+                or term.get('derived_from') not in sources):
             raise ValueError('PRODUCT_UNDERSTANDING_TERM_INVALID')
-        if eu_scope.non_us(task) and eu_scope.looks_german(term['value']):
-            continue    # r10: German listing text is not an English search term (11-17: 'schalter und nachtlicht')
+        if foreign and not (ENGLISH.match(term['value'].strip()) and eu_scope.english_term(term['value'])):
+            # r10/r10b: listing text in another language (11-17: 'schalter und nachtlicht'; an accent made the whole
+            # draft invalid) is dropped alone; the other terms of the draft stay
+            analysis['analysis'].setdefault('foreign_terms_dropped', []).append(term['value'][:120])
+            continue
+        if not ENGLISH.match(term['value'].strip()):
+            raise ValueError('PRODUCT_UNDERSTANDING_TERM_INVALID')
         value = clean_term(term['value'].strip()[:120]) if term['kind'] in PATENT_KINDS else term['value'].strip()[:120]
         row = {'value': value, 'kind': term['kind'], 'language': 'en', 'derived_from': term['derived_from']}
         # One term with '&', '/' or a trailing '.' loses only itself, not the model's description and other terms.
@@ -367,7 +380,10 @@ def apply_refinement(task, evidence, scope_payload, analysis_payload, raw):
     if recall.enabled(task):
         # r5d20: the model's concept groups replace the program's listing-phrase groups; an unusable answer keeps them
         try:
-            concepts = recall.parse_concepts(raw.get('search_concepts'), sources)
+            offered = raw.get('search_concepts')
+            if foreign:
+                offered = eu_scope.english_concepts(offered)     # r10b: foreign names leave the groups first
+            concepts = recall.parse_concepts(offered, sources)
         except ValueError as exc:
             analysis['analysis']['concept_fallback'] = str(exc)[:120]
         else:

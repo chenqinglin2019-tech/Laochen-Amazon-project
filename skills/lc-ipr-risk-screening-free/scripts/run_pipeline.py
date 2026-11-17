@@ -493,7 +493,7 @@ class Pipeline:
     def search_notice(self):
         # r9: the network, marketplace and unsearched-scope notices travel with the SerpApi notice in every output
         return {key: self.state[key] for key in ('search_notice', 'scope_notice', 'market_notice', 'network_notice',
-                                                  'model_notice') if self.state.get(key)}
+                                                  'model_notice', 'language_notice') if self.state.get(key)}
 
     def patent_search_check(self):
         """r7 (search-guard-v1): when no US patent or design discovery search succeeded, the run stops before the
@@ -553,6 +553,7 @@ class Pipeline:
         # r5d22: a draft written by this invocation (the first run, or a re-draft after the owner deleted 1-*.json)
         # is always shown once; before, a re-draft under --resume went straight on unseen
         released = not drafted and (mark == 'released' or (mark == 'waiting' and self.args.resume))
+        language = self.language_notice(checkpoints)       # r10b: also kept for the output under --trust-host
         if not (self.args.trust_host or released):
             self.state['checkpoints']['1'] = 'waiting'
             fallback = self.state.get('understanding_fallback')
@@ -560,11 +561,27 @@ class Pipeline:
                       '建议先删除 %s 下的 1-*.json，再运行上面的命令重跑产品理解，程序会带着新草稿再停在这里；'
                       '确认要继续再按上面的步骤。'
                       % (fallback.get('reason') or '原因未知', checkpoints)) if fallback else ''
+            notice += language
             raise Checkpoint(1, '检查点 1：请核对 %s 中的产品范围草稿，只修改 scope.objects[0].description（本体描述）、'
                              'scope.objects[0].visual_evidence.limitation_reason（主图呈现限制）和 scope.reasoning（备注），'
                              '然后运行：%s%s' % (scope, self.resume_command(), notice), scope)
         self.state['checkpoints']['1'] = 'released'
         return {'scope_draft': str(scope)}
+
+    def language_notice(self, checkpoints):
+        """r10b: checkpoint 1 says so when a non-US task's draft holds no English text term (a foreign listing whose
+        model session failed): the EU / UK text searches would have no term at all."""
+        import eu_scope
+        task = read_json(self.run / 'task.json', {}) or {}
+        analysis = read_json(checkpoints / '1-analysis.json', {}) or {}
+        terms = analysis.get('query_terms') if isinstance(analysis, dict) else None
+        if not eu_scope.non_us(task) or not isinstance(terms, list) or eu_scope.english_text_terms(terms):
+            with self.lock:
+                self.state.pop('language_notice', None)
+            return ''
+        with self.lock:
+            self.state['language_notice'] = eu_scope.LANGUAGE_NOTICE % checkpoints
+        return '\n注意：' + eu_scope.LANGUAGE_NOTICE % checkpoints
 
     def host_flags_for_understanding(self):
         return self.host_flags() if self.args.understanding_driver == 'native' else []
