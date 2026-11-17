@@ -932,7 +932,8 @@ def candidate_triage_origin(task: dict, candidate: dict) -> str:
             and candidate.get("retrieval_workflow_revision") == "api-first-v3"
             and candidate.get("right_type") == "unknown" and query_territory and not reviewed_origin):
         return UNLOCATED
-    return origin
+    import eu_scope
+    return eu_scope.scope_origin(task, candidate, origin)   # r10: an EP publication belongs to the EU scope
 
 
 def make_annotation(task: dict, collection: str, candidate: dict, decision: dict, *,
@@ -943,7 +944,8 @@ def make_annotation(task: dict, collection: str, candidate: dict, decision: dict
     if sid not in scenarios:
         raise ValueError("TRIAGE_SCENARIO_UNKNOWN")
     positioned = triage_scope_enabled(task)
-    origin = str(candidate.get("jurisdiction") or candidate.get("office") or "").upper()
+    import eu_scope
+    origin = eu_scope.scope_origin(task, candidate)
     triage_origin = candidate_triage_origin(task, candidate)
     default_country = triage_origin if triage_origin in task.get("target_jurisdictions", []) else UNLOCATED
     jurisdiction = str(decision.get("jurisdiction") or

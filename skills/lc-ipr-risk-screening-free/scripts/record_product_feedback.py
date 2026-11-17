@@ -85,6 +85,11 @@ def record(task_dir: Path, input_path: Path):
         if not isinstance(refs,list) or not refs or not set(refs)<=known:
             raise ValueError('PRODUCT_FEEDBACK_SOURCE_REQUIRED')
         if payload.get('action') == 'request':
+            import eu_scope
+            # r10: a comparison of a selected candidate the triage could not place keeps its UNLOCATED scope; its
+            # structure request is recorded instead of losing the whole comparison (11-17 run: 15 refusals)
+            unlocated = (eu_scope.enabled(task) and payload.get('stage') == 'candidate_comparison'
+                         and payload.get('jurisdiction') == 'UNLOCATED')
             if (set(payload)-{'schema_version','action','stage','expected_target_sha256','expected_scope_sha256',
                               'direction_id','fact_id','candidate_id','jurisdiction','purpose',
                               'minimum_information','question','reason','requester','source_refs','information_category'}
@@ -93,7 +98,7 @@ def record(task_dir: Path, input_path: Path):
                     or payload.get('stage') not in {'search_planning','candidate_comparison'}
                     or payload.get('expected_target_sha256')!=task['product_identity']['sha256']
                     or payload.get('expected_scope_sha256')!=task['product_scope']['scope_sha256']
-                    or payload.get('jurisdiction') not in task.get('target_jurisdictions',[])
+                    or (payload.get('jurisdiction') not in task.get('target_jurisdictions',[]) and not unlocated)
                     or any(not _text(payload.get(key)) for key in
                            ('purpose','minimum_information','question','reason','requester'))):
                 raise ValueError('PRODUCT_FEEDBACK_REQUEST_INVALID')
@@ -109,7 +114,9 @@ def record(task_dir: Path, input_path: Path):
                 path = task_dir/'normalized-candidates.json'
                 candidates = {row['candidate_id']:row for _,row in iter_candidates(load_json(path))} if path.is_file() else {}
                 candidate = candidates.get(candidate_id)
-                if (not candidate or candidate.get('jurisdiction')!=payload['jurisdiction']
+                origin = eu_scope.scope_origin(task, {'jurisdiction': (candidate or {}).get('jurisdiction')})
+                if (not candidate or (origin != payload['jurisdiction'] if not unlocated
+                                      else origin in task.get('target_jurisdictions', []))
                         or candidate.get('right_type')!=direction['right_type']):
                     raise ValueError('PRODUCT_FEEDBACK_CANDIDATE_MISMATCH')
             elif candidate_id:

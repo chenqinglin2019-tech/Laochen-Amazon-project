@@ -336,6 +336,28 @@ r8 的处理：
   - 欧、英、日外观的优先权日过滤按 25 年（美国仍按 16 年）。日本已授权专利号按授权号格式发给 JPO。SerpApi 余额提示按任务国家措辞。
 - 流水线输出里的 `search_notice`、`scope_notice`、`market_notice`、`network_notice`、`model_notice` 都原样转告用户。
 
+## r10（2026-11-17，新任务 `eu_scope_revision` 为 `eu-scope-v1`；德国站两单没出报告；用户要求只做第一期）
+
+德国站（EU+DE）2026-11-12、11-17 两单都没出报告。根因：欧盟专利范围用 `country:EP` 检索，候选号码都是 EP；r8 起的分流范围（`candidate-triage-scope-v1`）只拿候选的局号和任务国家比，EP 不等于 EU 或 DE，于是全部进了 `UNLOCATED`。之后比对结果写入被拒、终审没有这些候选的评级行、发布门禁拒绝；同时缩小候选的规则只认美国文献，入选的 EP 全文让技术模块超过终审上限。实现在 `eu_scope.py`、`review_budget.py`。只查美国的任务，检索、分流和评级都不变（`eu_scope.non_us`）；只有两种原来会失败的情形改为照常出报告：入选未定位的候选，和比对时提交的结构资料请求。
+
+- **EP 归欧盟范围**：`eu_scope.scope_origin` 把 EP 文献归到任务的 EU 范围；任务没有 EU、只有一个欧洲专利公约国家时（如英国站），归到该国。分流、交接、比对、专项核验和派发门禁都改用它比较（`decision_workflow`、`candidate_handoff`、`mechanical_ledger`、`workflow_v24`、`record_product_feedback`、`specialty_analysis`）。候选记录本身仍是 `EP`。EP 记录的法律状态、权利人和地域效力不用于欧盟或成员国范围（`trusted_api.DYNAMIC` 原规则），在报告里保持待核实。
+- **比对结果不再整批丢失**：比对宿主为未定位候选提交的结构资料请求按 `UNLOCATED` 登记（只限比对阶段）；EP 候选必须按 EU 提交。
+- **入选但未定位的候选**：终审只评目标国家，这类候选永远没有评级行。发布门禁把它们列为限制 `SELECTED_CANDIDATE_UNLOCATED`（入选、未评估、风险待定），不再以 `EVIDENCE_REVIEW_WORK_REMAINS` 拒绝。
+- **欧洲文献的默认分流**（`triage_defaults`，非美国任务；审阅人 `program:triage-defaults`，都可重开）：
+  - EP 专利按自身申请日超过 20 年（留 1 年余量），记为不入选 `expired_ep`；
+  - SerpApi 检索卡片显示 EP 状态为 NOT_ACTIVE，记为不入选 `inactive_ep_status`；
+  - 目标范围以外局的文献（WO、CN、US 等）记为不入选 `foreign_publication_eu`；同族已有 EP 或目标国文献的，记为 `family_duplicate_eu`。
+- **深查上限按范围计数**：`recall_screen.selected_count` 原来只数美国候选，欧盟候选每轮都从 0 计数（11-17 入选 8 件，超过上限 6）。新任务按各范围分别累计。
+- **终审材料预算**（`review_budget.fit`，新任务，所有国家）：只在模块提示词超过终审上限 1,048,576 字符（原来会直接失败）时才处理，依次做下面几步，压到 900,000 字符以内就停：
+  1. 去掉证据记录里内嵌的专利说明书全文；
+  2. 专利原文只发首页信息和权利要求，不发说明书；
+  3. 最长的原文按比例截短，每份至少保留 6,000 字符；
+  4. 最长的原文不再发送。
+
+  每一步都记在 `packet.review_packet_budget` 和材料行的 `budget_trimmed`、`limitations` 里。原件、哈希、冻结输入和证据编号都不变。终审预检和正式运行用同一处理；没超上限的材料包（目前所有美国任务）不受影响。
+- **德语资料的检索词**：产品理解提示要求把非英文页面文字译成英文专利用语。模型给出的检索词是德语（含变音字母或 und、mit、für 等词）时丢弃，不再当英文词；程序兜底词同样处理，全部是德语时保留原行为。
+- **仍未做（第二期）**：德国本国的专利、实用新型、外观、商标、版权、商业外观和维权检索。检查点 1 的 `scope_notice` 和报告限制照旧写“未检索、没有结论”。
+
 ## 状态与恢复
 
 - `RUN/pipeline-state.json`：每阶段的 `status`（running／completed／checkpoint／failed）、开始与结束时间、`input_sha256`（阶段开始时 task／evidence／plan／candidates／annotations 的组合哈希）、输出与秒数；`rounds` 记录每轮来源处理前后的进度签名。

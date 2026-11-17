@@ -192,6 +192,10 @@ def focus_rule(candidate: dict, task: dict, others, *, today=None):
         reason = core_focus.expired_by_age(candidate, today=today)
         if reason:
             return 'expired', reason
+        import eu_scope
+        found = eu_scope.focus_rule(candidate, task, others, today=today)    # r10: European documents
+        if found:
+            return found
         found = core_focus.foreign_publication(candidate, task, others)
         return found
     if candidate.get('right_type') not in (None, '', 'unknown') or candidate.get('candidate_nature') not in PUBLIC_CARD_NATURES:
@@ -261,6 +265,8 @@ def build_decisions(root: Path) -> tuple[list[dict], list[dict]]:
     focus = core_focus.enabled(task)
     import precision
     statuses = precision.card_statuses(root) if precision.enabled(task) else {}
+    import eu_scope
+    eu_statuses = eu_scope.card_statuses(root) if precision.enabled(task) and eu_scope.ep_scope(task) else {}
     patents = [row for name in ('patents', 'designs') for row in (candidates.get(name) or []) if isinstance(row, dict)]
     decisions, skipped, seen = [], [], set()
     for entry in pending_entries(root):
@@ -279,6 +285,9 @@ def build_decisions(root: Path) -> tuple[list[dict], list[dict]]:
         if rule is None and statuses:
             detail = precision.inactive_us_status(candidate, statuses)
             rule = 'inactive_us_status' if detail else None
+        if rule is None and eu_statuses:
+            detail = eu_scope.inactive_status(candidate, eu_statuses, task)
+            rule = 'inactive_ep_status' if detail else None
         if rule is None:
             continue
         template, guide = triage_decision(task, candidates, entry)
@@ -300,11 +309,13 @@ def build_decisions(root: Path) -> tuple[list[dict], list[dict]]:
                                          str(candidate.get('snippet') or candidate.get('abstract') or '').strip(),
                                          str(candidate.get('url') or '').strip())))[:900]
         reading = 'result_record'
-        if rule in {'expired', 'family_duplicate', 'foreign_publication', 'inactive_us_status'}:
+        if rule in {'expired', 'family_duplicate', 'foreign_publication', 'inactive_us_status', *eu_scope.TEXTS}:
             from host_triage import reading_profile
             reading = reading_profile(candidate)[0]
             relationship = detail + '。'
-            if rule == 'expired':
+            if rule in eu_scope.TEXTS:
+                reason, difference, reopen, _ = eu_scope.TEXTS[rule]
+            elif rule == 'expired':
                 difference = '候选的保护期已届满，不再能对拟售产品主张专利权；技术内容与产品的关系不再影响本次决策。'
                 reason, reopen = EXPIRED_REASON, REOPEN_EXPIRED
             elif rule == 'inactive_us_status':
@@ -348,7 +359,8 @@ def build_decisions(root: Path) -> tuple[list[dict], list[dict]]:
                                           'expired': '保护期已届满', 'inactive_us_status': '检索记录显示美国已失效',
                                           'family_duplicate': '非美国同族文献',
                                           'foreign_publication': '非美国公开文献', 'patent_page': '专利文献页面',
-                                          'no_rights_identity': '无权利身份卡片'}.get(rule, '无身份网页卡片')
+                                          'no_rights_identity': '无权利身份卡片',
+                                          **{key: value[3] for key, value in eu_scope.TEXTS.items()}}.get(rule, '无身份网页卡片')
                            + '）：依据卡片标题、摘要和地址；' + relationship)[:600],
             reopen_conditions=list(reopen), evidence_refs=refs, candidate_relation=relation,
             comparison={'candidate_content': card or relationship, 'product_content': product_text or relationship,

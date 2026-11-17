@@ -172,7 +172,7 @@ def preflight(task_dir, output_dir=None, *, resume_existing=False, binary=None, 
     for group in mr.GROUPS:
         try:
             packet = mr.module_packet(frozen, group)
-            images = mr.attach_originals(packet, task_dir)
+            images = mr.attach_originals(packet, task_dir, budget=True)
             # r5d4: the material inventory the sessions are later held to is checked here, before any session runs
             # (B0FSJBDTF2: an unreadable GIF voided the appearance review only after five minutes of sessions)
             from review_material_policy import enabled as classified_materials, validate_inventory

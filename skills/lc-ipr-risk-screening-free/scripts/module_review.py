@@ -839,7 +839,7 @@ def design_search_coverage(candidates, source_runs):
             'queries': queries, 'limit_reached': bool(stopped), 'note': note}
 
 
-def attach_originals(packet, task_dir):
+def attach_originals(packet, task_dir, *, budget=False):
     """Read exact retained public originals once, including actual image bytes.
 
     No URL fetch, reconstruction, preview rendering or source re-verification.
@@ -1014,6 +1014,10 @@ def attach_originals(packet, task_dir):
     from review_material_policy import enabled as classified_materials, attach_inventory
     if classified_materials(packet.get('task') or {}):
         attach_inventory(packet, task_dir)
+    if budget:
+        # r10 (eu-scope-v1 tasks): a module packet over the review host limit is brought within it (review_budget.py)
+        import review_budget
+        review_budget.fit(packet)
     return images
 
 
@@ -2010,7 +2014,7 @@ def run_module_pair(task_dir, output_dir, binary, frozen, frozen_meta, prepared_
                 packet, images, counts = integrated
             else:
                 packet = module_packet(frozen, group)
-                images = attach_originals(packet, task_dir)
+                images = attach_originals(packet, task_dir, budget=True)
             packets[group] = (packet, images)
         from review_execution_identity import recovery_index, retained_identity, record_from_audit
         recovery = recovery_index(output_dir, digest, payload_hash, material) if resume_existing else {

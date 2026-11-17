@@ -52,7 +52,8 @@ def _required_scopes(task: dict, candidate: dict) -> set[tuple[str, str]]:
     right = candidate.get("right_type")
     countries = task.get("target_jurisdictions", [])
     if triage_scope_enabled(task):
-        origin = str(candidate.get("jurisdiction") or candidate.get("office") or "").upper()
+        import eu_scope
+        origin = eu_scope.scope_origin(task, candidate)
         countries = [origin] if origin in countries else [UNLOCATED]
     return {(scenario["scenario_id"], country)
             for scenario in task.get("assessment_scenarios", [])

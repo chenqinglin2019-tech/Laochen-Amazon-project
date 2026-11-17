@@ -928,7 +928,9 @@ def _gap(task, request, indexed, plan=None, *, evidence=None, candidates=None, l
             else:
                 matches = [row for rows in (plan or {}).get("queries", {}).values() for row in rows
                            if row.get("query_id") == request.get("source_query_id")]
-                if (len(matches) != 1 or matches[0].get("jurisdiction") != request["jurisdiction"]
+                if (len(matches) != 1 or (matches[0].get("jurisdiction") != request["jurisdiction"]
+                        and __import__("eu_scope").scope_origin(task, None, matches[0].get("jurisdiction"))
+                        != request["jurisdiction"])   # r10: an EP request serves the EU scope
                         or matches[0].get("right_type") != request["right_type"]
                         or matches[0].get("candidate_id") != request["candidate_id"]):
                     raise ValueError("SPECIALTY_SOURCE_DEPENDENCY_QUERY_REQUIRED")
