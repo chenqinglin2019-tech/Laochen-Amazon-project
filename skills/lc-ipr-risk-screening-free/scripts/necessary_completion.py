@@ -2295,11 +2295,20 @@ def _publication_context(task, evidence, candidates, plan, ledger, assessment, *
         limited_scopes = {_scope(entry) for entry in limitations}
         if any(_scope(scope) not in limited_scopes for scope in view.get("unresolved_scopes", [])):
             reject("EVIDENCE_UNRESOLVED_SCOPE_WITHOUT_LIMITATION")
+        import eu_scope
         for scenario in assessment.get("scenario_summaries", []):
             queues = scenario["completion"].get("queues", {})
             pending = {(*_scope(row), row.get("candidate_id")) for row in queues.get("pending_assessments", [])}
-            if queues.get("scope_unassessed") or any((*_scope(row), row.get("candidate_id")) not in pending
-                    for row in queues.get("selected_unassessed", [])):
+            unassessed = [row for row in queues.get("selected_unassessed", [])
+                          if (*_scope(row), row.get("candidate_id")) not in pending]
+            # r10 (eu-scope-v1): a selected candidate left in the UNLOCATED scope can never get a final-review row (the
+            # review covers target countries only); it is disclosed as "selected, not assessed" (run of 2026-11-12)
+            for row in list(unassessed):
+                disclosed = eu_scope.unlocated_selected_limitation(task, row)
+                if disclosed:
+                    limitations.append(disclosed)
+                    unassessed.remove(row)
+            if queues.get("scope_unassessed") or unassessed:
                 reject("EVIDENCE_REVIEW_WORK_REMAINS")
             if any(_scope(row) not in limited_scopes for row in queues.get("pending_assessments", [])):
                 reject("EVIDENCE_PENDING_ASSESSMENT_WITHOUT_LIMITATION")

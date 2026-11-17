@@ -82,6 +82,13 @@ r5d4 起的新任务（`pipeline_robust_revision`、`prereview_screen_revision`�
 - **报告里的外观检索覆盖**：读到单次上限（前 100 条）时写明“排在其后的结果没有读取”，不再写“某日之后授权的外观不在检索范围”。
 - 细节见 [一键流水线](references/pipeline.md) 的 r9 一节，安装见 [安装](references/installation.md)。
 
+**r10（2026-11-17，新任务 `eu_scope_revision` 为 `eu-scope-v1`；德国站两单没出报告）**：
+- 欧盟专利范围检出的 EP 专利按欧盟范围分流、比对和终审（不再进 `UNLOCATED`），英国站等只有一个欧洲专利公约国家的任务归到该国。EP 在成员国是否生效仍是待核实事项，原样写进报告，不要自行推定。
+- 报告限制里的 `SELECTED_CANDIDATE_UNLOCATED` 表示“入选但没有定位到目标国、未评级、风险待定”，向用户如实说明，不能说成无风险。
+- 终审材料包超过上限时，程序按 `references/pipeline.md` r10 一节自动瘦身（`review_packet_budget`），不再因 `REPORT_REVIEW_HOST_INPUT_TOO_LARGE_AFTER_LOSSLESS_ENCODING` 停下；不要为此手工改判候选。
+- r10 之前建的任务没有 `eu_scope_revision`，仍按旧规则运行；德国站等非美国任务请新建任务重跑，不要给旧任务补字段或改脚本。
+- 德国本国（及法、意、西、日本国）范围仍不检索，照旧原样转告 `scope_notice`。
+
 r5d4 起对 Agent 的两条规则：
 - **检查点 2**：先运行一次 `run_pipeline.py --task-dir <同一目录> --resume`（程序会先补跑一轮派发、分流、核心资料、比对和筛查，多数待办由此关闭），仍停下时再按清单处理。流水线管理的任务不要直接调用 `run_api_plan.py`，它绕过进度记账和派发门槛；需要派发时用 `advance_work.py --execute-sources` 或 `--resume`。
 - **外观附图与分流不手工补**（r5d7）：美国外观在 Google Patents 没有页面（404）或附图被拒（403，2025 年后授权的多如此）时，程序自动从 USPTO 官方授权 PDF（`image-ppubs.uspto.gov/dirsearch-public/print/downloadPdf/D…`）逐页取图登记，再做视觉分流；检查点 2 前的补跑会重复到不再有变化（最多 3 轮），过期的结果审阅也由程序重做。Agent 不要自行下载附图、重开分流或手工审阅检索结果；这些手工改动会使已规划的细化检索作废并连锁出现新的待办。检查点 2 再次停下时，把清单与运行目录交给维护者。

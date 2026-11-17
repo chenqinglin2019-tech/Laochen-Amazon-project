@@ -271,6 +271,11 @@ def program_drafts(task, evidence):
             terms.append({'value': feature, 'kind': 'structural_feature', 'language': 'en',
                           'derived_from': 'product.bullets[%d]' % index})
             break
+    import eu_scope
+    if eu_scope.non_us(task):
+        # r10: a German listing phrase is not an English term; kept only when nothing else is left (old behaviour)
+        english = [term for term in terms if not eu_scope.looks_german(term['value'])]
+        terms = english or terms
     if not terms:
         raise ValueError('PRODUCT_UNDERSTANDING_QUERY_TERMS_UNAVAILABLE')
     if recall.enabled(task):
@@ -341,10 +346,13 @@ def apply_refinement(task, evidence, scope_payload, analysis_payload, raw):
     # would be planned for no direction at all.
     sources = term_sources(scope)
     model_terms = []
+    import eu_scope
     for term in extra[:8]:
         if (not isinstance(term, dict) or term.get('kind') not in allowed_kinds or not isinstance(term.get('value'), str)
                 or not ENGLISH.match(term['value'].strip()) or term.get('derived_from') not in sources):
             raise ValueError('PRODUCT_UNDERSTANDING_TERM_INVALID')
+        if eu_scope.non_us(task) and eu_scope.looks_german(term['value']):
+            continue    # r10: German listing text is not an English search term (11-17: 'schalter und nachtlicht')
         value = clean_term(term['value'].strip()[:120]) if term['kind'] in PATENT_KINDS else term['value'].strip()[:120]
         row = {'value': value, 'kind': term['kind'], 'language': 'en', 'derived_from': term['derived_from']}
         # One term with '&', '/' or a trailing '.' loses only itself, not the model's description and other terms.
@@ -416,6 +424,8 @@ def native_prompt(task, sources=None):
             + (__import__('recall').CONCEPT_PROMPT + 'search_concepts 的 derived_from 取 product.title 或 product.bullets。'
                + (__import__('recall').GUARD_CONCEPT_NOTE if __import__('search_guard').enabled(task) else '')
                if __import__('recall').enabled(task) else '')
+            + ('页面文字不是英文（例如德语）时，先理解原意，再译成英文专利用语写入检索词与概念组；不要照抄原文。'
+               if __import__('eu_scope').non_us(task) else '')
             + '只返回 JSON。\n'
             + json.dumps(view, ensure_ascii=False))
 

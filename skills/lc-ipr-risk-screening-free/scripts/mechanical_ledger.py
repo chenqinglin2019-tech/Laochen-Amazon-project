@@ -160,7 +160,8 @@ def plan_handoff(task, view, candidates):
         if not refs:
             continue
         candidate = index[row['candidate_id']]
-        origin = str(candidate.get('jurisdiction') or candidate.get('office') or '').upper()
+        import eu_scope
+        origin = eu_scope.scope_origin(task, candidate)
         for scope in row['remaining_scopes']:
             sid, country = scope['scenario_id'], scope['jurisdiction']
             if scenarios.get(sid, {}).get('type') == 'brand_reuse' and sid not in active:

@@ -23,8 +23,8 @@
     },
     {
       "path": "SKILL.md",
-      "bytes": 56805,
-      "sha256": "8edcdef0ccc4eca7c492753d7dc6aee0e4d96826b35872236e7e7366c1182233",
+      "bytes": 57879,
+      "sha256": "de4b8f84ba38457accf05c3ca6b7ff42a598f5e44467bd87b60772f8a03e3a24",
       "mode": "0644"
     },
     {
@@ -216,8 +216,8 @@
     },
     {
       "path": "references/distribution-files.json",
-      "bytes": 78377,
-      "sha256": "3d8e3758a31eefc8433482c343232750bcb3e000f37b90eb1484958b40f2145c",
+      "bytes": 78742,
+      "sha256": "d260fecd996471cc445e7831a27a21572bcae8d6ae2e47787992e6a603626a43",
       "mode": "0644"
     },
     {
@@ -288,8 +288,8 @@
     },
     {
       "path": "references/pipeline.md",
-      "bytes": 71425,
-      "sha256": "a362a836d853377fcfb0c884686b6562f265150703eaa55d8429fc3d1d3d543a",
+      "bytes": 75300,
+      "sha256": "036c6dcbf93932d997c4d3fef00050bfc3aa6dc0b404dbfbc69e876852dbf37f",
       "mode": "0644"
     },
     {
@@ -448,7 +448,7 @@
       "sha256": "108b4dc7165118efe5e5acdc10f6014cb75dddc31adaa5d9dd85b4a53621b9e3",
       "mode": "0644",
       "transform": "redact_sender_history_v1",
-      "source_sha256": "108b4dc7165118efe5e5acdc10f6014cb75dddc31adaa5d9dd85b4a53621b9e3"
+      "source_sha256": "717b7a855534a3171b8ce072744d6287af1c34be128e02db5696db414656788a"
     },
     {
       "path": "references/workflow-business-logic.md",
@@ -578,8 +578,8 @@
     },
     {
       "path": "scripts/candidate_handoff.py",
-      "bytes": 16973,
-      "sha256": "fd4e1f5a91b8cde9e8bdc585da77c5543343d1bde74d1ab86fd1ca87b20b0e00",
+      "bytes": 16960,
+      "sha256": "fb1ae10487954185853344fcf21791c06d8c3067a8c76d204b8110ac9faddc75",
       "mode": "0644"
     },
     {
@@ -704,8 +704,8 @@
     },
     {
       "path": "scripts/create_task.py",
-      "bytes": 31278,
-      "sha256": "ae1c1e80db1b0a457e52200688de309fa6d02b26c33d537a0b3e16d7ce41811c",
+      "bytes": 31650,
+      "sha256": "b768f1ae3bfd01f3dca23f1c89253a8ca3390027f2817e0a4d68370cb1fd81a9",
       "mode": "0644"
     },
     {
@@ -716,8 +716,8 @@
     },
     {
       "path": "scripts/decision_workflow.py",
-      "bytes": 69443,
-      "sha256": "a2bc3d97bf520f3e871d45adc7e5841740ccde9d254fb9d141b8e5b5c8bf2755",
+      "bytes": 69537,
+      "sha256": "cb8ccd37b7d14ece08625b487e35551aea94a40c5afaf19892b22eaae00c6391",
       "mode": "0644"
     },
     {
@@ -814,6 +814,12 @@
       "path": "scripts/eps_client.py",
       "bytes": 11526,
       "sha256": "55b2c16e01296e71dd9cc260b28e3e3dd47826494364866d4152429da8885583",
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/eu_scope.py",
+      "bytes": 13663,
+      "sha256": "71d7600c1c5dd3ea0bf4d7dd7d35d601f30426be341ceb11ad1ea1db755e9a37",
       "mode": "0644"
     },
     {
@@ -956,8 +962,8 @@
     },
     {
       "path": "scripts/mechanical_ledger.py",
-      "bytes": 44820,
-      "sha256": "49a7cb2cd97ec0d02fc2c8212e91400b0b93a1d677f5918c458c84b67dee0abd",
+      "bytes": 44807,
+      "sha256": "48b15fec7523ff49664e5c6cb3ce91f25c348bc81e49c3673976c200ec9c80cb",
       "mode": "0755"
     },
     {
@@ -980,8 +986,8 @@
     },
     {
       "path": "scripts/module_review.py",
-      "bytes": 163333,
-      "sha256": "ddcbaa0c26217e35d9bb1558ca79bb6dd5b14dea5356a77d4b6507263a814589",
+      "bytes": 163559,
+      "sha256": "cce772b94fc4a5ff1ddd50be7aaeea64efedbd7a872f49b4fb40f0daf21af508",
       "mode": "0644"
     },
     {
@@ -1004,8 +1010,8 @@
     },
     {
       "path": "scripts/necessary_completion.py",
-      "bytes": 159315,
-      "sha256": "3410cc6ff4a5ed19382532e002abb3a6f31d29c76bce624489d28382a29c5ec8",
+      "bytes": 159863,
+      "sha256": "d0e327d874015ee8078dff0a8eb5896573d4860fc721428e8e145b14892a469f",
       "mode": "0644"
     },
     {
@@ -1130,8 +1136,8 @@
     },
     {
       "path": "scripts/product_understanding_host.py",
-      "bytes": 36007,
-      "sha256": "274742ab3dad1e6f6193a634800101ae967e073a4b2d5037878e5178004ace47",
+      "bytes": 36728,
+      "sha256": "68120ef63c75214c588514bbe36ba18069c800a325190a68c1d70ea4a54005a2",
       "mode": "0644"
     },
     {
@@ -1190,8 +1196,8 @@
     },
     {
       "path": "scripts/recall_screen.py",
-      "bytes": 44486,
-      "sha256": "878a9b75139222968d58617a2546bb9c88c091b276cc80314cceaad3db949924",
+      "bytes": 45278,
+      "sha256": "83b2879c77b7887086ff2c1dc7334da2ed136852e4f288dcfa08f440bb0966ad",
       "mode": "0644"
     },
     {
@@ -1298,8 +1304,8 @@
     },
     {
       "path": "scripts/record_product_feedback.py",
-      "bytes": 13196,
-      "sha256": "1d69d7d68b0ff148beeeb5067b46ec3a17886f2c2fa63b53580ebf27523e1030",
+      "bytes": 13836,
+      "sha256": "4e001f66b58ba5a22814c175405c03a0bee92692a80588f06c9971557753bced",
       "mode": "0644"
     },
     {
@@ -1483,6 +1489,12 @@
       "mode": "0644"
     },
     {
+      "path": "scripts/review_budget.py",
+      "bytes": 10133,
+      "sha256": "4426abd3bb2288d25bd25b028dfd59eaf903c01c77843fc7a368b01ecb9893f5",
+      "mode": "0644"
+    },
+    {
       "path": "scripts/review_dependencies.py",
       "bytes": 1295,
       "sha256": "798847ee5b0a05a1590d4f289ab4f3ac59d1e88681f4c271401e9a40c4cc09c7",
@@ -1526,8 +1538,8 @@
     },
     {
       "path": "scripts/review_preflight.py",
-      "bytes": 17115,
-      "sha256": "42b5131eedc0e8b3534a8220c8f9b15aacac0d4898b11d468d6d1bb48789afe8",
+      "bytes": 17128,
+      "sha256": "8f2dcf8d1af5d59669fa7dee21a5f6a84747ccb42137790eee78539a31e7ab97",
       "mode": "0644"
     },
     {
@@ -1676,8 +1688,8 @@
     },
     {
       "path": "scripts/specialty_analysis.py",
-      "bytes": 130725,
-      "sha256": "01e1beb32d563366a60693a09447e37d4a1908d4e257c43da6c84b1dd22f44ca",
+      "bytes": 130929,
+      "sha256": "21526445df31d029e32ee17b9f4ee3cb31a6161f70069c64531e7e82e741c2ea",
       "mode": "0644"
     },
     {
@@ -2581,6 +2593,12 @@
       "mode": "0644"
     },
     {
+      "path": "scripts/test_r10_eu_scope.py",
+      "bytes": 16493,
+      "sha256": "e8b428fab7a6e22ebab7d2bd558f61f4ccd01f1b70177417cc42345b85f2b55d",
+      "mode": "0644"
+    },
+    {
       "path": "scripts/test_r5c_pipeline_fixes.py",
       "bytes": 9786,
       "sha256": "a49c2d0007c85546e2ec0c70a8ef5e983a43b830e9e2b576cdd0aad1ca650528",
@@ -3242,8 +3260,8 @@
     },
     {
       "path": "scripts/triage_defaults.py",
-      "bytes": 25175,
-      "sha256": "52374d3b68faaee89b0e17d97548c61e05f0d4104b8b4945c0d2558128ef79f6",
+      "bytes": 25881,
+      "sha256": "da756552a336e7507ceb30e1baa05c901196b0f7ff798496d7492c9e524a80c1",
       "mode": "0644"
     },
     {
@@ -3284,8 +3302,8 @@
     },
     {
       "path": "scripts/workflow_v24.py",
-      "bytes": 223591,
-      "sha256": "5d94638a2d85ab848df152e4a3c21feccd5c6f9e50e3c5c29411578631e635aa",
+      "bytes": 223733,
+      "sha256": "72b1841f7dee5c41059069b0c8411f93c1f066a215fed420c239e4c2b3c9a7f7",
       "mode": "0644"
     },
     {

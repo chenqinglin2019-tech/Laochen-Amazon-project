@@ -3586,6 +3586,24 @@
       "kind": "text",
       "required": true,
       "mode": "0644"
+    },
+    {
+      "path": "scripts/eu_scope.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/review_budget.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
+    },
+    {
+      "path": "scripts/test_r10_eu_scope.py",
+      "kind": "text",
+      "required": true,
+      "mode": "0644"
     }
   ]
 }

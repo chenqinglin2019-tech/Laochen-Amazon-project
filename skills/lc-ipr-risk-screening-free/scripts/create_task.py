@@ -337,6 +337,10 @@ def main() -> None:
         # language terms disclosed at planning time, national design lifetimes outside the US (portable.py)
         from portable import REVISION as PORTABLE_REVISION, TASK_FIELD as PORTABLE_FIELD
         task[PORTABLE_FIELD] = PORTABLE_REVISION
+        # r10 (eu-scope-v1, owner decisions 2026-11-17): EP publications belong to the EU scope, European documents
+        # get the deep-check rules, an unplaced selection is disclosed, the review packet fits the host (eu_scope.py)
+        from eu_scope import REVISION as EU_SCOPE_REVISION, TASK_FIELD as EU_SCOPE_FIELD
+        task[EU_SCOPE_FIELD] = EU_SCOPE_REVISION
         if args.claims_triage_host:
             from claims_triage_host import REVISION as CLAIMS_REVISION
             task['claims_triage_revision'] = CLAIMS_REVISION

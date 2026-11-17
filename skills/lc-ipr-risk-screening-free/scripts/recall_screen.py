@@ -447,8 +447,8 @@ def cap_row(row, cap):
                            'applicability_limit': '本件未比对；仅表示超出本轮深查上限，不等于法律不侵权，扩大范围时重新分流。'}}
 
 
-def selected_count(root, rights) -> int:
-    """Scopes whose latest triage decision is 'selected' for these US right types."""
+def selected_count(root, rights, jurisdiction='US') -> int:
+    """Scopes whose latest triage decision is 'selected' for these right types in one country (US by default)."""
     path = Path(root) / 'materiality-annotations.json'
     try:
         rows = load_json(path).get('annotations', []) if path.is_file() else []
@@ -457,7 +457,7 @@ def selected_count(root, rights) -> int:
     latest = {}
     for row in rows:
         if isinstance(row, dict) and row.get('candidate_id') and row.get('right_type') in rights \
-                and str(row.get('jurisdiction') or '').upper() == 'US':
+                and str(row.get('jurisdiction') or '').upper() == jurisdiction:
             latest[tuple(row.get(key) for key in SCOPE_FIELDS)] = row.get('decision')
     return sum(1 for value in latest.values() if value == 'selected')
 
@@ -496,8 +496,22 @@ def select(root, mode):
         rows.sort(key=lambda row: order.index(row['tier']) if row['tier'] in order else len(order))
     cap = precision.DESIGN_CAP if mode == 'image' else precision.UTILITY_CAP
     rights = {'design'} if mode == 'image' else {'patent', 'utility_model'}
-    room = max(0, cap - selected_count(root, rights))
-    chosen, overflow = rows[:room], rows[room:]
+    import eu_scope
+    try:
+        per_scope = eu_scope.non_us(load_json(root / 'task.json'))
+    except (OSError, ValueError):
+        per_scope = False
+    if per_scope:
+        # r10: the cap counts the selections already made in each scope (the 11-17 run selected 8 EP patents in
+        # two rounds because only US selections were counted)
+        chosen, overflow = [], []
+        for country in dict.fromkeys(row['scope']['jurisdiction'] for row in rows):
+            group = [row for row in rows if row['scope']['jurisdiction'] == country]
+            room = max(0, cap - selected_count(root, rights, str(country or '').upper()))
+            chosen, overflow = chosen + group[:room], overflow + group[room:]
+    else:
+        room = max(0, cap - selected_count(root, rights))
+        chosen, overflow = rows[:room], rows[room:]
     decisions = [selected_row(row) for row in chosen] + [cap_row(row, cap) for row in overflow]
     directory = root / ('recall-screen-' + mode) / 'selection'
     directory.mkdir(parents=True, exist_ok=True)

@@ -543,7 +543,8 @@ def derive_work_view(task: dict, evidence: dict, candidates: dict, plan: dict, l
             row.get("scenario_id"), row.get("triage_jurisdiction") or row.get("jurisdiction"), row.get("right_type"),
             row.get("triage_action_id"), row.get("triage_decision_sha256"))
             for provider, rows in plan.get("queries", {}).items() for row in rows if row.get("triage_action_id")}
-        candidate_origins = {item.get("candidate_id"): str(item.get("jurisdiction") or "").upper()
+        import eu_scope
+        candidate_origins = {item.get("candidate_id"): eu_scope.scope_origin(task, {"jurisdiction": item.get("jurisdiction")})
             for rows in candidates.values() if isinstance(rows, list)
             for item in rows if isinstance(item, dict)}
         for disposition in triage.get('scope_dispositions',[]):
@@ -1245,9 +1246,10 @@ def scenario_dispatch_block(task: dict, plan: dict, provider: str, row: dict,
         return blocked("TRIAGE_ACTION_COUNTRY_MISMATCH")
     collection, candidate = found[0]
     from decision_workflow import triage_scope_enabled, UNLOCATED
+    import eu_scope
     if triage_scope_enabled(task) and (row.get("triage_jurisdiction") == UNLOCATED
             or candidate.get("right_type") == "unknown"
-            or str(candidate.get("jurisdiction") or "").upper() != row.get("triage_jurisdiction")):
+            or eu_scope.scope_origin(task, {"jurisdiction": candidate.get("jurisdiction")}) != row.get("triage_jurisdiction")):
         return blocked("TRIAGE_IDENTITY_LOCATION_REQUIRED")
     decision = effective_decision(task, ledger, collection, candidate, row.get("scenario_id"),
                                   row.get("triage_jurisdiction") or row.get("jurisdiction"),
@@ -2948,7 +2950,7 @@ def append_scenario_candidate_actions(task_dir: Path, task: dict, candidates: di
         candidate = indexed[decision["candidate_id"]]
         country, right = decision["jurisdiction"], decision["right_type"]
         if triage_scope_enabled(task) and (country == UNLOCATED or right == "unknown"
-                or str(candidate.get("jurisdiction") or "").upper() != country):
+                or __import__("eu_scope").scope_origin(task, {"jurisdiction": candidate.get("jurisdiction")}) != country):
             # A source-backed association is not authority to submit a
             # country/right-specific verification or needs-info request.
             continue
