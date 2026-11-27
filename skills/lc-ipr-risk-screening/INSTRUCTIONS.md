@@ -38,15 +38,15 @@ xattr -dr com.apple.quarantine tools/bin/ 2>/dev/null || true
 
 > 请发送一个美国 Amazon 商品的 ASIN 或 `amazon.com` 商品链接；也可以同时上传商品主图和细节图。一次仅处理一个商品。
 
-ASIN/链接路径会通过云端商品详情优先取得可信 Amazon 主图，因此用户上传图片是可选补充，不得误报为必填。若用户不提供 ASIN/链接、选择提交完整人工商品资料，则必须同时提供标题、至少一条五点、长描述和至少一张清晰主图；缺失时只追问缺失项，不启动远程筛查。
+ASIN/链接路径优先从浏览器取得商品资料和可信主图，用户上传图片是可选补充。完整人工资料须包含标题、至少一条五点、长描述和至少一张清晰主图。缺失时只追问缺失项。
 
 为本轮确定一个尚不存在的唯一目录 `ipr_screening_YYYYMMDD_HHMMSS/`，放在技能包外面，不要提前创建空目录。禁止把 `--output-dir` 或 `--task-dir` 设为 `.`、技能包根目录或 `tools/`。任务产物不得写入 `SKILL.md` 所在目录。`collect-product --output-dir` 会以临时目录原子生成正式任务目录；后续命令始终复用它。按 `references/input-routing.md` 依次执行：
 
 ```bash
 <IPR_CLI> inspect-input <输入参数>
-<IPR_CLI> collect-product <输入参数> --task-id <task-id> --output-dir <task-dir>
-<IPR_CLI> validate-product --input <task-dir>/02_product_facts.json
 ```
+
+`manual_detail` 用原 `collect-product`。ASIN/链接使用 `tools/browser/product_capture.py collect`，按 EGO、Chrome + OpenCLI、无浏览器环境调用云端卖家精灵的顺序采集。命令、失败恢复和 Python 运行条件见 `references/input-routing.md`。采集完成后运行 `validate-product --input <task-dir>/02_product_facts.json`。
 
 两条输入路由都先做检索标识判断：实际打开冻结商品图，结合标题、品牌栏、包装和用户资料判断哪些文字是在标识商品来源；不要把品牌栏占位、品类描述、内部型号/SKU 原样当字标。完整值为 `Generic`（忽略大小写和首尾空格）固定排除，不作为品牌或字标查询；其他词不套用固定排除表。按 `references/input-routing.md` 生成 `<task-dir>/input-metadata/search-identity.json`，执行：
 
@@ -56,7 +56,7 @@ ASIN/链接路径会通过云端商品详情优先取得可信 Amazon 主图，�
 
 此命令保留原始字段，只绑定 Agent 的检索判断并更新事实摘要。必须在 ASIN 核对和 `init-task` **之前**运行，不得手工改事实、摘要或已有任务。明确没有字标则记录空标识及图文依据，不为凑查询而造一个品牌；其它筛查继续。图片看不清或身份冲突时先核实，不把未知冒充没有。
 
-`inspect-input` 在 ASIN 路径返回 `seller_lookup.provider=laochen_backend` 与 `action=product_detail`。`collect-product` 使用 `config.json` + `LAOCHEN_BACKEND_TOKEN` 自动调用云端商品详情并冻结事实；不要在本机安装、配置或调用任何上游数据工具。**仅 ASIN 路径**再按 `references/input-routing.md` 和 `references/contracts/product-corroboration-input.schema.json`，把语义核对写入 `<task-dir>/input-metadata/product-corroboration-input.json`，绑定上一步输出的新事实摘要。省略 `digest` 或设为空字符串，由 CLI 生成正式记录，禁止自行计算摘要：
+ASIN 路径必须核对请求身份、文字内部一致性、冻结主图与标题一致性。返回 `route=ego` 或 `route=chrome_opencli` 时，按 `references/input-routing.md` 生成浏览器核对输入，并用 `init-browser-task` 完成核对和初始化。返回 `route=sellersprite` 时，按 `references/contracts/product-corroboration-input.schema.json` 写入 `<task-dir>/input-metadata/product-corroboration-input.json`，绑定上一步的事实摘要，由原 CLI 生成正式记录。
 
 ```bash
 <IPR_CLI> record-product-corroboration --task-dir <task-dir> --input <task-dir>/input-metadata/product-corroboration-input.json
@@ -69,7 +69,7 @@ ASIN/链接路径会通过云端商品详情优先取得可信 Amazon 主图，�
 
 ## 3. 初始化正式任务
 
-`init-task` 只初始化上一步已经由 `collect-product` 生成、且包含冻结商品事实的任务目录；它不负责另建项目外壳或第二个任务目录。
+浏览器任务从上一步的 `init-browser-task` 成功结果直接进入规划。其他任务执行下面第一条命令初始化已有的冻结任务目录。
 
 ```bash
 <IPR_CLI> init-task --task-dir <task-dir>

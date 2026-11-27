@@ -1,4 +1,4 @@
 interface:
-  display_name: "Lc IPR Risk Screening"
+  display_name: "易逊-侵权查询付费接口版"
   short_description: "美国 Amazon 单品知识产权风险正式筛查"
   default_prompt: "Use $lc-ipr-risk-screening to screen one US Amazon product through cloud-managed discovery, complete full-batch candidate review, and deliver an evidence-bound seven-module risk report."

@@ -22,6 +22,8 @@
 
 向 Agent 提供美国 Amazon 链接或 ASIN，也可附主图和细节图。运行流程以
 `SKILL.md`、`INSTRUCTIONS.md` 和 `references/` 为准。需要有效的老陈 Token 和本技能授权。
+商品资料优先通过 EGO 获取，其次用 Chrome + OpenCLI。没有浏览器环境时使用原云端商品详情接口。
+浏览器采集及其核对入口需要 Python 3.9 或更新版本。
 `SERPER_API_KEY` 为可选公开网页增强；没有时可跳过，继续云端核心流程。
 
 包内包含 Windows x64、Linux x64、macOS Intel 和 Apple Silicon 程序。
