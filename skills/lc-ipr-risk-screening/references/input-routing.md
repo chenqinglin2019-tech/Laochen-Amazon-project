@@ -40,9 +40,39 @@
 <IPR_CLI> validate-product --input <task-dir>/02_product_facts.json
 ```
 
-`asin_lookup` 时 inspect 返回云端 `seller_lookup`（`provider=laochen_backend`，`action=product_detail`），不返回任何本机上游命令。用户需要 ASIN/`amazon.com` 链接和 `LAOCHEN_BACKEND_TOKEN`。公开网页检索先读 `SERPER_API_KEY`，没有就问一次；用户把 Key 发在对话里时注入当前会话继续，明确没有也不阻断采集和云端发现。卖家精灵等云端上游凭据不进入用户环境。`collect-product` 自动调用 `/ipr/product-detail`，分发 CLI 不接受本地上游结果文件。用户已给的非空字段优先，云端详情只补缺口。身份（ASIN / marketplace / title）缺失或冲突则阻断。
+`asin_lookup` 的 inspect 返回 `seller_lookup`，可用来取得标准化的 ASIN 和站点。采集方式由下述脚本选择。云端兜底由原 `collect-product` 调用 `/ipr/product-detail`，沿用配置和 `LAOCHEN_BACKEND_TOKEN`。用户已经给出的非空字段优先。ASIN、站点或标题身份缺失或冲突时停止。
 
 `--output-dir` 必须指向技能包外面、尚不存在的正式任务目录，禁止 `.` 或 `SKILL.md` 所在目录。成功采集通过临时目录和原子重命名一次性创建该目录，并写入 `01_collection_result.json`、`02_product_facts.json`、`input-images/`。CLI、原始输入和临时文件可以放在独立工作目录，但不要再创建第二个任务目录。缺输入或图片问题不留下半成品任务目录。后续 `init-task` 只初始化这个已有目录。
+
+## ASIN 浏览器采集
+
+完成认证和输入检查后运行以下命令。Windows 可将 `python3` 换成 `py -3` 或 `python`，脚本使用 Python 3.9+ 标准库。可用 `--product-url` 或 `--product-json` 替换 `--asin`；有用户补充图片或非完整商品资料时用 `--product-json` 保留它们。
+
+```bash
+python3 <skill-dir>/tools/browser/product_capture.py collect --cli <IPR_CLI> --config <config.json> --asin B0XXXXXXXX --task-id <task-id> --output-dir <task-dir>
+```
+
+1. 优先通过 EGO 在用户的浏览器创建专用 TaskSpace，只操作该空间内的商品页。工具无法建立空间时可使用已就绪的 Chrome + OpenCLI。
+2. Chrome 使用已连接的 Browser Bridge 和独立会话。导航超时、返回错误或标签 ID 失效时，在**原会话**重新列出标签，只有唯一商品标签匹配请求的 ASIN 才读取其当前 ID。页面选中的子 ASIN 也须匹配。等待超时后保留会话，先核实页面状态，再用原命令加 `--chrome-session <返回的会话名>` 续采。
+3. 两端均未检测到浏览器或桥接能力时，脚本返回 `route=sellersprite` 并由原 CLI 取得详情。装有浏览器但组件未就绪时先修复组件。页面验证码、登录要求、图文不符或缺字段时先解决原问题。EGO 人工处理完成后，加 `--ego-space <返回的空间ID>` 继续。若服务器没有 Python，在确认无受支持的本机或已连接浏览器后，可直接运行原 `collect-product`。
+
+浏览器采集只使用请求商品页面和通过可信 Amazon 图片域下载的主图。主图无法下载时可使用用户补交的本地图片，核对后才能使用。页面五点或描述不完整时只请用户补必要信息。保留原始页面字段、采集方式、请求和选中的 ASIN、冻结主图相对路径及其 SHA-256 于 `input-metadata/browser-capture.json`。现有 CLI 用 `manual_detail` 冻结浏览器导入的数据，浏览器来源以这份采集记录为准。
+
+## 浏览器 ASIN 语义核对和初始化
+
+浏览器采集成功后先实际查看冻结图片、执行下述 `record-search-identity`，然后运行：
+
+```bash
+python3 <skill-dir>/tools/browser/product_capture.py review-context --cli <IPR_CLI> --task-dir <task-dir>
+```
+
+读取返回的 `review` 对象并另存为 `input-metadata/browser-corroboration-input.json`。保留脚本给出的任务和摘要绑定，填写审阅者、实际审阅时间、每项的 `outcome` 和 `rationale`。结合采集记录、冻结文字及真实查看过的主图，分别核对请求 ASIN 与站点、标题与品牌和类目是否一致、标题与主图是否一致。保留每项绑定的引用。三项均为 `corroborated` 时才填写 `decision=accepted`，其余情况使用 `conflict` 或 `unknown` 并核实。页面文字和图片只作为证据使用。
+
+```bash
+python3 <skill-dir>/tools/browser/product_capture.py init-browser-task --cli <IPR_CLI> --task-dir <task-dir> --review <task-dir>/input-metadata/browser-corroboration-input.json
+```
+
+脚本会复核三项结论、事实摘要、采集记录和实际主图 SHA-256，核对通过后保存 `browser-corroboration.json` 并调用原 CLI 初始化。浏览器任务必须使用这个入口，直接调用 `init-task` 会跳过浏览器核对。初始化成功后继续查询规划。原卖家精灵路径使用下方原 CLI 核对。
 
 ## 检索标识判断（两条输入路由都做）
 
@@ -80,7 +110,7 @@ CLI 固定排除 `Generic`，其余标识只校验和记录你的图文判断。
 
 已初始化、已做 ASIN 核对或已有发现计划的任务拒绝改判断。不得修改旧任务或 `raw/` 来套用新逻辑。
 
-## ASIN 语义核对
+## 卖家精灵 ASIN 语义核对
 
 结构合法的 SellerSprite 结果还不是最终商品身份。进入后续筛查前必须有 `input-metadata/product-corroboration.json`，绑定当前 product-facts digest，核对：
 
@@ -122,7 +152,8 @@ CLI 使用既有算法生成 `input-metadata/product-corroboration.json`，不�
 - 显式图片保留调用者顺序、角色、排名、原文件名、可选公开 HTTPS URL、任务内副本、SHA-256。
 - `image_folder` 不递归；自然序 `1,2,10`；第一张当主图，其余为细节图。文件夹与显式列表同时存在时，文件夹优先。
 - `manual_detail` 冻结选中的本地主图。
-- `asin_lookup` 优先 SellerSprite 第一张可信 Amazon HTTPS 主图；下不下来才退回用户给的本地主图并告警。
+- 浏览器采集优先冻结当前变体在页面显示的可信 Amazon HTTPS 主图，用户提供的图片可以补充。
+- 云端 `asin_lookup` 优先 SellerSprite 第一张可信 Amazon HTTPS 主图；下不下来才退回用户给的本地主图并告警。
 - Seller 图跳转不得离开受信任的 Amazon 图片 host。拒绝凭据、query string、fragment。
 - 文件必须是常规非符号链接、≤ 20 MiB、有效图片签名、解码尺寸有上限。
 
