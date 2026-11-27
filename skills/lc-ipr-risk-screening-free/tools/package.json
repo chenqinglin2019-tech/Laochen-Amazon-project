@@ -1,0 +1,9 @@
+{
+  "name": "lc-ipr-risk-screening-free-tools",
+  "private": true,
+  "type": "module",
+  "description": "Chrome 采集用的依赖（没装 EGO 浏览器时才用得到）",
+  "dependencies": {
+    "playwright-core": "1.62.0"
+  }
+}

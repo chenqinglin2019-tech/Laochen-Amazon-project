@@ -1,0 +1,235 @@
+{
+ "说明": "常见维权方清单：产品上出现这些名字或图案时，程序会在风险假设里点名权利人。清单不完整，可以自己往里加；没在清单里不等于没有风险。 aliases 用来对照 AI 列出的图案和角色；page_words 是 aliases 里足够独特、可以直接在页面文字里查的单词。 marks 是这个权利人最主要的文字商标，命中时拿它去商标库查。",
+ "updated_at": "2026-11-26",
+ "entries": [
+  {
+   "owner": "The Smiley Company",
+   "rights": "SMILEY 商标和笑脸图案版权",
+   "aliases": [
+    "smiley",
+    "smiley face",
+    "smile face",
+    "smiling face",
+    "happy face",
+    "笑脸"
+   ],
+   "note": "在美国多次以批量起诉电商卖家的方式维权；图案或文字像不像要比对后才能定",
+   "page_words": [
+    "smiley"
+   ],
+   "marks": [
+    "SMILEY"
+   ]
+  },
+  {
+   "owner": "The Walt Disney Company",
+   "rights": "角色形象版权和商标",
+   "aliases": [
+    "disney",
+    "mickey mouse",
+    "minnie mouse",
+    "frozen elsa",
+    "elsa",
+    "winnie the pooh",
+    "stitch",
+    "米老鼠",
+    "迪士尼"
+   ],
+   "note": "",
+   "page_words": [
+    "disney"
+   ],
+   "marks": [
+    "DISNEY"
+   ]
+  },
+  {
+   "owner": "Marvel（The Walt Disney Company）",
+   "rights": "角色形象版权和商标",
+   "aliases": [
+    "marvel",
+    "spider-man",
+    "spiderman",
+    "iron man",
+    "avengers",
+    "captain america",
+    "漫威",
+    "蜘蛛侠"
+   ],
+   "note": "",
+   "page_words": [
+    "spiderman",
+    "spider-man"
+   ],
+   "marks": [
+    "MARVEL"
+   ]
+  },
+  {
+   "owner": "Lucasfilm（The Walt Disney Company）",
+   "rights": "角色形象版权和商标",
+   "aliases": [
+    "star wars",
+    "darth vader",
+    "grogu",
+    "baby yoda",
+    "yoda",
+    "星球大战"
+   ],
+   "note": "",
+   "page_words": [
+    "grogu",
+    "yoda"
+   ],
+   "marks": [
+    "STAR WARS"
+   ]
+  },
+  {
+   "owner": "The Pokémon Company",
+   "rights": "角色形象版权和商标",
+   "aliases": [
+    "pokemon",
+    "pokémon",
+    "pikachu",
+    "宝可梦",
+    "皮卡丘"
+   ],
+   "note": "",
+   "page_words": [
+    "pokemon",
+    "pokémon",
+    "pikachu"
+   ],
+   "marks": [
+    "POKEMON"
+   ]
+  },
+  {
+   "owner": "Sanrio",
+   "rights": "角色形象版权和商标",
+   "aliases": [
+    "sanrio",
+    "hello kitty",
+    "kuromi",
+    "cinnamoroll",
+    "my melody",
+    "凯蒂猫",
+    "库洛米"
+   ],
+   "note": "",
+   "page_words": [
+    "sanrio",
+    "kuromi",
+    "cinnamoroll"
+   ],
+   "marks": [
+    "HELLO KITTY"
+   ]
+  },
+  {
+   "owner": "Nintendo",
+   "rights": "角色形象版权和商标",
+   "aliases": [
+    "nintendo",
+    "super mario",
+    "mario bros",
+    "zelda",
+    "任天堂",
+    "马里奥"
+   ],
+   "note": "",
+   "page_words": [
+    "nintendo",
+    "zelda"
+   ],
+   "marks": [
+    "NINTENDO"
+   ]
+  },
+  {
+   "owner": "Warner Bros.",
+   "rights": "角色形象版权和商标",
+   "aliases": [
+    "harry potter",
+    "hogwarts",
+    "gryffindor",
+    "哈利波特",
+    "霍格沃茨"
+   ],
+   "note": "",
+   "page_words": [
+    "hogwarts",
+    "gryffindor"
+   ],
+   "marks": [
+    "HARRY POTTER"
+   ]
+  },
+  {
+   "owner": "Peanuts Worldwide",
+   "rights": "角色形象版权和商标",
+   "aliases": [
+    "snoopy",
+    "peanuts",
+    "charlie brown",
+    "史努比"
+   ],
+   "note": "",
+   "page_words": [
+    "snoopy"
+   ],
+   "marks": [
+    "SNOOPY"
+   ]
+  },
+  {
+   "owner": "Mattel",
+   "rights": "商标和角色形象",
+   "aliases": [
+    "barbie",
+    "hot wheels",
+    "芭比"
+   ],
+   "note": "",
+   "page_words": [
+    "barbie"
+   ],
+   "marks": [
+    "BARBIE"
+   ]
+  },
+  {
+   "owner": "LEGO Group",
+   "rights": "商标和人仔立体形象",
+   "aliases": [
+    "lego",
+    "minifigure",
+    "乐高"
+   ],
+   "note": "",
+   "page_words": [
+    "lego"
+   ],
+   "marks": [
+    "LEGO"
+   ]
+  },
+  {
+   "owner": "Ludo Studio / BBC Studios",
+   "rights": "角色形象版权和商标",
+   "aliases": [
+    "bluey",
+    "bingo heeler",
+    "布鲁伊"
+   ],
+   "note": "",
+   "page_words": [
+    "bluey"
+   ],
+   "marks": [
+    "BLUEY"
+   ]
+  }
+ ]
+}

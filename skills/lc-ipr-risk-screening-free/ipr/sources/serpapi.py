@@ -1,0 +1,85 @@
+"""SerpApi：Google Patents 检索（按相关度排序，带现行状态和代表图）。每次成功的检索计 1 次，账户查询不计次。"""
+from __future__ import annotations
+
+import re
+import urllib.parse
+
+from .. import numbers
+from . import http
+
+BASE = "https://serpapi.com"
+
+
+def remaining(key: str, opener=None) -> int:
+    """这个 key 还剩几次；查不到返回 -1。"""
+    if not key:
+        return 0
+    try:
+        status, _headers, data = http.fetch_json(BASE + "/account.json?" + urllib.parse.urlencode({"api_key": key}), timeout=15, opener=opener)
+    except http.SourceError:
+        return -1
+    if status != 200 or not isinstance(data, dict):
+        return -1
+    try:
+        return int(data.get("total_searches_left"))
+    except (TypeError, ValueError):
+        return -1
+
+
+def patents(key: str, query: str, design: bool, country: str = "US", after: str = "", limit: int = 100, opener=None,
+            granted: bool = True, language: str = "") -> dict:
+    """country 可以是几个局（"DE,EP"）。granted=False 不加"只要已授权"的筛选：欧盟外观没有授权日，加了一条都查不到。
+    返回 {"total": …, "docs": […]}；零结果是正常结果，不是失败。"""
+    params = {"engine": "google_patents", "api_key": key, "q": query, "country": country,
+              "type": "DESIGN" if design else "PATENT", "num": str(max(10, min(100, limit)))}
+    if granted:
+        params["status"] = "GRANT"
+    if language:  # 欧盟外观每种语言各有一条记录：只要英文的，不然 100 条里其实只有三四件
+        params["language"] = language
+    if after:
+        params["after"] = after
+    status, _headers, data = http.fetch_json(BASE + "/search.json?" + urllib.parse.urlencode(params), timeout=45, opener=opener)
+    error = str(data.get("error") or "") if isinstance(data, dict) else ""
+    if status in (401, 403):
+        raise http.SourceError("SerpApi 的 key 无效", kind="auth", status=status)
+    if status == 429 or "run out of searches" in error.lower() or "exceeded" in error.lower():
+        raise http.SourceError("SerpApi 本期的次数用完了", kind="quota", status=status)
+    if "hasn't returned any results" in error:
+        return {"total": 0, "docs": []}
+    if status != 200 or not isinstance(data, dict) or error:
+        raise http.SourceError("SerpApi 返回状态码 %d%s" % (status, "：" + error[:120] if error else ""), status=status)
+    if not isinstance(data.get("organic_results"), list):
+        raise http.SourceError("SerpApi 返回的内容里没有检索结果", kind="format", status=status)
+    docs = [doc for doc in (normalize(item, design, country) for item in data["organic_results"] if isinstance(item, dict)) if doc]
+    info = data.get("search_information") if isinstance(data.get("search_information"), dict) else {}
+    try:
+        total = int(info.get("total_results"))
+    except (TypeError, ValueError):
+        total = len(docs)
+    return {"total": total, "docs": docs}
+
+
+def normalize(item: dict, design: bool, country: str):
+    raw = str(item.get("publication_number") or "")
+    if country == "US":
+        number = numbers.us_display(raw) if numbers.us_key(raw) else raw
+    else:
+        number = re.sub(r"[^A-Za-z0-9]", "", raw).upper()
+    if not number:
+        return None
+    statuses = item.get("country_status") if isinstance(item.get("country_status"), dict) else {}
+    state = str(statuses.get(country if country == "US" else numbers.office_of(number)) or "")  # 看发这件专利的那个局记的状态
+    figures = [str(f.get("full") or f.get("thumbnail")) for f in item.get("figures") or [] if isinstance(f, dict) and (f.get("full") or f.get("thumbnail"))]
+    return {
+        "right_type": ("design" if design else "patent") if country == "US" else numbers.kind_type(number, design),
+        "number": number,
+        "title": str(item.get("title") or "").strip(),
+        "owner": str(item.get("assignee") or ""),
+        "filing_date": str(item.get("filing_date") or "")[:10],
+        "grant_date": str(item.get("grant_date") or "")[:10],
+        "url": str(item.get("patent_link") or "https://patents.google.com/patent/%s/en" % number),
+        "snippet": str(item.get("snippet") or "")[:400],
+        "legal_status": {"ACTIVE": "有效", "NOT_ACTIVE": "已失效"}.get(state, ""),
+        "figures": ([str(item["thumbnail"])] if item.get("thumbnail") else []) + figures[:8],
+        "source": "SerpApi（Google Patents）",
+    }
