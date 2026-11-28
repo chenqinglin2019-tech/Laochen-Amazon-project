@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 import urllib.parse
+import uuid
+from pathlib import Path
 
 from .. import numbers
 from . import http
@@ -57,6 +59,55 @@ def patents(key: str, query: str, design: bool, country: str = "US", after: str 
     except (TypeError, ValueError):
         total = len(docs)
     return {"total": total, "docs": docs}
+
+
+def _check(status: int, data, what: str) -> None:
+    error = str(data.get("error") or "") if isinstance(data, dict) else ""
+    if status in (401, 403):
+        raise http.SourceError("SerpApi 的 key 无效", kind="auth", status=status)
+    if status == 429 or "run out of searches" in error.lower() or "exceeded" in error.lower():
+        raise http.SourceError("SerpApi 本期的次数用完了", kind="quota", status=status)
+    if status != 200 or not isinstance(data, dict) or error:
+        raise http.SourceError("SerpApi %s返回状态码 %d%s" % (what, status, "：" + error[:120] if error else ""), status=status)
+
+
+def upload_image(key: str, path, opener=None) -> str:
+    """把本地图片传给 SerpApi（POST /image，multipart，字段 image 和 api_key；≤500KB 的 jpg/png/webp），返回 image_id（10 分钟内有效）。
+    用户 2026-11-28 同意上传主图（图在对方那里保存一段时间）。"""
+    path = Path(path)
+    boundary = "----lcipr" + uuid.uuid4().hex
+    kind = {".png": "image/png", ".webp": "image/webp"}.get(path.suffix.lower(), "image/jpeg")
+    body = b"".join([
+        ("--%s\r\nContent-Disposition: form-data; name=\"api_key\"\r\n\r\n%s\r\n" % (boundary, key)).encode("utf-8"),
+        ("--%s\r\nContent-Disposition: form-data; name=\"image\"; filename=\"product%s\"\r\nContent-Type: %s\r\n\r\n"
+         % (boundary, path.suffix.lower() or ".jpg", kind)).encode("utf-8"),
+        path.read_bytes(),
+        ("\r\n--%s--\r\n" % boundary).encode("utf-8")])
+    status, _headers, data = http.fetch_json(BASE + "/image", "POST", {"Content-Type": "multipart/form-data; boundary=" + boundary},
+                                             body, timeout=60, opener=opener)
+    _check(status, data, "上传图片时")
+    image_id = str(data.get("image_id") or "")
+    if not image_id:
+        raise http.SourceError("SerpApi 上传图片后没有给出图片编号", kind="format", status=status)
+    return image_id
+
+
+def lens(key: str, image_id: str = "", url: str = "", country: str = "", opener=None) -> list:
+    """Google Lens 以图搜图（每次计 1 次）：返回长得像的网页 [{title, source, link, image}]，和 Serper 的格式一样。"""
+    params = {"engine": "google_lens", "api_key": key, "type": "visual_matches"}
+    if image_id:
+        params["image_id"] = image_id
+    else:
+        params["url"] = url
+    if country:
+        params["country"] = country.lower()
+    status, _headers, data = http.fetch_json(BASE + "/search.json?" + urllib.parse.urlencode(params), timeout=60, opener=opener)
+    if isinstance(data, dict) and "hasn't returned any results" in str(data.get("error") or ""):
+        return []
+    _check(status, data, "以图搜图")
+    return [{"title": str(i.get("title") or "")[:200], "source": str(i.get("source") or "")[:60], "link": str(i.get("link") or ""),
+             "image": str(i.get("thumbnail") or i.get("image") or "")}
+            for i in data.get("visual_matches") or [] if isinstance(i, dict)]
 
 
 def normalize(item: dict, design: bool, country: str):

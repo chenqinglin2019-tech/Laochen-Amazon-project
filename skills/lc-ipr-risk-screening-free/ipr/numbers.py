@@ -115,3 +115,38 @@ def official_link(number: str) -> str:
     if match:  # 欧盟外观 EM150277340001S → 015027734-0001
         return "https://euipo.europa.eu/eSearch/#details/designs/%s-%s" % (match.group(1).zfill(9), match.group(2))
     return ""
+
+
+def is_application(number: str) -> bool:
+    """是不是还没授权的申请公开：美国 US20230000282A1；其他局类别码是 A、A1、A2……（法国的 A3 是实用证书，不算）。"""
+    text = re.sub(r"[^A-Za-z0-9]", "", str(number or "")).upper()
+    if re.fullmatch(r"US\d{11}A\d", text):
+        return True
+    # 法国的 A3 是实用证书；意大利本国专利在 Google Patents 上授权后可能也只有 A1，拿不准就按授权算（照常比对，宁可多比）
+    if office_of(text) in ("US", "", "IT") or re.fullmatch(r"FR\d+A3", text):
+        return False
+    return re.search(r"\dA\d?$", text) is not None
+
+
+JP_MARKS = ((r"意匠登録\s*(?:第|No\.?)?\s*(\d{7})(?!\d)", "design", "JP%sS"),
+            (r"実用新案登録\s*(?:第|No\.?)?\s*(\d{7})(?!\d)", "utility_model", "JP%sU"),
+            (r"特許\s*(?:第|No\.?)?\s*(\d{7})(?!\d)", "patent", "JP%sB2"))   # 日本发明标注里看不出是 B1 还是 B2：先按 B2，读公开页时找不到再试 B1
+_US_NUM = r"(?:us\s*)?(?:D\s?(?:\d{1,2},?)?\d{3},?\d{3}|\d{1,2},?\d{3},?\d{3})(?!,?\d)"   # 后面紧跟数字的不算；跟逗号、空格的算（号码常成串列出）
+US_MARK = re.compile(r"pat(?:ent)?s?\.?\s*(?:no\.?|nos\.?|numbers?)?\s*:?\s*(%s(?:(?:\s*(?:,|;|/|&|and)\s*)+%s)*)" % (_US_NUM, _US_NUM), re.I)
+US_NUM = re.compile(r"(?<!\d)%s" % _US_NUM.replace("(?:us\\s*)?", ""), re.I)
+
+
+def marked_numbers(text: str) -> list:
+    """商品页或竞品页上标注的专利号，返回 [(权利类型, 号码)]。认不出的不要。"""
+    import unicodedata
+    text = unicodedata.normalize("NFKC", str(text or ""))
+    out = []
+    for pattern, right, shape in JP_MARKS:
+        for found in re.findall(pattern, text):
+            out.append((right, shape % found))
+    for listed in US_MARK.findall(text):  # "Pat. No. 9,876,543, D912,345 and 10,123,456"：一串都认
+        for found in US_NUM.findall(listed):
+            key = us_key(found)
+            if key:
+                out.append(("design" if key.startswith("D") else "patent", us_display(found)))
+    return list(dict.fromkeys(out))

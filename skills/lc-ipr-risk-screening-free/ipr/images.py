@@ -31,6 +31,32 @@ def prepare(paths, dest_dir: Path, max_px: int) -> list:
     return out
 
 
+def for_upload(path: Path, dest_dir: Path, limit: int = 500_000):
+    """以图搜图上传前把图压到 limit 字节以内（SerpApi 只收 500KB 以内的 jpg、png、webp）。
+    本来就够小、格式也对的原样用；否则用 Pillow 缩成 JPEG。做不到（没装 Pillow、图坏了）返回 None。"""
+    path = Path(path)
+    if not path.is_file():
+        return None
+    if path.stat().st_size <= limit and path.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp"):
+        return path
+    try:
+        from PIL import Image
+        with Image.open(path) as image:
+            image = image.convert("RGB")
+            target = Path(dest_dir) / "lens-upload.jpg"
+            for side, quality in ((1600, 85), (1200, 80), (900, 75), (700, 70)):
+                copy = image.copy()
+                copy.thumbnail((side, side))
+                copy.save(target, "JPEG", quality=quality)
+                if target.stat().st_size <= limit:
+                    return target
+    except ImportError:
+        return None
+    except Exception:
+        return None
+    return None
+
+
 def readable(path: Path) -> bool:
     """用户给的图片能不能当图片打开。装了 Pillow 就真的打开验一下，没装只看文件头。"""
     path = Path(path)

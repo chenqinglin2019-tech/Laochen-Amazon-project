@@ -45,15 +45,14 @@ NOT_APPLICABLE = {
 
 # 美国以外各国：发明和实用新型查哪几个局、外观查哪个局（Google Patents 的局代码；None 表示这一类没有可用的来源）。
 # 欧洲专利（EP）在英、法、德、意、西都可能生效；欧盟外观（EM）对法、德、意、西有效，英国脱欧后不继承。
-# utility：实用新型要单独查一次的局。德国的实用新型登记了也不算"已授权"，带着"只要已授权"查发明时一件都不会出来；
-# 日本的实用新案有登记日，查发明时一起回来，不用另查。
+# 发明（含申请公开）和实用新型一次查回来（不加"只要已授权"），按号码的类别码分开（2026-11-28 起；之前德、意、西的实用新型要另查一次）。
 FOREIGN_PLAN = {
-    "GB": {"patent": "GB,EP", "utility": None, "design": None},
-    "DE": {"patent": "DE,EP", "utility": "DE", "design": "EM"},
-    "FR": {"patent": "FR,EP", "utility": None, "design": "EM"},   # 法国的实用证书有授权日，随发明一起回来
-    "IT": {"patent": "IT,EP", "utility": "IT", "design": "EM"},
-    "ES": {"patent": "ES,EP", "utility": "ES", "design": "EM"},
-    "JP": {"patent": "JP", "utility": None, "design": "JP"},
+    "GB": {"patent": "GB,EP", "design": None},
+    "DE": {"patent": "DE,EP", "design": "EM"},
+    "FR": {"patent": "FR,EP", "design": "EM"},
+    "IT": {"patent": "IT,EP", "design": "EM"},
+    "ES": {"patent": "ES,EP", "design": "EM"},
+    "JP": {"patent": "JP", "design": "JP"},
 }
 OFFICE_NAMES = {"EP": "欧洲专利局", "EM": "欧盟知识产权局", "GB": "英国", "DE": "德国", "FR": "法国", "IT": "意大利", "ES": "西班牙", "JP": "日本"}
 # 查不了的本国库：逐项记进检索记录（"未检索"加原因），这一类因此不会被评成低。日本商标在商标检索那里单独写。
@@ -65,6 +64,8 @@ COVERAGE_GAPS = {
     ("ES", "design"): "西班牙本国外观没有可用的数据源，未检索（欧盟外观另查）",
     ("DE", "trademark"): "德国本国商标库没有可用的数据源，未检索（欧盟商标另查）",
 }
+# 商标没有可以合规地用程序按文字检索的来源、改成"挑词 + 人工核对链接"的国家（2026-11-28 查证，见产品需求文档第 6 节）。
+TRADEMARK_MANUAL = {"JP"}
 # Google Patents 上这两个局的外观没有任何附图：查得到名单，做不了外观比对。
 NO_FIGURE_OFFICES = {"EM": "欧盟外观", "JP": "日本意匠"}
 
@@ -89,6 +90,10 @@ AI_IMAGE_MAX_PX = 768   # 给 AI 看的图先缩到这个尺寸
 SHEET_MAX_PX = 1280     # 拼图里有十几个格子，缩得太小就看不清了
 PRODUCT_IMAGES_MAX = 6  # 采集最多留几张商品图
 UNDERSTAND_IMAGES = 4   # 产品理解时给 AI 看几张
+COMPETITOR_MAX = 3     # 竞品最多采几个（每个大约半分钟）
+COMPETITOR_CAPTURE_SECONDS = 120  # 一个竞品最多采这么久（主商品的采集给得更长）
+COMPETITOR_TIME_SECONDS = 150  # 这一次运行用到这么久就不再采竞品（竞品是可选的，不能拖垮 8 分钟的线）
+UNDERSTAND_IMAGES_LISTING = 8  # 资料入口：图是卖家拟上架用的，要逐张检查道具、水印、别人的标识，多看几张
 
 # 验收线和收口线（需求 R-010）。
 BUDGET = {

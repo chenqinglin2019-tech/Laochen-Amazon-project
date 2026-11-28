@@ -18,11 +18,45 @@ def fallback_from_title(product: dict) -> dict:
         "generic_names": [],
         "local_names": [],
         "features": [],
+        "parts": [],
         "text_on_product": [],
+        "listing_marks": [],
+        "image_notes": [],
         "marking": list(product.get("marking") or []),
         "hypotheses": watchlist.apply([], page_text(product)),
         "fallback": True,
     }
+
+
+PART_FIELDS = {"terms": 3, "local_terms": 4, "design_names": 3, "features": 4, "local_features": 4}
+
+
+def clean_parts(value) -> list:
+    """按部件分开的检索词。格式不对的部件不要；一个品名都没有的部件也不要。最多 3 个。"""
+    out = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        part = {"name": str(item.get("name") or "").strip()[:30]}
+        part.update({key: texts(item.get(key))[:cap] for key, cap in PART_FIELDS.items()})
+        if part["terms"] or part["local_terms"]:
+            out.append(part)
+    return out[:3]  # 留 3 个：检索只用前 2 个，第 3 个会写进"没查完"
+
+
+def clean_image_notes(value, image_count: int) -> list:
+    """上架图片里要注意的东西（道具、水印、别人的标识）。格式不对的、图号对不上的不要，最多 10 条。"""
+    out = []
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict) or not str(item.get("what") or "").strip():
+            continue
+        try:
+            image = int(item.get("image"))
+        except (TypeError, ValueError):
+            image = 0
+        out.append({"image": image if 1 <= image <= max(image_count, 1) else 0, "kind": str(item.get("kind") or "其他")[:10],
+                    "what": str(item["what"]).strip()[:160]})
+    return out[:10]
 
 
 def texts(value) -> list:
@@ -57,8 +91,9 @@ def specific_names(names: list, generic: list) -> list:
 def run(ctx) -> None:
     task = ctx.task
     product = task["product"]
-    prompt = prompts.understand(product, task.country)
-    pictures = [task.dir / image["file"] for image in product["images"][:config.UNDERSTAND_IMAGES]]
+    listing = (task["entry"] or {}).get("type") == "input"
+    prompt = prompts.understand(product, task.country, listing=listing)
+    pictures = [task.dir / image["file"] for image in product["images"][:config.UNDERSTAND_IMAGES_LISTING if listing else config.UNDERSTAND_IMAGES]]
     answer, last = None, ""
     for attempt in (1, 2):  # 会话本身的失败由 ai.ask 重试；这里只在"答了但内容不合格"时再问一次
         try:
@@ -88,7 +123,10 @@ def run(ctx) -> None:
         "generic_names": texts(answer.get("generic_names")),
         "local_names": texts(answer.get("local_names")),
         "features": texts(answer.get("features")),
+        "parts": clean_parts(answer.get("parts")),
         "text_on_product": texts(answer.get("text_on_product")),
+        "listing_marks": texts(answer.get("listing_marks"))[:5],
+        "image_notes": clean_image_notes(answer.get("image_notes"), len(product.get("images") or [])),
         "marking": sorted(set(texts(answer.get("marking")) + list(product.get("marking") or []))),
         "hypotheses": watchlist.apply(clean_hypotheses(answer.get("hypotheses")), page_text(product)),
         "fallback": False,

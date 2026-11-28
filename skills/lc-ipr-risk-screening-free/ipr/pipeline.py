@@ -16,11 +16,17 @@ def _clear_products(task, name: str, partial: bool) -> None:
     """清掉某一步留下的结果。partial=True 表示这一步自己要重做，但已经做成的那部分留着（比过的不再比）。"""
     if name == "intake":
         task["product"] = {}
+        task["competitors"] = []
     elif name == "understand":
         task["understanding"] = {}
     elif name == "search":
         task["searches"], task["candidates"] = [], []
-        task["lens"], task["enforcement"], task["search_notes"] = [], [], []
+        task["lens"], task["enforcement"], task["search_notes"], task["manual_marks"] = [], [], [], []
+        for old in (task.dir / "raw").glob("search-S*.json"):  # 检索整段重来、编号从 S1 起：上次的留档清掉，免得和这次的对不上
+            try:
+                old.unlink()
+            except OSError:
+                pass
     elif name == "screen":
         for cand in task["candidates"]:
             if not partial or (cand.get("screen") or {}).get("retry"):  # 只重做没做成的：别的决定留着，不再问一遍 AI

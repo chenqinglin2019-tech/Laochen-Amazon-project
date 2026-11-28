@@ -38,3 +38,9 @@ def run(ctx) -> None:
         "asin_note": str(product.get("asin_note") or ""),
     }
     ctx.say("  商品：%s（图片 %d 张）" % (title[:50], len(images)))
+    wanted = texts(product.get("competitors_wanted"))
+    task["competitors"] = []
+    if wanted and hasattr(ctx.sources, "competitors"):  # 可选：竞品页上标注的专利、外观
+        task["competitors"] = [c for c in ctx.sources.competitors(ctx, wanted) if isinstance(c, dict)]
+        got = [c for c in task["competitors"] if c.get("status") == "ok"]
+        ctx.say("  竞品：%d 个里采到 %d 个，页面标注 %d 处" % (len(wanted), len(got), sum(len(c.get("marking") or []) for c in got)))

@@ -24,19 +24,21 @@ def available() -> str:
     return node
 
 
-def capture(url: str, task_dir: Path, label: str, runner=None) -> dict:
+def capture(url: str, task_dir: Path, label: str, runner=None, wait_for_user: int = WAIT_FOR_USER_SECONDS, timeout: int = 0) -> dict:
+    """wait_for_user：遇到验证码或登录时窗口开着等用户处理几秒（采竞品时传 0：不等人）。"""
     runner = runner or subprocess.run
     node = available()
     if not node:
         raise StepFailed("Chrome 采集用不了：没有 node，或者 tools/ 里没装 playwright-core（安装脚本会装）")
     payload = {"url": url, "imageDir": str((Path(task_dir) / "images").resolve()), "maxImages": config.PRODUCT_IMAGES_MAX,
                "profileDir": str(Path.home() / ".lc-ipr" / "chrome-profile"), "extract": (HERE / "extract.js").read_text(encoding="utf-8"),
-               "timeout": 45000, "waitForUserSeconds": WAIT_FOR_USER_SECONDS}
+               "timeout": 45000, "waitForUserSeconds": max(0, int(wait_for_user))}
     try:
         result = runner([node, str(SCRIPT)], input=json.dumps(payload, ensure_ascii=False), text=True, encoding="utf-8",
-                        errors="replace", capture_output=True, timeout=TIMEOUT_SECONDS, env=config.child_env())
+                        errors="replace", capture_output=True, timeout=timeout or TIMEOUT_SECONDS - WAIT_FOR_USER_SECONDS + max(0, int(wait_for_user)),
+                        env=config.child_env())
     except subprocess.TimeoutExpired:
-        raise StepFailed("Chrome 超过 %d 秒没有采完" % TIMEOUT_SECONDS)
+        raise StepFailed("Chrome 超过 %d 秒没有采完" % (timeout or TIMEOUT_SECONDS - WAIT_FOR_USER_SECONDS + max(0, int(wait_for_user))))
     except OSError as exc:
         raise StepFailed("Chrome 采集没能启动（%s）" % type(exc).__name__)
     try:

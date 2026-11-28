@@ -43,7 +43,9 @@ def read_page(cand: dict, opener=None) -> None:
     for attempt in (1, 2):  # 请求多了 Google 偶尔会断开：断开的再试一次
         count("Google Patents 公开页")
         try:
-            page = gpatents.fetch(cand["number"], opener)
+            page = gpatents.fetch_any(cand["number"], opener) if cand.get("marked_by") else gpatents.fetch(cand["number"], opener)
+            if page.get("number") and page["number"] != cand["number"]:  # 标注推出来的号码类别码不对，按实际找到的改过来
+                cand["number"], cand["url"] = page["number"], gpatents.URL % page["number"]
             break
         except http.SourceError as exc:
             note = exc.message
@@ -290,6 +292,24 @@ def session_ready(session):
     return session
 
 
+
+def merge_duplicates(candidates: list) -> None:
+    """标注推出来的号码改成实际找到的之后，可能和检索到的同一件重复：留先来的那件，标注记到它身上。"""
+    seen = {}
+    for cand in candidates:  # 标注推出来的号码改成实际找到的之后，可能和检索到的同一件重复：留先来的那件
+        number = cand.get("number")
+        if not number or cand["right_type"] not in ("patent", "utility_model", "design"):
+            continue
+        if number in seen and not (cand.get("screen") or {}).get("decision"):
+            keeper = seen[number]
+            if cand.get("marked_by") and not keeper.get("marked_by") and (keeper.get("screen") or {}).get("decision") not in (None, "", "selected"):
+                keeper.pop("screen", None)  # 先来那件已被（比如只看标题那一轮）排除：它其实是页面标注的，清掉决定，让程序先筛直接选去深查
+            keeper["marked_by"] = keeper.get("marked_by") or cand.get("marked_by", "")
+            cand["screen"] = {"decision": "not_selected", "by": "program", "reason": "和 %s 是同一件，按那一件算" % keeper["id"], "rank": 9}
+        else:
+            seen.setdefault(number, cand)
+
+
 def run(task, say=print, opener=None, today: date = None, usage=None) -> None:
     """只给还没有决定的候选补材料；补过的打上 enriched 标记，初筛就看这一批。"""
     today = today or date.today()
@@ -308,6 +328,7 @@ def run(task, say=print, opener=None, today: date = None, usage=None) -> None:
         list(pool.map(lambda job: enrich_one(job[0], task.dir, job[1], session, today, opener), jobs))
     for cand, _want in jobs:
         cand["enriched"] = True
+    merge_duplicates(task["candidates"])
     missed = [c for c in patents if c.get("page_note")]
     if missed:
         task.add_incomplete("%d 件发明专利的公开页" % len(missed), "没有读到（%s），初筛时只看了标题" % missed[0]["page_note"][:60], "patent")

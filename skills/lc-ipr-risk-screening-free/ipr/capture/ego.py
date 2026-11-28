@@ -49,7 +49,7 @@ def parse_result(*streams: str) -> dict:
     raise StepFailed("EGO 浏览器没有返回采集结果")
 
 
-def capture(url: str, task_dir: Path, label: str, space_id=None, runner=None) -> dict:
+def capture(url: str, task_dir: Path, label: str, space_id=None, runner=None, timeout: int = 0) -> dict:
     """返回 {"product": 页面取到的资料, "images": [{file, url}], "space_id": …}。
     验证码或登录抛 WaitingUser（带 space_id，续跑时接着用同一个工作区）；商品不存在抛 NoProduct；其他问题抛 StepFailed。"""
     runner = runner or subprocess.run
@@ -59,9 +59,9 @@ def capture(url: str, task_dir: Path, label: str, space_id=None, runner=None) ->
     script = build_script(url, Path(task_dir) / "images", label, space_id)
     try:
         result = runner([binary, "nodejs"], input=script, text=True, encoding="utf-8", errors="replace",
-                        capture_output=True, timeout=TIMEOUT_SECONDS, env=config.child_env())
+                        capture_output=True, timeout=timeout or TIMEOUT_SECONDS, env=config.child_env())
     except subprocess.TimeoutExpired:
-        raise StepFailed("EGO 浏览器超过 %d 秒没有采完" % TIMEOUT_SECONDS)
+        raise StepFailed("EGO 浏览器超过 %d 秒没有采完" % (timeout or TIMEOUT_SECONDS))
     except OSError as exc:
         raise StepFailed("EGO 浏览器没能启动（%s）" % type(exc).__name__)
     try:

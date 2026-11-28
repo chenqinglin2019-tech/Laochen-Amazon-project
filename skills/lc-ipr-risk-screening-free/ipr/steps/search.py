@@ -1,7 +1,7 @@
 """检索（R-004）：各路检索的记录和候选清单。哪一路没查成如实记下，不影响其他路。"""
 from __future__ import annotations
 
-from .. import config
+from .. import config, jp_marks
 from ..outcome import StepFailed
 
 
@@ -18,6 +18,7 @@ def run(ctx) -> None:
     task["lens"] = [m for m in found.get("lens") or [] if isinstance(m, dict)][:30]
     task["enforcement"] = [m for m in found.get("enforcement") or [] if isinstance(m, dict)][:16]
     task["search_notes"] = [str(n) for n in found.get("notes") or [] if n]
+    task["manual_marks"] = [m for m in found.get("manual_marks") or [] if isinstance(m, dict) and m.get("term")][:jp_marks.MAX_WORDS]
     if not_applicable:
         ctx.say("  有 %d 件候选属于%s不存在的权利类型，已剔除" % (not_applicable, config.COUNTRIES[task.country]["name"]))
     if broken:
@@ -40,7 +41,7 @@ def run(ctx) -> None:
             "，".join("%s %d" % (config.RIGHT_NAMES[k], v) for k, v in counts.items()) or "无"))
 
 
-TEXT_FIELDS = ("number", "title", "owner", "filing_date", "grant_date", "priority_date", "url", "snippet", "source",
+TEXT_FIELDS = ("number", "title", "owner", "filing_date", "grant_date", "priority_date", "url", "snippet", "source", "marked_by",
                "legal_status", "expiry", "image_location", "matched_term", "office")
 LIST_FIELDS = ("figures", "classes", "cpc", "via")
 

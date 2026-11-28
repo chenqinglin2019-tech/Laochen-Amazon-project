@@ -1,7 +1,8 @@
 """资料入口（R-014）：没有链接时，用自己提供的图片和文字开跑。
 
 资料文件夹里放：至少一张产品图（jpg / png / webp）；文字可以写在文件夹里的 .txt 或 .md 文件里（第一行当品名，其余当描述），
-也可以用命令行的 --title 直接给一句。可选的 product.json 可以写 title、brand、category、bullets、description。
+也可以用命令行的 --title 直接给一句。可选的 product.json 可以写 title、brand、category、bullets、description，
+还可以写 competitors（竞品的 ASIN 或链接，最多 3 个，可选）。
 """
 from __future__ import annotations
 
@@ -55,7 +56,7 @@ def inspect(folder: Path, title: str = "") -> dict:
     pictures = [p for p in files if p.suffix.lower() in images.SUFFIXES]
     good = [p for p in pictures if images.readable(p)]
     bad = [p for p in pictures if p not in good]
-    text = {"title": (title or "").strip(), "description": "", "brand": "", "category": "", "bullets": []}
+    text = {"title": (title or "").strip(), "description": "", "brand": "", "category": "", "bullets": [], "competitors": []}
     meta = folder / "product.json"
     if meta.is_file():
         try:
@@ -69,6 +70,7 @@ def inspect(folder: Path, title: str = "") -> dict:
             text["brand"] = str(data.get("brand") or "").strip()
             text["category"] = str(data.get("category") or "").strip()
             text["bullets"] = [str(b).strip() for b in data.get("bullets") or [] if str(b).strip()] if isinstance(data.get("bullets"), list) else []
+            text["competitors"] = [str(c).strip() for c in data.get("competitors") or [] if str(c).strip()] if isinstance(data.get("competitors"), list) else []
     for note in (p for p in files if p.suffix.lower() in TEXT_SUFFIXES):
         content = read_text(note)
         if not content.strip():
@@ -108,7 +110,10 @@ def capture(folder: Path, task_dir: Path, title: str = "") -> dict:
     saved = []
     image_dir = Path(task_dir) / "images"
     image_dir.mkdir(parents=True, exist_ok=True)
-    for index, source in enumerate(found["images"][:config.PRODUCT_IMAGES_MAX]):
+    most = max(config.PRODUCT_IMAGES_MAX, config.UNDERSTAND_IMAGES_LISTING)  # 资料入口的图是拟上架用的，产品理解要逐张检查，留够它看的张数
+    if len(found["images"]) > most:
+        found["problems"].append("文件夹里有 %d 张图，只用了前 %d 张（第 %d 张以后没有检查）" % (len(found["images"]), most, most + 1))
+    for index, source in enumerate(found["images"][:most]):
         target = image_dir / ("IMG-%03d%s" % (index + 1, source.suffix.lower()))
         shutil.copyfile(source, target)
         saved.append({"file": str(target), "url": ""})
@@ -116,4 +121,4 @@ def capture(folder: Path, task_dir: Path, title: str = "") -> dict:
     product = {"title": text["title"], "brand": text["brand"], "category": text["category"], "bullets": text["bullets"],
                "description": text["description"], "asin": "", "url": "", "marking": []}
     notes = [p for p in found["problems"] if p not in found["blocking"]]
-    return {"product": product, "images": saved, "space_id": None, "failed_images": [], "notes": notes}
+    return {"product": product, "images": saved, "space_id": None, "failed_images": [], "notes": notes, "competitors": text["competitors"]}
