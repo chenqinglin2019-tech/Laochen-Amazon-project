@@ -125,11 +125,19 @@ def program_filter(task, today: date = None) -> None:
             continue
         raw = cand.get("legal_status_raw", "")
         expiry = numbers.parse_date(cand.get("expiry", "")) if raw else None  # 读到公开页的才信这个到期日（含期限调整）
+        lifetime = raw.strip().lower().startswith("expired - lifetime")  # 保护期届满是按日期算死的，可靠
+        if raw and gpatents.is_dead(raw) and not lifetime:  # 欠费、放弃、撤回这类：来源记载可能不准，标"状态存疑"照常初筛
+            cand["status_doubt"] = "Google Patents 记载：%s" % gpatents.status_name(raw)
         if cand.get("no_figures"):  # 欧盟外观、日本意匠：来源只有名单没有图，看图初筛看不了
             kind = config.NO_FIGURE_OFFICES.get(numbers.office_of(cand.get("number", "")), "外观")
-            set_decision(cand, "unseen", "名称相关的%s，Google Patents 不提供它的附图，没有做外观比对" % kind, "program")
-        elif raw and gpatents.is_dead(raw):
-            set_decision(cand, "not_selected", "已经失效（Google Patents 记载：%s）" % gpatents.status_name(raw), "program")
+            if cand.get("marked_by"):
+                set_decision(cand, "unseen", "%s标注了这件%s：Google Patents 不提供附图，要人工看图（优先看这一件）" % (cand["marked_by"], kind), "program", 0)
+            else:
+                set_decision(cand, "unseen", "名称相关的%s，Google Patents 不提供它的附图，没有做外观比对" % kind, "program")
+        elif cand.get("marked_by") and not lifetime and not (expiry and expiry < today):  # 页面标注了的：那款产品就受它保护，直接深查
+            set_decision(cand, "selected", "%s标注了这件，直接深查" % cand["marked_by"], "program", 0)
+        elif lifetime:
+            set_decision(cand, "not_selected", "保护期已届满（Google Patents 记载：%s）" % gpatents.status_name(raw), "program")
         elif expiry and expiry < today:
             set_decision(cand, "not_selected", "保护期已于 %s 届满" % expiry.isoformat(), "program")
         elif cand["right_type"] == "artwork" and cand.get("watchlist"):
@@ -161,10 +169,20 @@ def text_round(ctx) -> None:
         if note not in notes:
             notes.append(note)
     for rank, (cand, decision, reason) in enumerate(matched):
-        if decision in ("selected", "watch"):
+        if decision in ("selected", "watch") and cand.get("pending"):  # 申请公开：授权前不能主张权利，进关注清单，不深查不评等级
+            set_decision(cand, "watch", "已公开未授权，列进关注清单：%s" % reason, "ai", rank)
+            cand["watchlist_pending"] = True
+        elif decision in ("selected", "watch"):
             set_decision(cand, decision, reason, "ai", rank)
         else:
             set_decision(cand, "unseen", "初筛给出的决定认不出（%s）" % decision)
+    rows = answer.get("closest") if isinstance(answer, dict) and isinstance(answer.get("closest"), list) else []
+    table = lookup_of(patents)
+    for row in rows[:3]:  # 没入选里最接近的几件：写明不选的理由，报告里单列，人能复查初筛有没有漏
+        cand = find(table, row.get("id")) if isinstance(row, dict) else None
+        if cand is not None and not decision_of(cand):
+            set_decision(cand, "not_selected", "最接近的几件之一，没有入选：%s" % str(row.get("reason") or "AI 没有说明")[:160], "ai")
+            cand["closest"] = True
     settle_rest(pairs, bad, lambda cand: {"trademark": "商标文字和产品上的文字、名字对不上，或只是通用词",
                                           "artwork": "没有发现具体的权利人或维权迹象"}.get(cand["right_type"], "保护的不是和本产品同一类的物品"))
 
@@ -294,6 +312,62 @@ def close_out(ctx) -> None:
         "，没下结论 %d 件" % counts[""] if counts.get("") else ""))
 
 
+TITLE_NOTE = "只看标题判断不是同一类物品，没有读公开页（标题多是机器翻译，可能不准）"
+
+
+def title_round(ctx) -> None:
+    """发明和实用新型的候选超过一轮能读的件数时，先只看标题挑出可能相关的，免得读不完的那部分"超出上限、没有看"。
+    这一轮没成就照旧：读前面那一批，其余记超上限。"""
+    task = ctx.task
+    cap = enrich.PATENT_PAGES
+    # 页面标注了的不进这一轮（程序会直接选去深查，标题还常是空的）
+    open_items = [c for c in task["candidates"] if c["right_type"] in ("patent", "utility_model") and not decision_of(c) and not c.get("marked_by")]
+    if len(open_items) <= cap:
+        return
+    labels = [("K%03d" % (i + 1), c) for i, c in enumerate(open_items)]
+    items = [{"id": label, "title": " ".join(str(c.get("title") or "").split())[:140],
+              "kind": "申请公开" if c.get("pending") else config.RIGHT_NAMES.get(c["right_type"], "")} for label, c in labels]
+    answer = ctx.ai.ask("screen", "screen-titles", prompts.screen_titles(task, items, cap), schema=prompts.TITLE_SCHEMA, tier="light")
+    by_label = dict(labels)
+    raw_keep = answer.get("keep") if isinstance(answer, dict) else None
+    if not isinstance(raw_keep, list):
+        raise StepFailed("只看标题的那一轮没有给出可用的回答")
+    keep = []
+    for raw in raw_keep:
+        cand = by_label.get(str(raw).strip().upper())
+        if cand is not None and cand not in keep:
+            keep.append(cand)
+    if raw_keep and not keep:  # 答了一串编号却一个都对不上：这份回答不能用（一个都不留的空清单是有效回答）
+        raise StepFailed("只看标题的那一轮回答里的编号都对不上")
+    # AI 认为相关、但超出一轮能读的件数的（实用新型另有上限）：记超上限，会进"没查完"，不说成"不是同一类"
+    within, utility = [], 0
+    over = []
+    for cand in keep:
+        is_utility = cand["right_type"] == "utility_model"
+        if len(within) < cap and not (is_utility and utility >= enrich.UTILITY_PAGES):
+            within.append(cand)
+            utility += 1 if is_utility else 0
+        else:
+            over.append(cand)
+    dropped = 0
+    for cand in open_items:
+        if cand in over:
+            set_decision(cand, "over_cap", "超出本轮文字初筛的上限，没有看（只看标题时认为可能相关）", "program")
+        elif cand not in within:
+            set_decision(cand, "not_selected", TITLE_NOTE, "ai-title")
+            dropped += 1
+    keep = within
+    # 留下的排到前面，补材料时按这个先后读公开页
+    order = {id(c): i for i, c in enumerate(keep)}
+    task["candidates"] = sorted(task["candidates"], key=lambda c: order.get(id(c), len(order)))
+    note = "发明和实用新型候选 %d 件，超过一轮能读的 %d 件：先只看标题排除了 %d 件明显不是同一类的（标题多是机器翻译，排除的那些没有读公开页）%s。" % (
+        len(open_items), cap, dropped, "；另有 %d 件可能相关但超出上限、没有看" % len(over) if over else "")
+    notes = task.data.setdefault("search_notes", [])
+    if note not in notes:
+        notes.append(note)
+    ctx.say("  只看标题：%d 件里留下 %d 件去读公开页" % (len(open_items), len(keep)))
+
+
 def run(ctx) -> None:
     task = ctx.task
     if not task["candidates"]:
@@ -301,6 +375,10 @@ def run(ctx) -> None:
         return
     failures = []
     try:
+        try:
+            title_round(ctx)
+        except StepFailed as exc:  # 锦上添花的一轮：没成就照旧读前面那一批，其余记超上限（那些会写进"没查完"）
+            ctx.say("  只看标题的那一轮没有完成（%s），按原来的先后读前 %d 件" % (exc.message, enrich.PATENT_PAGES))
         ctx.sources.enrich(ctx)
         program_filter(task)
         for name, round_ in (("文字初筛", text_round), ("看图初筛", visual_round)):

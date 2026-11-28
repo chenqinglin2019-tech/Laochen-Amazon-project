@@ -161,6 +161,8 @@ class LiveSources:
         product["images"] = [{"id": "IMG-%03d" % (i + 1), "file": "images/" + Path(item["file"]).name, "url": item.get("url", "")}
                              for i, item in enumerate(found["images"]) if images.readable(Path(item["file"]))]
         product["captured_by"] = method
+        wanted = list(entry.get("competitors") or []) + list(found.get("competitors") or [])
+        product["competitors_wanted"] = list(dict.fromkeys(str(w).strip() for w in wanted if str(w).strip()))[:config.COMPETITOR_MAX]
         if found.get("failed_images"):
             task.add_incomplete("%d 张商品图" % len(found["failed_images"]), "没有下载下来")
         wanted, got = entry.get("asin") or "", product.get("asin") or ""
@@ -168,6 +170,56 @@ class LiveSources:
             ctx.say("  注意：链接里的 ASIN 是 %s，页面实际显示的是 %s" % (wanted, got))
             product["asin_note"] = "链接里的 ASIN 是 %s，页面实际显示的是 %s（可能跳到了别的款式）" % (wanted, got)
         return product
+
+    def competitors(self, ctx, wanted: list) -> list:
+        """采竞品页（可选）：品牌、标题、页面上的专利和外观标注、主图。遇到验证码、登录不等人，记"没采到"；任何一个没采成都不影响这一单。"""
+        task = ctx.task
+        site = config.COUNTRIES[task.country]["site"]
+        out = []
+        for index, raw in enumerate(wanted[:config.COMPETITOR_MAX], 1):
+            found = re.search(r"(?:/dp/|/gp/product/|/gp/aw/d/|^)(B0[A-Z0-9]{8})(?:[/?#]|$)", raw.upper())
+            asin = found.group(1) if found else ""
+            url = raw if config.is_amazon_url(raw) else ("https://www.%s/dp/%s" % (site, asin) if asin else "")
+            record = {"input": raw[:200], "asin": asin, "url": url, "title": "", "brand": "", "marking": [], "image": "", "status": "failed", "note": ""}
+            if not url:
+                record["note"] = "认不出是 ASIN 还是 Amazon 商品链接"
+                out.append(record)
+                continue
+            used = ctx.usage.run_seconds() if getattr(ctx, "usage", None) else 0
+            if used >= config.COMPETITOR_TIME_SECONDS:  # 竞品是可选的：采集这一步已经花太久，剩下的不采，保住 8 分钟的线
+                record["note"] = "这一单已经用了 %d 秒，为了不超时没有采" % used
+                out.append(record)
+                continue
+            name = asin or "c%d" % index
+            folder = task.dir / "competitors" / name
+            ctx.say("  采竞品 %s…" % (asin or url[:60]))
+            try:
+                if ego.available():
+                    page = ego.capture(url, folder, "竞品 " + (asin or str(index)), timeout=config.COMPETITOR_CAPTURE_SECONDS)
+                elif chrome.available():
+                    page = chrome.capture(url, folder, "竞品 " + (asin or str(index)), wait_for_user=0, timeout=config.COMPETITOR_CAPTURE_SECONDS)
+                else:
+                    raise StepFailed("没有可用的浏览器")
+            except WaitingUser:
+                record["note"] = "要验证码或登录，没有等，没采到（不影响这一单）"
+            except NoProduct:
+                record["note"] = "商品页不存在或已下架"
+            except StepFailed as exc:
+                record["note"] = exc.message[:160]
+            except Exception as exc:  # 竞品是可选的：任何意外都只记"没采到"，不影响这一单
+                record["note"] = "采集时程序出错（%s），没采到" % type(exc).__name__
+            else:
+                try:
+                    product = page.get("product") or {}
+                    shots = [Path(i["file"]) for i in page.get("images") or [] if images.readable(Path(i["file"]))]
+                    # 路径照主商品那样按文件名拼（浏览器给的是解析过的绝对路径，Windows 短路径、软链接下和任务目录对不上）
+                    record.update(status="ok", title=str(product.get("title") or "")[:300], brand=str(product.get("brand") or "")[:80],
+                                  marking=[str(m) for m in product.get("marking") or []][:5],
+                                  image="competitors/%s/images/%s" % (name, shots[0].name) if shots else "")
+                except Exception as exc:
+                    record.update(status="failed", note="整理竞品资料时程序出错（%s），没采到" % type(exc).__name__)
+            out.append(record)
+        return out
 
     def _capture_url(self, ctx, entry: dict):
         task = ctx.task

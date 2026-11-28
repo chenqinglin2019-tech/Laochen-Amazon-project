@@ -37,6 +37,8 @@ class TaskState:
             "understanding": {},
             "searches": [],
             "search_notes": [],
+            "manual_marks": [],  # 日本这类没有可查商标库的：要人工核对的词和检索链接
+            "competitors": [],   # 竞品（可选）：采到的品牌、标题、页面标注
             "lens": [],
             "enforcement": [],
             "candidates": [],
@@ -56,7 +58,7 @@ class TaskState:
         path = Path(task_dir) / config.STATE_FILE
         data = json.loads(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):  # 早先版本建的任务没有这几项
-            for key in ("search_notes", "lens", "enforcement"):
+            for key in ("search_notes", "lens", "enforcement", "manual_marks", "competitors"):
                 data.setdefault(key, [])
         return cls(Path(task_dir), data)
 

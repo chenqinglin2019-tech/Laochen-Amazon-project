@@ -24,7 +24,13 @@ def patent(finding: dict, cand: dict, task_dir: Path, opener=None) -> None:
     for _attempt in (1, 2):
         enrich.count("Google Patents 公开页")
         try:
-            page = gpatents.fetch(cand["number"], opener)
+            # 页面标注推出来的号码不知道是 B1 还是 B2：和补材料时一样，找不到换另一个试
+            page = (gpatents.fetch_any if cand.get("marked_by") else gpatents.fetch)(cand["number"], opener)
+            if page.get("number") and page["number"] != cand["number"]:  # 实际读到的是另一个类别码（B1/B2）：号码改过来
+                cand["number"], cand["url"] = page["number"], gpatents.URL % page["number"]
+                for field in ("number", "url"):
+                    if field in finding:
+                        finding[field] = cand[field]
             break
         except http.SourceError as exc:
             note = exc.message

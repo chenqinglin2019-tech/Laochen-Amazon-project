@@ -148,11 +148,43 @@ def block_rights(task) -> str:
             level, confidence = '<span class="badge risk-none">不适用</span>', "—"
         elif row["state"] == "not_searched":
             level, confidence = '<span class="badge risk-待定">未检索</span>', "—"
+        elif row["state"] == "nothing":
+            level, confidence = '<span class="badge risk-none">无可查项</span>', "—"
         else:
             level, confidence = risk_span(row["risk"]), e(row["confidence"] or "—")
         rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (e(row["name"]), level, confidence, e(row["basis"])))
     return ('<section><h2>各类权利</h2><div class="table-wrap"><table><thead><tr><th>权利</th><th>等级</th><th>置信度</th><th>依据</th></tr></thead>'
-            "<tbody>%s</tbody></table></div></section>" % "".join(rows))
+            "<tbody>%s</tbody></table></div>%s</section>" % ("".join(rows), progress_table(task)))
+
+
+def progress_table(task) -> str:
+    """核查进度：每类权利分开写"检索到 / 取到材料 / 已比对 / 官方状态已核"，免得把"查到了"当成"比过了"、把"比过了"当成"状态核过了"。"""
+    rows = []
+    for row in task["rights_summary"]:
+        right = row["right_type"]
+        if row["state"] == "not_applicable":
+            continue
+        cands = [c for c in task["candidates"] if c["right_type"] == right]
+        findings = [f for f in task["findings"] if f["right_type"] == right]
+        if right in ("patent", "utility_model"):
+            material = sum(1 for c in cands if c.get("claim1") or c.get("abstract")) or sum(1 for f in findings if f.get("claims"))
+            material_text = "%d 件读到权利要求或摘要" % material
+        elif right == "design":
+            material = sum(1 for c in cands if c.get("thumb"))
+            listed = sum(1 for c in cands if c.get("no_figures"))
+            material_text = "%d 件取到附图%s" % (material, "，%d 件只有名单没有图" % listed if listed else "")
+        else:
+            material_text = "—"
+        searched = "未检索" if row["state"] == "not_searched" else "%d 件" % len(cands)
+        compared = sum(1 for f in findings if f.get("status") == "compared")
+        rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%d 件</td><td>0 件</td></tr>" % (
+            e(row["name"]), e(searched), e(material_text), compared))
+    if not rows:
+        return ""
+    return ('<details><summary>核查进度（检索到、取到材料、已比对、官方状态已核分开写）</summary><div class="table-wrap"><table><thead><tr>'
+            "<th>权利</th><th>检索到</th><th>取到材料</th><th>已比对</th><th>官方状态已核</th></tr></thead><tbody>%s</tbody></table></div>"
+            '<p class="small">官方状态：本工具没有接官方的状态接口，"是否有效"都来自公开数据库（Google Patents 等），评到中以上的请到官方核对。</p></details>'
+            % "".join(rows))
 
 
 # ---------------- 第三块：风险项明细 ----------------
@@ -167,7 +199,8 @@ def finding_card(task, finding: dict, key: bool = True) -> str:
              ("权利人", finding.get("owner") or "未取得"),
              ("申请日", finding.get("filing_date") or "未取得"),
              ("授权日", finding.get("grant_date") or "未取得"),
-             ("是否有效", finding.get("legal_status") or "未核实"),
+             ("是否有效", ("状态存疑：%s（未核官方）" % finding["status_doubt"]) if finding.get("status_doubt") else
+                         ("%s（公开数据库记载，未核官方）" % finding["legal_status"]) if finding.get("legal_status") else "未核实"),
              ("到期日", finding.get("expiry") or "未核实")]
     if finding["right_type"] in ("trademark", "artwork"):
         facts = [fact for fact in facts if fact[0] != "到期日" and not (finding["right_type"] == "artwork" and fact[0] in ("申请日", "授权日", "是否有效"))]
@@ -238,6 +271,77 @@ def block_findings(task) -> str:
     return "".join(out)
 
 
+def block_pending(task) -> str:
+    """关注清单：已公开、还没授权、但和本产品相关的申请。不评等级（授权前不能主张权利），要留意它的进展。"""
+    pending = [c for c in task["candidates"] if c.get("watchlist_pending")]
+    if not pending:
+        return ""
+    rows = "".join("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+        link(c.get("url"), c.get("number")) if c.get("url") else e(c.get("number", "")), e(c.get("title", "")), e(c.get("owner") or "—"),
+        e(str((c.get("screen") or {}).get("reason", "")).replace("已公开未授权，列进关注清单：", ""))) for c in pending)
+    return ('<section><h2>关注清单：已公开、还没授权的申请（%d 件，不评等级）</h2><p class="small">授权前不能用来主张权利；'
+            "但授权后，对方可能要求公开以后的补偿（例如日本特许法第 65 条：先书面警告，授权后才能行使）。上架后要留意它们的进展，"
+            "授权了就要按授权的权利要求重新比对。</p><div class=\"table-wrap\"><table><thead><tr><th>号码</th><th>名称</th><th>申请人</th>"
+            "<th>为什么列进来</th></tr></thead><tbody>%s</tbody></table></div></section>" % (len(pending), rows))
+
+
+def block_competitors(task) -> str:
+    """竞品（可选）：采到的品牌、标题和页面上的专利、外观标注。"""
+    rows = []
+    for comp in task.data.get("competitors") or []:
+        if not isinstance(comp, dict):
+            continue
+        label = link(comp.get("url"), comp.get("asin") or comp.get("input")) if comp.get("url") else e(comp.get("input", ""))
+        if comp.get("status") == "ok":
+            rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (label, e(comp.get("brand") or "—"), e(comp.get("title", "")[:120]),
+                                                                          e("；".join(comp.get("marking") or []) or "没有标注")))
+        else:
+            rows.append('<tr><td>%s</td><td colspan="3">没采到：%s</td></tr>' % (label, e(comp.get("note", ""))))
+    if not rows:
+        return ""
+    return ('<section><h2>竞品（%d 个）</h2><p class="small">页面上标注的专利、外观号码已经直接列入深查（见上面的明细）。竞品的品牌、图片、文案都不要用在你的上架里。'
+            "品牌名通常不是专利权人的名字，按品牌查权利人不可靠，本工具只取了页面标注。</p>"
+            '<div class="table-wrap"><table><thead><tr><th>竞品</th><th>品牌</th><th>标题</th><th>页面上的专利、外观标注</th></tr></thead><tbody>%s</tbody></table></div>'
+            "</section>" % (len(rows), "".join(rows)))
+
+
+def block_image_notes(task) -> str:
+    """上架图片要注意的：不是产品本身、但出现在拟上架图片里的道具、水印、别人的标识。本工具没有对它们做检索。"""
+    notes = [n for n in (task["understanding"] or {}).get("image_notes") or [] if isinstance(n, dict) and n.get("what")]
+    if not notes:
+        return ""
+    rows = "".join("<tr><td>%s</td><td>%s</td><td>%s</td></tr>" % (e("第 %d 张" % n["image"] if n.get("image") else "—"), e(n.get("kind", "")),
+                                                              e(n["what"])) for n in notes)
+    return ('<section><h2>上架图片要注意的（%d 处）</h2><p class="small">这些不是产品本身，但出现在拟上架的图片里：道具和别人的品牌、角色可能涉及版权或商标，'
+            "水印说明图片来源要确认授权，图里的文字也要和文案一样避开别人的商标。本工具没有对它们做检索，请人工确认或换掉。</p>"
+            '<div class="table-wrap"><table><thead><tr><th>哪张图</th><th>类型</th><th>看到了什么</th></tr></thead><tbody>%s</tbody></table></div></section>'
+            % (len(notes), rows))
+
+
+def block_manual_marks(task) -> str:
+    """日本这类没有可查商标库的：要人工核对的词和检索链接。放在明细后面、不折叠——这是要用户动手的事。"""
+    if task.country not in config.TRADEMARK_MANUAL or not task.step_done("search"):
+        return ""
+    marks = task.data.get("manual_marks") or []
+    intro = ('<p class="small">%s的商标没有可以合规地用程序检索的来源，这一类本工具<strong>没有查</strong>（报告里写"未检索"，不是低风险）。'
+             "请逐个点开链接人工核对：有没有相同或读音相近的注册，它的指定商品是否覆盖本产品，状态是否有效。"
+             "两个网站都禁止程序自动查询，这里只给链接。</p>" % e(config.COUNTRIES[task.country]["name"]))
+    if not marks:
+        body = '<div class="empty">没有挑出要查的词。定了自有品牌后，品牌名也要到 J-PlatPat 查。</div>'
+    else:
+        rows = []
+        for mark in marks:
+            remind = "；".join(x for x in (("权利人：" + mark["owner"]) if mark.get("owner") else "", mark.get("note", ""),
+                                           ("可以换成：" + mark["plain"]) if mark.get("plain") else "") if x)
+            links = "<br>".join(link(item.get("url"), item.get("label")) for item in mark.get("links") or [] if isinstance(item, dict))
+            rows.append("<tr><td><strong>%s</strong></td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+                e(mark["term"]), e(mark.get("why", "")), e(remind or "—"), links or "—"))
+        body = ('<div class="table-wrap"><table><thead><tr><th>词</th><th>为什么要查</th><th>提醒</th><th>点开核对</th></tr></thead>'
+                "<tbody>%s</tbody></table></div>" % "".join(rows))
+        body += '<p class="small">定了自有品牌后，品牌名也要查。</p>'
+    return "<section><h2>商标要人工核对的词</h2>%s%s</section>" % (intro, body)
+
+
 # ---------------- 第四块：没查到或没查完的 ----------------
 def block_incomplete(task) -> str:
     rows = "".join("<tr><td>%s</td><td>%s</td></tr>" % (e(i["what"]), e(i["why"])) for i in task["incomplete"])
@@ -272,10 +376,14 @@ def block_searches(task) -> str:
         out.append('<p class="small">%s</p>' % e(note))
     head = "<thead><tr><th>类别</th><th>号码</th><th>名称</th><th>原因</th></tr></thead>"
     selected = [c for c in task["candidates"] if (c.get("screen") or {}).get("decision") == "selected"]
-    watch = [c for c in task["candidates"] if (c.get("screen") or {}).get("decision") == "watch"]
+    watch = [c for c in task["candidates"] if (c.get("screen") or {}).get("decision") == "watch" and not c.get("watchlist_pending")]
     if selected:
         out.append('<h3>初筛入选、进入深查的 %d 件</h3><div class="table-wrap"><table>%s<tbody>%s</tbody></table></div>' % (
             len(selected), head, candidate_rows(selected)))
+    closest = [c for c in task["candidates"] if c.get("closest") and (c.get("screen") or {}).get("decision") == "not_selected"]
+    if closest:
+        out.append('<h3>没入选里最接近的 %d 件（初筛说明了为什么不选，可以复查）</h3><div class="table-wrap"><table>%s<tbody>%s</tbody></table></div>' % (
+            len(closest), head, candidate_rows(closest)))
     if watch:
         out.append('<h3>仅关注、没有深查的 %d 件</h3><div class="table-wrap"><table>%s<tbody>%s</tbody></table></div>' % (
             len(watch), head, candidate_rows(watch)))
@@ -325,7 +433,7 @@ def block_footer(task, usage: dict) -> str:
 
 
 def render(task, usage_summary: dict, result: dict) -> str:
-    body = "".join([block_top(task, result), block_rights(task), block_findings(task),
+    body = "".join([block_top(task, result), block_rights(task), block_findings(task), block_pending(task), block_manual_marks(task), block_image_notes(task), block_competitors(task),
                     block_incomplete(task), block_searches(task), block_footer(task, usage_summary)])
     return ('<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
             "<title>侵权风险排查报告 - %s</title><style>%s</style></head><body><main>%s</main></body></html>") % (

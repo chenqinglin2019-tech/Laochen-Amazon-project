@@ -29,6 +29,7 @@ def blank_finding(cand: dict) -> dict:
         "filing_date": cand.get("filing_date", ""),
         "grant_date": cand.get("grant_date", ""),
         "legal_status": cand.get("legal_status", ""),
+        "status_doubt": cand.get("status_doubt", ""),
         "expiry": cand.get("expiry", ""),
         "selected_reason": (cand.get("screen") or {}).get("reason", ""),
         "detail": cand.get("snippet") or cand.get("watch_note") or "",
@@ -87,6 +88,9 @@ def common(finding: dict, row: dict) -> None:
         "uncertain": row.get("uncertain") is True,
     })
     finding.pop("reason", None)
+    if finding.get("status_doubt"):  # 来源记载已失效但入选了：比出来的等级照写，提醒先核官方状态
+        check = "状态存疑（%s）：先到官方核对当前状态；确实失效的话，这一件不构成风险" % finding["status_doubt"]
+        finding["human_checks"] = ([check] + finding["human_checks"])[:HUMAN_CHECKS]
 
 
 # ---------------- 发明：按要素对照表定级 ----------------
@@ -212,6 +216,12 @@ def apply_design(task, finding: dict, row: dict) -> bool:
             finding["uncertain"] = True  # 一边说几乎照抄、一边说主体不同：自相矛盾，交复核
     limited(finding)
     finding.update(risk=risk, relation=relation)
+    if row.get("partial") is True:  # 部分外观：保护的只是实线那一块，范围要看官方公报里的说明
+        finding["partial"] = True
+        finding["claimed_part"] = str(row.get("claimed_part") or "")[:120]
+        check = "这件是部分外观（只保护实线画的部分%s）：保护的部位和范围要以官方公报的图面和说明为准" % (
+            "：" + finding["claimed_part"] if finding["claimed_part"] else "")
+        finding["human_checks"] = ([check] + [c for c in finding["human_checks"] if c != check])[:HUMAN_CHECKS]
     return True
 
 

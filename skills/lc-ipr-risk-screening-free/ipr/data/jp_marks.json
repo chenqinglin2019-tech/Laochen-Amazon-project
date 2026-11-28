@@ -1,0 +1,38 @@
+{
+  "note": "日本：常被当成品类词用、但其实有人注册成商标的词。只放核对过出处的；每条都要人工到 J-PlatPat 再核对指定商品和当前状态。",
+  "checked": "2026-11-28",
+  "entries": [
+    {
+      "term": "スクイーズ",
+      "aliases": ["スクイーズ"],
+      "owner": "江崎グリコ（第 30 类，登録第 5947936 号）、タカラトミー「やわらかスクイーズ」（第 28 类，登録第 5129857 号）等",
+      "plain": "やわらか玩具、スクイーズ玩具（是否也受限要人工判断）",
+      "note": "第 28 类（玩具）有含这个词的注册；用来描述能装的东西也可能被主张，要看指定商品",
+      "source": "WIPO Global Brand Database 人工查询结果，2026-11-27（日本站运行包 evidence/wipo-query.txt）"
+    },
+    {
+      "term": "マジックテープ",
+      "aliases": ["マジックテープ", "magic tape"],
+      "owner": "株式会社クラレ",
+      "plain": "面ファスナー",
+      "note": "クラレ官网写明是它面ファスナー的登録商標",
+      "source": "https://magictape.kuraray.com/ja/"
+    },
+    {
+      "term": "サランラップ",
+      "aliases": ["サランラップ"],
+      "owner": "旭化成ホームプロダクツ",
+      "plain": "食品用ラップ",
+      "note": "旭化成ホームプロダクツ的新闻稿写明是它的登録商標",
+      "source": "https://www.asahi-kasei.com/jp/news/2017/li170817.html"
+    },
+    {
+      "term": "ジップロック",
+      "aliases": ["ジップロック", "ziploc"],
+      "owner": "旭化成ホームプロダクツ在日本销售，带 ® 标记（登记的权利人要到 J-PlatPat 核对）",
+      "plain": "チャック付き袋、ジッパーバッグ",
+      "note": "旭化成的新闻稿里写作「ジップロック®」",
+      "source": "https://www.asahi-kasei.com/jp/news/2020/li210224.html"
+    }
+  ]
+}

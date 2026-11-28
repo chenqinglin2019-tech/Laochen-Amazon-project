@@ -42,6 +42,9 @@ def parse_args(argv=None):
                         help="链接入口用哪个浏览器采集。默认 auto：装了 EGO 浏览器就用它，没装用 Chrome")
     parser.add_argument("--task-dir", help="任务目录；续跑时给原来的目录")
     parser.add_argument("--fresh", action="store_true", help="不接着上次停下的任务，重新开一单")
+    parser.add_argument("--pack", metavar="任务目录", help="把一单打成可分享的运行包（不跑排查，不联网）")
+    parser.add_argument("--competitor", action="append", default=[], metavar="ASIN或链接",
+                        help="可选：竞品（可以给多次，最多 3 个）。会采它的页面，看它标注了哪些专利、外观")
     return parser.parse_args(argv)
 
 
@@ -182,6 +185,8 @@ def prepare(args) -> dict:
         raise ValueError("任务目录 %s 里没有可以续跑的任务。" % args.task_dir)
     else:
         raise ValueError("请给一个 --url 链接、--input 资料文件夹，或用 --task-dir 续跑。")
+    if args.competitor and entry.get("type") in ("url", "input"):
+        entry["competitors"] = [c.strip() for c in args.competitor if c.strip()][:config.COMPETITOR_MAX]
     if task_dir is None and not args.demo and not args.fresh:
         waiting = unfinished_task(label, country, entry)
         if waiting is not None:
@@ -233,10 +238,21 @@ def summary_lines(task) -> list:
     lines = ["结论摘要：", "  总风险等级：%s%s　置信度：%s" % (overall.get("risk", ""), "（仅就已查部分）" if overall.get("partial") else "",
                                                  overall.get("confidence") or "—"),
              "  建议：%s" % overall.get("advice", "")]
-    rows = ["%s %s" % (row.get("name", ""), {"not_applicable": "不适用", "not_searched": "未检索"}.get(row.get("state"), row.get("risk") or "—"))
+    rows = ["%s %s" % (row.get("name", ""), {"not_applicable": "不适用", "not_searched": "未检索", "nothing": "无可查项"}.get(row.get("state"), row.get("risk") or "—"))
             for row in task["rights_summary"] or []]
     if rows:
         lines.append("  各类权利：" + "；".join(rows))
+    comps = [c for c in task.data.get("competitors") or [] if isinstance(c, dict)]
+    if comps:
+        got = [c for c in comps if c.get("status") == "ok"]
+        lines.append("  竞品：%d 个里采到 %d 个，页面上有专利或外观标注的 %d 个（标注的号码已列入深查）" % (
+            len(comps), len(got), sum(1 for c in got if c.get("marking"))))
+    image_notes = [n for n in (task["understanding"] or {}).get("image_notes") or [] if isinstance(n, dict) and n.get("what")]
+    if image_notes:
+        lines.append("  上架图片要注意的有 %d 处（道具、水印或别人的标识），明细见报告" % len(image_notes))
+    marks = [str(m.get("term", "")) for m in task.data.get("manual_marks") or [] if isinstance(m, dict) and m.get("term")]
+    if marks:
+        lines.append("  商标未检索，要人工核对的词：%s（检索链接见报告\"商标要人工核对的词\"）" % "、".join(marks))
     middle = config.risk_rank(config.RECHECK_FROM)
     key = [f for f in task["findings"] if f.get("status") == "compared" and config.risk_rank(f.get("risk", "")) >= middle]
     key.sort(key=lambda f: -config.risk_rank(f["risk"]))
@@ -250,6 +266,26 @@ def summary_lines(task) -> list:
     return [config.redact(line) for line in lines]
 
 
+def pack_command(task_dir: str, env=None) -> int:
+    from ipr import pack
+    try:
+        if env is None:  # 后台鉴权 token 也要核对（它在 config.json 或环境变量里，不在 .env 里）
+            env = dict(config.load_env())
+            try:
+                env["_backend_token"] = auth.load_backend()[1]
+            except Exception:
+                pass
+        out = pack.pack(task_dir, env)
+    except ValueError as exc:
+        print("没有打包：%s" % str(exc).replace("没有打包：", ""))
+        return outcome.EXIT_CODES[outcome.ERROR_STOPPED]
+    except OSError as exc:
+        print("没有打包：读写文件出错（%s）" % type(exc).__name__)
+        return outcome.EXIT_CODES[outcome.ERROR_STOPPED]
+    print("运行包：%s" % out)
+    return outcome.EXIT_CODES[outcome.DONE]
+
+
 def main(argv=None, env=None) -> int:
     """env 不给时读 Skill 目录的 .env 和环境变量；测试传空字典，不碰真实的 key。"""
     if argv is None and env is None:  # 只在真的从命令行运行时换
@@ -258,6 +294,8 @@ def main(argv=None, env=None) -> int:
             return code
     config.setup_streams()
     args = parse_args(argv)
+    if args.pack:
+        return pack_command(args.pack, env)
     try:
         plan = prepare(args)  # 先检查参数
         demo = plan["resume"]["demo"] if "resume" in plan else plan["create"]["demo"]

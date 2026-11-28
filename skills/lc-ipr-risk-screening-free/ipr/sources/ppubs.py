@@ -58,8 +58,8 @@ class Session:
                 raise http.SourceError(self.failed, status=status)
             self.case_id, self.token = data["userCase"].get("caseId"), token
 
-    def search(self, query: str, limit: int = 100, sort: str = "date_publ desc") -> dict:
-        """返回 {"total": 命中总数, "docs": [整理后的记录]}。"""
+    def search(self, query: str, limit: int = 100, sort: str = "date_publ desc", database: str = "USPAT") -> dict:
+        """返回 {"total": 命中总数, "docs": [整理后的记录]}。database：USPAT 是授权的，US-PGPUB 是申请公开。"""
         if not self.token:
             self.open()
         body = {"start": 0, "pageCount": limit, "sort": sort, "docFamilyFiltering": "familyIdFiltering", "searchType": 1,
@@ -67,7 +67,7 @@ class Session:
                 "familyIdThirdPreferred": "FPRS", "showDocPerFamilyPref": "showEnglish", "queryId": 0, "tagDocSearch": False,
                 "query": {"caseId": self.case_id, "hl_snippets": "2", "op": "OR", "q": query, "queryName": query, "highlights": "0",
                           "qt": "brs", "spellCheck": False, "viewName": "tile", "plurals": True, "britishEquivalents": True,
-                          "databaseFilters": [{"databaseName": "USPAT", "countryCodes": []}], "searchType": 1,
+                          "databaseFilters": [{"databaseName": database, "countryCodes": []}], "searchType": 1,
                           "ignorePersist": True, "userEnteredQuery": query}}
         status, _headers, data = http.fetch_json(BASE + "/searches/searchWithBeFamily", "POST", dict(HEADERS, **{"X-Access-Token": self.token}),
                                                  body=body, timeout=40, opener=self.opener)
@@ -144,11 +144,12 @@ def _first(value) -> str:
 def normalize(item: dict):
     raw = _first(item.get("publicationReferenceDocumentNumber"))
     key = numbers.us_key(raw)
-    if not key:
-        return None
     kind = _first(item.get("kindCode")).upper()
-    design = key.startswith("D")
-    number = numbers.us_display(raw, kind)
+    application = re.fullmatch(r"(?:US)?(\d{11})", re.sub(r"[^A-Za-z0-9]", "", raw).upper())
+    if not key and not (application and kind.startswith("A")):
+        return None
+    design = bool(key) and key.startswith("D")
+    number = numbers.us_display(raw, kind) if key else "US%s%s" % (application.group(1), kind or "A1")
     classes = [c for c in [_first(item.get("mainClassificationCode"))] + re.split(r"[;,]\s*", _first(item.get("uspcFullClassificationFlattened"))) if c]
     return {
         "right_type": "design" if design else "patent",
@@ -164,6 +165,8 @@ def normalize(item: dict):
         "pages": _number(item.get("pageCount")),
         "figures_from": _number(item.get("drawingsStart")),  # 附图从第几页开始、到第几页（引用文献多的，第 2 页还是文字）
         "figures_to": _number(item.get("drawingsEnd")),
+        "app_number": re.sub(r"[^0-9]", "", _first(item.get("applicationNumber"))),
+        "pending": not key,  # 申请公开（还没授权）
         "source": "美国专利局",
     }
 

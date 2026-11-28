@@ -90,9 +90,11 @@ def grade_right(task, right_type: str) -> dict:
         gaps.append("%d 件没读到权利要求、只凭标题判的" % title_only)
     gap_text = "、".join(gaps)
 
+    by_title = sum(1 for c in candidates if (c.get("screen") or {}).get("by") == "ai-title")
+    title_part = "；其中 %d 件只凭标题排除（标题多是机器翻译，没读公开页）" % by_title if by_title else ""
     if compared:
         top = top_finding(compared)
-        basis = "入选 %d 件，已比对 %d 件，最高的是 %s（%s）" % (len(selected), len(compared), top["number"] or top["title"], top["risk"])
+        basis = "入选 %d 件，已比对 %d 件，最高的是 %s（%s）%s" % (len(selected), len(compared), top["number"] or top["title"], top["risk"], title_part)
         blind = sum(1 for f in compared if f.get("blind") and config.risk_rank(f["risk"]) < below)  # 复核抬到中以上的不再这么说
         if blind:
             basis += "；其中 %d 件的要素从照片上一个都看不到，评低只是因为没看到对应，需要拿样品核对" % blind
@@ -113,9 +115,11 @@ def grade_right(task, right_type: str) -> dict:
                    basis="检索到 %d 件候选，%s，无法判断" % (len(candidates), gap_text))
     else:
         row.update(state="checked", risk=config.RISK_LOW, confidence=config.CONFIDENCE_ORDER[1],
-                   basis="检索到 %d 件候选，初筛后没有需要深查的" % len(candidates))
+                   basis="检索到 %d 件候选，初筛后没有需要深查的%s" % (len(candidates), title_part))
         if not candidates and main_routes and all(s.get("empty") for s in main_routes):
-            row.update(nothing=True, basis="没有需要查的词，没有检索")  # 这一行的"低"不是查出来的
+            # 没有要查的词、没有发请求：不是查出来的"低"，单独一种状态"无可查项"，不参与总评
+            row.update(state="nothing", risk="", confidence="", basis="没有需要查的词（%s），没有检索" % (
+                "；".join(sorted({str(s.get("query") or "").strip("（）") for s in main_routes if s.get("query")})) or "产品上没有文字和标识"))
     return row
 
 
@@ -135,7 +139,7 @@ def run(ctx) -> None:
 
     rated = [r for r in rows if r["state"] == "checked" and r["risk"] in config.RISK_ORDER]
     gaps = [r["name"] for r in rows if r["state"] == "not_searched" or (r["state"] == "checked" and r["risk"] == config.RISK_PENDING)]
-    if not [r for r in rated if not r.get("nothing")]:  # 评出等级的行里没有一行是真的查过的
+    if not rated:
         task["overall"] = {"risk": config.RISK_PENDING, "confidence": "", "partial": True,
                            "advice": "没有任何一类权利完成排查，无法判断。暂缓上架。"}
     else:

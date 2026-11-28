@@ -18,6 +18,16 @@ def _prop(page: str, name: str) -> str:
     return _text(match.group(1)) if match else ""
 
 
+def fetch_any(number: str, opener=None) -> dict:
+    """同 fetch；日本、美国发明的号码是从页面标注推出来的（只知道号、不知道 B1 还是 B2）时，找不到就换另一个试。返回的 number 是实际找到的。"""
+    try:
+        return fetch(number, opener)
+    except http.SourceError as exc:
+        if exc.kind == "missing" and re.fullmatch(r"(JP\d{7}|US\d{7,8})B[12]", number or ""):
+            return fetch(number[:-1] + ("1" if number.endswith("2") else "2"), opener)
+        raise
+
+
 def fetch(number: str, opener=None) -> dict:
     """取不到（没收录、被拦）抛 SourceError。"""
     if not re.fullmatch(r"[A-Z]{2}[A-Z0-9]{4,16}", number or ""):
